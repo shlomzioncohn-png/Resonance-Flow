@@ -9,6 +9,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -68,7 +69,7 @@ class OutboxEventRepositoryIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void claimPendingBatch_returnsOnlyPendingRowsDueForRetry() {
-        OutboxEvent duePending = newPendingEvent();
+        OutboxEvent duePending = saveTracked(newUnsavedEvent(Instant.now().minus(1, ChronoUnit.DAYS)));
 
         OutboxEvent notYetDue = newPendingEvent();
         notYetDue.setNextRetryAt(Instant.now().plusSeconds(3600));

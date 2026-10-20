@@ -14,5 +14,5 @@ import "google/protobuf/timestamp.proto";
 message TaskCompletedEvent {
   string task_id = 1;      // UUID as string.
   bool is_completed = 2;   // true when status == DONE.
-  google.protobuf.Timestamp updated_at = 3;   // When the task was completed.
+  google.protobuf.Timestamp updated_at = 3;
 }

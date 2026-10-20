@@ -30,22 +30,10 @@ permissions:
 
 jobs:
   ci:
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
-    uses: ./.github/workflows/service-ci-node.yaml
-    with:
-      service_name: lens-frontend
-      service_dir: teams/lens/frontend
-
-  cd:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
       packages: write
-      pull-requests: write
-    uses: ./.github/workflows/service-cd.yaml
-    secrets: inherit
+    uses: ./.github/workflows/service-ci.yaml
     with:
       service_name: lens-frontend
       service_dir: teams/lens/frontend

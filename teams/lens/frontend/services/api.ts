@@ -37,14 +37,31 @@ export class ApiError extends Error {
 
 /**
  * Turns any error from an API call into a short message a user can act on.
- * The Gateway's own messages are technical ("Downstream service returned an error"),
- * so the HTTP status decides the text instead.
+ * Provides specific messages for common errors, especially login-related ones.
  */
-export function getErrorMessage(error: unknown): string {
+export function getErrorMessage(error: unknown, path?: string): string {
   if (!(error instanceof ApiError)) {
     // fetch() throws a TypeError when the Gateway can't be reached at all
-    return 'The task service is unreachable. Check your connection and try again.';
+    return 'The service is unreachable. Check your connection and try again.';
   }
+
+  // Login-specific errors
+  if (path === '/auth/login') {
+    switch (error.status) {
+      case 400:
+        return 'Email and password are required.';
+      case 401:
+        return 'Invalid email or password. Please try again.';
+      case 429:
+        return 'Too many login attempts. Please try again in a few minutes.';
+      case 503:
+        return 'The authentication service is temporarily unavailable. Please try again.';
+      default:
+        return 'Login failed. Please try again.';
+    }
+  }
+
+  // Generic error handling for other endpoints
   switch (error.status) {
     case 400:
       return "This change isn't allowed for this task.";
@@ -54,19 +71,28 @@ export function getErrorMessage(error: unknown): string {
       return "You don't have access to this task.";
     case 404:
       return "This task wasn't found. It may have been removed.";
+    case 429:
+      return 'Too many requests. Please wait a moment and try again.';
     case 502:
     case 503:
     case 504:
-      return 'The task service is temporarily unavailable. Please try again in a moment.';
+      return 'The service is temporarily unavailable. Please try again in a moment.';
     default:
       return 'Something went wrong. Please try again.';
   }
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = { 'Content-Type': 'application/json', ...init?.headers };
+
+  // JWT token is sent automatically by the browser via HttpOnly cookie.
+  // No need to manually add Authorization header — fetch() with credentials: 'include'
+  // will attach the cookie to every request.
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers,
+    credentials: 'include',  // Include HttpOnly cookies in requests
   });
 
   if (!response.ok) {

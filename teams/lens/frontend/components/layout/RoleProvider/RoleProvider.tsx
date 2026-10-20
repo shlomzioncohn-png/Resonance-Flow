@@ -1,46 +1,23 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useState, type ReactNode } from 'react';
+import type { AuthRole } from '@/services/authApi';
 
-export type Role = 'manager' | 'employee' | null;
+export type Role = AuthRole | null;
 
 interface RoleContextValue {
   role: Role;
   setRole: (role: Role) => void;
 }
 
-const STORAGE_KEY = 'lens.role';
-
 const RoleContext = createContext<RoleContextValue | null>(null);
 
 export function RoleProvider({ children }: { children: ReactNode }) {
-  const [role, setRoleState] = useState<Role>(null);
-
-  useEffect(() => {
-    // Deliberately setState-in-effect: this hydrates client-only persisted state
-    // (localStorage isn't available during SSR) without a hydration mismatch —
-    // the first client render still matches the server's (role=null), and only
-    // updates after mount. Moving this into a useState lazy initializer would
-    // read localStorage during hydration itself and reintroduce the mismatch
-    // this pattern exists to avoid.
-    try {
-      const stored = window.localStorage.getItem(STORAGE_KEY);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (stored === 'manager' || stored === 'employee') setRoleState(stored);
-    } catch {
-      // localStorage unavailable — fall back to the in-memory default (no role)
-    }
-  }, []);
-
-  const setRole = (next: Role) => {
-    setRoleState(next);
-    try {
-      if (next) window.localStorage.setItem(STORAGE_KEY, next);
-      else window.localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // localStorage unavailable — the in-memory state still updates for this session
-    }
-  };
+  // Role stored ONLY in memory (state), NOT in localStorage.
+  // Reason: localStorage is vulnerable to XSS attacks.
+  // Role is set after successful login and is re-fetched from server if needed.
+  // On page reload, role reverts to null and is re-established on next login.
+  const [role, setRole] = useState<Role>(null);
 
   return <RoleContext.Provider value={{ role, setRole }}>{children}</RoleContext.Provider>;
 }

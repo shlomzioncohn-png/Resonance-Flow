@@ -77,6 +77,46 @@ class TaskUpdatedProtoMapperTest {
         assertThat(event.hasEffortEstimateConfidence()).isFalse();
         assertThat(event.hasSuggestedOwnerUserId()).isFalse();
         assertThat(event.hasSuggestedOwnerConfidence()).isFalse();
+        assertThat(event.hasFeedbackText()).isFalse();
+        assertThat(event.hasFeedbackUserId()).isFalse();
+    }
+
+    @Test
+    void toProto_mapsFeedbackFieldsWhenPresent() {
+        UUID feedbackUserId = UUID.randomUUID();
+        Map<String, Object> payload = minimalPayload();
+        payload.put("status", "REJECTED");
+        payload.put("feedbackText", "Not clear what is expected");
+        payload.put("feedbackUserId", feedbackUserId.toString());
+
+        TaskUpdatedEvent event = mapper.toProto(payload);
+
+        assertThat(event.getFeedbackText()).isEqualTo("Not clear what is expected");
+        assertThat(event.getFeedbackUserId()).isEqualTo(feedbackUserId.toString());
+    }
+
+    @Test
+    void toProto_whenDescriptionAndSourceRefAreNull_sendsEmptyStrings() {
+        Map<String, Object> payload = minimalPayload();
+        payload.put("description", null);
+        payload.put("sourceRef", null);
+
+        TaskUpdatedEvent event = mapper.toProto(payload);
+
+        assertThat(event.getDescription()).isEmpty();
+        assertThat(event.getSourceRef()).isEmpty();
+    }
+
+    @Test
+    void toProto_whenDescriptionAndSourceRefAreAbsent_sendsEmptyStrings() {
+        Map<String, Object> payload = minimalPayload();
+        payload.remove("description");
+        payload.remove("sourceRef");
+
+        TaskUpdatedEvent event = mapper.toProto(payload);
+
+        assertThat(event.getDescription()).isEmpty();
+        assertThat(event.getSourceRef()).isEmpty();
     }
 
     @Test
