@@ -3,10 +3,12 @@ package com.rnd.bridge.media.classification;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.rnd.bridge.ai.LlmQuotaExhaustedException;
 import com.rnd.bridge.media.classification.document.DocumentScan;
 import com.rnd.bridge.media.classification.document.DocumentScanner;
 import com.rnd.bridge.raw.model.Classification;
@@ -19,6 +21,7 @@ import com.rnd.bridge.raw.model.MeetingCategory;
 import com.rnd.bridge.raw.model.Quality;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import com.rnd.bridge.raw.model.Sensitivity;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -36,7 +39,8 @@ class MediaClassificationServiceTest {
         Triage triage = service(false, "key").triageMeeting(INPUT, "m.mp4");
 
         assertThat(triage).isEqualTo(Triage.UNCLASSIFIED);
-        verifyNoInteractions(rules, model);
+        verifyNoInteractions(rules);
+        verifyNoModelCall();
     }
 
     @Test
@@ -46,7 +50,7 @@ class MediaClassificationServiceTest {
         Triage triage = service(true, "key").triageMeeting(INPUT, "m.mp4");
 
         assertThat(triage.scopeDecision()).isEqualTo(ScopeDecision.EXCLUDED);
-        verifyNoInteractions(model);
+        verifyNoModelCall();
     }
 
     @Test
@@ -87,7 +91,7 @@ class MediaClassificationServiceTest {
         Triage triage = service(true, "").triageMeeting(INPUT, "m.mp4");
 
         assertThat(triage).isEqualTo(Triage.UNCLASSIFIED);
-        verifyNoInteractions(model);
+        verifyNoModelCall();
     }
 
     @Test
@@ -99,11 +103,21 @@ class MediaClassificationServiceTest {
     }
 
     @Test
+    void spentQuotaPublishesNowIncludedAndUnclassified() {
+        when(rules.classifyMeeting(INPUT)).thenReturn(Optional.empty());
+        when(model.classifyMeeting(any())).thenThrow(new LlmQuotaExhaustedException(
+                "Quota for gemini/m is spent", Instant.parse("2026-10-21T07:00:00Z"), true, null));
+
+        assertThat(service(true, "key").triageMeeting(INPUT, "m.mp4")).isEqualTo(Triage.UNCLASSIFIED);
+    }
+
+    @Test
     void disabledDoesNotEvenScanDocuments() {
         Triage triage = service(false, "key").triageDocument(new DocumentClassificationInput(new byte[0], "x.pdf"));
 
         assertThat(triage).isEqualTo(Triage.UNCLASSIFIED);
-        verifyNoInteractions(documentScanner, rules, model);
+        verifyNoInteractions(documentScanner, rules);
+        verifyNoModelCall();
     }
 
     @Test
@@ -130,12 +144,20 @@ class MediaClassificationServiceTest {
         Triage triage = service(true, "key").triageDocument(new DocumentClassificationInput(new byte[] {1}, "x.png"));
 
         assertThat(triage.scopeDecision()).isEqualTo(ScopeDecision.EXCLUDED);
-        verifyNoInteractions(model);
+        verifyNoModelCall();
     }
 
+    /** apiKey stands for "the usage's model has a key": blank means rules only. */
     private MediaClassificationService service(boolean enabled, String apiKey) {
+        when(model.meetingModelConfigured()).thenReturn(!apiKey.isBlank());
+        when(model.documentModelConfigured()).thenReturn(!apiKey.isBlank());
         return new MediaClassificationService(rules, model, documentScanner,
-                ClassificationTestSupport.properties(enabled, apiKey));
+                ClassificationTestSupport.properties(enabled));
+    }
+
+    private void verifyNoModelCall() {
+        verify(model, never()).classifyMeeting(any());
+        verify(model, never()).classifyDocument(any());
     }
 
     private static Classification verdict(ItemCategory category, double confidence) {
