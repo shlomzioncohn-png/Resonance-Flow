@@ -146,7 +146,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
     }
 
     @Test
-    void transitioningToDone_releasesDependents() throws InterruptedException {
+    void transitioningToDone_doesNotReleaseDependents() throws InterruptedException {
         UUID blocker = UUID.randomUUID();
         UUID dependent = UUID.randomUUID();
         taskRepository.save(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME));
@@ -163,10 +163,13 @@ class TaskUpdatedEventHandlerIntegrationTest {
                 .setUpdatedAt(timestamp(BASE_TIME.plusMinutes(5)))
                 .build());
 
-        await().atMost(Duration.ofSeconds(20)).alias("the dependent to be released").until(() ->
-                taskRepository.findById(dependent).map(Task::isReady).orElse(false));
-
-        assertEquals(0, taskRepository.findById(dependent).orElseThrow().getBlockingCount());
+        // Completion is applied only by task.completed, so a DONE update must leave everything as it was.
+        await().during(Duration.ofSeconds(3)).atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            assertEquals(TaskStatus.ACTIVE, taskRepository.findById(blocker).orElseThrow().getStatus());
+            Task dependentAfter = taskRepository.findById(dependent).orElseThrow();
+            assertEquals(1, dependentAfter.getBlockingCount());
+            assertFalse(dependentAfter.isReady());
+        });
     }
 
     @Test
@@ -177,7 +180,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
         producer.send(TOPIC, taskId.toString(), TaskUpdatedEvent.newBuilder()
                 .setTaskId(taskId.toString())
                 .setTenantId(TENANT_ID.toString())
-                .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_DONE)
+                .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_NEW)
                 .setUpdatedAt(timestamp(BASE_TIME.minusMinutes(1))) // older than stored
                 .build());
 
