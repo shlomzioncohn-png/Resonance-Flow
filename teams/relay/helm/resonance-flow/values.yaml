@@ -630,6 +630,32 @@ kafka:
         memory: 768Mi
   broker:
     replicaCount: 0
+# prometheus-kafka-exporter, for consumer-group lag
+kafka-exporter:
+  enabled: false
+  kafkaServer:
+    - resonance-flow-kafka:9092
+  kafkaBrokerVersion: "3.6.0"
+  sasl:
+    enabled: true
+    scram:
+      enabled: true
+      mechanism: plain
+      secretName: resonance-flow-kafka-exporter-sasl
+  # see README.md "Metrics scraping".
+  prometheus:
+    serviceMonitor:
+      enabled: false
+  liveness:
+    enabled: true
+  readiness:
+    enabled: true
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
 minio:
   enabled: true
   mode: standalone

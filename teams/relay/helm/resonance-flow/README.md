@@ -195,6 +195,12 @@ alert routing.
   scrapes them, with the same CRD check, labelled `team: relay`. Don't turn on the
   subcharts' own `metrics.serviceMonitor.enabled`: theirs skip the CRD check, and
   on a fresh cluster the failed apply would block every team's sync.
+- **Kafka consumer-group lag.** The `kafka-exporter` subchart
+  (prometheus-kafka-exporter), also on only in `environments/shared.yaml`. It logs
+  in with the `kafka.sasl.client` credentials through
+  `templates/kafka-exporter-sasl-secret.yaml` - never set its `sasl.scram`
+  username/password directly. Same as above: its own ServiceMonitor stays off,
+  `infra-servicemonitors.yaml` scrapes it.
 
 ## Component configuration (`config` / `secret`)
 

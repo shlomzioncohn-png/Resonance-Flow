@@ -34,7 +34,6 @@ dedicated project is needed for this repo's scope.
 | `apps/resonance-flow.yaml` | `Application` syncing the [`resonance-flow`](../helm/resonance-flow) chart (all teams' services, including the Kafka/Postgres/MinIO subcharts), with [`environments/shared.yaml`](../helm/resonance-flow/environments/shared.yaml) layered on top for shared-cluster-only settings |
 | `apps/traefik.yaml`      | `Application` installing the Traefik ingress controller (namespace `traefik`, ingress class `traefik`) that serves the chart's Ingress |
 | `apps/kube-prometheus-stack.yaml` | `Application` installing cluster monitoring (Prometheus Operator, Prometheus, Alertmanager, node-exporter, kube-state-metrics) into namespace `monitoring` - see [Monitoring](#monitoring) |
-| `apps/kafka-exporter.yaml` | `Application` installing `kafka-exporter` into namespace `monitoring`, for Kafka consumer-group lag - see [Monitoring](#monitoring) |
 
 ## Onboarding your team's service
 
@@ -92,16 +91,14 @@ team's sync.
   `templates/servicemonitor.yaml` only renders once the
   `monitoring.coreos.com/v1` CRDs exist, so on a fresh cluster
   `resonance-flow`'s first sync skips ServiceMonitors, and ArgoCD's next
-  refresh adds them once this app has installed the CRDs. `traefik` and
-  `kafka-exporter` are on wave `4`, after it: their charts render a
-  ServiceMonitor without that check.
+  refresh adds them once this app has installed the CRDs. `traefik` is on
+  wave `4`, after it: its chart renders a ServiceMonitor without that check.
 - **Scraping a service.** A team opts its component in with
   `components.<team>.metrics` - see the chart's
   [README](../helm/resonance-flow/README.md#metrics-scraping-metrics).
 - **Infra targets.** Kafka, PostgreSQL and MinIO - see the chart's README.
   Traefik exposes its own metrics, per router. Kafka consumer-group lag comes
-  from `apps/kafka-exporter.yaml`, which logs in as the `kafka.sasl.client`
-  user - keep its password in sync.
+  from the chart's `kafka-exporter` subchart - see the chart's README.
 
 Nothing here has an Ingress. Reach Prometheus and Alertmanager with:
 

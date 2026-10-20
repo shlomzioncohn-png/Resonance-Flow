@@ -23,3 +23,5 @@ postgresql:
 minio:
   metrics:
     enabled: true
+kafka-exporter:
+  enabled: true

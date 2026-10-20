@@ -8,5 +8,8 @@ dependencies:
 - name: postgresql
   repository: oci://registry-1.docker.io/bitnamicharts
   version: 18.8.13
-digest: sha256:2aad3adcaeb3ce184ebed310049027213f65c38b3b15c5c477f27e7b904951f1
-generated: "2026-09-01T01:27:41.5807315+03:00"
+- name: prometheus-kafka-exporter
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 4.0.0
+digest: sha256:b77f7f9da371a7cbce074e39e5f875130483a93b4d65272d32a2966577852a18
+generated: "2026-10-19T20:43:50.1395306+03:00"
