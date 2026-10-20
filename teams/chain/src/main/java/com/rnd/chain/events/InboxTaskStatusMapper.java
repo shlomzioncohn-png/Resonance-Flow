@@ -4,9 +4,8 @@ import com.rnd.chain.dto.TaskStatus;
 
 /**
  * Maps Inbox's 8-value canonical task status onto Chain's own coarse 3-value lifecycle
- * (PENDING/ACTIVE/DONE). Inbox does not perform this mapping for us - task.created and
- * task.updated both carry Inbox's own {@code com.rnd.inbox.event.TaskStatus} verbatim (confirmed:
- * both .proto files declare the identical 8-value enum).
+ * (PENDING/ACTIVE/DONE). Inbox does not perform this mapping for us - task.updated
+ * carries Inbox's own {@code com.rnd.inbox.event.TaskStatus} verbatim.
  *
  * Responsibility split: task.updated no longer applies DONE (TaskUpdatedEventHandler intercepts
  * it before this mapper); completion and the release of dependents come only from task.completed.
