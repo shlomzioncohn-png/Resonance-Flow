@@ -25,6 +25,7 @@ from confluent_kafka.serialization import (
     SerializationContext,
     StringSerializer,
 )
+from google.protobuf.message import Message
 
 from mind.messaging.config import MessagingSettings, load_settings
 
@@ -35,9 +36,9 @@ class ProtobufProducer:
         self._producer = Producer(self._settings.producer_conf())
         self._registry = SchemaRegistryClient({"url": self._settings.schema_registry_url})
         self._key_serializer = StringSerializer("utf_8")
-        self._schema_ids: dict[tuple[str, type], SchemaId] = {}
+        self._schema_ids: dict[tuple[str, type[Message]], SchemaId] = {}
 
-    def _schema_id(self, topic: str, message_type: type) -> SchemaId:
+    def _schema_id(self, topic: str, message_type: type[Message]) -> SchemaId:
         if (topic, message_type) not in self._schema_ids:
             latest = self._registry.get_latest_version(f"{topic}-value")
             schema_id = SchemaId("PROTOBUF", latest.schema_id, latest.guid)
