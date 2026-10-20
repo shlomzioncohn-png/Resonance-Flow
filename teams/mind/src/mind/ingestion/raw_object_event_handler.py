@@ -1,4 +1,5 @@
-"""A Bridge RawObjectEvent -> NormalizedRecord, one per content object."""
+"""Reading a landed event's files: the reader contract, its errors, and the
+checks on what Bridge sent (tenant, content_hash). Used by extraction_items.py."""
 
 import hashlib
 import logging
@@ -6,8 +7,7 @@ from collections.abc import Callable
 from uuid import UUID
 
 from mind.contracts import RawObjectEvent
-from mind.contracts.raw_object_event_enums import ChangeType, ObjectRole, ScopeDecision
-from mind.ingestion.normalized_record import NormalizedRecord
+from mind.contracts.raw_object_event import RawObjectRef
 
 logger = logging.getLogger(__name__)
 
@@ -35,75 +35,35 @@ class ObjectTooLarge(Exception):
 ObjectReader = Callable[[str], bytes]
 
 
-def handle_raw_object_event(
-    event: RawObjectEvent, read_object: ObjectReader
-) -> list[NormalizedRecord]:
-    """Read the event's content objects and normalize each.
+def tenant_uuid(event: RawObjectEvent) -> UUID:
+    """Inbox needs the tenant as a UUID; Bridge's contract allows any string."""
 
-    Nothing comes out of a DELETE_REVIEW (no objects) or an EXCLUDED item, and
-    an EXCLUDED item's objects are never read: Bridge judged them not work, and
-    they are often private. SOURCE_METADATA describes the item rather than
-    being its content, so it is skipped too.
-
-    A missing object, one too large to read, or one that does not match its
-    content_hash is logged and skipped; the rest of the event still comes through.
-    """
-
-    if event.change_type is ChangeType.DELETE_REVIEW:
-        return []
-    if event.scope_decision is ScopeDecision.EXCLUDED:
-        logger.info("raw_object_event: skipping EXCLUDED item %s", event.correlation_id)
-        return []
-
-    # Here and not in NormalizedRecord, so the error names Bridge's field.
+    # Here and not in a model, so the error names Bridge's field.
     try:
-        tenant_id = UUID(event.tenant_id)
+        return UUID(event.tenant_id)
     except ValueError:
         raise InvalidEvent(f"RawObjectEvent.tenant_id is not a UUID: {event.tenant_id!r}") from None
 
-    records = []
-    for obj in event.objects:
-        if obj.role is ObjectRole.SOURCE_METADATA:
-            continue
-        try:
-            content = read_object(obj.object_key)
-        except ObjectNotFound:
-            logger.warning(
-                "raw_object_event: skipping missing object %s of %s",
-                obj.object_key,
-                event.correlation_id,
-            )
-            continue
-        except ObjectTooLarge:
-            logger.error(
-                "raw_object_event: skipping %s of %s, over the size limit",
-                obj.object_key,
-                event.correlation_id,
-            )
-            continue
-        if f"sha256:{hashlib.sha256(content).hexdigest()}" != obj.content_hash:
-            logger.warning(
-                "raw_object_event: skipping %s of %s, content does not match its hash",
-                obj.object_key,
-                event.correlation_id,
-            )
-            continue
-        records.append(
-            NormalizedRecord(
-                object_ref=f"minio://{obj.object_key}",
-                content=content,
-                content_hash=obj.content_hash,
-                content_type=obj.content_type,
-                modality=obj.modality,
-                role=obj.role,
-                source_type=event.source_type,
-                tenant_id=tenant_id,
-                source_ref=event.source_ref,
-                source_timestamp=event.source_timestamp,
-                participants=event.participants,
-                correlation_id=event.correlation_id,
-                revision=event.revision,
-                metadata={"ingested_at": event.ingested_at.isoformat()},
-            )
+
+def read_checked(obj: RawObjectRef, read_object: ObjectReader, item: UUID) -> bytes | None:
+    """The file's bytes, or None when it is missing, too large, or does not
+    match its content_hash (logged). Any other read failure propagates."""
+
+    try:
+        content = read_object(obj.object_key)
+    except ObjectNotFound:
+        logger.warning("raw_object_event: skipping missing object %s of %s", obj.object_key, item)
+        return None
+    except ObjectTooLarge:
+        logger.error(
+            "raw_object_event: skipping %s of %s, over the size limit", obj.object_key, item
         )
-    return records
+        return None
+    if f"sha256:{hashlib.sha256(content).hexdigest()}" != obj.content_hash:
+        logger.warning(
+            "raw_object_event: skipping %s of %s, content does not match its hash",
+            obj.object_key,
+            item,
+        )
+        return None
+    return content

@@ -6,9 +6,9 @@ import pytest
 
 from mind.config import LandedConsumerSettings
 from mind.contracts import RawObjectEvent
-from mind.contracts.raw_object_event_enums import Modality, ObjectRole, RawSourceType
-from mind.ingestion.landed_consumer_runner import _log_texts
-from mind.ingestion.normalized_record import NormalizedRecord
+from mind.contracts.base_enums import SourceType
+from mind.extraction.extractor import ExtractionItem
+from mind.ingestion.landed_consumer_runner import _log_items
 
 ITEM = UUID("6f1c1f9e-0000-4000-8000-000000000001")
 SECRET = "Dana's salary goes up to 31,000 in March"
@@ -20,20 +20,8 @@ def test_the_stand_in_hand_off_logs_where_the_text_is_never_what_it_says(
     # Bridge may have classified the item HIGH sensitivity; logs travel further
     # than the content was meant to.
     caplog.set_level(logging.INFO)
-    record = NormalizedRecord(
-        object_ref="minio://EMAIL/t/2026-10-19/body.eml",
-        content=SECRET.encode(),
-        content_hash="sha256:" + "a" * 64,
-        content_type=None,
-        modality=Modality.TEXT,
-        role=ObjectRole.BODY,
-        source_type=RawSourceType.EMAIL,
-        tenant_id=UUID("00000000-0000-0000-0000-000000000001"),
-        source_ref=None,
-        source_timestamp=None,
-        participants=None,
-        correlation_id=ITEM,
-        revision=0,
+    item = ExtractionItem(
+        text=SECRET, source_type=SourceType.EMAIL, item_key="EMAIL/t/2026-10-19/body.eml"
     )
     event = RawObjectEvent.model_validate(
         {
@@ -57,7 +45,7 @@ def test_the_stand_in_hand_off_logs_where_the_text_is_never_what_it_says(
         }
     )
 
-    _log_texts(event, [(record, SECRET)])
+    _log_items(event, [item])
 
     assert "body.eml" in caplog.text
     assert f"{len(SECRET)} chars" in caplog.text

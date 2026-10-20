@@ -18,6 +18,8 @@ _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 _DEFAULT_CONFIG_FILE = "/etc/resonance-flow/config/config.yaml"
 _DEFAULT_SECRETS_FILE = "/etc/resonance-flow/secret/secrets.yaml"
+# The chart mounts the MinIO credentials as one file each (dependencySecretVolumes).
+_DEFAULT_OBJECT_STORAGE_SECRETS_DIR = "/etc/resonance-flow/secrets/object-storage"
 
 
 def _read_yaml(path: str) -> dict[str, Any]:
@@ -57,10 +59,38 @@ class ASRSettings(BaseSettings):
         return Path(self.model_cache_dir) / "whisper" / self.whisper_model
 
 
+class _ChartObjectStorageSource(PydanticBaseSettingsSource):
+    """MinIO from Relay's chart-mounted files: endpoint and bucket from
+    config.yaml's `object_storage`, each credential from its own mounted file.
+    Missing files give nothing, so a local run falls through to the defaults."""
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        raise NotImplementedError  # unused: __call__ is overridden directly
+
+    def __call__(self) -> dict[str, Any]:
+        config = _read_yaml(os.environ.get("CONFIG_FILE_PATH", _DEFAULT_CONFIG_FILE))
+        object_storage = (config or {}).get("object_storage") or {}
+        values = {k: object_storage[k] for k in ("endpoint", "bucket") if object_storage.get(k)}
+
+        secrets_dir = Path(
+            os.environ.get("OBJECT_STORAGE_SECRETS_DIR", _DEFAULT_OBJECT_STORAGE_SECRETS_DIR)
+        )
+        for field_name, filename in (
+            ("access_key", "object-storage.access-key"),
+            ("secret_key", "object-storage.secret-key"),
+        ):
+            path = secrets_dir / filename
+            if path.is_file():
+                values[field_name] = path.read_text().strip()  # mounted files end in a newline
+        return values
+
+
 class ObjectStorageSettings(BaseSettings):
     """Standalone -- the bridge.raw.landed consumer (#349) reads Bridge's objects.
 
-    Defaults match Bridge's own local ones (teams/bridge application.yml); the
+    Sources, first wins: environment variables, .env, then the cluster's
+    mounted files (_ChartObjectStorageSource), then the defaults. The defaults
+    match Bridge's own local ones (teams/bridge application.yml); the
     credentials have none, so a missing one fails at start-up.
     """
 
@@ -74,6 +104,24 @@ class ObjectStorageSettings(BaseSettings):
     secret_key: SecretStr  # never printed: repr, logs, tracebacks show '**********'
     # Larger objects are skipped, not read: the process's memory is the limit.
     max_object_bytes: int = Field(default=100 * 1024 * 1024, gt=0)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Earlier sources win; the chart's files only fill what env leaves unset.
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            _ChartObjectStorageSource(settings_cls),
+            file_secret_settings,
+        )
 
 
 class LandedConsumerSettings(BaseSettings):

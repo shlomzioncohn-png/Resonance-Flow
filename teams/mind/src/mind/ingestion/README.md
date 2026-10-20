@@ -4,16 +4,17 @@ Mind's entry point (#349): reads what Bridge lands and turns it into text for
 extraction. Also loads AMI's human transcripts for the extraction eval (see
 "AMI transcripts" at the end). Bridge stores each item's files in MinIO and publishes one
 `RawObjectEvent` on `bridge.raw.landed` carrying pointers, not content. This
-package fetches the files, checks them, and turns each into text. It does not
-interpret content — that is `extraction/` and `multimodal/`.
+package fetches the files one at a time, checks them, and turns each into an
+`ExtractionItem` (text, task source type, object key). It does not interpret
+content — that is `extraction/` and `multimodal/`.
 
 ```
-bridge.raw.landed ─► to_raw_object_event ─► classify_arrival ─► handle_raw_object_event ─► to_texts ─► on_texts
-  (protobuf)          (pydantic contract)    (processed yet?)      │ reads MinIO              │ OCR/ASR    (extraction)
-                                                                   ▼                          ▼
-                                                           list[NormalizedRecord]     list[(record, text)]
-                                                                                              │
-                                                                              mark_processed ◄┘
+bridge.raw.landed ─► to_raw_object_event ─► classify_arrival ─► extraction_items ─────────► on_items
+  (protobuf)          (pydantic contract)    (processed yet?)     │ per file, one at a time:   (extraction)
+                                                                  │ read MinIO, check hash,       │
+                                                                  │ text (OCR/ASR), let go        ▼
+                                                                  ▼                         mark_processed
+                                                          list[ExtractionItem]
 ```
 
 | file | what it does |
@@ -22,10 +23,10 @@ bridge.raw.landed ─► to_raw_object_event ─► classify_arrival ─► hand
 | `landed_consumer.py` | `LandedHandler`: one message through every step below |
 | `raw_object_event_proto.py` | the protobuf message → the `RawObjectEvent` contract |
 | `seen_revisions.py` | whether an item was already processed, and at which revision |
-| `raw_object_event_handler.py` | the event → one `NormalizedRecord` per file it points to |
+| `extraction_items.py` | the event → one `ExtractionItem` per file, one file at a time |
+| `raw_object_event_handler.py` | the reader contract and per-file checks (tenant, `content_hash`) |
 | `minio_reader.py` | reads one file from MinIO |
-| `normalized_record.py` | `NormalizedRecord`: one file, read and checked |
-| `to_text.py` | the event's records → text, via R4's OCR and ASR |
+| `to_text.py` | one file's bytes → text, via R4's OCR and ASR |
 
 ## How a message travels
 
@@ -39,19 +40,25 @@ bridge.raw.landed ─► to_raw_object_event ─► classify_arrival ─► hand
    and is processed once, at the first revision that arrives. The same
    revision again is a duplicate, an older one arrived late, a newer one is
    Bridge updating the item. All three are skipped and logged.
-3. **The files** (`handle_raw_object_event`). Nothing is read for an
-   `EXCLUDED` item (Bridge judged it not work, and it is often private) or a
-   `DELETE_REVIEW`. `SOURCE_METADATA` describes the item rather than being its
-   content and is skipped. Every other file is read from MinIO and checked
-   against its `content_hash`.
-4. **Text** (`to_texts`), by `modality`: `TEXT` is decoded as UTF-8,
-   `SCANNED_DOC` goes to R4's `ocr.extract_text`, `AUDIO` to `asr.transcribe`.
-   When the event carries a `TRANSCRIPT`, its `RECORDING` is not transcribed;
-   other audio in the event (an attached voice note) still is. A file with no
-   text in it is skipped.
-5. **Hand-off** (`on_texts(event, texts)`), then the item is marked processed.
-   Not before: a crash in between processes the item again, and Inbox
-   de-duplicates task requests on `correlation_id`.
+3. **Files to items** (`extraction_items`), one file at a time: read from
+   MinIO, checked against its `content_hash`, turned into text, and let go
+   before the next is read, so memory holds one file, not the event. Nothing
+   is read for an `EXCLUDED` item (Bridge judged it not work, and it is often
+   private) or a `DELETE_REVIEW`; `SOURCE_METADATA` describes the item rather
+   than being its content and is skipped. Text by `modality` (`to_text.text_of`):
+   `TEXT` decoded as UTF-8, `SCANNED_DOC` to R4's `ocr.extract_text`, `AUDIO`
+   to `asr.transcribe`. Transcripts go first: the `RECORDING` is skipped, and
+   never read, only when a transcript gave speech; a missing, broken or empty
+   one (a WEBVTT with timings and no words) leaves the recording to be
+   transcribed. Other audio (an attached voice note) is always transcribed. A
+   file with no text in it is skipped. Each item carries the task's source
+   type (ZOOM / BIGBLUEBUTTON → MEETING until Inbox's values reach
+   shared/proto) and the file's object key.
+4. **Hand-off** (`on_items(event, items)`), then the item is marked processed.
+   The event travels next to the items: it carries the tenant, `source_ref`
+   and `correlation_id` extraction needs. Marked only after the hand-off: a
+   crash in between processes the item again, and Inbox de-duplicates task
+   requests on `correlation_id`.
 
 ## Skip or retry
 
@@ -101,6 +108,10 @@ MIND_OBJECT_STORAGE__ACCESS_KEY=... MIND_OBJECT_STORAGE__SECRET_KEY=... make run
 `MIND_OBJECT_STORAGE__ENDPOINT` (default `http://localhost:9000`) and
 `MIND_OBJECT_STORAGE__BUCKET` (default `bridge-raw`) match Bridge's local
 defaults. The credentials have no default, so a missing one fails at start-up.
+In the cluster nothing needs setting: endpoint and bucket come from the
+chart's `config.yaml` (`object_storage`, at `$CONFIG_FILE_PATH`) and each
+credential from its file under `/etc/resonance-flow/secrets/object-storage/`.
+An environment variable still wins over both.
 `MIND_OBJECT_STORAGE__MAX_OBJECT_BYTES` (default 100 MB) caps what is read: at
 most one byte past it is fetched, whatever the event's `size_bytes` says, and
 the read itself stops there even if the server ignores the Range header.
@@ -109,7 +120,7 @@ alone raises `max.poll.interval.ms` to 30 minutes (`conf_overrides`). No
 database is needed: the runner reads `LandedConsumerSettings` (group id,
 `MIND_LOG_LEVEL`), not `Settings`, which requires the vector-store DSN.
 
-Until extraction is wired in, `on_texts` logs each text by its item, file and
+Until extraction is wired in, `on_items` logs each item by its event, file and
 length, never its content (Bridge may have classified it HIGH sensitivity),
 which also shows the stage in a demo run.
 
@@ -125,7 +136,7 @@ MIND_LANDED_CONSUMER__GROUP_ID=mind-landed-joint-test make run-landed-consumer
 
 ## Not yet in
 
-- **The hand-off to extraction (#350).** `on_texts` only logs today.
+- **The hand-off to extraction (#350).** `on_items` only logs today.
 - **Bridge updates.** A newer revision is skipped. Acting on it means finding
   and updating the tasks the earlier revision produced, a feature of its own.
   It also means an item first `EXCLUDED`, then re-classified `INCLUDED` in a
@@ -141,23 +152,12 @@ MIND_LANDED_CONSUMER__GROUP_ID=mind-landed-joint-test make run-landed-consumer
   the second request (correlation_id), but extraction pays for it twice. A
   persistent store shared by all replicas only needs `RevisionStore`'s two
   methods.
-- **Memory per event, not per file.** `max_object_bytes` bounds one file, but
-  `handle_raw_object_event` reads every file of the event before any becomes
-  text, and each record keeps its raw bytes through the hand-off: an email
-  with five 90 MB scans holds ~450 MB, over the pod's 512Mi. The fix for both:
-  read, convert and drop one file at a time. Demo items carry one file each.
 - **Work redone after a retry.** When an event stops on a retry (MinIO down,
   `MediaUnavailable`), what was already OCR'd or transcribed for its earlier
   files is lost, and every restart does it again until the cause is fixed.
   Keeping partial results across restarts is not worth it yet.
 - **A dead-letter queue.** OCR/ASR `BUG` failures should be parked, not
   dropped; there is no such queue yet, so they are skipped and logged.
-- **An unreadable transcript.** When the event's transcript cannot be read,
-  its recording is still not transcribed, and the meeting yields no text. Rare
-  (the transcript comes from Bridge or Zoom, not a user upload); logged.
-- **Credentials in the cluster.** Helm mounts them as files under
-  `/etc/resonance-flow/secrets/object-storage/`; this reads environment
-  variables only.
 - **An event that takes over 30 minutes.** OCR is capped at 200 s per file
   and ASR at 240 s, and the poll interval is raised to 30 minutes, but an
   event with many long media files (about five 10-page scans that each fail
@@ -209,7 +209,7 @@ pytest tests/ingestion -q
 ```
 
 No Kafka, MinIO, Whisper or tesseract needed: the handler, the reader and
-`to_texts` take their collaborators as arguments, and the tests pass fakes.
+`extraction_items` take their collaborators as arguments, and the tests pass fakes.
 
 See `MIND-01-System-Overview.md` (§2, §7) for the source list and the real-vs-synthetic data policy.
 

@@ -1,41 +1,16 @@
-import logging
 from collections.abc import Callable
 from enum import Enum
 from typing import Any
-from uuid import UUID
 
 import pytest
 
-from mind.contracts.raw_object_event_enums import Modality, ObjectRole, RawSourceType
-from mind.ingestion.normalized_record import NormalizedRecord
-from mind.ingestion.to_text import RETRY_REASONS, SKIP_REASONS, MediaUnavailable, to_texts
+from mind.contracts.raw_object_event_enums import Modality
+from mind.ingestion.to_text import RETRY_REASONS, SKIP_REASONS, MediaUnavailable, text_of
 from mind.multimodal.asr import ASRFailureReason, ASRResult
 from mind.multimodal.ocr import OCRFailureReason, OCRResult
 
-HASH = "sha256:" + "a" * 64
-
-
-def _record(role: ObjectRole, modality: Modality, content: bytes, name: str) -> NormalizedRecord:
-    return NormalizedRecord(
-        object_ref=f"minio://ZOOM/t/2026-10-18/{name}",
-        content=content,
-        content_hash=HASH,
-        content_type=None,
-        modality=modality,
-        role=role,
-        source_type=RawSourceType.ZOOM,
-        tenant_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
-        source_ref=None,
-        source_timestamp=None,
-        participants=None,
-        correlation_id=None,
-        revision=None,
-    )
-
-
-RECORDING = _record(ObjectRole.RECORDING, Modality.AUDIO, b"RIFF", "meeting.wav")
-TRANSCRIPT = _record(ObjectRole.TRANSCRIPT, Modality.TEXT, b"WEBVTT ready", "meeting.vtt")
-SCAN = _record(ObjectRole.ATTACHMENT, Modality.SCANNED_DOC, b"%PDF", "quote.pdf")
+SCAN_KEY = "ZOOM/t/2026-10-20/quote.pdf"
+RECORDING_KEY = "ZOOM/t/2026-10-20/meeting.wav"
 
 
 def _returns(result: Any) -> Callable[..., Any]:
@@ -60,42 +35,30 @@ OCR_OK = _returns(OCRResult(success=True, text="price quote"))
 ASR_OK = _returns(ASRResult(success=True, text="we will send the quote"))
 
 
-def _texts(records: list[NormalizedRecord], ocr: Any = OCR_OK, asr: Any = ASR_OK) -> list[str]:
-    return [text for _, text in to_texts(records, ocr=ocr, asr=asr)]
+def _scan(ocr: Any) -> str | None:
+    return text_of(b"%PDF", Modality.SCANNED_DOC, SCAN_KEY, ocr, ASR_OK)
+
+
+def _recording(asr: Any) -> str | None:
+    return text_of(b"RIFF", Modality.AUDIO, RECORDING_KEY, OCR_OK, asr)
 
 
 def test_each_modality_goes_its_own_way() -> None:
-    texts = _texts([RECORDING, SCAN, TRANSCRIPT.model_copy(update={"role": ObjectRole.BODY})])
-
-    assert texts == ["we will send the quote", "price quote", "WEBVTT ready"]
-
-
-def test_a_transcript_in_the_event_means_the_recording_is_not_transcribed() -> None:
-    asr = _returns(ASRResult(success=True, text="should not run"))
-
-    assert _texts([RECORDING, TRANSCRIPT], asr=asr) == ["WEBVTT ready"]
-    assert asr.calls == []  # type: ignore[attr-defined]
-
-
-def test_a_transcript_replaces_only_the_recording_not_other_audio(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    caplog.set_level(logging.INFO)
-    voice_note = _record(ObjectRole.ATTACHMENT, Modality.AUDIO, b"OggS", "note.ogg")
-
-    assert _texts([RECORDING, TRANSCRIPT, voice_note]) == [
-        "WEBVTT ready",
-        "we will send the quote",
-    ]
-    assert "meeting.wav" in caplog.text
+    assert text_of(b"plain text", Modality.TEXT, "k", OCR_OK, ASR_OK) == "plain text"
+    assert _scan(OCR_OK) == "price quote"
+    assert _recording(ASR_OK) == "we will send the quote"
 
 
 def test_the_pipelines_get_the_bytes_and_the_file_name() -> None:
     ocr = _returns(OCRResult(success=True, text="x"))
 
-    _texts([SCAN], ocr=ocr)
+    _scan(ocr)
 
     assert ocr.calls == [(b"%PDF", "quote.pdf")]  # type: ignore[attr-defined]
+
+
+def test_text_that_is_not_utf8_is_skipped() -> None:
+    assert text_of(b"\xff\xfe\xfa", Modality.TEXT, "k", OCR_OK, ASR_OK) is None
 
 
 @pytest.mark.parametrize(
@@ -110,50 +73,32 @@ def test_the_pipelines_get_the_bytes_and_the_file_name() -> None:
         OCRResult(success=False, reason=OCRFailureReason.OCR_FAILED, error="timeout"),
     ],
 )
-def test_a_failure_that_retrying_cannot_fix_skips_only_that_record(
+def test_a_failure_that_retrying_cannot_fix_skips_the_file(
     failure: OCRResult, caplog: pytest.LogCaptureFixture
 ) -> None:
-    assert _texts([SCAN, TRANSCRIPT], ocr=_returns(failure)) == ["WEBVTT ready"]
+    assert _scan(_returns(failure)) is None
     assert "quote.pdf" in caplog.text
 
 
 def test_a_recording_the_asr_failed_on_is_skipped(caplog: pytest.LogCaptureFixture) -> None:
     failed = ASRResult(success=False, reason=ASRFailureReason.ASR_FAILED, error="decoder crashed")
 
-    assert _texts([RECORDING, SCAN], asr=_returns(failed)) == ["price quote"]
+    assert _recording(_returns(failed)) is None
     assert "meeting.wav" in caplog.text
 
 
-def test_text_that_is_not_utf8_is_skipped() -> None:
-    broken = TRANSCRIPT.model_copy(update={"content": b"\xff\xfe\xfa"})
-
-    assert _texts([broken, SCAN]) == ["price quote"]
-
-
-def test_a_record_with_no_text_in_it_is_skipped() -> None:
-    blank_body = TRANSCRIPT.model_copy(update={"role": ObjectRole.BODY, "content": b"  \n"})
-
-    assert _texts([blank_body, SCAN]) == ["price quote"]
-
-
 @pytest.mark.parametrize(
-    ("records", "pipeline"),
+    ("convert", "failure"),
     [
-        (
-            [RECORDING],
-            {"asr": ASRResult(success=False, reason=ASRFailureReason.ASR_UNAVAILABLE, error="x")},
-        ),
-        (
-            [SCAN],
-            {"ocr": OCRResult(success=False, reason=OCRFailureReason.OCR_UNAVAILABLE, error="x")},
-        ),
+        (_recording, ASRResult(success=False, reason=ASRFailureReason.ASR_UNAVAILABLE, error="x")),
+        (_scan, OCRResult(success=False, reason=OCRFailureReason.OCR_UNAVAILABLE, error="x")),
     ],
 )
 def test_a_missing_model_or_binary_stops_the_item_so_it_is_retried(
-    records: list[NormalizedRecord], pipeline: dict[str, Any]
+    convert: Callable[[Any], str | None], failure: Any
 ) -> None:
     with pytest.raises(MediaUnavailable):
-        _texts(records, **{name: _returns(result) for name, result in pipeline.items()})
+        convert(_returns(failure))
 
 
 def test_every_ocr_and_asr_failure_reason_has_exactly_one_decision() -> None:
@@ -173,14 +118,14 @@ def test_a_tool_failure_is_tried_once_more_and_may_pass() -> None:
         OCRResult(success=True, text="price quote"),
     )
 
-    assert _texts([SCAN], ocr=ocr) == ["price quote"]
+    assert _scan(ocr) == "price quote"
     assert len(ocr.calls) == 2  # type: ignore[attr-defined]
 
 
 def test_a_failure_of_the_file_itself_is_not_tried_again() -> None:
     ocr = _returns(OCRResult(success=False, reason=OCRFailureReason.NO_TEXT_RECOGNIZED, error="x"))
 
-    assert _texts([SCAN], ocr=ocr) == []
+    assert _scan(ocr) is None
     assert len(ocr.calls) == 1  # type: ignore[attr-defined]
 
 
@@ -199,5 +144,5 @@ class _UndecidedFailure:
 def test_a_reason_without_a_decision_is_skipped_and_named(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    assert _texts([SCAN, TRANSCRIPT], ocr=_returns(_UndecidedFailure())) == ["WEBVTT ready"]
+    assert _scan(_returns(_UndecidedFailure())) is None
     assert "undecided" in caplog.text

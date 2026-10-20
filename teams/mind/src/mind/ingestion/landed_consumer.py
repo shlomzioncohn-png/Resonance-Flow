@@ -1,4 +1,4 @@
-"""One `bridge.raw.landed` message, from protobuf to text in hand (#349).
+"""One `bridge.raw.landed` message, from protobuf to ExtractionItems (#349).
 
 ProtobufConsumer commits a message's offset only when the handler returns, so
 every failure here is one of two kinds:
@@ -20,21 +20,19 @@ import logging
 from collections.abc import Callable
 
 from mind.contracts import RawObjectEvent
-from mind.ingestion.normalized_record import NormalizedRecord
-from mind.ingestion.raw_object_event_handler import (
-    InvalidEvent,
-    ObjectReader,
-    handle_raw_object_event,
-)
+from mind.extraction.extractor import ExtractionItem
+from mind.ingestion.extraction_items import extraction_items
+from mind.ingestion.raw_object_event_handler import InvalidEvent, ObjectReader
 from mind.ingestion.raw_object_event_proto import to_raw_object_event
 from mind.ingestion.seen_revisions import RevisionStore, classify_arrival
-from mind.ingestion.to_text import Texts
-from mind.ingestion.to_text import to_texts as _to_texts
 from mind.messaging.raw_object_event_pb2 import RawObjectEvent as RawObjectEventMessage
 
 logger = logging.getLogger(__name__)
 
-OnTexts = Callable[[RawObjectEvent, Texts], None]  # the hand-off to extraction (#350)
+# The hand-off to extraction (#350): the event carries what the items do not
+# (tenant, source_ref, correlation_id).
+OnItems = Callable[[RawObjectEvent, list[ExtractionItem]], None]
+ToItems = Callable[[RawObjectEvent, ObjectReader], list[ExtractionItem]]
 
 
 class LandedHandler:
@@ -43,13 +41,13 @@ class LandedHandler:
         *,
         read_object: ObjectReader,
         store: RevisionStore,
-        on_texts: OnTexts,
-        to_texts: Callable[[list[NormalizedRecord]], Texts] = _to_texts,
+        on_items: OnItems,
+        to_items: ToItems = extraction_items,
     ) -> None:
         self._read_object = read_object
         self._store = store
-        self._on_texts = on_texts
-        self._to_texts = to_texts
+        self._on_items = on_items
+        self._to_items = to_items
 
     def __call__(self, message: RawObjectEventMessage, _kafka_message: object) -> None:
         try:
@@ -70,17 +68,16 @@ class LandedHandler:
             )
             return
 
-        # InvalidEvent here is the tenant_id check. A missing or oversized
-        # object is skipped inside; storage being down propagates (retry).
+        # InvalidEvent here is the tenant_id check. A missing or oversized file
+        # is skipped inside; storage being down propagates (retry).
         try:
-            records = handle_raw_object_event(event, self._read_object)
+            items = self._to_items(event, self._read_object)
         except InvalidEvent as e:
             logger.error("landed: skipping %s: %s", event.correlation_id, e)
             return
 
-        texts = self._to_texts(records)
-        if texts:
-            self._on_texts(event, texts)
+        if items:
+            self._on_items(event, items)
         else:
             logger.info("landed: %s has nothing to extract", event.correlation_id)
         self._store.mark_processed(event.correlation_id, event.revision)

@@ -6,9 +6,9 @@ from uuid import UUID
 import pytest
 
 from mind.contracts import RawObjectEvent
+from mind.extraction.extractor import ExtractionItem
 from mind.ingestion.landed_consumer import LandedHandler
-from mind.ingestion.normalized_record import NormalizedRecord
-from mind.ingestion.raw_object_event_handler import ObjectNotFound
+from mind.ingestion.raw_object_event_handler import ObjectNotFound, ObjectReader
 from mind.ingestion.seen_revisions import InMemoryRevisionStore
 from mind.ingestion.to_text import MediaUnavailable
 from mind.messaging import raw_object_event_pb2 as pb
@@ -54,13 +54,13 @@ class _Handed:
     def __init__(self) -> None:
         self.calls: list[tuple[RawObjectEvent, list[str]]] = []
 
-    def __call__(self, event: RawObjectEvent, texts: list[tuple[NormalizedRecord, str]]) -> None:
-        self.calls.append((event, [text for _, text in texts]))
+    def __call__(self, event: RawObjectEvent, items: list[ExtractionItem]) -> None:
+        self.calls.append((event, [item.text for item in items]))
 
 
 def _handler(**overrides: Any) -> tuple[LandedHandler, _Handed, InMemoryRevisionStore]:
     handed, store = _Handed(), InMemoryRevisionStore()
-    parts: dict[str, Any] = {"read_object": _read, "store": store, "on_texts": handed}
+    parts: dict[str, Any] = {"read_object": _read, "store": store, "on_items": handed}
     return LandedHandler(**(parts | overrides)), handed, store
 
 
@@ -98,17 +98,17 @@ def _storage_down(key: str) -> bytes:
     raise ConnectionError("MinIO unreachable")
 
 
-def _no_model(records: list[NormalizedRecord]) -> list[tuple[NormalizedRecord, str]]:
+def _no_model(event: RawObjectEvent, read: ObjectReader) -> list[ExtractionItem]:
     raise MediaUnavailable("ASR_UNAVAILABLE")
 
 
-def _our_bug(records: list[NormalizedRecord]) -> list[tuple[NormalizedRecord, str]]:
+def _our_bug(event: RawObjectEvent, read: ObjectReader) -> list[ExtractionItem]:
     # A ValueError of our own, not Bridge's: it must stop the consumer loudly,
     # not be skipped as if the message were invalid.
     raise ValueError("a bug in Mind")
 
 
-def _hand_off_fails(event: RawObjectEvent, texts: list[tuple[NormalizedRecord, str]]) -> None:
+def _hand_off_fails(event: RawObjectEvent, items: list[ExtractionItem]) -> None:
     raise RuntimeError("extraction down")
 
 
@@ -116,9 +116,9 @@ def _hand_off_fails(event: RawObjectEvent, texts: list[tuple[NormalizedRecord, s
     ("override", "error"),
     [
         ({"read_object": _storage_down}, ConnectionError),
-        ({"to_texts": _no_model}, MediaUnavailable),
-        ({"on_texts": _hand_off_fails}, RuntimeError),
-        ({"to_texts": _our_bug}, ValueError),
+        ({"to_items": _no_model}, MediaUnavailable),
+        ({"on_items": _hand_off_fails}, RuntimeError),
+        ({"to_items": _our_bug}, ValueError),
     ],
 )
 def test_a_failure_that_may_pass_later_propagates_and_nothing_is_marked(
