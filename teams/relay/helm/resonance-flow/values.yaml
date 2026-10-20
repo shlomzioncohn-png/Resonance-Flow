@@ -137,6 +137,9 @@ components:
       - name: mind-llm-credentials
         mountPath: /etc/resonance-flow/secrets/llm
         readOnly: true
+      - name: kafka-sasl-credentials
+        mountPath: /etc/resonance-flow/secrets/kafka-sasl
+        readOnly: true
     dependencySecretVolumes:
       - name: object-storage-credentials
         dependencyName: object-storage
@@ -150,6 +153,9 @@ components:
         secret:
           secretName: resonance-flow-mind-llm
           optional: true
+      - name: kafka-sasl-credentials
+        secret:
+          secretName: resonance-flow-kafka-sasl-credentials
     # Mounted as config.yaml at /etc/resonance-flow/config/ - keys are what MIND reads.
     config:
       vector_store:
