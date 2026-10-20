@@ -1,16 +1,18 @@
+import { Suspense } from 'react';
 import PageContainer from '@/components/layout/PageContainer';
-import EmptyState from '@/components/feedback/EmptyState';
+import LoadingState from '@/components/feedback/LoadingState';
+import BottlenecksView from './BottlenecksView';
 
 export default function ManagerBottlenecksPage() {
   return (
     <PageContainer
       title="Bottlenecks"
-      description="Aggregate dependency and process-problem indicators from Chain."
+      description="Which tasks are holding up the most work, from Chain's dependency graph."
     >
-      <EmptyState
-        title="No bottlenecks detected yet"
-        description="This view will visualize dependency and process bottlenecks once connected to Chain data."
-      />
+      {/* BottlenecksView reads ?projectId= from the URL, which needs a Suspense boundary to build. */}
+      <Suspense fallback={<LoadingState message="Loading dependency graph…" />}>
+        <BottlenecksView />
+      </Suspense>
     </PageContainer>
   );
 }

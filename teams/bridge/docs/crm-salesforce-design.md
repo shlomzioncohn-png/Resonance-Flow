@@ -251,10 +251,19 @@ policy choice, not a Salesforce-documented convention, kept as the default and m
 
 ## 4. `sourceRef`
 
-`"crm:salesforce:<OpportunityId>"` — distinct from HubSpot's `"crm:<id>"` (unchanged). `SourceType`
-stays `CRM_DEAL` for both; nothing downstream (`DealToTaskMapper`, Inbox's dedup key) needs a new
-source type, since `sourceRef` alone already disambiguates HubSpot deals from Salesforce
-Opportunities even if the two systems ever reused the same raw id.
+`"crm:salesforce:<OpportunityId>"` — distinct from HubSpot's `"crm:hubspot:<id>"` and the JSON
+fixture's bare `"crm:<id>"`. `SourceType` stays `CRM_DEAL` for every source; nothing downstream
+(`DealToTaskMapper`, Inbox's dedup key) needs a new source type, since `sourceRef` alone already
+disambiguates HubSpot deals from Salesforce Opportunities even if the two systems ever reused the
+same raw id.
+
+**Update 2026-10-19 (team lead decision):** HubSpot and Salesforce run together now, not XOR (§6)
+— one company, every CRM tool active at once, one tenant (`CRM_ORGANIZATION_ID`) for all of them.
+If the same business deal exists in both systems, Bridge publishes it twice, once per source, as
+two Tasks with distinct `sourceRef`s — there is no cross-CRM business-level deduplication in
+Bridge, by design; that's explicitly out of scope here. The working assumption is that downstream
+consumption (Mind indexing tasks off Inbox's `task.created` event) can handle or itself reconcile
+two Tasks referring to the same real-world deal — **not yet confirmed with the Mind team.**
 
 ## 5. Robustness
 
@@ -303,17 +312,16 @@ free.
 ## 6. Profiles
 
 Same convention as `HubSpotDealRepository` (`teams/bridge/CLAUDE.md` §5): `SalesforceDealRepository`
-is `@Repository @Profile("salesforce") @Primary`. One CRM profile is expected to be active per
-deployment (`hubspot` XOR `salesforce`, mirroring the doc's "one CRM per deployment" framing).
+is `@Repository @Profile("salesforce")`.
 
-**Startup check for both active:** Spring would likely already fail context startup if `hubspot`
-and `salesforce` were both active, since two `@Primary` beans would exist for `DealRepository` —
-but that failure (`NoUniqueBeanDefinitionException`) names Spring's own bean machinery, not the
-actual mistake. Add an explicit, CRM-domain-specific check — a small bean (same shape as
-`CrmLaneConfig.requireValidTenantIdForKafka`) that reads `Environment.matchesProfiles("hubspot")`
-and `Environment.matchesProfiles("salesforce")` and throws a clear `IllegalStateException` naming
-both profiles if both are true — so the failure message is actionable instead of a generic Spring
-ambiguity error.
+**Update 2026-10-19 (team lead decision): `hubspot` and `salesforce` are additive, not XOR.** One
+company uses every CRM tool at once — `SPRING_PROFILES_ACTIVE=kafka,hubspot,salesforce` is the
+expected production shape. Neither `DealRepository` implementation is `@Primary` anymore (it only
+ever existed to break a tie Spring would otherwise refuse to resolve when exactly one CRM profile
+was expected); there is no startup check rejecting both profiles together either — the "one CRM
+per deployment" framing this section originally proposed, and the matching startup check, are both
+gone. `CrmSyncService` (`teams/bridge/CLAUDE.md` §10) is what actually runs every active source
+each cycle, sequentially, isolating one source's failure from the rest.
 
 ## 7. Future real-time (design only — no implementation)
 

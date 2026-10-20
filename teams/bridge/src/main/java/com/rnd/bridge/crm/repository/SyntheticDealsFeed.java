@@ -6,10 +6,8 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * The shape of {@code synthetic-deals.json}'s envelope, shared by
- * {@link JsonDealRepository} and {@link SyntheticDealsLoader} so the two
- * paths that read the same file cannot silently drift apart in what they
- * expect it to contain.
+ * The shape of {@code synthetic-deals.json}'s envelope, shared by {@link JsonDealRepository} and
+ * {@link SyntheticDealsLoader} so the two can't drift apart in what they expect it to contain.
  */
 record SyntheticDealsFeed(
         String datasetVersion,

@@ -1,6 +1,9 @@
 bridge:
   crm:
     salesforce:
+      # Active alongside "hubspot" now (additive CRM profiles, team lead decision 2026-10-19) -
+      # sourceRef "crm:salesforce:<id>" keeps Salesforce deals distinct from HubSpot's
+      # "crm:hubspot:<id>" even if the same raw id or business deal exists in both.
       # My Domain base URL for the org, e.g. https://my-org.my.salesforce.com. OAuth 2.0 Client
       # Credentials Flow requires this exact host - login.salesforce.com/test.salesforce.com are
       # not supported for it (crm-salesforce-design.md §1). Backed by SALESFORCE_LOGIN_URL - no

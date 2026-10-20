@@ -12,6 +12,7 @@ import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.client.RestClient;
 
@@ -23,6 +24,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -46,6 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * class's pipeline fixtures carry {@code metadata} on every stage for that reason; a fixture that
  * deliberately omits it is exercising one of the FAIL/SKIP paths that metadata absence triggers.
  */
+@Timeout(value = 30, unit = TimeUnit.SECONDS)
 class HubSpotDealRepositoryTest {
 
     private static final Instant FIXED_NOW = Instant.parse("2026-08-30T12:00:00Z");
@@ -272,6 +275,28 @@ class HubSpotDealRepositoryTest {
 
         assertEquals(1, history.size());
         assertEquals(DealStage.PROSPECT, history.get(0).stage());
+    }
+
+    @Test
+    void sourceIsHubspot() {
+        enqueueConstructorPipeline();
+
+        assertEquals("hubspot", newRepository().source());
+    }
+
+    @Test
+    void dealsCarryTheExplicitHubspotSourceRefPrefix() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
+        enqueuePipeline();
+        String deal = dealJson("D-5", "Prefix check deal", "1000", "2026-10-01T00:00:00.000Z",
+                "2026-08-01T08:00:00Z", historyEntry("st-100", "2026-08-01T08:00:00.000Z"));
+        enqueueJson(dealsPage(null, deal));
+
+        Deal only = repository.snapshot().findLatestByDealId("D-5").orElseThrow();
+
+        assertEquals("crm:hubspot:", only.sourceRefPrefix());
     }
 
     @Test
