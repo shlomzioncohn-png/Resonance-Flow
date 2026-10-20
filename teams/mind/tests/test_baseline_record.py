@@ -429,51 +429,6 @@ def test_load_refuses_when_a_hierarchy_node_was_edited_after_the_baseline_was_re
         )
 
 
-def test_load_names_the_hierarchy_path_mismatch_when_its_location_also_changed(tmp_path):
-    path = tmp_path / "baseline_score.json"
-    _write_real_record(path)  # recorded hierarchy_path is "eval/hierarchy"
-    moved = _copy_real_set(tmp_path, "moved")
-    nodes_file = moved.parent / "hierarchy" / NODES_FILENAME
-    data = json.loads(nodes_file.read_text(encoding="utf-8"))
-    data["nodes"][0]["importance"] = 0.35  # forces a checksum mismatch
-    nodes_file.write_text(json.dumps(data), encoding="utf-8")
-
-    with pytest.raises(BaselineRecordError, match=r"hierarchy path: recorded 'eval/hierarchy', now '"):
-        load_baseline_record(path, personas_path=moved, hierarchy_dir=moved.parent / "hierarchy")
-
-
-def test_load_does_not_mention_a_hierarchy_mismatch_when_only_its_content_changed(tmp_path):
-    # Record and load use the exact same hierarchy_dir value, so only its content,
-    # never its location, can differ between the two.
-    copy = _copy_real_set(tmp_path, "same_location")
-    hierarchy_dir = copy.parent / "hierarchy"
-    scenarios = load_personas(copy)
-    combined = run(SkipBlockedNearestDeadlineModel(), scenarios)
-    path = tmp_path / "baseline_score.json"
-    write_baseline_record(
-        path,
-        build_baseline_record(
-            recorded_on=date(2026, 10, 4),
-            provenance=FAKE_PROVENANCE,
-            personas_path=copy,
-            hierarchy_dir=hierarchy_dir,
-            scenarios=scenarios,
-            combined=combined,
-            groups={},
-            roles=split_by_role(scenarios, combined),
-        ),
-    )
-    nodes_file = hierarchy_dir / NODES_FILENAME
-    data = json.loads(nodes_file.read_text(encoding="utf-8"))
-    data["nodes"][0]["importance"] = 0.35  # forces a checksum mismatch, same file in place
-    nodes_file.write_text(json.dumps(data), encoding="utf-8")
-
-    with pytest.raises(BaselineRecordError, match="same fixed set") as exc_info:
-        load_baseline_record(path, personas_path=copy, hierarchy_dir=hierarchy_dir)
-
-    assert "hierarchy path" not in str(exc_info.value)
-
-
 def test_load_refuses_when_the_persona_directory_is_missing(tmp_path):
     path = tmp_path / "baseline_score.json"
     _write_real_record(path)

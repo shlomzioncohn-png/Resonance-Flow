@@ -2,7 +2,6 @@ import argparse
 import json
 import sys
 from datetime import UTC, datetime
-from functools import partial
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -20,13 +19,13 @@ from mind.evaluation.baseline_record import (
     write_baseline_record,
 )
 from mind.evaluation.dummy_model import DummyModel
-from mind.evaluation.harness import EvaluationOutput, Report, run, split_by_role, subset_report
+from mind.evaluation.harness import EvaluationOutput, Report, run, split_by_role
 from mind.evaluation.hierarchy import (
     NODES_FILENAME,
     validate_hierarchy_fixture,
     validate_hierarchy_links,
 )
-from mind.evaluation.interfaces import PersonaEvaluationScenario, RankingModel
+from mind.evaluation.interfaces import RankingModel
 from mind.evaluation.personas import (
     HIERARCHY_DECIDES_GROUP,
     HIERARCHY_DIR,
@@ -44,10 +43,6 @@ def _summary_lines(label: str, report: Report) -> str:
         f"  Top-1 accuracy:      {report.top1_accuracy:.1%} "
         f"({report.correct_top1}/{report.total_scenarios})"
     )
-
-
-def _id_in(scenario: PersonaEvaluationScenario, ids: set[str]) -> bool:
-    return scenario.scenario_id in ids
 
 
 def _report_json(output: EvaluationOutput) -> str:
@@ -186,26 +181,20 @@ def main() -> None:
     # One report per scenario group (a subdirectory of the personas dir), plus a combined one.
     group_dirs = sorted(p for p in personas_path.iterdir() if p.is_dir())
     group_scenarios = {group_dir.name: load_personas(group_dir) for group_dir in group_dirs}
-    combined_report = run(model, all_scenarios)
-    # Each group's report is derived from combined_report rather than re-run, so it's
-    # exact even for a non-deterministic model (group_reports, original_report and
-    # role_reports below all build on combined_report instead of calling run() again).
-    group_ids = {
-        name: {s.scenario_id for s in scenarios} for name, scenarios in group_scenarios.items()
-    }
     group_reports: dict[str, Report] = {
-        name: subset_report(all_scenarios, combined_report, partial(_id_in, ids=ids))
-        for name, ids in group_ids.items()
+        name: run(model, scenarios) for name, scenarios in group_scenarios.items()
     }
+    combined_report = run(model, all_scenarios)
     # The set as it was before the hierarchy group (#507): every other group together.
-    # all_scenarios (not group_scenarios) so a loose scenario file directly under
-    # personas_path still counts.
     original_report: Report | None = None
     if HIERARCHY_DECIDES_GROUP in group_scenarios:
-        hierarchy_ids = {s.scenario_id for s in group_scenarios[HIERARCHY_DECIDES_GROUP]}
-        original_report = subset_report(
-            all_scenarios, combined_report, lambda s: s.scenario_id not in hierarchy_ids
-        )
+        original_scenarios = [
+            s
+            for name, scenarios in group_scenarios.items()
+            if name != HIERARCHY_DECIDES_GROUP
+            for s in scenarios
+        ]
+        original_report = run(model, original_scenarios)
     # Per role, so a model that is bad for one role can't hide inside the aggregate.
     role_reports = split_by_role(all_scenarios, combined_report)
 
