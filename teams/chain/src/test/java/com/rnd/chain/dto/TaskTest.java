@@ -80,6 +80,7 @@ class TaskTest {
                 .score(0.7)
                 .confidence(0.8)
                 .priorityScore(0.9)
+                .tier(TaskTier.TACTICAL)
                 .createdAt(created)
                 .updatedAt(updated)
                 .deletedAt(deleted)

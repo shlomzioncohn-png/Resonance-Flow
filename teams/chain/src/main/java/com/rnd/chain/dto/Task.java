@@ -60,6 +60,9 @@ public final class Task {
      * {@code TaskEligibilityService}. */
     private final Double priorityScore;
 
+    /** Latest tier Inbox sent (issue #864); null until Inbox classifies the task. */
+    private final TaskTier tier;
+
     private final LocalDateTime createdAt;
     private final LocalDateTime updatedAt;
     private final LocalDateTime deletedAt;
@@ -76,6 +79,7 @@ public final class Task {
                  Double score,
                  Double confidence,
                  Double priorityScore,
+                 TaskTier tier,
                  LocalDateTime createdAt,
                  LocalDateTime updatedAt,
                  LocalDateTime deletedAt) {
@@ -102,6 +106,7 @@ public final class Task {
         this.score = score;
         this.confidence = confidence;
         this.priorityScore = priorityScore;
+        this.tier = tier;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.deletedAt = deletedAt;
