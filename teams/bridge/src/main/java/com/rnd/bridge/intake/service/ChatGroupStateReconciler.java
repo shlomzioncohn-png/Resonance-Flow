@@ -309,13 +309,27 @@ public class ChatGroupStateReconciler {
         }
         RawSourceType sourceType = message.sourceType();
         String tenantId = message.tenantId();
-        Optional<String> existingGroupId = message.id() == null
+        Optional<GroupState> resolved = message.id() == null
                 ? Optional.empty()
-                : groupStateStore.findGroupIdForMessage(sourceType, tenantId, message.id());
+                : resolveCurrentGroupId(sourceType, tenantId, message.id());
 
-        GroupState updated = existingGroupId.isPresent()
+        if (resolved.isPresent() && isThreadGroup(resolved.get())) {
+            // This message's own event carries no threadId (a thread root's event never does -
+            // see class javadoc), but it resolves to an existing thread group (a root edit after
+            // the thread was created - see resolveCurrentGroupId's javadoc for why the stale
+            // messageId index can't be trusted here). Route by the resolved group's kind, not by
+            // event shape: thread groups always merge-and-publish immediately.
+            List<SourceRecord> records = mergeAndMaybePublish(
+                    sourceType, tenantId, resolved.get().groupId(), MISSING_GROUP_SENTINEL, List.of(message));
+            GroupState threadState = groupStateStore.load(sourceType, tenantId, resolved.get().groupId())
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Thread group vanished immediately after being merged: " + resolved.get().groupId()));
+            return new RealtimeReconcileResult(threadState, records, false, true);
+        }
+
+        GroupState updated = resolved.isPresent()
                 ? mergeIntoGroupState(
-                        sourceType, tenantId, existingGroupId.get(), MISSING_GROUP_SENTINEL, List.of(message),
+                        sourceType, tenantId, resolved.get().groupId(), MISSING_GROUP_SENTINEL, List.of(message),
                         new AtomicBoolean())
                 : mergeIntoCurrentChatGroup(sourceType, tenantId, message);
 
@@ -326,7 +340,116 @@ public class ChatGroupStateReconciler {
         // covering edits too - an edit can just as well produce a fresh unpublished revision
         // needing a live timer); this flag is kept as it may still be useful metadata for a
         // caller distinguishing "brand new session/message" from "edit of existing content".
-        return new RealtimeReconcileResult(updated, newAttachmentRecords, existingGroupId.isEmpty());
+        return new RealtimeReconcileResult(updated, newAttachmentRecords, resolved.isEmpty());
+    }
+
+    /**
+     * Resolves which group a message currently lives in for the purpose of an edit or a
+     * deletion, trying a direct load first (succeeds only when messageId is itself a group's own
+     * groupId - i.e. a thread's root, since groupId==threadId==root's ts for threaded groups;
+     * never a time-gap group, whose groupId is an unrelated minted UUID) before falling back to
+     * the messageId index (resolves the ordinary non-thread case, and a reply's id - replies are
+     * indexed to their thread group, unlike the root - see GroupStateStore.writeMessageIndex).
+     * This order is what fixes the pre-existing thread-root edit bug: GroupStateStore.
+     * writeMessageIndex deliberately never indexes a thread group under its own groupId (the
+     * root), so findGroupIdForMessage(rootTs) alone permanently resolves to the root's ORIGINAL
+     * (now superseded) non-thread group - see GroupStateStore's javadoc and
+     * ChatGroupStateReconciler.newThreadGroupState. The direct load bypasses that stale index
+     * entirely whenever a thread group actually exists at that id.
+     * The caller inspects the resolved GroupState's own threadId()/groupId() fields (see
+     * isThreadGroup) to decide routing - never which lookup succeeded.
+     */
+    Optional<GroupState> resolveCurrentGroupId(RawSourceType sourceType, String tenantId, String messageId) {
+        Optional<GroupState> direct = groupStateStore.load(sourceType, tenantId, messageId);
+        if (direct.isPresent()) {
+            return direct;
+        }
+        return groupStateStore.findGroupIdForMessage(sourceType, tenantId, messageId)
+                .flatMap(groupId -> groupStateStore.load(sourceType, tenantId, groupId));
+    }
+
+    /** A group is a thread group iff threadId() != null && groupId().equals(threadId()) -
+     * true regardless of whether it was reached via resolveCurrentGroupId's direct-load (root)
+     * or index-fallback (reply) branch, and false for every ordinary time-gap group (see
+     * resolveCurrentGroupId's javadoc). */
+    private boolean isThreadGroup(GroupState state) {
+        return state.threadId() != null && state.groupId().equals(state.threadId());
+    }
+
+    /**
+     * New entry point for both message_deleted and a nested-tombstone deletion (see
+     * SlackEventMessageParser.parseDeletion): resolves the group via resolveCurrentGroupId, then
+     * removes the matching MessageSnapshot under the same per-groupId lock mergeIntoGroupState
+     * already uses. Reports which kind of group was resolved (thread vs. non-thread) so the
+     * caller (SlackEventsController) can route the result to the correct publish mechanism - a
+     * thread group publishes immediately, a non-thread group's removal just advances its
+     * revision and leaves the inactivity timer to publish later (see SlackSessionScheduler).
+     * An unknown/not-found messageId, or one already removed by an earlier delivery, is a no-op:
+     * RemovalResult.removed() is false and nothing is persisted - mirrors the existing
+     * "not found" tolerance pattern elsewhere in this class/GroupStateStore (e.g.
+     * confirmPublished/claimForPublication).
+     * <p>
+     * <b>Invariant this method alone is responsible for upholding:</b> a persisted GroupState with
+     * revision &gt;= 0 is empty (messages().isEmpty()) ONLY because this method produced it.
+     * Every other mutator in this class/GroupStateStore only ever appends or replaces-by-id
+     * (mergeSnapshots never removes an entry) - before this method existed, revision &gt;= 0 with
+     * an empty messages() was structurally unreachable. If a future change anywhere else ever
+     * empties messages() directly, it silently breaks this invariant - which is exactly what lets
+     * SlackSessionScheduler/ChatSourceRecordMapper treat "empty + revision &gt;= 0" as unambiguous
+     * proof that this deletion feature (and only this feature) produced the state they're looking
+     * at. See mergingNeverProducesAnEmptyGroupWithoutGoingThroughRemoveMessage in
+     * ChatGroupStateReconcilerTest for the regression test.
+     */
+    public RemovalResult removeMessage(RawSourceType sourceType, String tenantId, String messageId) {
+        Optional<GroupState> resolved = resolveCurrentGroupId(sourceType, tenantId, messageId);
+        if (resolved.isEmpty()) {
+            return new RemovalResult(null, false, false);
+        }
+        GroupState target = resolved.get();
+        AtomicBoolean removed = new AtomicBoolean(false);
+        GroupState updated = groupStateStore.update(
+                target.sourceType(), target.tenantId(), target.groupId(), MISSING_GROUP_SENTINEL, current -> {
+                    if (current == MISSING_GROUP_SENTINEL) {
+                        return current;
+                    }
+                    if (current.messages().stream().noneMatch(m -> m.messageId().equals(messageId))) {
+                        return current;
+                    }
+                    removed.set(true);
+                    List<MessageSnapshot> remaining = current.messages().stream()
+                            .filter(m -> !m.messageId().equals(messageId))
+                            .toList();
+                    // Same revision-advance rule as any other content change (mergeIntoGroupState)
+                    // - deletion is not a different kind of change, just another input to it.
+                    boolean supersedesAnOutstandingVersion = current.published() || current.claimedRevision() != null;
+                    int revision = supersedesAnOutstandingVersion ? current.revision() + 1 : Math.max(current.revision(), 0);
+                    return new GroupState(
+                            current.groupId(), current.sourceType(), current.tenantId(), current.chatId(),
+                            current.threadId(), current.correlationId(), remaining, false, revision, null,
+                            current.superseded());
+                });
+        return new RemovalResult(updated, removed.get(), isThreadGroup(updated));
+    }
+
+    /**
+     * Builds the SourceRecord(s) to publish immediately for an already-merged thread group -
+     * used by SlackEventsController after {@link #removeMessage} resolves a deletion to a thread
+     * group (no new incoming message to report, so newMessagesThisBatch is empty - every
+     * attachment this group already has was landed when its owning message first arrived). An
+     * empty mergedGroup.messages() (the thread's last message/root was just removed) still
+     * produces exactly one record, a DELETE_REVIEW, via ChatSourceRecordMapper's empty-group
+     * branch - see that class's javadoc.
+     */
+    public List<SourceRecord> toSourceRecordsForPublishedGroup(GroupState mergedGroup) {
+        return chatSourceRecordMapper.toSourceRecords(mergedGroup, List.of());
+    }
+
+    /** Result of {@link #removeMessage}: groupState is the persisted state after the removal
+     * attempt (null if resolveCurrentGroupId found nothing at all); removed is false for a
+     * no-op (unknown/already-removed messageId, or no group found) - the caller must not treat
+     * groupState as having actually changed in that case; isThreadGroup tells the caller which
+     * publish mechanism applies (see this class's javadoc). */
+    public record RemovalResult(GroupState groupState, boolean removed, boolean isThreadGroup) {
     }
 
     /**
@@ -430,8 +553,20 @@ public class ChatGroupStateReconciler {
      * schedules based on groupState().published() instead, since an edit can also produce a
      * fresh unpublished revision that needs a live timer) - kept as descriptive metadata about
      * what kind of message this reconcile call actually processed.
+     * threadRouted is true only when this message resolved to an existing thread group despite
+     * carrying no threadId of its own (a thread root's edit - see this class's javadoc) - in
+     * that case newAttachmentRecords actually holds the FULL record set (transcript included),
+     * ready for the caller to publish immediately through the lane, exactly like the ordinary
+     * threaded path (group()); false for the normal non-thread case, where it only ever holds
+     * newly-landable attachment records and the transcript stays pending for the scheduler.
      */
-    public record RealtimeReconcileResult(GroupState groupState, List<SourceRecord> newAttachmentRecords, boolean newActivity) {
+    public record RealtimeReconcileResult(
+            GroupState groupState, List<SourceRecord> newAttachmentRecords, boolean newActivity, boolean threadRouted) {
+
+        /** Convenience constructor for every existing non-thread-routed call site. */
+        public RealtimeReconcileResult(GroupState groupState, List<SourceRecord> newAttachmentRecords, boolean newActivity) {
+            this(groupState, newAttachmentRecords, newActivity, false);
+        }
     }
 
     /** Merge by messageId (same id = edit, replace text; new id = append), then re-sort by

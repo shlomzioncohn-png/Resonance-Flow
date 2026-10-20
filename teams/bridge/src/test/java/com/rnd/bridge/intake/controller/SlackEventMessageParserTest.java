@@ -105,6 +105,86 @@ class SlackEventMessageParserTest {
     }
 
     @Test
+    void messageChangedWithNestedTombstoneIsNotParsedAsAnEdit() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_changed\",\"channel\":\"C123\",\"ts\":\"1000.9\","
+                        + "\"message\":{\"type\":\"message\",\"subtype\":\"tombstone\",\"ts\":\"1000.0\","
+                        + "\"text\":\"This message was deleted.\"}}");
+
+        assertThat(parser.parse(event)).isEmpty();
+    }
+
+    @Test
+    void messageChangedWithNestedBotMessageIsIgnoredEntirely() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_changed\",\"channel\":\"C123\",\"ts\":\"1000.9\","
+                        + "\"message\":{\"type\":\"message\",\"subtype\":\"bot_message\",\"ts\":\"1000.0\","
+                        + "\"text\":\"unfurled link\"}}");
+
+        assertThat(parser.parse(event)).isEmpty();
+    }
+
+    @Test
+    void parseDeletionExtractsDeletedTsFromMessageDeleted() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_deleted\",\"channel\":\"C123\","
+                        + "\"ts\":\"1000.9\",\"deleted_ts\":\"1000.0\","
+                        + "\"previous_message\":{\"type\":\"message\",\"user\":\"U1\",\"ts\":\"1000.0\",\"text\":\"bye\"}}");
+
+        Optional<com.rnd.bridge.intake.model.SlackMessageDeletion> result = parser.parseDeletion(event);
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().chatId()).isEqualTo("C123");
+        assertThat(result.orElseThrow().messageId()).isEqualTo("1000.0");
+    }
+
+    @Test
+    void parseDeletionPrefersDeletedTsOverMismatchedPreviousMessageTs() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_deleted\",\"channel\":\"C123\","
+                        + "\"ts\":\"1000.9\",\"deleted_ts\":\"1000.0\","
+                        + "\"previous_message\":{\"type\":\"message\",\"user\":\"U1\",\"ts\":\"1000.1\",\"text\":\"bye\"}}");
+
+        Optional<com.rnd.bridge.intake.model.SlackMessageDeletion> result = parser.parseDeletion(event);
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().messageId()).isEqualTo("1000.0");
+    }
+
+    @Test
+    void parseDeletionDetectsATombstoneNestedInMessageChanged() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_changed\",\"channel\":\"C123\",\"ts\":\"1000.9\","
+                        + "\"message\":{\"type\":\"message\",\"subtype\":\"tombstone\",\"ts\":\"1000.0\","
+                        + "\"text\":\"This message was deleted.\"}}");
+
+        Optional<com.rnd.bridge.intake.model.SlackMessageDeletion> result = parser.parseDeletion(event);
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().chatId()).isEqualTo("C123");
+        assertThat(result.orElseThrow().messageId()).isEqualTo("1000.0");
+    }
+
+    @Test
+    void parseDeletionIgnoresABotMessageNestedInMessageChanged() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_changed\",\"channel\":\"C123\",\"ts\":\"1000.9\","
+                        + "\"message\":{\"type\":\"message\",\"subtype\":\"bot_message\",\"ts\":\"1000.0\","
+                        + "\"text\":\"unfurled link\"}}");
+
+        assertThat(parser.parseDeletion(event)).isEmpty();
+    }
+
+    @Test
+    void parseDeletionIgnoresAnOrdinaryEdit() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_changed\",\"channel\":\"C123\",\"ts\":\"1000.9\","
+                        + "\"message\":{\"type\":\"message\",\"user\":\"U1\",\"ts\":\"1000.0\",\"text\":\"edited\"}}");
+
+        assertThat(parser.parseDeletion(event)).isEmpty();
+    }
+
+    @Test
     void otherSubtypesAreUnsupported() throws Exception {
         JsonNode event = event(
                 "{\"type\":\"message\",\"subtype\":\"bot_message\",\"channel\":\"C123\","

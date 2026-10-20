@@ -138,7 +138,7 @@ directly against the source of each reader/parser, not inferred from this doc's 
 | Source | Platform signals edit? | Platform signals delete? | Edit implemented here? | Delete implemented here? |
 |---|---|---|---|---|
 | WhatsApp | ❌ no edit concept in export format | ❌ no delete event — a deletion is just literal text `"This message was deleted"` in the export | — (nothing to implement against) | — (nothing to implement against) |
-| Slack | ✅ `message_changed` event | ✅ `message_deleted` event | ✅ done — `SlackEventMessageParser.parse()` remaps `event.message.ts` as the stable id so `ChatGroupStateReconciler` republishes a bumped revision (`ChangeType.UPSERT`) | ❌ not done — `SlackEventMessageParser.parse()`'s fallback explicitly names `message_deleted` as out of scope and returns `Optional.empty()`; the event is ack'd but never reaches the reconciler. No `ChangeType.DELETE_REVIEW` ever produced for Slack |
+| Slack | ✅ `message_changed` event | ✅ `message_deleted` event | ✅ done — `SlackEventMessageParser.parse()` remaps `event.message.ts` as the stable id so `ChatGroupStateReconciler` republishes a bumped revision (`ChangeType.UPSERT`) | ✅ done (2026-10-20, §3.1) — `SlackEventMessageParser.parseDeletion()` handles `message_deleted` and nested-`tombstone` `message_changed`; `ChatGroupStateReconciler.removeMessage` produces `ChangeType.DELETE_REVIEW` once a group empties entirely |
 | Calendar | ✅ updated event via `syncToken` | ✅ cancelled event (`status: "cancelled"`) via `syncToken` | ✅ done — same `events.list` + `syncToken` path, revision bump via `CalendarEventStateReconciler` | ✅ done — `RealCalendarSourceReader.toSourceRecord()` detects `isCancelled(event)` and builds a `ChangeType.DELETE_REVIEW` record via `toCancelledSourceRecord()`; `FixtureCalendarSourceReader` mirrors it |
 | Gmail | ⚠️ not really — email bodies are immutable once sent, no edit concept | ✅ `users.history.list` reports `messagesDeleted` / `labelsRemoved` (e.g. moved to Trash) | — (nothing to implement against) | ❌ not done — `RealEmailSourceReader.readIncremental()` only reads `history.getMessagesAdded()`; `getMessagesDeleted()`/`getLabelsRemoved()` are never inspected. Every record also gets a fresh random `correlationId` and `revision=0` every read, so there isn't even a stable identity across reads to attach a delete to yet |
 | Drive | ✅ `changes.list` reports `modifiedTime` | ✅ `changes.list` reports `trashed`/`removed` | ✅ **done 2026-10-18** — `RealDriveSourceReader.read(ReadCursor)` baselines via `files.list()` once (minting a `startPageToken` alongside it), then `changes.list(startPageToken)` on every later run; `headRevisionId` changes bump revision via `DriveFileStateReconciler`/`DriveFileStateStore` (real correlationId/revision per `fileId`, replacing the old `UUID.randomUUID()`/hardcoded `revision=0`) | ✅ **done 2026-10-18** — `file.trashed=true` → `ChangeType.DELETE_REVIEW` via `toTrashedSourceRecord()`, mirroring `RealCalendarSourceReader.toCancelledSourceRecord()`; content is never fetched for a trashed file. `removed=true` still deliberately unhandled (skipped outright), per the decision below |
@@ -193,30 +193,74 @@ directly against the source of each reader/parser, not inferred from this doc's 
    retracted/corrected message is itself meaningful content history, unlike an email leaving a
    mailbox. §3.1 stands unchanged.
 
-### 3.1 Slack `message_deleted` handling — pick up only after §1 and §2 land
-Now scoped smaller than originally described, because `ChangeType.DELETE_REVIEW` is a proven,
-already-emitted pattern (Calendar) rather than a from-scratch concept:
-1. `SlackEventMessageParser` currently returns `Optional.empty()` for `message_deleted` — needs a
-   parse path that extracts the deleted message's stable id. Slack's own `ts` is the only
-   identity a message has within a channel (no separate "message id" field exists) — the exact
-   same identity `SlackEventMessageParser.parseMessageNode`'s `message_changed` path already uses
-   for `ChatMessage.id()` (see that method's javadoc). For `message_deleted`, this lives in
-   `previous_message.ts`/the event's own `deleted_ts` (both should carry the same value — confirm
-   exact field name against Slack's `message_deleted` event docs, not assumed here), the deleted
-   message's original `ts`, never the delete notification's own top-level `ts`.
-2. **Decided 2026-10-18 (correction to this doc's own prior framing, which read ambiguously):**
-   deleting ONE message out of a multi-message session is a content-shrinking edit of the
-   session, not a deletion of the session — `RawObjectEvent`/`correlationId` represent the whole
-   session, not one message, so this stays `ChangeType.UPSERT` at a bumped revision (same as any
-   other edit), with the deleted message simply absent from the republished transcript.
-   `ChangeType.DELETE_REVIEW` is correct **only** when removing that message leaves the session's
-   `GroupState` with zero remaining messages — i.e. the logical item itself (the whole session)
-   no longer exists, the same bar Calendar's cancellation and Drive's `trashed` both clear.
-3. `ChatGroupStateReconciler` needs a new reconciliation path (there is genuinely no existing
-   method for this — `group`/`reconcileNonThreadedMessage` both assume an upsert) that removes the
-   matching `MessageSnapshot` (by the `ts` from step 1) from a `GroupState`, then branches per
-   point 2: remaining messages → `UPSERT` with the revised transcript; zero remaining → mirror how
-   Calendar's reader already constructs a `ChangeType.DELETE_REVIEW` event today.
+### 3.1 Slack `message_deleted` handling — ✅ **DONE** (2026-10-20)
+Implemented per `docs/plans/slack-message-deleted.md` (see `docs/slack-deletion-contract.md` for
+the consumer-facing contract summary — replacement semantics, `DELETE_REVIEW`, timing); landed as
+one change since the two
+pre-existing bugs it surfaced (thread-root edits getting silently absorbed into a dead group, and
+the timer racing a burst of corrections) shared the same root cause/fix surface as deletion itself.
+1. **Parser** — `SlackEventMessageParser.parseDeletion()` (new, alongside the unchanged `parse()`)
+   handles both real Slack deletion shapes: top-level `message_deleted` (identity from `deleted_ts`,
+   cross-checked against `previous_message.ts` with a logged warning on mismatch — `deleted_ts`
+   always wins), and `message_changed` with a nested `message.subtype == "tombstone"` (a
+   root-with-replies deletion; identity from the nested message's own `ts`, unchanged by the
+   tombstone). A nested `bot_message` subtype (link-unfurl) is now also detected and ignored
+   outright in `parse()` — previously unguarded and a real text-corruption risk (the unfurl's own
+   `text` would silently overwrite the real message's stored content).
+2. **Routing fix, broader than just deletion** — `ChatGroupStateReconciler.resolveCurrentGroupId`
+   tries a direct `GroupStateStore.load(messageId)` before falling back to the messageId index.
+   This fixes a **pre-existing, independent bug**: a thread root's own event never carries
+   `thread_ts`, so an edit/deletion of a root arriving after the thread was created used to resolve
+   (via the index alone) to the root's original, now-`superseded` non-thread group forever —
+   silently absorbed, never reaching Kafka. The direct load bypasses that stale index whenever a
+   thread group actually exists at that id. `SlackEventsController`/`reconcileNonThreadedMessage`
+   now route by the **resolved group's own kind** (thread vs. non-thread), not by the event's own
+   `threadId()` field.
+3. **Removal** — `ChatGroupStateReconciler.removeMessage` is the new reconciliation path (no
+   existing method removed from `messages()` before this): resolves the group, removes the matching
+   `MessageSnapshot`, and bumps revision using the same rule as any other content change. Deleting
+   ONE message out of a multi-message session is a content-shrinking edit, not a deletion of the
+   session (`RawObjectEvent`/`correlationId` represent the whole session) — stays `UPSERT`.
+   `ChangeType.DELETE_REVIEW` only once the group empties entirely, same bar Calendar/Drive use. An
+   unknown/already-removed `messageId` is a no-op, no revision bump.
+4. **Publish timing** — new `ChatSessionProperties.correctionDelaySeconds` (default 60). A group
+   that `maybePublished` (`published() || revision() > 0 || claimedRevision() != null`) publishes
+   `correctionDelay` after the triggering change instead of waiting out the full session gap,
+   collapsing a burst of rapid edits/deletions into one publish via the existing timer
+   cancel-and-replace logic — **this changes timing for ordinary edits too, not just deletions**:
+   previously a correction to an already-published-ish group would ride the full `sessionGapMinutes`
+   debounce like any other message. `SlackSessionScheduler.onDeadline` skips its staleness recheck
+   entirely once `maybePublished` (otherwise a `now + correctionDelay` deadline always looks "early"
+   and never fires); the ordinary still-open recheck is unchanged. `ChatSourceRecordMapper` gained
+   the empty-`GroupState` branch (`toDeleteReviewRecord`) this needed regardless of design choice —
+   `toSourceRecords(GroupState, List)` used to throw on an empty `messages()`.
+   **Two more real, pre-existing bugs surfaced and fixed while verifying this end to end (neither
+   caught by any prior unit test, since neither had ever been exercised with a real, non-mocked
+   `DELETE_REVIEW` payload before):** `SlackSessionPublisher.publishSession` — the non-thread
+   timer-driven publish path, which bypasses `UnstructuredIntakeLane`/`UnstructuredPayloadMapper`
+   entirely — always landed and referenced the transcript regardless of `changeType`, so an empty
+   group would still publish a non-empty `objects` list; and `RawObjectValidator.validate`
+   unconditionally rejected an empty `objects` list, which would have blocked `DELETE_REVIEW`
+   (Calendar's and Drive's existing ones too, not just Slack's new one) from ever reaching Kafka
+   through the real validator. Both fixed to special-case `ChangeType.DELETE_REVIEW`, mirroring
+   `UnstructuredPayloadMapper`'s existing rule. See `docs/slack-deletion-contract.md`.
+5. **Thread groups** — reuse the same removal logic; publish immediately (no `correctionDelay`,
+   nothing to debounce against — threads have no timer).
+6. **Known limitations** (not fixed here, out of scope per the plan):
+   - A channel group `confirmPublished` **before** a reply caused thread migration is permanently
+     unreachable for correction — the thread group has no back-reference to the original's
+     `correlationId`, and `superseded` permanently blocks the original from publishing again.
+   - A deletion/tombstone arriving **before** the message it targets was ever indexed is a no-op;
+     if that message later arrives via delayed delivery, it's ingested normally with no record it
+     was already deleted (Slack doesn't guarantee ordered delivery).
+   - §3.4 (stale-claim recovery after restart) remains separate and unaddressed.
+7. **Verified via the full test suite** (full `mvn test` run has 8 pre-existing, unrelated
+   environment failures — `BridgeApplicationTests`/`CrmBridgeControllerTest`/
+   `HubSpotDealRecordObjectMapperNamingStrategyTest` all need a local Postgres/Kafka this machine
+   doesn't have running; reproduces identically on `main` before this change). **Not yet verified
+   against a real Slack workspace** — a real tombstone/`bot_message` payload, and the thread-root
+   migration + correction-delay timing end to end, are still outstanding; fold into §6's pre-demo
+   dry run, don't treat unit-green as equivalent to that check.
 
 ### 3.2 Gmail edit/delete handling — declined, see decision above
 **Decision (2026-10-18): out of scope, not just unsequenced.** No further work planned here

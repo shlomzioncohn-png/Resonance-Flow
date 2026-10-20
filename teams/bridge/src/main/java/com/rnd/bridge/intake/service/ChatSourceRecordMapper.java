@@ -7,6 +7,7 @@ import com.rnd.bridge.intake.model.MessageSnapshot;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.raw.model.ChangeType;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -131,6 +132,15 @@ public class ChatSourceRecordMapper {
      */
     public List<SourceRecord> toSourceRecords(GroupState mergedGroup, List<ChatMessage> newMessagesThisBatch) {
         List<MessageSnapshot> allMessages = mergedGroup.messages();
+        if (allMessages.isEmpty()) {
+            // A deletion emptied this group entirely (see ChatGroupStateReconciler.removeMessage)
+            // - there is no message left to derive a transcript/naturalId/participants from, so
+            // this is the one case that isn't "the existing logic, unchanged": build a single
+            // DELETE_REVIEW record instead, same contract Calendar/Drive already use for their
+            // own whole-item-deleted case (RealCalendarSourceReader.toCancelledSourceRecord /
+            // RealDriveSourceReader.toTrashedSourceRecord).
+            return List.of(toDeleteReviewRecord(mergedGroup));
+        }
         MessageSnapshot first = allMessages.get(0);
         List<String> participants = allMessages.stream()
                 .map(MessageSnapshot::sender)
@@ -226,5 +236,35 @@ public class ChatSourceRecordMapper {
             }
         }
         return records;
+    }
+
+    /** Builds the single DELETE_REVIEW record for a group a deletion emptied entirely - see
+     * toSourceRecords(GroupState, List)'s empty branch. No message is left to derive
+     * occurredAt/naturalId from, so occurredAt falls back to "now" (there is no legitimate
+     * "unknown" value - same reasoning as RealCalendarSourceReader.toCancelledSourceRecord) and
+     * naturalId is derived from the group's own stable identity instead of a message timestamp. */
+    private SourceRecord toDeleteReviewRecord(GroupState mergedGroup) {
+        String naturalId = mergedGroup.chatId() + "|" + mergedGroup.correlationId();
+        return new SourceRecord(
+                mergedGroup.sourceType(),
+                mergedGroup.tenantId(),
+                naturalId,
+                mergedGroup.correlationId(),
+                Instant.now(),
+                null,
+                List.of(),
+                null,
+                null,
+                EMPTY_CONTENT,
+                null,
+                null,
+                null,
+                0,
+                0,
+                List.of(),
+                mergedGroup.revision(),
+                ChangeType.DELETE_REVIEW,
+                mergedGroup.groupId(),
+                null);
     }
 }

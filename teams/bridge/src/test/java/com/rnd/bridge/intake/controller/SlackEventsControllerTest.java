@@ -401,11 +401,37 @@ class SlackEventsControllerTest {
     }
 
     @Test
-    void messageDeletedEndToEndIsAcknowledgedWithoutTouchingTheReconciler() throws Exception {
+    void nonThreadEventThatResolvesToAnExistingThreadGroupPublishesImmediatelyInsteadOfScheduling() throws Exception {
+        // A thread root's edit: the event itself carries no threadId (roots never do), but
+        // reconciler.reconcileNonThreadedMessage resolved it to an existing thread group (see
+        // ChatGroupStateReconciler.resolveCurrentGroupId) - threadRouted=true means the full
+        // record set (transcript included) must be published immediately via the lane, exactly
+        // like the ordinary threaded path, never landed/scheduled.
+        String body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\"}}";
+        when(verifier.isValid("1000", "v0=valid", body)).thenReturn(true);
+        ChatMessage message = nonThreadMessage();
+        SourceRecord transcript = attachmentRecord();
+        when(eventMessageParser.parse(any())).thenReturn(Optional.of(message));
+        when(reconciler.reconcileNonThreadedMessage(message)).thenReturn(
+                new ChatGroupStateReconciler.RealtimeReconcileResult(groupState(), List.of(transcript), false, true));
+        when(slackLane.run(any(Stream.class), any())).thenReturn(new IntakeResult(1, 1, 0, List.of()));
+
+        ResponseEntity<?> response = controller.handle("1000", "v0=valid", requestWithBody(body));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verify(slackLane).run(any(Stream.class), any());
+        verifyNoInteractions(landingService, groupStateStore);
+        verify(sessionScheduler, never()).scheduleOrReschedule(any());
+    }
+
+    @Test
+    void messageDeletedOfAnUnknownMessageIsAckedAsANoOpWithoutPublishing() throws Exception {
         String body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"subtype\":\"message_deleted\","
                 + "\"channel\":\"chat-a\",\"ts\":\"1000.9\",\"deleted_ts\":\"1000.1\","
                 + "\"previous_message\":{\"type\":\"message\",\"user\":\"U1\",\"ts\":\"1000.1\",\"text\":\"hi\"}}}";
         when(verifier.isValid("1000", "v0=valid", body)).thenReturn(true);
+        when(reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "1000.1"))
+                .thenReturn(new ChatGroupStateReconciler.RemovalResult(null, false, false));
 
         ResponseEntity<?> response = controllerWithRealParser.handle("1000", "v0=valid", requestWithBody(body));
 
@@ -413,6 +439,45 @@ class SlackEventsControllerTest {
         verify(reconciler, never()).group(any());
         verify(reconciler, never()).reconcileNonThreadedMessage(any());
         verify(slackLane, never()).run(any(Stream.class), any());
+        verify(sessionScheduler, never()).scheduleOrReschedule(any());
+    }
+
+    @Test
+    void messageDeletedOfAMessageInANonThreadGroupSchedulesButNeverPublishesDirectly() throws Exception {
+        String body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"subtype\":\"message_deleted\","
+                + "\"channel\":\"chat-a\",\"ts\":\"1000.9\",\"deleted_ts\":\"1000.1\","
+                + "\"previous_message\":{\"type\":\"message\",\"user\":\"U1\",\"ts\":\"1000.1\",\"text\":\"hi\"}}}";
+        when(verifier.isValid("1000", "v0=valid", body)).thenReturn(true);
+        GroupState groupState = groupState();
+        when(reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "1000.1"))
+                .thenReturn(new ChatGroupStateReconciler.RemovalResult(groupState, true, false));
+
+        ResponseEntity<?> response = controllerWithRealParser.handle("1000", "v0=valid", requestWithBody(body));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verify(slackLane, never()).run(any(Stream.class), any());
+        verify(sessionScheduler).scheduleOrReschedule(groupState);
+    }
+
+    @Test
+    void messageDeletedResolvingToAThreadGroupPublishesImmediately() throws Exception {
+        String body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"subtype\":\"message_deleted\","
+                + "\"channel\":\"chat-a\",\"ts\":\"1000.9\",\"deleted_ts\":\"1000.2\","
+                + "\"previous_message\":{\"type\":\"message\",\"user\":\"U1\",\"ts\":\"1000.2\",\"text\":\"reply\"}}}";
+        when(verifier.isValid("1000", "v0=valid", body)).thenReturn(true);
+        GroupState threadGroupState = new GroupState(
+                "1000.0", RawSourceType.SLACK, "kamatech", "chat-a", "1000.0", "corr-1", List.of(), false, 1, null);
+        SourceRecord deleteReview = attachmentRecord();
+        when(reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "1000.2"))
+                .thenReturn(new ChatGroupStateReconciler.RemovalResult(threadGroupState, true, true));
+        when(reconciler.toSourceRecordsForPublishedGroup(threadGroupState)).thenReturn(List.of(deleteReview));
+        when(slackLane.run(any(Stream.class), any())).thenReturn(new IntakeResult(1, 1, 0, List.of()));
+
+        ResponseEntity<?> response = controllerWithRealParser.handle("1000", "v0=valid", requestWithBody(body));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verify(slackLane).run(any(Stream.class), any());
+        verify(sessionScheduler, never()).scheduleOrReschedule(any());
     }
 
     private static MockHttpServletRequest requestWithBody(String body) {

@@ -262,4 +262,22 @@ class ChatSourceRecordMapperTest {
 
         assertThat(records.get(0).revision()).isEqualTo(3);
     }
+
+    @Test
+    void anEmptiedGroupProducesExactlyOneDeleteReviewRecord() {
+        GroupState emptiedGroup = new GroupState(
+                "g1", RawSourceType.SLACK, "kamatech", "chat-a", null, "fixed-correlation-uuid", List.of(), false, 1,
+                null);
+
+        List<SourceRecord> records = mapper.toSourceRecords(emptiedGroup, List.of());
+
+        assertThat(records).hasSize(1);
+        SourceRecord record = records.get(0);
+        assertThat(record.changeType()).isEqualTo(com.rnd.bridge.raw.model.ChangeType.DELETE_REVIEW);
+        assertThat(record.correlationId()).isEqualTo("fixed-correlation-uuid");
+        assertThat(record.revision()).isEqualTo(1);
+        assertThat(record.groupId()).isEqualTo("g1");
+        assertThat(record.attachmentIndex()).isZero();
+        assertThat(record.attachmentCount()).isZero();
+    }
 }

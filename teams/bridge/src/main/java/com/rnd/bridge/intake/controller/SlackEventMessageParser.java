@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rnd.bridge.intake.config.SlackApiProperties;
 import com.rnd.bridge.intake.model.ChatMessage;
+import com.rnd.bridge.intake.model.SlackMessageDeletion;
 import com.rnd.bridge.intake.parser.slack.SlackUserNameResolver;
 import com.rnd.bridge.raw.model.RawSourceType;
 import com.slack.api.model.File;
@@ -23,6 +24,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -52,6 +55,8 @@ import org.springframework.stereotype.Component;
 @Component
 class SlackEventMessageParser {
 
+    private static final Logger log = LoggerFactory.getLogger(SlackEventMessageParser.class);
+
     // The Slack SDK's Message/File models are annotated for Gson (SerializedName), not Jackson -
     // there is no @JsonProperty mapping "thread_ts" -> threadTs etc. for our app's shared
     // ObjectMapper to pick up. A small dedicated snake_case mapper reuses the SDK's DTO shape
@@ -78,10 +83,64 @@ class SlackEventMessageParser {
             return parseMessageNode(event, event);
         }
         if ("message_changed".equals(event.get("subtype").asText()) && event.hasNonNull("message")) {
-            return parseMessageNode(event, event.get("message"));
+            JsonNode nested = event.get("message");
+            // A root-with-replies deletion arrives as message_changed with a nested
+            // "tombstone" subtype, not message_deleted at all - handled by parseDeletion
+            // instead of being misread as an ordinary text edit (see SlackMessageDeletion's
+            // javadoc). A link-unfurl's nested message is Slack's own "bot_message" subtype,
+            // typically missing "user" - ignored outright (neither edit nor new message),
+            // same as the existing top-level bot_message rejection below.
+            if (nested.hasNonNull("subtype")) {
+                String nestedSubtype = nested.get("subtype").asText();
+                if ("tombstone".equals(nestedSubtype) || "bot_message".equals(nestedSubtype)) {
+                    return Optional.empty();
+                }
+            }
+            return parseMessageNode(event, nested);
         }
         // message_deleted, bot messages, channel-join notices, malformed message_changed
         // payloads (no nested "message"), etc. - not this step's scope.
+        return Optional.empty();
+    }
+
+    /**
+     * The deletion counterpart to {@link #parse(JsonNode)}: recognizes the two Slack shapes
+     * that mean "this message no longer exists" - see {@link SlackMessageDeletion}'s javadoc.
+     * For {@code message_deleted}, identity comes from the top-level {@code deleted_ts} field
+     * (authoritative per Slack's own docs), never the event's own {@code ts}/{@code event_ts}
+     * (the deletion notification's own timestamp). {@code previous_message.ts}, when present,
+     * carries the same value as a redundant copy - cross-checked here and logged on mismatch,
+     * but {@code deleted_ts} always wins.
+     */
+    Optional<SlackMessageDeletion> parseDeletion(JsonNode event) {
+        if (event == null || !event.hasNonNull("type") || !"message".equals(event.get("type").asText())
+                || !event.hasNonNull("subtype") || !event.hasNonNull("channel")) {
+            return Optional.empty();
+        }
+        String subtype = event.get("subtype").asText();
+        String channel = event.get("channel").asText();
+        if ("message_deleted".equals(subtype)) {
+            if (!event.hasNonNull("deleted_ts")) {
+                return Optional.empty();
+            }
+            String deletedTs = event.get("deleted_ts").asText();
+            JsonNode previousMessage = event.get("previous_message");
+            if (previousMessage != null && previousMessage.hasNonNull("ts")
+                    && !deletedTs.equals(previousMessage.get("ts").asText())) {
+                log.warn(
+                        "Slack message_deleted deleted_ts={} disagrees with previous_message.ts={} - using deleted_ts",
+                        deletedTs, previousMessage.get("ts").asText());
+            }
+            return Optional.of(new SlackMessageDeletion(RawSourceType.SLACK, properties.tenantId(), channel, deletedTs));
+        }
+        if ("message_changed".equals(subtype) && event.hasNonNull("message")) {
+            JsonNode nested = event.get("message");
+            if (nested.hasNonNull("subtype") && "tombstone".equals(nested.get("subtype").asText())
+                    && nested.hasNonNull("ts")) {
+                return Optional.of(
+                        new SlackMessageDeletion(RawSourceType.SLACK, properties.tenantId(), channel, nested.get("ts").asText()));
+            }
+        }
         return Optional.empty();
     }
 

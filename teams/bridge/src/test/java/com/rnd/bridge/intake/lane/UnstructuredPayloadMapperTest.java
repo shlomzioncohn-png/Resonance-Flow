@@ -51,6 +51,23 @@ class UnstructuredPayloadMapperTest {
     }
 
     @Test
+    void slackSourcedDeleteReviewAlsoProducesAnEmptyObjectsListLikeEverySource() {
+        // Explicit SLACK regression case (docs/plans/slack-message-deleted.md §7) - this generic,
+        // changeType-based enforcement (no source-specific branching) already covers Slack for
+        // free, same as Calendar/Drive; this test only proves it, it changes no code.
+        SourceRecord deletedTranscript = new SourceRecord(
+                RawSourceType.SLACK, "kamatech", "chat-a|corr-1", "corr-1", NOW, null, List.of(), null, null,
+                "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), 1, ChangeType.DELETE_REVIEW);
+        when(scopingFilter.decide(deletedTranscript)).thenReturn(ScopeDecision.INCLUDED);
+
+        RawObjectEvent event = mapper.map(List.of(deletedTranscript), NOW);
+
+        assertThat(event.objects()).isEmpty();
+        assertThat(event.changeType()).isEqualTo(ChangeType.DELETE_REVIEW);
+        verify(refMapper, never()).toRef(any(), any());
+    }
+
+    @Test
     void upsertStillBuildsOneRefPerRecordInTheGroup() {
         SourceRecord record = new SourceRecord(
                 RawSourceType.DRIVE, "kamatech", "file-1", "corr-1", NOW, "malki@kamatech.org",
