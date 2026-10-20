@@ -73,17 +73,29 @@ type SparklineProps = {
 function Sparkline({ data, color, label }: SparklineProps) {
   if (data.length < 2) return null;
 
-  return (
-    <Box role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
-      <SparkLineChart
-        data={data}
-        height={SPARKLINE_HEIGHT}
-        color={color}
-        margin={2}
-        showTooltip
-        showHighlight
-      />
+  // With a label, the chart is a named group: keyboard users can Tab in and
+  // step through the points with the arrow keys (MUI's keyboard navigation).
+  // Without one the line is decorative: hidden from screen readers and taken
+  // out of the Tab order. (MUI's own `title` prop isn't used: it puts
+  // aria-label on a role="none" element, which axe flags.)
+  const chart = (
+    <SparkLineChart
+      data={data}
+      height={SPARKLINE_HEIGHT}
+      color={color}
+      margin={2}
+      showTooltip
+      showHighlight
+      disableKeyboardNavigation={!label}
+    />
+  );
+
+  return label ? (
+    <Box role="group" aria-label={label}>
+      {chart}
     </Box>
+  ) : (
+    <Box aria-hidden>{chart}</Box>
   );
 }
 
