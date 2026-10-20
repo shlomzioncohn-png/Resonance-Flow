@@ -1,6 +1,8 @@
 package com.rnd.chain.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -11,36 +13,21 @@ import java.util.UUID;
  * Readiness-related fields are sourced from task_readiness rather than
  * the legacy counters stored on Task.
  */
+@Getter
+@AllArgsConstructor
 public class TaskResponse {
 
     private final UUID id;
     private final UUID parentTaskId;
     private final TaskStatus status;
+
+    @Getter(onMethod_ = @JsonProperty("isReady"))
     private final boolean isReady;
+
     private final int blockingCount;
     private final int openConstraintCount;
     private final Integer estimatedDurationMin;
     private final Double score;
-
-    public TaskResponse(
-            UUID id,
-            UUID parentTaskId,
-            TaskStatus status,
-            boolean isReady,
-            int blockingCount,
-            int openConstraintCount,
-            Integer estimatedDurationMin,
-            Double score) {
-
-        this.id = id;
-        this.parentTaskId = parentTaskId;
-        this.status = status;
-        this.isReady = isReady;
-        this.blockingCount = blockingCount;
-        this.openConstraintCount = openConstraintCount;
-        this.estimatedDurationMin = estimatedDurationMin;
-        this.score = score;
-    }
 
     /**
      * Builds an API response from the task domain data plus the authoritative
@@ -75,38 +62,5 @@ public class TaskResponse {
                 readiness.openConstraintCount(),
                 task.getEstimatedDurationMin(),
                 task.getScore());
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public UUID getParentTaskId() {
-        return parentTaskId;
-    }
-
-    public TaskStatus getStatus() {
-        return status;
-    }
-
-    @JsonProperty("isReady")
-    public boolean isReady() {
-        return isReady;
-    }
-
-    public int getBlockingCount() {
-        return blockingCount;
-    }
-
-    public int getOpenConstraintCount() {
-        return openConstraintCount;
-    }
-
-    public Integer getEstimatedDurationMin() {
-        return estimatedDurationMin;
-    }
-
-    public Double getScore() {
-        return score;
     }
 }
