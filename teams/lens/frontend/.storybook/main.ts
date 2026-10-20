@@ -10,7 +10,10 @@ const config: StorybookConfig = {
     '@storybook/addon-a11y',
     '@storybook/addon-docs',
     '@storybook/addon-mcp',
+    'msw-storybook-addon',
   ],
+  // Serves public/mockServiceWorker.js, which MSW registers in the browser.
+  staticDirs: ['../public'],
   framework: '@storybook/nextjs-vite',
 };
 export default config;
