@@ -34,7 +34,6 @@ public final class PgCleanup {
         for (UUID id : newTasks) {
             jdbc.update("DELETE FROM dependency_history WHERE task_id = ? OR depends_on_task_id = ?", id, id);
             jdbc.update("DELETE FROM task_dependency WHERE task_id = ? OR depends_on_task_id = ?", id, id);
-            jdbc.update("DELETE FROM unresolved_dependencies WHERE task_id = ? OR depends_on_task_id = ?", id, id);
             jdbc.update("DELETE FROM task_constraint WHERE task_id = ?", id);
             jdbc.update("DELETE FROM task_state_history WHERE task_id = ?", id);
             jdbc.update("UPDATE task SET parent_task_id = NULL WHERE parent_task_id = ?", id);

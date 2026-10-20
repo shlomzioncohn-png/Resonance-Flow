@@ -1,6 +1,9 @@
 bridge:
   crm:
     salesforce:
+      # Active alongside "hubspot" now (additive CRM profiles, team lead decision 2026-10-19) -
+      # sourceRef "crm:salesforce:<id>" keeps Salesforce deals distinct from HubSpot's
+      # "crm:hubspot:<id>" even if the same raw id or business deal exists in both.
       # My Domain base URL for the org, e.g. https://my-org.my.salesforce.com. OAuth 2.0 Client
       # Credentials Flow requires this exact host - login.salesforce.com/test.salesforce.com are
       # not supported for it (crm-salesforce-design.md §1). Backed by SALESFORCE_LOGIN_URL - no
@@ -24,12 +27,14 @@ bridge:
       connect-timeout-millis: 5000
       read-timeout-millis: 15000
       # Which Opportunity field SalesforceDealRepository reads as Deal.stageChangedAt.
-      # LastStageChangeDate's existence on a real org is UNVERIFIED (moderate-confidence only -
-      # see crm-salesforce-design.md §2, every official field-reference page returned a loading
-      # shell to automated fetching). If it turns out not to exist on the target org, switch this
-      # to LastModifiedDate - no code change needed - but note the real imprecision that comes
-      # with it: LastModifiedDate bumps on ANY field edit, not just a stage change, so a deal
-      # whose Description was edited looks like its stage "just changed" even though it didn't.
+      # Verified 2026-10-14 against a real Developer Edition org (API v68.0): LastStageChangeDate
+      # exists and is set when the stage changes, but is null for an Opportunity that never has -
+      # SalesforceDealRepository.toDeal() falls back to that row's CreatedDate in that case (see
+      # crm-salesforce-design.md §2), never to LastModifiedDate, which bumps on ANY field edit and
+      # would break stalled-deal detection. If the configured field is missing from the org's
+      # schema entirely (not the case verified here), switch this to LastModifiedDate instead -
+      # no code change needed - noting that imprecision: a deal whose Description was edited
+      # would look like its stage "just changed" even though it didn't.
       stage-changed-at-field: ${SALESFORCE_STAGE_CHANGED_AT_FIELD:LastStageChangeDate}
       # Full OpportunityHistory read (every stage transition, not just current state) - NOT
       # IMPLEMENTED YET. Enabling this fails startup immediately with a clear error instead of

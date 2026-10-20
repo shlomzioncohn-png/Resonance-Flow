@@ -11,6 +11,7 @@ on:
     paths:
       - "shared/proto/**"
       - "teams/relay/ci/**"
+      - "teams/relay/schema-canonicalize/**"
       - ".github/workflows/relay-schema-sync.yaml"
 
 jobs:
@@ -25,12 +26,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Build the schema canonicalizer
+        run: |
+          docker run --rm \
+            -v "$PWD:/workspace" -w /workspace/teams/relay/schema-canonicalize \
+            -v "${HOME:-$RUNNER_TEMP}/.m2:/root/.m2" \
+            maven:3.9.9-eclipse-temurin-21 \
+            mvn -B -q package
+
       - name: Copy real schema + CI files into their copies
         run: |
           mkdir -p teams/relay/schema-sync-hook/files/schemas teams/relay/schema-sync-hook/files/ci
           # rm first so a schema deleted from shared/proto disappears from the copy too
           rm -f teams/relay/schema-sync-hook/files/schemas/*.proto
-          cp shared/proto/*.proto teams/relay/schema-sync-hook/files/schemas/
+          for f in shared/proto/*.proto; do
+            docker run --rm -v "$PWD:/workspace" -w /workspace maven:3.9.9-eclipse-temurin-21 \
+              java -jar teams/relay/schema-canonicalize/target/canonicalize.jar shared/proto "$(basename "$f")" \
+              > "teams/relay/schema-sync-hook/files/schemas/$(basename "$f")"
+            [ -s "teams/relay/schema-sync-hook/files/schemas/$(basename "$f")" ] || { echo "::error::canonicalize produced no output for $f"; exit 1; }
+          done
           # only the scripts the chart actually mounts — not seed-registry.sh /
           # check-all-schemas.sh, which are CI-only
           cp teams/relay/ci/check-schema-compatibility.sh teams/relay/ci/register-schema.sh teams/relay/ci/_schema-references.sh teams/relay/schema-sync-hook/files/ci/
