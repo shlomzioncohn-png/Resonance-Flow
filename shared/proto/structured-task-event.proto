@@ -9,6 +9,10 @@ import "google/protobuf/timestamp.proto";
 import "task-created-event.proto";
 import "task-creation-requested-event.proto";
 
+// kafkaTopic: bridge.structured.tasks
+// Published by Bridge (BridgeTaskKafkaConfig), consumed by Inbox (StructuredTaskConsumer). One topic
+// for every source platform; the platform travels in source_type.
+
 message StructuredTaskEvent {
   optional string event_id = 1;
   string tenant_id = 2;
