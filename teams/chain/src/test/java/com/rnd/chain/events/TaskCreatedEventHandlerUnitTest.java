@@ -4,7 +4,6 @@ import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.TaskRepository;
-import com.rnd.chain.service.UnresolvedDependencyService;
 import com.rnd.inbox.event.TaskCreatedEvent;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -29,9 +28,8 @@ class TaskCreatedEventHandlerUnitTest {
     private static final UUID TENANT_ID = UUID.randomUUID();
 
     private final TaskRepository taskRepository = mock(TaskRepository.class);
-    private final UnresolvedDependencyService unresolved = mock(UnresolvedDependencyService.class);
     private final TaskCreatedEventHandler handler = new TaskCreatedEventHandler(
-            taskRepository, new ChainEventProcessingTemplate(mock(ProcessedEventStore.class)), unresolved);
+            taskRepository, new ChainEventProcessingTemplate(mock(ProcessedEventStore.class)));
 
     private static TaskCreatedEvent event(String id) {
         return TaskCreatedEvent.newBuilder()
@@ -43,7 +41,7 @@ class TaskCreatedEventHandlerUnitTest {
     }
 
     @Test
-    void newTask_isInsertedReadyWithZeroCounters_andWaitingDependenciesAreResolved() {
+    void newTask_isInsertedReadyWithZeroCounters() {
         UUID taskId = UUID.randomUUID();
         when(taskRepository.update(eq(taskId), any())).thenReturn(Optional.empty());
 
@@ -57,7 +55,6 @@ class TaskCreatedEventHandlerUnitTest {
         assertTrue(saved.getValue().isReady());
         assertEquals(0, saved.getValue().getBlockingCount());
         assertEquals(0, saved.getValue().getOpenConstraintCount());
-        verify(unresolved).resolveWaitingForTask(taskId);
     }
 
     @Test
@@ -69,7 +66,6 @@ class TaskCreatedEventHandlerUnitTest {
         handler.onMessage(event(taskId.toString()));
 
         verify(taskRepository, never()).save(any());
-        verify(unresolved).resolveWaitingForTask(taskId);
     }
 
     @Test
