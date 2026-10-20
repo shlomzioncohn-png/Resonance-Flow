@@ -187,7 +187,7 @@ own `@KafkaListener` handler, and the handlers share the claim/logging skeleton 
 
 | Topic | Producer | Handler | Idempotency | Retries before `.errors` |
 | --- | --- | --- | --- | --- |
-| `task.updated` | Inbox | `TaskUpdatedEventHandler` | state-based, last-write-wins on `updated_at` | 3 attempts, 2s apart |
+| `task.updated` | Inbox | `TaskUpdatedEventHandler` | state-based, last-write-wins on `updated_at`; `DONE` is not applied (see Idempotency) | 3 attempts, 2s apart |
 | `task.completed` | Inbox | `TaskCompletedEventHandler` | state-based; Kafka record timestamp compared to stored `updated_at`, never written | 3 attempts, 2s apart |
 | `task.dependencies.proposed` | Mind | `DependencyProposedEventHandler` | `event_id` claim in `ProcessedEventStore` | 3 attempts, 2s apart |
 
@@ -206,14 +206,22 @@ the handler fails, so a retry can process the event again. `task.updated` and `t
 event id, so they rely on their state changes being safe to repeat. `task.completed` has no
 timestamp either, so its Kafka record timestamp is compared against the stored `updated_at` (to
 ignore a completion that arrives after a reopen) but never written to it; this is interim until
-Inbox adds `completed_at` to the event. `TaskStateReconciliationService` likewise never writes
+Inbox adds `completed_at` to the event. A task finishes, and its dependents are released, only through
+`task.completed`: `task.updated` with status `DONE` never changes an existing task's status or
+`updated_at`, so it can't make a later `task.completed` look stale (only its tenant check still runs).
+If the task is unknown, that `DONE` event creates it as `PENDING` with `updated_at` one second before the
+event's (`TaskEligibilityService.DONE_EVENT_UPDATED_AT_SKEW`): the following `task.completed` still applies,
+while an older `task.updated` is still rejected. Reopening (`DONE` back to `PENDING`/`ACTIVE`) still
+arrives on `task.updated` and blocks the dependents again. `TaskStateReconciliationService` likewise never writes
 `updated_at` when it corrects counters, so it can't make a genuine `task.updated` look stale. Claims are stored in
 the `processed_events` table by `PostgresProcessedEventStore` (an atomic `INSERT ... ON CONFLICT DO
 NOTHING`), so they survive restarts and are shared by every instance. See `ProcessedEventStore`'s
 Javadoc for what a claim does and doesn't guarantee.
 
 **Status mapping**: `InboxTaskStatusMapper` collapses Inbox's 8 task statuses into Chain's 3.
-`DONE`, `CANCELLED` and `REJECTED` map to `DONE`, because all three release dependents. `IN_PROGRESS`
+`DONE`, `CANCELLED` and `REJECTED` map to `DONE`, because all three release dependents. The mapping is
+not what releases a `DONE` task, though: `task.updated` intercepts Inbox's `DONE` before the mapper, and
+only `task.completed` releases it. `CANCELLED` and `REJECTED` still release through `task.updated`. `IN_PROGRESS`
 maps to `ACTIVE`, and every other status maps to `PENDING`.
 
 **Publishing**: the only publisher for `task.scheduling.updated` is `KafkaSchedulingUpdatePublisher`

@@ -3,11 +3,13 @@ package com.rnd.chain.service;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskEligibilityResponse;
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.repository.TaskRepository;
 
 import org.slf4j.Logger;
@@ -15,21 +17,19 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Task status transitions and the readiness they imply; see {@link GraphLock} for the
  * locking rationale.
  *
- * <p>{@code @Transactional} on the methods below now provides real atomicity and rollback -
- * {@link #onTaskStatusChanged} holds a row lock on the changed task and every one of its
- * dependents simultaneously until it returns, so they all commit or roll back together.
+ * <p>{@code @Transactional} on the methods below provides atomicity and rollback.
  */
 @Service
 public class TaskEligibilityService {
@@ -37,24 +37,30 @@ public class TaskEligibilityService {
     private static final Logger log =
             LoggerFactory.getLogger(TaskEligibilityService.class);
 
+    /** How far before a DONE task.updated's own updated_at a task created from it is stamped. */
+    static final Duration DONE_EVENT_UPDATED_AT_SKEW = Duration.ofSeconds(1);
+
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
     private final GraphLock graphLock;
     private final TaskCounterUpdater taskCounterUpdater;
     private final TaskStateHistoryRecorder historyRecorder;
+    private final TaskReadinessRepository taskReadinessRepository;
 
     public TaskEligibilityService(
             TaskRepository taskRepository,
             TaskDependencyRepository taskDependencyRepository,
             GraphLock graphLock,
             TaskCounterUpdater taskCounterUpdater,
-            TaskStateHistoryRecorder historyRecorder) {
+            TaskStateHistoryRecorder historyRecorder,
+            TaskReadinessRepository taskReadinessRepository) {
 
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
         this.graphLock = graphLock;
         this.taskCounterUpdater = taskCounterUpdater;
         this.historyRecorder = historyRecorder;
+        this.taskReadinessRepository = taskReadinessRepository;
     }
 
     @Transactional
@@ -64,12 +70,20 @@ public class TaskEligibilityService {
                 taskId,
                 "taskId must not be null");
 
+        TaskReadinessSnapshot readiness =
+                requireReadinessSnapshot(
+                        taskReadinessRepository.findByIds(
+                                List.of(taskId)),
+                        taskId);
+
         taskCounterUpdater.updateCounters(
                 taskId,
                 task -> TaskCounterUpdater.withCounters(
                         task,
                         task.getBlockingCount(),
-                        task.getOpenConstraintCount()));
+                        task.getOpenConstraintCount()),
+                readiness,
+                readiness);
     }
 
     @Transactional
@@ -87,218 +101,503 @@ public class TaskEligibilityService {
 
         graphLock.runExclusive(() -> {
 
-            AtomicReference<Task> previous =
-                    new AtomicReference<>();
+            Task current =
+                    taskCounterUpdater.requireTask(taskId);
+
+            TaskStatus previousStatus =
+                    current.getStatus();
+
+            boolean affectsDependents =
+                    (previousStatus != TaskStatus.DONE
+                            && newStatus == TaskStatus.DONE)
+                            || (previousStatus == TaskStatus.DONE
+                            && newStatus != TaskStatus.DONE);
+
+            List<UUID> dependentIds =
+                    List.of();
+
+            Map<UUID, TaskReadinessSnapshot> beforeReadiness =
+                    Map.of();
+
+            /*
+             * Read the View BEFORE changing the blocker status.
+             * Once the blocker becomes DONE/non-DONE the View itself changes.
+             */
+            if (affectsDependents) {
+
+                dependentIds =
+                        taskDependencyRepository
+                                .findByDependsOnTaskId(taskId)
+                                .stream()
+                                .map(TaskDependency::taskId)
+                                .toList();
+
+                beforeReadiness =
+                        taskReadinessRepository.findByIds(
+                                dependentIds);
+            }
 
             TaskCounterUpdater.requireUpdated(
                     taskRepository.update(
                             taskId,
-                            task -> {
-                                previous.set(task);
-
-                                return TaskCounterUpdater.copyOf(task)
-                                        .status(newStatus)
-                                        .build();
-                            }),
+                            task -> TaskCounterUpdater.copyOf(task)
+                                    .status(newStatus)
+                                    .build()),
                     taskId);
 
-            TaskStatus previousStatus =
-                    previous.get().getStatus();
-
-            historyRecorder.recordStatusChange(taskId, previousStatus, newStatus);
+            historyRecorder.recordStatusChange(
+                    taskId,
+                    previousStatus,
+                    newStatus);
 
             if (previousStatus != TaskStatus.DONE
                     && newStatus == TaskStatus.DONE) {
 
                 adjustDependentsBlockingCount(
                         taskId,
-                        -1);
+                        -1,
+                        dependentIds,
+                        beforeReadiness);
 
             } else if (previousStatus == TaskStatus.DONE
                     && newStatus != TaskStatus.DONE) {
 
                 adjustDependentsBlockingCount(
                         taskId,
-                        1);
+                        1,
+                        dependentIds,
+                        beforeReadiness);
             }
         });
     }
 
     /**
-     * Same status-change effect as {@link #onTaskStatusChanged}, but for a producer (task.updated)
-     * whose events carry no id and must be ordered by the {@code updatedAt} on the event itself.
-     * The staleness check, status write, and {@code updatedAt} stamp all happen inside one
-     * graph-lock critical section, so a redelivered or out-of-order event cannot
-     * interleave between them (PR #467 review).
+     * Same status-change effect as {@link #onTaskStatusChanged},
+     * but for a task.updated producer whose events are ordered by
+     * eventUpdatedAt.
      *
-     * @throws TaskNotFoundException if no task with {@code taskId} exists
-     * @throws TenantReassignmentException if {@code tenantId} differs from the task's already-stored,
-     * non-null tenant - confirmed with the Inbox team that {@code tenant_id} never legitimately
-     * changes after creation, so this always signals a bug upstream. Checked before the staleness
-     * short-circuit below, so a stale/duplicate redelivery carrying a wrong tenant is still flagged.
-     */
-   @Transactional
-public void onTaskStatusChangedIfNewer(
-        UUID taskId,
-        TaskStatus newStatus,
-        LocalDateTime eventUpdatedAt,
-        UUID tenantId) {
-
-    Objects.requireNonNull(taskId, "taskId must not be null");
-    Objects.requireNonNull(newStatus, "newStatus must not be null");
-    Objects.requireNonNull(eventUpdatedAt, "eventUpdatedAt must not be null");
-
-    graphLock.runExclusive(() -> {
-
-        Task current = taskRepository.findById(taskId).orElse(null);
-
-        if (current == null) {
-            Task newTask = Task.builder()
-                    .id(taskId)
-                    .parentTaskId(null)
-                    .tenantId(tenantId)
-                    .status(newStatus)
-                    .isReady(true)
-                    .blockingCount(0)
-                    .openConstraintCount(0)
-                    .estimatedDurationMin(null)
-                    .score(null)
-                    .createdAt(LocalDateTime.now())
-                    .updatedAt(eventUpdatedAt)
-                    .deletedAt(null)
-                    .build();
-
-            taskRepository.insertIfAbsent(newTask);
-            return;
-        }
-
-        if (current.getTenantId() != null
-                && !current.getTenantId().equals(tenantId)) {
-
-            log.error(
-                    "task.updated for task {} claims tenant {} but Chain has {} stored - "
-                            + "tenant_id is immutable after creation, rejecting as a bug upstream",
-                    taskId,
-                    tenantId,
-                    current.getTenantId());
-
-            throw new TenantReassignmentException(
-                    "Task " + taskId
-                            + " already has tenant " + current.getTenantId()
-                            + ", event claims " + tenantId);
-        }
-
-        if (current.getUpdatedAt() != null
-                && !eventUpdatedAt.isAfter(current.getUpdatedAt())) {
-
-            log.debug(
-                    "Task {} status update ignored: event updatedAt {} is not newer than stored {}",
-                    taskId,
-                    eventUpdatedAt,
-                    current.getUpdatedAt());
-
-            return;
-        }
-
-        log.info("Task {} status changed to {}", taskId, newStatus);
-
-        TaskStatus previousStatus = current.getStatus();
-
-        TaskCounterUpdater.requireUpdated(
-                taskRepository.update(
-                        taskId,
-                        task -> TaskCounterUpdater.copyOf(task)
-                                .status(newStatus)
-                                .updatedAt(eventUpdatedAt)
-                                .tenantId(tenantId)
-                                .build()),
-                taskId);
-
-        if (previousStatus != TaskStatus.DONE
-                && newStatus == TaskStatus.DONE) {
-
-            adjustDependentsBlockingCount(taskId, -1);
-
-        } else if (previousStatus == TaskStatus.DONE
-                && newStatus != TaskStatus.DONE) {
-
-            adjustDependentsBlockingCount(taskId, 1);
-        }
-    });
-}
-
-    /**
-     * Applies task.completed. The Kafka record timestamp is only compared against the stored
-     * updatedAt (Inbox's clock) and never written to it, so a later task.updated is not skewed.
-     *
-     * @throws TaskNotFoundException if no task with {@code taskId} exists
+     * @throws TenantReassignmentException if tenantId differs from
+     * the already stored tenant
      */
     @Transactional
-    public void onTaskCompleted(UUID taskId, LocalDateTime kafkaTimestamp) {
-        Objects.requireNonNull(taskId, "taskId must not be null");
-        Objects.requireNonNull(kafkaTimestamp, "kafkaTimestamp must not be null");
-
-        graphLock.runExclusive(() -> {
-            Task current = taskCounterUpdater.requireTask(taskId);
-            if (current.getStatus() == TaskStatus.DONE) {
-                return;
-            }
-            if (current.getUpdatedAt() != null && !kafkaTimestamp.isAfter(current.getUpdatedAt())) {
-                log.debug("Task {} completion ignored: record timestamp {} is not newer than stored {}",
-                        taskId, kafkaTimestamp, current.getUpdatedAt());
-                return;
-            }
-
-            log.info("Task {} completed", taskId);
-            TaskCounterUpdater.requireUpdated(taskRepository.update(taskId, task ->
-                    TaskCounterUpdater.copyOf(task).status(TaskStatus.DONE).build()), taskId);
-            historyRecorder.recordStatusChange(taskId, current.getStatus(), TaskStatus.DONE);
-            adjustDependentsBlockingCount(taskId, -1);
-        });
-    }
-
-    private void adjustDependentsBlockingCount(
+    public void onTaskStatusChangedIfNewer(
             UUID taskId,
-            int delta) {
-
-        List<TaskDependency> dependents =
-                taskDependencyRepository
-                        .findByDependsOnTaskId(taskId);
-
-        List<UUID> dependentIds = dependents.stream().map(TaskDependency::taskId).toList();
-
-        Map<UUID, Task> previousById = new HashMap<>();
-        List<Task> updated = taskRepository.updateAll(dependentIds, task -> {
-            previousById.put(task.getId(), task);
-            return TaskCounterUpdater.withCounters(
-                    task,
-                    Math.max(0, task.getBlockingCount() + delta),
-                    task.getOpenConstraintCount());
-        });
-
-        // Issue #445: each dependent's blockingCount just changed, which can move its own
-        // priority_score (see TaskCounterUpdater's confidence sums) even on top of whatever
-        // isReady did - recomputePriorityScoreAndPublish decides whether that warrants a publish.
-        for (Task task : updated) {
-            Task before = previousById.get(task.getId());
-            historyRecorder.recordBlockingTransition(
-                    task.getId(), before.getBlockingCount(), task.getBlockingCount());
-            taskCounterUpdater.recomputePriorityScoreAndPublish(task.getId(), previousById.get(task.getId()), task);
-        }
-    }
-
-    public TaskEligibilityResponse getTaskEligibility(UUID taskId) {
+            TaskStatus newStatus,
+            LocalDateTime eventUpdatedAt,
+            UUID tenantId) {
 
         Objects.requireNonNull(
                 taskId,
                 "taskId must not be null");
 
-        Task task = taskCounterUpdater.requireTask(taskId);
+        Objects.requireNonNull(
+                newStatus,
+                "newStatus must not be null");
+
+        Objects.requireNonNull(
+                eventUpdatedAt,
+                "eventUpdatedAt must not be null");
+
+        Objects.requireNonNull(
+                tenantId,
+                "tenantId must not be null");
+
+        graphLock.runExclusive(() -> {
+
+            Task current =
+                    taskRepository.findById(taskId)
+                            .orElse(null);
+
+            if (current == null) {
+
+                taskRepository.insertIfAbsent(
+                        newTaskFromEvent(
+                                taskId,
+                                tenantId,
+                                newStatus,
+                                eventUpdatedAt));
+
+                return;
+            }
+
+            if (current.getTenantId() != null
+                    && !current.getTenantId().equals(tenantId)) {
+
+                log.error(
+                        "task.updated for task {} claims tenant {} but Chain has {} stored - "
+                                + "tenant_id is immutable after creation, rejecting as a bug upstream",
+                        taskId,
+                        tenantId,
+                        current.getTenantId());
+
+                throw new TenantReassignmentException(
+                        "Task "
+                                + taskId
+                                + " already has tenant "
+                                + current.getTenantId()
+                                + ", event claims "
+                                + tenantId);
+            }
+
+            if (current.getUpdatedAt() != null
+                    && !eventUpdatedAt.isAfter(
+                            current.getUpdatedAt())) {
+
+                log.debug(
+                        "Task {} status update ignored: event updatedAt {} is not newer than stored {}",
+                        taskId,
+                        eventUpdatedAt,
+                        current.getUpdatedAt());
+
+                return;
+            }
+
+            TaskStatus previousStatus =
+                    current.getStatus();
+
+            boolean affectsDependents =
+                    (previousStatus != TaskStatus.DONE
+                            && newStatus == TaskStatus.DONE)
+                            || (previousStatus == TaskStatus.DONE
+                            && newStatus != TaskStatus.DONE);
+
+            List<UUID> dependentIds =
+                    List.of();
+
+            Map<UUID, TaskReadinessSnapshot> beforeReadiness =
+                    Map.of();
+
+            if (affectsDependents) {
+
+                dependentIds =
+                        taskDependencyRepository
+                                .findByDependsOnTaskId(taskId)
+                                .stream()
+                                .map(TaskDependency::taskId)
+                                .toList();
+
+                beforeReadiness =
+                        taskReadinessRepository.findByIds(
+                                dependentIds);
+            }
+
+            log.info(
+                    "Task {} status changed to {}",
+                    taskId,
+                    newStatus);
+
+            TaskCounterUpdater.requireUpdated(
+                    taskRepository.update(
+                            taskId,
+                            task -> TaskCounterUpdater.copyOf(task)
+                                    .status(newStatus)
+                                    .updatedAt(eventUpdatedAt)
+                                    .tenantId(tenantId)
+                                    .build()),
+                    taskId);
+
+            historyRecorder.recordStatusChange(
+                    taskId,
+                    previousStatus,
+                    newStatus);
+
+            if (previousStatus != TaskStatus.DONE
+                    && newStatus == TaskStatus.DONE) {
+
+                adjustDependentsBlockingCount(
+                        taskId,
+                        -1,
+                        dependentIds,
+                        beforeReadiness);
+
+            } else if (previousStatus == TaskStatus.DONE
+                    && newStatus != TaskStatus.DONE) {
+
+                adjustDependentsBlockingCount(
+                        taskId,
+                        1,
+                        dependentIds,
+                        beforeReadiness);
+            }
+        });
+    }
+
+    /**
+     * Handles a task.updated carrying Inbox's DONE status.
+     *
+     * Completion itself is applied only by task.completed.
+     * This method preserves task.updated's tenant validation and
+     * missing-task creation behavior.
+     */
+    @Transactional
+    public void onTaskUpdatedAsDone(
+            UUID taskId,
+            LocalDateTime eventUpdatedAt,
+            UUID tenantId) {
+
+        Objects.requireNonNull(
+                taskId,
+                "taskId must not be null");
+
+        Objects.requireNonNull(
+                eventUpdatedAt,
+                "eventUpdatedAt must not be null");
+
+        Objects.requireNonNull(
+                tenantId,
+                "tenantId must not be null");
+
+        graphLock.runExclusive(() -> {
+
+            Task current =
+                    taskRepository.findById(taskId)
+                            .orElse(null);
+
+            if (current == null) {
+
+                taskRepository.insertIfAbsent(
+                        newTaskFromEvent(
+                                taskId,
+                                tenantId,
+                                TaskStatus.PENDING,
+                                eventUpdatedAt.minus(
+                                        DONE_EVENT_UPDATED_AT_SKEW)));
+
+                return;
+            }
+
+            if (current.getTenantId() != null
+                    && !current.getTenantId().equals(tenantId)) {
+
+                throw new TenantReassignmentException(
+                        "Task "
+                                + taskId
+                                + " already has tenant "
+                                + current.getTenantId()
+                                + ", event claims "
+                                + tenantId);
+            }
+
+            log.debug(
+                    "Task {} task.updated DONE ignored: "
+                            + "completion is applied by task.completed",
+                    taskId);
+        });
+    }
+
+    private static Task newTaskFromEvent(
+            UUID taskId,
+            UUID tenantId,
+            TaskStatus status,
+            LocalDateTime updatedAt) {
+
+        return Task.builder()
+                .id(taskId)
+                .parentTaskId(null)
+                .tenantId(tenantId)
+                .status(status)
+                .isReady(true)
+                .blockingCount(0)
+                .openConstraintCount(0)
+                .estimatedDurationMin(null)
+                .score(null)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(updatedAt)
+                .deletedAt(null)
+                .build();
+    }
+
+    /**
+     * Applies task.completed.
+     *
+     * The Kafka record timestamp is compared against the stored updatedAt
+     * but is not written back to it, so a later task.updated is not skewed.
+     *
+     * @throws TaskNotFoundException if no task with taskId exists
+     */
+    @Transactional
+    public void onTaskCompleted(
+            UUID taskId,
+            LocalDateTime kafkaTimestamp) {
+
+        Objects.requireNonNull(
+                taskId,
+                "taskId must not be null");
+
+        Objects.requireNonNull(
+                kafkaTimestamp,
+                "kafkaTimestamp must not be null");
+
+        graphLock.runExclusive(() -> {
+
+            Task current =
+                    taskCounterUpdater.requireTask(taskId);
+
+            if (current.getStatus() == TaskStatus.DONE) {
+                return;
+            }
+
+            if (current.getUpdatedAt() != null
+                    && !kafkaTimestamp.isAfter(
+                            current.getUpdatedAt())) {
+
+                log.debug(
+                        "Task {} completion ignored: record timestamp {} is not newer than stored {}",
+                        taskId,
+                        kafkaTimestamp,
+                        current.getUpdatedAt());
+
+                return;
+            }
+
+            List<UUID> dependentIds =
+                    taskDependencyRepository
+                            .findByDependsOnTaskId(taskId)
+                            .stream()
+                            .map(TaskDependency::taskId)
+                            .toList();
+
+            Map<UUID, TaskReadinessSnapshot> beforeReadiness =
+                    taskReadinessRepository.findByIds(
+                            dependentIds);
+
+            log.info(
+                    "Task {} completed",
+                    taskId);
+
+            TaskCounterUpdater.requireUpdated(
+                    taskRepository.update(
+                            taskId,
+                            task -> TaskCounterUpdater.copyOf(task)
+                                    .status(TaskStatus.DONE)
+                                    .build()),
+                    taskId);
+
+            historyRecorder.recordStatusChange(
+                    taskId,
+                    current.getStatus(),
+                    TaskStatus.DONE);
+
+            adjustDependentsBlockingCount(
+                    taskId,
+                    -1,
+                    dependentIds,
+                    beforeReadiness);
+        });
+    }
+
+    /**
+     * Stored counters are still maintained for backwards compatibility,
+     * but readiness/history decisions are based on task_readiness.
+     */
+    private void adjustDependentsBlockingCount(
+            UUID taskId,
+            int delta,
+            List<UUID> dependentIds,
+            Map<UUID, TaskReadinessSnapshot> beforeReadiness) {
+
+        if (dependentIds.isEmpty()) {
+            return;
+        }
+
+        Map<UUID, Task> previousById =
+                new HashMap<>();
+
+        List<Task> updated =
+                taskRepository.updateAll(
+                        dependentIds,
+                        task -> {
+
+                            previousById.put(
+                                    task.getId(),
+                                    task);
+
+                            return TaskCounterUpdater.withCounters(
+                                    task,
+                                    Math.max(
+                                            0,
+                                            task.getBlockingCount()
+                                                    + delta),
+                                    task.getOpenConstraintCount());
+                        });
+
+        /*
+         * Read again from the View AFTER the blocker/status change.
+         * This is the authoritative readiness state.
+         */
+        Map<UUID, TaskReadinessSnapshot> afterReadiness =
+                taskReadinessRepository.findByIds(
+                        dependentIds);
+
+        for (Task task : updated) {
+
+            TaskReadinessSnapshot before =
+                    requireReadinessSnapshot(
+                            beforeReadiness,
+                            task.getId());
+
+            TaskReadinessSnapshot after =
+                    requireReadinessSnapshot(
+                            afterReadiness,
+                            task.getId());
+
+            /*
+             * History receives values calculated by the View,
+             * not the stored task.blocking_count.
+             */
+            historyRecorder.recordBlockingTransition(
+                    task.getId(),
+                    before.blockingCount()
+                            + before.openConstraintCount(),
+                    after.blockingCount()
+                            + after.openConstraintCount());
+
+            taskCounterUpdater.recomputePriorityScoreAndPublish(
+                    task.getId(),
+                    previousById.get(task.getId()),
+                    task,
+                    before,
+                    after);
+        }
+    }
+
+    public TaskEligibilityResponse getTaskEligibility(
+            UUID taskId) {
+
+        Objects.requireNonNull(
+                taskId,
+                "taskId must not be null");
+
+        Task task =
+                taskCounterUpdater.requireTask(taskId);
+
+        TaskReadinessSnapshot readiness =
+                requireReadinessSnapshot(
+                        taskReadinessRepository.findByIds(
+                                List.of(taskId)),
+                        taskId);
 
         return new TaskEligibilityResponse(
                 task.getId(),
-                task.isReady(),
-                task.getBlockingCount(),
-                task.getOpenConstraintCount());
+                readiness.isReady(),
+                readiness.blockingCount(),
+                readiness.openConstraintCount());
+    }
+
+    private TaskReadinessSnapshot requireReadinessSnapshot(
+            Map<UUID, TaskReadinessSnapshot> snapshots,
+            UUID taskId) {
+
+        TaskReadinessSnapshot snapshot =
+                snapshots.get(taskId);
+
+        if (snapshot == null) {
+
+            throw new IllegalStateException(
+                    "No task_readiness row found for task "
+                            + taskId);
+        }
+
+        return snapshot;
     }
 }

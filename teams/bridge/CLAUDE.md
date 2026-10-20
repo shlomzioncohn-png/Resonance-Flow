@@ -83,15 +83,21 @@ candidate); profile active → both beans exist, `@Primary` breaks the tie.
 
 | Concern | Default | Profile override |
 |---|---|---|
-| CRM deal source | `JsonDealRepository` (synthetic fixture) | `hubspot` → `HubSpotDealRepository` (live HubSpot API); `salesforce` → `SalesforceDealRepository` (live Salesforce REST API) |
+| CRM deal source | `JsonDealRepository` (synthetic fixture, active only when neither `hubspot` nor `salesforce` is) | `hubspot` → `HubSpotDealRepository` (live HubSpot API); `salesforce` → `SalesforceDealRepository` (live Salesforce REST API) — **additive**, both can be active together |
 | CRM task publisher | `LoggingPayloadPublisher<Task>` (logs, publishes nowhere) | `kafka` → `KafkaPayloadPublisher` (real Kafka via `BridgeTaskEventDto`) |
 
 Don't add a new switch without this pattern — a bespoke `if/else` in a `@Bean` method or a second
-mechanism will fight `@Primary` resolution. `hubspot` and `salesforce` are mutually exclusive, not
-stackable the way `kafka` is: both repository beans are independently `@Primary` within their own
-profile, so Spring has no tiebreaker if both are active at once. `CrmLaneConfig.dealToTaskMapper`
-fails startup with a clear `IllegalStateException` naming both profiles if that happens (same
-shape as the kafka/tenant-id check, §7) — see §10 for the Salesforce source specifically.
+mechanism will fight `@Primary` resolution.
+
+**Update 2026-10-19 (team lead decision): `hubspot` and `salesforce` now stack, the same way
+`kafka` does — one company uses every CRM tool at once, one tenant (`CRM_ORGANIZATION_ID`) for all
+of them.** Neither repository bean is `@Primary` anymore (that only ever existed to break a tie
+Spring would otherwise refuse to resolve when exactly one CRM source profile was expected).
+`CrmSyncService` (`crm.CrmSyncService`, not `CrmLaneConfig`) is what actually runs every active
+`DealRepository` each cycle — sequentially, one snapshot/`asOf` per source, catching one source's
+failure without blocking the rest; `CrmSyncJob`/`CrmBridgeController` both delegate to it (see
+§10). There is no "exactly one CRM profile" rule anymore and no startup check rejecting both
+being active together — that check existed and is gone.
 
 ## 6. Known gaps — don't silently "fix" these without asking
 
@@ -257,12 +263,14 @@ suite (126 tests, 0 failures — see §7):
   (`CrmLaneConfig.dealToTaskMapper`, CRM-lane audit finding F5).
 - **Snapshot-per-sync, latest-state-per-deal (added 2026-10-06, audit findings F1/F2/F14/F9).**
   `DealRepository.snapshot()` performs one fresh fetch and returns an immutable `DealSnapshot`
-  (`asOf`, full history, `latestPerDeal()`, `skippedAtRead`). `CrmBridgeController` and
-  `CrmSyncJob` each take exactly one snapshot per run and call
-  `crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf())` — never the old
-  `ReadCursor`/`ReadCursor.full()` overload, which would let the deals and `asOf` come from two
-  separate fetches. `CrmSourceReader.read()` also returns `latestPerDeal()`, so the generic
-  `AbstractIntakeLane.run(ReadCursor, Instant)` path (used by `CrmLaneIntegrationTest`) agrees.
+  (`asOf`, full history, `latestPerDeal()`, `skippedAtRead`). **Update 2026-10-19:** `CrmSyncService`
+  (not `CrmBridgeController`/`CrmSyncJob` directly anymore — see §10) takes exactly one snapshot
+  per *source* per run and calls `crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf())`
+  — never the old `ReadCursor`/`ReadCursor.full()` overload, which would let the deals and `asOf`
+  come from two separate fetches. `CrmSourceReader.read()` still returns `latestPerDeal()` too, but
+  is single-source only now (it throws if more than one `DealRepository` is active) and is
+  exercised only by `CrmLaneIntegrationTest`'s generic `AbstractIntakeLane.run(ReadCursor, Instant)`
+  path, not by either real entry point.
   **`DealRepository` has only `snapshot()` now** — the five old per-instance-cached finder methods
   (`asOf()`, `findAll()`, …) were deprecated, then removed outright (2026-10-06, same day): nothing
   called them except their own test suite, and leaving a cache field on `HubSpotDealRepository`
@@ -281,10 +289,13 @@ suite (126 tests, 0 failures — see §7):
   approach §10's Salesforce fix already used, so that failure mode is gone — a renamed/custom
   label with valid metadata just resolves correctly.
   `SyncJobScheduler`'s shared `catch (RuntimeException e) { log.error(...) }` (every `SyncJob`'s
-  failure handling, not just CRM's — see §9.4) and
-  `CrmBridgeController.handleSnapshotFailure` (a 503 with the exception's message, not the
-  framework's default message-less 500) still apply to what genuinely can't be isolated to one
-  stage (§11's FAIL STARTUP / FAIL RUN rows).
+  failure handling, not just CRM's — see §9.4) still applies to a pipeline/stage-level problem
+  severe enough to fail an entire source's `snapshot()` call (§11's FAIL STARTUP / FAIL RUN rows)
+  — but per-source failure isolation (one source's exception never blocking the others) is
+  `CrmSyncService`'s job now, not a controller-level exception handler (§10;
+  `CrmBridgeController`'s old `handleSnapshotFailure` is gone — a source failing entirely is just
+  one more `CrmSourceResult` with a non-null `error`, not a thrown exception reaching the
+  controller).
   Only a CRM-only `CrmTaskValidator` (wraps the shared `TaskValidator`, adds tenant-UUID/
   `sourceRef` checks) is new for F5 — the shared `TaskValidator` itself is unchanged, since
   GitHub/JIRA/`TaskEnrichmentConsumer` share it directly and never set a tenant id.
@@ -314,8 +325,13 @@ suite (126 tests, 0 failures — see §7):
   Bean wiring in `CrmLaneConfig` follows the default/profile-override convention (§5): fixture vs.
   `hubspot`, logging vs. `kafka` publisher.
 - **`CrmBridgeController`** — `POST /bridge/crm/sync`, the (currently only) trigger for a CRM
-  sync run. No auth (documented gap, not solved here). No single-flight guard against concurrent
-  POSTs (harmless today with the logging publisher; not once Kafka is the default).
+  sync run; delegates to `CrmSyncService.syncAll()` (2026-10-19, see §10) rather than reading a
+  `DealRepository` itself. The response keeps the original top-level sums
+  (`read`/`published`/`rejected`/`errors`/`skippedAtRead`, now summed across every active source)
+  and adds `sources[]`, one entry per source; 200 if at least one source succeeded, 503 only if
+  every source failed that cycle. No auth (documented gap, not solved here). No single-flight
+  guard against concurrent POSTs (harmless today with the logging publisher; not once Kafka is
+  the default).
 - **Kafka publish path** — `KafkaPayloadPublisher` (kafka profile) builds `BridgeTaskEventDto`
   from `Task` (via `BridgeTaskEventDto.from(task)`) and publishes to
   `${bridge.structured-tasks-topic:bridge.structured.tasks}` — the real Inbox contract shape
@@ -435,9 +451,10 @@ that brief, not a linked spec.
 
 ## 10. Salesforce CRM source
 
-`SalesforceDealRepository` (`@Repository @Profile("salesforce") @Primary`) is the third
-`DealRepository` implementation, alongside `JsonDealRepository` (default) and
-`HubSpotDealRepository` (`hubspot`). Full design rationale lives in
+`SalesforceDealRepository` (`@Repository @Profile("salesforce")`) is the third `DealRepository`
+implementation, alongside `JsonDealRepository` (default, active only when neither `hubspot` nor
+`salesforce` is) and `HubSpotDealRepository` (`hubspot`) — all three can be registered at once now
+(§5's 2026-10-19 update). Full design rationale lives in
 `teams/bridge/docs/crm-salesforce-design.md` — this section is the short version plus the things
 most likely to trip someone up.
 
@@ -448,9 +465,10 @@ most likely to trip someone up.
   refreshed *reactively* on a `401` (refreshed once, triggering call retried once — a second `401`
   after a genuinely fresh token is fatal, not looped).
 - **`dealId` is always the bare `Opportunity.Id` — never prefixed.** Per-source `sourceRef` needs
-  go through `Deal.sourceRefPrefix` instead (defaults to `"crm:"` in the builder and for
-  HubSpot/JSON, both of which never set it; `SalesforceDealRepository` sets it to
-  `"crm:salesforce:"`). `DealToTaskMapper.toSourceRef` is `deal.sourceRefPrefix() + deal.dealId()`
+  go through `Deal.sourceRefPrefix` instead (defaults to `"crm:"` in the builder — JSON never sets
+  it; `HubSpotDealRepository` sets it to `"crm:hubspot:"`; `SalesforceDealRepository` sets it to
+  `"crm:salesforce:"` — distinct per source so the same raw id from two CRMs never collides).
+  `DealToTaskMapper.toSourceRef` is `deal.sourceRefPrefix() + deal.dealId()`
   — no per-source branch in the mapper, and `dealId()` is the same bare value everywhere, so
   `fetchDeal(deal.dealId())` always round-trips. Don't reintroduce a prefixed `dealId` to solve a
   future per-source `sourceRef` need — extend `sourceRefPrefix` (or add a sibling field) instead.
@@ -485,9 +503,24 @@ most likely to trip someone up.
   a short per-second bucket like HubSpot's `429`, so backing off cannot make it succeed sooner.
   `500`/`502`/`503`/`504` and transport failures (connect/read timeout, DNS/IO errors) **are**
   retried with exponential backoff, same as `HubSpotClient`.
-- **`hubspot` and `salesforce` are mutually exclusive profiles** — see §5's table note. Both active
-  at once fails startup with an `IllegalStateException` naming both, from
-  `CrmLaneConfig.dealToTaskMapper` (`CrmLaneConfigTest.failsToStartWhenBothHubspotAndSalesforceProfilesAreActive`).
+- **`hubspot` and `salesforce` now stack — team lead decision, 2026-10-19: one company, every CRM
+  tool active at once.** Both profiles can be active together
+  (`SPRING_PROFILES_ACTIVE=kafka,hubspot,salesforce`); neither repository bean is `@Primary`
+  anymore (see §5). `CrmSyncService` runs every active `DealRepository` each cycle, sequentially,
+  one snapshot/`asOf` per source, catching a source's `RuntimeException` and continuing with the
+  rest — a HubSpot outage never blocks Salesforce's publish, or vice versa. `CrmSyncJob`/
+  `CrmBridgeController` both delegate to it instead of talking to a `DealRepository` directly; the
+  HTTP response's `sources[]` carries one entry per source, and the endpoint only returns 503 if
+  **every** source failed that cycle (200 if at least one succeeded). There is no longer a startup
+  check rejecting both profiles together — that check, and the "exactly one CRM profile" rule it
+  enforced, are both gone.
+- **If the same business deal exists in both HubSpot and Salesforce, Bridge publishes both as
+  separate Tasks** — `crm:hubspot:<id>` and `crm:salesforce:<id>` are always distinct `sourceRef`s
+  (== Inbox's dedup key) by construction, even for the same underlying deal. Business-level
+  deduplication across CRM sources is explicitly out of Bridge's scope; the working assumption is
+  that downstream consumption (Mind indexing tasks off Inbox's `task.created` event) can tolerate
+  or itself reconcile two Tasks for one real-world deal — **not yet confirmed with the Mind
+  team.**
 - **No Salesforce org exists for this work yet** (design doc §9) — everything above is verified
   against `SalesforceClient`/`SalesforceDealRepository`'s own test suites
   (`MockWebServer`-backed, no live calls), not against a real org. **Update 2026-10-14: the

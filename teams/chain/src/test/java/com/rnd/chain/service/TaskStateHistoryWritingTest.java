@@ -2,6 +2,7 @@ package com.rnd.chain.service;
 
 import com.rnd.chain.testsupport.PgRepos;
 import org.junit.jupiter.api.Tag;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,9 +14,9 @@ import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TaskStateHistoryRepository;
-import com.rnd.chain.testsupport.ConcurrentTestRunner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -24,8 +25,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -43,18 +42,42 @@ class TaskStateHistoryWritingTest {
     private TaskEligibilityService service;
     private DependencyEdgeService edgeService;
 
+    @Autowired
+    private TaskReadinessRepository taskReadinessRepository;
+
     @BeforeEach
     void setUp() {
         taskRepository = PgRepos.tasks(List.of());
         history = PgRepos.stateHistory();
         TaskDependencyRepository dependencyRepository = PgRepos.dependencies(List.of());
         GraphLock lock = PgRepos.graphLock();
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
+
+        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(
+                taskRepository,
+                dependencyRepository,
                 new PriorityScoreService(),
-                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> { })));
-        TaskStateHistoryRecorder recorder = new TaskStateHistoryRecorder(history, Clock.systemUTC());
-        service = new TaskEligibilityService(taskRepository, dependencyRepository, lock, counterUpdater, recorder);
-        edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater, recorder);
+                new SchedulingPublishListener(
+                        taskRepository,
+                        new SchedulingUpdateService(event -> { })),
+                taskReadinessRepository);
+
+        TaskStateHistoryRecorder recorder =
+                new TaskStateHistoryRecorder(history, Clock.systemUTC());
+
+        service = new TaskEligibilityService(
+                taskRepository,
+                dependencyRepository,
+                lock,
+                counterUpdater,
+                recorder,
+                taskReadinessRepository);
+
+        edgeService = new DependencyEdgeService(
+                dependencyRepository,
+                lock,
+                counterUpdater,
+                recorder,
+                taskReadinessRepository);
     }
 
     private UUID savedTask(TaskStatus status, LocalDateTime updatedAt) {
@@ -69,12 +92,11 @@ class TaskStateHistoryWritingTest {
 
     /** Oldest first, so assertions read in the order things happened. */
     private List<TaskStateHistoryEntry> rowsOf(UUID taskId) {
-        List<TaskStateHistoryEntry> rows = new ArrayList<>(history.findByTaskId(taskId, null, null, 0, 1000).content());
+        List<TaskStateHistoryEntry> rows = new ArrayList<>(
+                history.findByTaskId(taskId, null, null, 0, 1000).content());
         java.util.Collections.reverse(rows);
         return rows;
     }
-
-    // --- STATUS_CHANGED ---
 
     @Test
     void statusChangedIfNewer_appliedEvent_writesExactlyOneRow() {
@@ -159,23 +181,23 @@ class TaskStateHistoryWritingTest {
         assertThat(rowsOf(id)).isEmpty();
     }
 
-    // --- BLOCKED / UNBLOCKED ---
-
     @Test
     void blockingCount_recordsOnlyZeroCrossings() {
         UUID dependent = savedTask();
         UUID blockerA = savedTask();
         UUID blockerB = savedTask();
 
-        edgeService.addDependency(dependent, blockerA);   // 0 -> 1: BLOCKED
-        edgeService.addDependency(dependent, blockerB);   // 1 -> 2: nothing
-        service.onTaskStatusChanged(blockerA, TaskStatus.DONE);   // 2 -> 1: nothing
-        service.onTaskStatusChanged(blockerB, TaskStatus.DONE);   // 1 -> 0: UNBLOCKED
-        service.onTaskStatusChanged(blockerA, TaskStatus.ACTIVE); // 0 -> 1: BLOCKED (reopened)
+        edgeService.addDependency(dependent, blockerA);
+        edgeService.addDependency(dependent, blockerB);
+        service.onTaskStatusChanged(blockerA, TaskStatus.DONE);
+        service.onTaskStatusChanged(blockerB, TaskStatus.DONE);
+        service.onTaskStatusChanged(blockerA, TaskStatus.ACTIVE);
 
         List<TaskStateHistoryEntry> rows = rowsOf(dependent);
         assertThat(rows).extracting(TaskStateHistoryEntry::eventType)
-                .containsExactly(TaskStateEventType.BLOCKED, TaskStateEventType.UNBLOCKED,
+                .containsExactly(
+                        TaskStateEventType.BLOCKED,
+                        TaskStateEventType.UNBLOCKED,
                         TaskStateEventType.BLOCKED);
         assertThat(rows.get(0).blockingCountAfter()).isEqualTo(1);
         assertThat(rows.get(1).blockingCountBefore()).isEqualTo(1);
@@ -207,14 +229,18 @@ class TaskStateHistoryWritingTest {
                 .containsExactly(TaskStateEventType.BLOCKED, TaskStateEventType.UNBLOCKED);
     }
 
-    // --- history must not alter the task itself ---
-
     @Test
     void historyWrite_doesNotChangeAnyOtherTaskField() {
         LocalDateTime stored = LocalDateTime.now();
         UUID id = UUID.randomUUID();
-        Task original = TaskTestFixtures.defaultTask(id).status(TaskStatus.ACTIVE).updatedAt(stored)
-                .score(7.0).confidence(0.5).priorityScore(4.0).isReady(true).build();
+        Task original = TaskTestFixtures.defaultTask(id)
+                .status(TaskStatus.ACTIVE)
+                .updatedAt(stored)
+                .score(7.0)
+                .confidence(0.5)
+                .priorityScore(4.0)
+                .isReady(true)
+                .build();
         taskRepository.save(original);
         LocalDateTime eventTime = stored.plusSeconds(10);
 
@@ -228,7 +254,4 @@ class TaskStateHistoryWritingTest {
         assertThat(after.getPriorityScore()).isEqualTo(original.getPriorityScore());
         assertThat(after.getScore()).isEqualTo(original.getScore());
     }
-
-
-
 }

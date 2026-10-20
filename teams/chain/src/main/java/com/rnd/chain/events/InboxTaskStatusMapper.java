@@ -7,9 +7,15 @@ import com.rnd.chain.dto.TaskStatus;
  * (PENDING/ACTIVE/DONE). Inbox does not perform this mapping for us - task.updated
  * carries Inbox's own {@code com.rnd.inbox.event.TaskStatus} verbatim.
  *
+ * Responsibility split: task.updated no longer applies DONE (TaskUpdatedEventHandler intercepts
+ * it before this mapper); completion and the release of dependents come only from task.completed.
+ * The DONE case below stays for completeness of the mapping (task.created, which Chain does not
+ * currently consume, also uses it). CANCELLED and REJECTED still arrive via task.updated and are
+ * mapped here.
+ *
  * Confirmed rule, final (team lead, overriding an earlier answer during initial planning that
  * scoped this to DONE only): DONE, CANCELLED, and REJECTED all release (unblock) a task's
- * dependents - a blocking task that's been abandoned should stop blocking its dependents, same as
+ * dependents (DONE only through task.completed, see above) - a blocking task that's been abandoned should stop blocking its dependents, same as
  * one that's been completed. Chain's 3-value model has no separate "abandoned" state, so all three
  * map to Chain's DONE - {@code TaskEligibilityService.onTaskStatusChanged} already implements the
  * release/re-block logic structurally (it only reacts to entering/leaving DONE), so folding these

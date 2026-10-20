@@ -1,0 +1,17 @@
+{
+  "name": "deep_nesting",
+  "description": "A leaf four levels under an important goal vs. a leaf one level under an unimportant goal, same own importance. Forces the depth-decay decision: with no decay, the deep leaf's boost should not have eroded enough to lose.",
+  "graph": {
+    "nodes": [
+      {"task_id": "goal_deep_important", "parent_task_id": null, "importance": 0.9, "label": "Important goal, reached through a long chain"},
+      {"task_id": "program_l2", "parent_task_id": "goal_deep_important", "importance": 0.03, "label": "Program under the goal"},
+      {"task_id": "initiative_l3", "parent_task_id": "program_l2", "importance": 0.03, "label": "Initiative under the program"},
+      {"task_id": "epic_l4", "parent_task_id": "initiative_l3", "importance": 0.03, "label": "Epic under the initiative"},
+      {"task_id": "task_deep", "parent_task_id": "epic_l4", "importance": 0.1, "label": "Leaf task, 4 levels under the important goal"},
+      {"task_id": "goal_shallow_unimportant", "parent_task_id": null, "importance": 0.2, "label": "Unimportant goal, reached directly"},
+      {"task_id": "task_shallow", "parent_task_id": "goal_shallow_unimportant", "importance": 0.1, "label": "Leaf task, 1 level under the unimportant goal, same own importance as task_deep"}
+    ]
+  },
+  "expected_order": ["task_deep", "task_shallow"],
+  "notes": "The three middle nodes (program_l2, initiative_l3, epic_l4) are set to 0.03 -- see README.md's 'Design decisions' section for why no depth decay is the default; this fixture is what makes that decision actually testable. No-decay: task_deep = 0.1 + 3*0.03 + 0.9 = 1.09; task_shallow = 0.1 + 0.2 = 0.3 -- task_deep wins, as stated. Halving-per-hop decay (0.5^hop_distance from the leaf): task_deep = 0.1 + 0.03*0.5 + 0.03*0.25 + 0.03*0.125 + 0.9*0.0625 = 0.1825; task_shallow = 0.1 + 0.2*0.5 = 0.2 -- the order flips, proving this fixture genuinely depends on no decay rather than merely tolerating a mild one (with the old 0.1 values it took a ~63%-per-hop decay to flip; 0.03 flips under a common 50%-per-hop decay). One-hop-only read: epic_l4 (0.03) alone still loses to goal_shallow_unimportant (0.2) alone, so a naive one-level-up implementation still gets the wrong answer under no-decay -- the fixture's original purpose still holds. Multiplicative (own * product of ancestor importances): task_deep = 0.1*0.03*0.03*0.03*0.9 ~= 0.0000024; task_shallow = 0.1*0.2 = 0.02 -- task_shallow still wins, same reversal as before, so the documented multiplicative assumption still holds."
+}
