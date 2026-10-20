@@ -28,7 +28,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-// Runs against the real database, so it also proves the V15 migration: the insight_type enum mapping,
+// Runs against the real database, so it also proves the V16 migration: the insight_type enum mapping,
 // the nullable recommendation, the period CHECK, and that a user's list never contains another user's insights.
 class InsightRepositoryTest extends PostgresIntegrationTest {
 
