@@ -37,3 +37,25 @@ blocked; they become 0 only when the clustering matrix is built.
 | `median_gap_days` | median time between consecutive ADDED / REMOVED events of the pair; empty when there is only one event | days | the open stretch is not a gap |
 | `active_fraction` | active time divided by the time since the first ADDED. The period ends at `as_of`, or earlier when the dependent task finished (an edge stops mattering once its dependent is done). An edge judged at the instant it was added is 1 if active, else 0 | 0..1 | the open stretch counts up to the end of the period |
 | `n_dependent_flips` | BLOCKED / UNBLOCKED rows of the dependent caused by this edge. A BLOCKED row belongs to the edges added in the same write (within 1 second). An UNBLOCKED row belongs to the edges removed then, or whose target became DONE then. An edge added in the same write as others shares the flip with them | count | a block that has not ended yet counts only its BLOCKED |
+
+## Chain level (`features_chain.csv`, one row per chain)
+
+A chain is built for every task that is DONE and has no dependents (no edge pointing at it is active at `as_of`; this
+keeps a chain from being counted again as the tail of a longer one). From that sink it takes the longest path, counted in
+tasks, along the edges that were active **at the moment the sink finished**, down to a root (a task with no active
+dependency at that moment). An edge is followed only if its target finished before its dependent did. Among paths of
+the same length it takes the one that started earliest (the slower chain), then the smaller ids. A chain has at least 3
+tasks; shorter ones produce no row. Because a chain ends in a DONE sink, every task in it is DONE: an open task is never
+part of a chain, and chains carry no open-item cut-off.
+
+| Feature | Definition | Unit |
+|---|---|---|
+| `sink_task_id`, `root_task_id` | the finished sink and the root of its longest path | uuid |
+| `task_ids` | the tasks of the chain, root first, joined by `;` | text |
+| `chain_length` | number of tasks | count |
+| `end_to_end_days` | from the earliest first ACTIVE among the chain's tasks to the DONE of the sink | days |
+| `hop_days` | `chain_length` values joined by `;`. The first is the root's own work (the chain's first ACTIVE to the root's DONE); each next one runs from the DONE of the dependency to the DONE of the task that waited on it. They add up to `end_to_end_days` | days |
+| `mean_hop`, `max_hop`, `std_hop` | mean, maximum and population standard deviation of `hop_days` | days |
+| `max_hop_share` | `max_hop / end_to_end_days` (0 when the total is 0). Low: the delay is spread out (a slow chain). High: it sits in one task (a chronic blocker) | 0..1 |
+| `n_edge_changes` | ADDED plus REMOVED events, up to the sink's DONE, of the edges along the chain | count |
+| `length_bucket` | `3`, `4`, `5`, `6`, `7` or `8+`, so a detector can compare chains of similar length | text |
