@@ -8,7 +8,7 @@ The dependency/constraint update flow is split by domain (#649): `DependencyEdge
 (`addDependency`, `addDependencies`, `removeDependency`), `TaskEligibilityService`
 (`onTaskStatusChanged`, `recalculateTaskEligibility`, `getTaskEligibility`) and
 `ConstraintEligibilityService` (`onConstraintAdded`, `onConstraintStatusChanged`), sharing
-`TaskCounterUpdater` and `GraphLock`, against the Postgres-backed repositories (the in-memory
+`TaskCounterUpdater`, `PriorityScoreService` and `GraphLock`, against the Postgres-backed repositories (the in-memory
 repositories and `MockDataConfig` were removed on 2026-10-15; Postgres is the only persistence).
 `TaskEligibilityService` and `TaskTraversalService` are plain Spring beans wired by constructor
 injection. Chain also
@@ -275,9 +275,10 @@ template starts from those properties, so the same settings apply everywhere.
 `priority_score` is Mind's per-task importance score, adjusted by Chain's own feasibility state
 (dependencies, constraints), stored on `Task` and published on `task.scheduling.updated` alongside
 `is_available`. It is `null` until Mind has scored the task; Mind clearing a score clears it again.
-Computed by `PriorityScoreService` (pure function, no repository access) and wired into
-`TaskEligibilityService`, which gathers its inputs from the dependency graph and publishes whenever
-either `priority_score` or `is_available` changes.
+Computed by `PriorityScoreService.compute` (a pure function, no repository access).
+`PriorityScoreService.recomputePriorityScoreAndPublish` gathers its inputs from the dependency graph and
+`task_readiness`, persists the result and queues a publish whenever either `priority_score` or
+`is_available` changes; `TaskCounterUpdater` and `TaskEligibilityService` call it.
 
 ### Formula
 
@@ -348,8 +349,8 @@ the profile didn't override the build's own value). CI runs them too now, agains
 
 None of `TaskEligibilityService`/`DependencyEdgeService`/`ConstraintEligibilityService` call
 `SchedulingUpdateService` directly or synchronously. Every trigger
-(`TaskCounterUpdater.recomputePriorityScoreAndPublish`) instead calls
-`requestPublishAfterCommit(taskId)`, which:
+(`PriorityScoreService.recomputePriorityScoreAndPublish`) instead calls
+`SchedulingUpdateService.requestPublishAfterCommit(taskId, listener)`, which:
 
 - Binds a `Set<UUID>` to the current transaction via `TransactionSynchronizationManager` and adds
   `taskId` to it - a task touched several times in one transaction (e.g. `addDependencies`'s batch
@@ -364,10 +365,11 @@ None of `TaskEligibilityService`/`DependencyEdgeService`/`ConstraintEligibilityS
   mutator that forgot `@Transactional`, which would otherwise desync Inbox's copy of
   `priority_score`/`is_available` permanently and silently). This is why every public mutator on
   `TaskEligibilityService`, `DependencyEdgeService`, `ConstraintEligibilityService`, and
-  `TaskCounterUpdater` itself is `@Transactional` (issue #649 split
+  `TaskCounterUpdater` and `PriorityScoreService` themselves are `@Transactional` (issue #649 split
   `TaskEligibilityService`'s original `addDependency`/`removeDependency`/`onScoreProposed` out
-  into the first two of those), and why `SchedulingPublishTransactionalCoverageTest` exists: a
-  reflection-based guardrail covering all four classes that fails the build if a future public
+  into the first two of those; `onScoreProposed` now lives on `PriorityScoreService`), and why
+  `SchedulingPublishTransactionalCoverageTest` exists: a
+  reflection-based guardrail covering all five classes that fails the build if a future public
   mutator is added without `@Transactional`, since that failure mode is otherwise silent at
   runtime.
 
@@ -384,11 +386,11 @@ same methods a real transaction manager calls, exposed for exactly this kind of 
 `testsupport/TestTransactions.java` (`runCommitted`/`runRolledBack`) - used both by the ~15
 pre-#445-Phase-3 tests that asserted synchronous publish behavior (updated to simulate a commit
 around the call) and by the new tests that specifically prove the commit/rollback/dedup behavior
-(`TaskEligibilityServiceTest`'s "Phase 3" section at the bottom of the file).
+(`PriorityScoreServicePostgresTest`, plus the hand-simulated `SchedulingUpdateServiceTest`).
 
 ### Not yet wired (tracked separately from #445)
 
-- **`task.score.proposed` consumer**: `TaskEligibilityService.onScoreProposed` exists and is
+- **`task.score.proposed` consumer**: `PriorityScoreService.onScoreProposed` exists and is
   covered by its own tests, but nothing calls it yet from a `@KafkaListener` - that's #386, pending
   Mind's contract.
 - ~~**Publish format**: #545~~ - done (merged from `main`, see "Kafka event infrastructure" above):
