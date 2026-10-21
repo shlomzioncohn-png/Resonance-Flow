@@ -306,11 +306,13 @@ components:
             path: minio.access-key
           - key: root-password
             path: minio.secret-key
+    volumes:
       - name: kafka-credentials
-        dependencyName: kafka-user-passwords
-        items:
-          - key: client-passwords
-            path: kafka.password
+        secret:
+          secretName: resonance-flow-kafka-sasl-credentials
+          items:
+            - key: client-passwords
+              path: kafka.password
     dependencies:
       - name: object-storage
         port: 9000
