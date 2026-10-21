@@ -20,7 +20,8 @@ pytest
 python -m flow_health.generator          # writes data/dev AND data/eval, validated, in one command
 ```
 
-The generator itself uses only the standard library. Options: `--out`, `--seed` (dev), `--eval-seed`,
+The generator itself uses only the standard library; the analysis code (loader, features, clustering) needs
+`pip install -e ".[dev,analysis]"` (pandas, scikit-learn). Options: `--out`, `--seed` (dev), `--eval-seed`,
 `--tasks`, `--days`, `--projects`, `--instances`, `--missing-tier-rate` (see `--help`).
 
 ## Two timelines: dev and eval
@@ -121,3 +122,11 @@ and returns the root task and a params dict. It is discovered automatically; not
   rejects cycles anyway). The "recurring blocker" disease is therefore an edge that is repeatedly removed and re-added, not a graph cycle. Tasks never leave DONE in this data.
 - Normal-world timing is a plausible guess, not calibrated against real Chain data. Re-check the
   numbers once real history exists.
+
+## Loading data (`flow_health.loaders`)
+
+`CsvLoader(data_dir).load(as_of=None)` returns a `Dataset`: the tables `tasks`, `task_meta`, `dependency_history`,
+`task_state_history` plus `as_of`. All later code reads data only through `Dataset`, so stage B can swap in a loader
+that reads Chain. Only the contract columns are read; `REJECTED` dependency rows are dropped (logged); history is
+ordered by `created_at`, then `sequence`; `as_of` defaults to the latest event, and later events are cut off when it
+is set earlier. A test checks that analysis code never mentions the answer files.
