@@ -46,9 +46,7 @@ jobs:
           cache-dependency-path: teams/mind/pyproject.toml
 
       - name: Install
-        run: |
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          make dev
+        run: make dev
 
       - name: Lint (ruff + mypy)
         run: make lint
