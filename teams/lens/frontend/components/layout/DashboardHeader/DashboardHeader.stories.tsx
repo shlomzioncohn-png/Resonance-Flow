@@ -13,13 +13,10 @@ const meta = {
   tags: ['autodocs'],
   args: {
     orgName: 'Acme Corp',
-    period: '30d',
+    filters: { period: '30d' },
+    onApplyFilters: fn(),
     projects,
-    selectedProjectIds: [],
     updatedSecondsAgo: 12,
-    onPeriodChange: fn(),
-    onAddProject: fn(),
-    onRemoveProject: fn(),
   },
 } satisfies Meta<typeof DashboardHeader>;
 
@@ -29,13 +26,13 @@ type Story = StoryObj<typeof meta>;
 export const AllProjects: Story = {};
 
 export const WithSelectedProjects: Story = {
-  args: { selectedProjectIds: ['p-1', 'p-3'] },
+  args: { filters: { period: '30d', projectIds: ['p-1', 'p-3'] } },
 };
 
 export const WithAskField: Story = {
-  args: { showAsk: true, selectedProjectIds: ['p-2'] },
+  args: { showAsk: true, filters: { period: '30d', projectIds: ['p-2'] } },
 };
 
 export const UpdatedMinutesAgo: Story = {
-  args: { period: '7d', updatedSecondsAgo: 185 },
+  args: { filters: { period: '7d' }, updatedSecondsAgo: 185 },
 };

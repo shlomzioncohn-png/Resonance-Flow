@@ -12,8 +12,7 @@ import AddIcon from '@mui/icons-material/Add';
 import AutoAwesomeOutlinedIcon from '@mui/icons-material/AutoAwesomeOutlined';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import FilterChip from '@/components/ui/FilterChip';
-
-type Period = '7d' | '30d' | '90d';
+import type { DashboardFilters } from '@/services/dashboardFilters';
 
 type ProjectOption = {
   id: string;
@@ -22,9 +21,10 @@ type ProjectOption = {
 
 type DashboardHeaderProps = {
   orgName: string;
-  period: Period;
+  filters: DashboardFilters;
+  /** Every chip change goes through here — the same entry point the LLM will use. */
+  onApplyFilters: (partial: Partial<DashboardFilters>) => void;
   projects: ProjectOption[];
-  selectedProjectIds: string[];
   /** Seconds since the dashboard data was last refreshed. */
   updatedSecondsAgo: number;
   /**
@@ -32,9 +32,6 @@ type DashboardHeaderProps = {
    * filter parser exists; the flag only decides whether its slot is visible.
    */
   showAsk?: boolean;
-  onPeriodChange: (period: Period) => void;
-  onAddProject: (projectId: string) => void;
-  onRemoveProject: (projectId: string) => void;
 };
 
 const PERIOD_OPTIONS = [
@@ -50,17 +47,15 @@ function formatUpdated(seconds: number): string {
 
 export default function DashboardHeader({
   orgName,
-  period,
+  filters,
+  onApplyFilters,
   projects,
-  selectedProjectIds,
   updatedSecondsAgo,
   showAsk = false,
-  onPeriodChange,
-  onAddProject,
-  onRemoveProject,
 }: DashboardHeaderProps) {
   const [projectMenuAnchor, setProjectMenuAnchor] = useState<HTMLElement | null>(null);
 
+  const selectedProjectIds = filters.projectIds ?? [];
   const selectedProjects = projects.filter((project) => selectedProjectIds.includes(project.id));
   const addableProjects = projects.filter((project) => !selectedProjectIds.includes(project.id));
 
@@ -68,12 +63,14 @@ export default function DashboardHeader({
     setProjectMenuAnchor(event.currentTarget);
   const closeProjectMenu = () => setProjectMenuAnchor(null);
   const handleAddProject = (projectId: string) => {
-    onAddProject(projectId);
+    onApplyFilters({ projectIds: [...selectedProjectIds, projectId] });
     closeProjectMenu();
   };
+  const handleRemoveProject = (projectId: string) =>
+    onApplyFilters({ projectIds: selectedProjectIds.filter((id) => id !== projectId) });
 
   return (
-    <Stack spacing={2} sx={{ mb: 3 }}>
+    <Stack spacing={2}>
       <Stack
         direction={{ xs: 'column', sm: 'row' }}
         spacing={1}
@@ -119,8 +116,8 @@ export default function DashboardHeader({
         <FilterChip
           label="Period"
           options={PERIOD_OPTIONS}
-          value={period}
-          onChange={(value) => onPeriodChange(value as Period)}
+          value={filters.period}
+          onChange={(value) => onApplyFilters({ period: value as DashboardFilters['period'] })}
         />
 
         {selectedProjects.map((project) => (
@@ -128,7 +125,7 @@ export default function DashboardHeader({
             key={project.id}
             variant="outlined"
             label={`Project: ${project.name}`}
-            onDelete={() => onRemoveProject(project.id)}
+            onDelete={() => handleRemoveProject(project.id)}
           />
         ))}
 
