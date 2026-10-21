@@ -26,3 +26,14 @@ open; open items are never dropped. Days are 24-hour days.
 
 Not-happened versus unknown: `blocked_p50`, `blocked_p90` and `blocked_max` are empty (not 0) when a task was never
 blocked; they become 0 only when the clustering matrix is built.
+
+## Edge level (`features_edge.csv`, one row per `(task_id, depends_on_task_id)` pair seen in the history)
+
+`REJECTED` rows are not edges and never produce a row. `task_id` is the dependent, `depends_on_task_id` the task it waits on.
+
+| Feature | Definition | Unit | If the edge is still active at `as_of` |
+|---|---|---|---|
+| `n_toggles` | number of ADDED plus REMOVED events of the pair | count | counts its ADDED |
+| `median_gap_days` | median time between consecutive ADDED / REMOVED events of the pair; empty when there is only one event | days | the open stretch is not a gap |
+| `active_fraction` | active time divided by the time since the first ADDED. The period ends at `as_of`, or earlier when the dependent task finished (an edge stops mattering once its dependent is done). An edge judged at the instant it was added is 1 if active, else 0 | 0..1 | the open stretch counts up to the end of the period |
+| `n_dependent_flips` | BLOCKED / UNBLOCKED rows of the dependent caused by this edge. A BLOCKED row belongs to the edges added in the same write (within 1 second). An UNBLOCKED row belongs to the edges removed then, or whose target became DONE then. An edge added in the same write as others shares the flip with them | count | a block that has not ended yet counts only its BLOCKED |
