@@ -977,9 +977,10 @@ the JSON:
 
 A separate Python project next to the Java service (not part of the Maven build or the Docker image)
 that will flag unhealthy dependency patterns from `dependency_history` and `task_state_history`.
-Stage 1 only: a synthetic history generator that writes rows shaped like those two tables plus a
-ground-truth key of planted diseases. No model, no endpoint, nothing written to Postgres yet. See
-`analytics/flow_health/README.md`.
+Today: a synthetic history generator (rows shaped like those two tables plus a ground-truth key of planted
+diseases), and from its CSV files a feature step (task, edge and chain features) with one KMeans clustering of the tasks,
+the "normal behaviour" the detectors will compare against. No detectors, no model, no endpoint, nothing written to
+Postgres yet. See `analytics/flow_health/README.md`.
 
 ## Constraint persistence (Issue #378)
 
