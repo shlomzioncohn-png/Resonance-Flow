@@ -7,9 +7,10 @@ import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
+from uuid import UUID
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, PostgresDsn, Secret, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, PostgresDsn, Secret, SecretStr, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
@@ -185,6 +186,45 @@ class MonitoringSettings(BaseSettings):
     llm_max_cost_usd: float | None = Field(default=0.02, ge=0)
     # Log the summary every this many model calls; 0 or none turns it off.
     summary_every_n_calls: int | None = Field(default=100, ge=0)
+
+
+class InboxDirectorySettings(BaseSettings):
+    """Standalone, like EmbeddingModelSettings -- looking up a name needs no DSN.
+
+    How the Inbox directory client (integrations/inbox_directory.py) reaches
+    Inbox's Users/Teams endpoints. `base_url` and `actor_id` have no default on
+    purpose: the actor is a service user Inbox creates for Mind (#131), and a
+    guessed id would make every call look like a permissions problem. Left
+    unset, the client logs it and returns no candidates.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="MIND_INBOX_DIRECTORY__", env_file=_ENV_FILE, extra="ignore"
+    )
+
+    base_url: str | None = None
+    # Sent as X-Actor-Id. Its role decides what Inbox returns: TENANT_ADMIN or
+    # SYSTEM_ADMIN see everyone, a TEAM_LEAD or EMPLOYEE gets a partial list.
+    actor_id: UUID | None = None
+    # Per HTTP call.
+    timeout_seconds: float = Field(default=5.0, gt=0)
+    # For reading both lists of a tenant together, however many pages it takes.
+    max_fetch_seconds: float = Field(default=15.0, gt=0)
+    # 0 turns the cache off.
+    cache_ttl_seconds: float = Field(default=300.0, ge=0)
+    # Candidates scoring below this are dropped. A starting point, not a
+    # calibrated value -- see the matching step of #131.
+    min_score: float = Field(default=0.6, ge=0.0, le=1.0)
+
+    @field_validator("base_url", "actor_id", mode="before")
+    @classmethod
+    def _blank_means_unset(cls, value: object) -> object:
+        # A variable that is exported but empty (`MIND_...__ACTOR_ID=`) arrives
+        # as "" and would otherwise be a bad UUID, or an address that counts as
+        # configured. Both mean "not set".
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
 
 
 class VectorStoreSettings(BaseModel):
