@@ -6,10 +6,14 @@ import com.rnd.inbox.user.dto.UserUpdateRequestDto;
 import com.rnd.inbox.user.exception.DuplicateEmailException;
 import com.rnd.inbox.user.exception.DuplicateUsernameException;
 import com.rnd.inbox.user.exception.UserNotFoundException;
+import com.rnd.inbox.user.exception.UsernameImmutableException;
 import com.rnd.inbox.user.mapper.UserMapper;
+import com.rnd.inbox.user.model.AuthType;
 import com.rnd.inbox.user.model.User;
+import com.rnd.inbox.user.model.UserAuthIdentity;
 import com.rnd.inbox.user.model.UserRole;
 import com.rnd.inbox.user.model.UserStatus;
+import com.rnd.inbox.user.repository.UserAuthIdentityRepository;
 import com.rnd.inbox.user.repository.UserRepository;
 import com.rnd.inbox.user.security.UserAuthorization;
 import com.rnd.inbox.audit.AuditService;
@@ -28,6 +32,7 @@ import org.openapitools.jackson.nullable.JsonNullable;
 import org.hibernate.exception.ConstraintViolationException;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -44,8 +49,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -63,6 +70,12 @@ class UserServiceTest {
     @Mock
     private AuditService auditService;
 
+    @Mock
+    private UserAuthIdentityRepository userAuthIdentityRepository;
+
+    @Mock
+    private PasswordEncoder passwordEncoder;
+
     private UserService userService;
 
     private UUID tenantId;
@@ -75,7 +88,8 @@ class UserServiceTest {
     @BeforeEach
     void setUp() {
         userService = new UserService(
-                userRepository, tenantRepository, userMapper, auditService, new UserAuthorization(userRepository));
+                userRepository, tenantRepository, userMapper, auditService, new UserAuthorization(userRepository),
+                userAuthIdentityRepository, passwordEncoder);
 
         tenantId = UUID.randomUUID();
         tenant = new Tenant();
@@ -103,6 +117,7 @@ class UserServiceTest {
         request.setEmail(email);
         request.setUsername(username);
         request.setRole("EMPLOYEE");
+        request.setPassword("MyPass123");
         return request;
     }
 
@@ -351,9 +366,66 @@ class UserServiceTest {
     }
 
     @Test
+    void createUser_withPassword_savesOneNormalizedUsernameIdentity() {
+        stubActorFound();
+        UserCreateRequestDto request = createRequest("Yehudit@Acme.com", "Yehudit");
+        user.setEmail("Yehudit@Acme.com");
+        user.setUsername("Yehudit");
+
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(userMapper.toEntity(request, tenant)).thenReturn(user);
+        when(userRepository.save(user)).thenReturn(user);
+        when(passwordEncoder.encode("MyPass123")).thenReturn("hashed");
+
+        userService.createUser(request, actorId);
+
+        ArgumentCaptor<UserAuthIdentity> captor = ArgumentCaptor.forClass(UserAuthIdentity.class);
+        verify(userAuthIdentityRepository).save(captor.capture());
+        UserAuthIdentity identity = captor.getValue();
+        assertThat(identity.getUser()).isSameAs(user);
+        assertThat(identity.getAuthType()).isEqualTo(AuthType.PASSWORD);
+        assertThat(identity.getIdentifier()).isEqualTo("yehudit");
+        assertThat(identity.getPasswordHash()).isEqualTo("hashed");
+    }
+
+    @Test
+    void createUser_withoutPassword_savesNoPasswordIdentity() {
+        stubActorFound();
+        UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
+        request.setPassword(null);
+        user.setEmail("yehudit@acme.com");
+        user.setUsername("yehudit");
+
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(userMapper.toEntity(request, tenant)).thenReturn(user);
+        when(userRepository.save(user)).thenReturn(user);
+
+        userService.createUser(request, actorId);
+
+        verify(userRepository).save(user);
+        verifyNoInteractions(userAuthIdentityRepository, passwordEncoder);
+    }
+
+    @Test
+    void createUser_whenUsernameIsAlreadyALoginInAnotherCase_throwsDuplicateUsernameException() {
+        stubActorFound();
+        UserCreateRequestDto request = createRequest(null, "Yehudit");
+
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(userRepository.findByUsername("Yehudit")).thenReturn(Optional.empty());
+        when(userAuthIdentityRepository.existsByAuthTypeAndIdentifier(AuthType.PASSWORD, "yehudit"))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> userService.createUser(request, actorId))
+                .isInstanceOf(DuplicateUsernameException.class);
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
     void createUser_whenEmailAndUsernameAreNull_skipsUniquenessChecksAndSaves() {
         stubActorFound();
         UserCreateRequestDto request = createRequest(null, null);
+        request.setPassword(null);
 
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(userMapper.toEntity(request, tenant)).thenReturn(user);
@@ -486,13 +558,12 @@ class UserServiceTest {
     @Test
     void updateUser_whenUserExists_updatesAndReturnsUser() {
         stubActorFound();
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
         UserResponseDto responseDto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
                 "new@acme.com", null, "newname", UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.findByEmail("new@acme.com")).thenReturn(Optional.empty());
-        when(userRepository.findByUsername("newname")).thenReturn(Optional.empty());
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(responseDto);
 
@@ -501,8 +572,49 @@ class UserServiceTest {
         assertThat(result).isSameAs(responseDto);
         verify(userMapper).applyUpdate(user, request);
         verify(userRepository).save(user);
-        verify(auditService).createAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(tenant),
-                eq(actor), any(), isNull());
+        verify(auditService).createUpdateAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(tenant),
+                eq(actor), any(), any(), isNull());
+    }
+
+    @Test
+    void updateUser_auditsTheValuesFromBeforeAndAfterTheChange() {
+        stubActorFound();
+        user.setEmail("old@acme.com");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByEmail("new@acme.com")).thenReturn(Optional.empty());
+        when(userRepository.save(user)).thenReturn(user);
+        // userMapper is a mock, so it changes nothing by itself: stand in for the real mapper
+        // changing the user in place, which is what makes "before" and "after" differ.
+        doAnswer(invocation -> {
+            user.setEmail("new@acme.com");
+            return null;
+        }).when(userMapper).applyUpdate(user, request);
+
+        userService.updateUser(userId, request, actorId);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> beforeCaptor = ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> afterCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createUpdateAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(tenant),
+                eq(actor), beforeCaptor.capture(), afterCaptor.capture(), isNull());
+        assertThat(beforeCaptor.getValue()).containsEntry("email", "old@acme.com");
+        assertThat(afterCaptor.getValue()).containsEntry("email", "new@acme.com");
+    }
+
+    @Test
+    void updateUser_whenUsernameChanges_throwsUsernameImmutableException() {
+        stubActorFound();
+        user.setUsername("yehudit");
+        UserUpdateRequestDto request = updateRequest("yehudit@acme.com", "renamed");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
+                .isInstanceOf(UsernameImmutableException.class);
+        verify(userRepository, never()).save(any());
     }
 
     @Test
@@ -519,15 +631,14 @@ class UserServiceTest {
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.of(user));
-        when(userRepository.findByUsername("yehudit")).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
 
         userService.updateUser(userId, request, actorId);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> snapshotCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(auditService).createAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(tenant),
-                eq(actor), snapshotCaptor.capture(), isNull());
+        verify(auditService).createUpdateAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(tenant),
+                eq(actor), any(), snapshotCaptor.capture(), isNull());
         assertThat(snapshotCaptor.getValue())
                 .containsEntry("displayName", "Yehudit Cohen")
                 .containsEntry("firstName", "Yehudit")
@@ -535,26 +646,26 @@ class UserServiceTest {
                 .containsEntry("email", "yehudit@acme.com")
                 .containsEntry("phone", "0501234567")
                 .containsEntry("username", "yehudit")
-                .containsEntry("role", UserRole.EMPLOYEE)
+                .containsEntry("role", "EMPLOYEE")
                 .containsEntry("status", "ACTIVE");
     }
 
     @Test
     void updateUser_whenActorDoesNotExist_throwsUnauthenticatedException() {
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
         when(userRepository.findById(actorId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
                 .isInstanceOf(UnauthenticatedException.class);
 
         verify(userMapper, never()).applyUpdate(any(), any());
-        verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any(), any());
+        verifyNoInteractions(auditService);
     }
 
     @Test
     void updateUser_whenUserDoesNotExist_throwsUserNotFoundException() {
         stubActorFound();
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
         when(userRepository.findById(userId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
@@ -568,7 +679,7 @@ class UserServiceTest {
         stubActorFound();
         actor.setTenant(new Tenant());
         actor.getTenant().setId(UUID.randomUUID());
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
 
@@ -585,11 +696,10 @@ class UserServiceTest {
         actor.setTenant(new Tenant());
         actor.getTenant().setId(UUID.randomUUID());
         stubActorFound();
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.findByEmail("new@acme.com")).thenReturn(Optional.empty());
-        when(userRepository.findByUsername("newname")).thenReturn(Optional.empty());
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(new UserResponseDto(
                 userId, "Yehudit Cohen", null, null, "new@acme.com", null, "newname",
@@ -604,12 +714,11 @@ class UserServiceTest {
     void updateUser_whenActorIsTeamLeadAndTargetIsOnTheirTeam_updatesAndReturnsUser() {
         actor.setRole(UserRole.TEAM_LEAD);
         stubActorFound();
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.existsInTeamLedBy(userId, actorId)).thenReturn(true);
         when(userRepository.findByEmail("new@acme.com")).thenReturn(Optional.empty());
-        when(userRepository.findByUsername("newname")).thenReturn(Optional.empty());
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(new UserResponseDto(
                 userId, "Yehudit Cohen", null, null, "new@acme.com", null, "newname",
@@ -624,7 +733,7 @@ class UserServiceTest {
     void updateUser_whenActorIsTeamLeadAndTargetIsNotOnTheirTeam_throwsForbiddenActionException() {
         actor.setRole(UserRole.TEAM_LEAD);
         stubActorFound();
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.existsInTeamLedBy(userId, actorId)).thenReturn(false);
@@ -640,11 +749,10 @@ class UserServiceTest {
     void updateUser_whenActorIsEmployeeAndTargetIsThemselves_updatesAndReturnsUser() {
         actor.setRole(UserRole.EMPLOYEE);
         stubActorFound();
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
 
         when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
         when(userRepository.findByEmail("new@acme.com")).thenReturn(Optional.empty());
-        when(userRepository.findByUsername("newname")).thenReturn(Optional.empty());
         when(userRepository.save(actor)).thenReturn(actor);
         when(userMapper.toResponseDto(actor)).thenReturn(new UserResponseDto(
                 actorId, "Yehudit Cohen", null, null, "new@acme.com", null, "newname",
@@ -744,7 +852,7 @@ class UserServiceTest {
     void updateUser_whenActorIsEmployeeAndTargetIsSomeoneElse_throwsForbiddenActionException() {
         actor.setRole(UserRole.EMPLOYEE);
         stubActorFound();
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
 
@@ -758,7 +866,7 @@ class UserServiceTest {
     @Test
     void updateUser_whenEmailBelongsToAnotherUser_throwsDuplicateEmailException() {
         stubActorFound();
-        UserUpdateRequestDto request = updateRequest("taken@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("taken@acme.com", null);
         User anotherUser = new User();
         anotherUser.setId(UUID.randomUUID());
 
@@ -775,11 +883,11 @@ class UserServiceTest {
     @Test
     void updateUser_whenEmailBelongsToTheSameUser_doesNotThrowAndSaves() {
         stubActorFound();
+        user.setUsername("yehudit");
         UserUpdateRequestDto request = updateRequest("yehudit@acme.com", "yehudit");
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.of(user));
-        when(userRepository.findByUsername("yehudit")).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(new UserResponseDto(
                 userId, "Yehudit Cohen", null, null, "yehudit@acme.com", null, "yehudit", UserRole.EMPLOYEE,
@@ -789,40 +897,6 @@ class UserServiceTest {
 
         verify(userMapper).applyUpdate(user, request);
         verify(userRepository).save(user);
-    }
-
-    @Test
-    void updateUser_whenUsernameBelongsToAnotherUser_throwsDuplicateUsernameException() {
-        stubActorFound();
-        UserUpdateRequestDto request = updateRequest("yehudit@acme.com", "taken");
-        User anotherUser = new User();
-        anotherUser.setId(UUID.randomUUID());
-
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
-        when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.empty());
-        when(userRepository.findByUsername("taken")).thenReturn(Optional.of(anotherUser));
-
-        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
-                .isInstanceOf(DuplicateUsernameException.class);
-
-        verify(userRepository, never()).save(any());
-    }
-
-    @Test
-    void updateUser_whenUsernameUniqueConstraintViolatedConcurrently_throwsDuplicateUsernameException() {
-        stubActorFound();
-        user.setUsername("racer");
-        UserUpdateRequestDto request = updateRequest("yehudit@acme.com", "racer");
-
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
-        when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.empty());
-        when(userRepository.findByUsername("racer")).thenReturn(Optional.empty());
-        when(userRepository.save(user)).thenThrow(constraintViolation("uq_users_username"));
-
-        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
-                .isInstanceOf(DuplicateUsernameException.class);
-
-        verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -938,14 +1012,25 @@ class UserServiceTest {
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(responseDto);
+        doAnswer(invocation -> {
+            user.setStatus(UserStatus.SUSPENDED);
+            return null;
+        }).when(userMapper).applyStatusChange(user, UserStatus.SUSPENDED);
 
         UserResponseDto result = userService.updateStatus(userId, request, actorId);
 
         assertThat(result).isSameAs(responseDto);
         verify(userMapper).applyStatusChange(user, UserStatus.SUSPENDED);
         verify(userRepository).save(user);
-        verify(auditService).createAuditLog(eq("USER_STATUS_UPDATED"), eq("User"), eq(userId), eq(tenant),
-                eq(actor), any(), isNull());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> beforeCaptor = ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> afterCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createUpdateAuditLog(eq("USER_STATUS_UPDATED"), eq("User"), eq(userId), eq(tenant),
+                eq(actor), beforeCaptor.capture(), afterCaptor.capture(), isNull());
+        assertThat(beforeCaptor.getValue()).containsEntry("status", "ACTIVE");
+        assertThat(afterCaptor.getValue()).containsEntry("status", "SUSPENDED");
     }
 
     @Test
@@ -958,7 +1043,7 @@ class UserServiceTest {
                 .isInstanceOf(UnauthenticatedException.class);
 
         verify(userMapper, never()).applyStatusChange(any(), any());
-        verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any(), any());
+        verifyNoInteractions(auditService);
     }
 
     @Test
@@ -1079,5 +1164,36 @@ class UserServiceTest {
 
         verify(userMapper, never()).applyStatusChange(any(), any());
         verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void promoteToTeamLeadIfEmployee_whenEmployee_promotesAndAuditsTheRoleFromBeforeAndAfter() {
+        user.setRole(UserRole.EMPLOYEE);
+        when(userRepository.save(user)).thenReturn(user);
+
+        userService.promoteToTeamLeadIfEmployee(user, actor);
+
+        assertThat(user.getRole()).isEqualTo(UserRole.TEAM_LEAD);
+        verify(userRepository).save(user);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> beforeCaptor = ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> afterCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createUpdateAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(tenant),
+                eq(actor), beforeCaptor.capture(), afterCaptor.capture(), isNull());
+        assertThat(beforeCaptor.getValue()).containsEntry("role", "EMPLOYEE");
+        assertThat(afterCaptor.getValue()).containsEntry("role", "TEAM_LEAD");
+    }
+
+    @Test
+    void promoteToTeamLeadIfEmployee_whenAlreadyTenantAdmin_doesNotDowngradeRoleOrAudit() {
+        user.setRole(UserRole.TENANT_ADMIN);
+
+        userService.promoteToTeamLeadIfEmployee(user, actor);
+
+        assertThat(user.getRole()).isEqualTo(UserRole.TENANT_ADMIN);
+        verify(userRepository, never()).save(any());
+        verifyNoInteractions(auditService);
     }
 }

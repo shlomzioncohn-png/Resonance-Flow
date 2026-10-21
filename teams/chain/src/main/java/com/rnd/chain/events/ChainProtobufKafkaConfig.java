@@ -3,7 +3,6 @@ package com.rnd.chain.events;
 import com.google.protobuf.Message;
 import com.rnd.inbox.event.SchedulingUpdatedEvent;
 import com.rnd.inbox.event.TaskCompletedEvent;
-import com.rnd.inbox.event.TaskCreatedEvent;
 import com.rnd.inbox.event.TaskUpdatedEvent;
 import com.rnd.mind.event.DependencyProposedEvent;
 import com.rnd.mind.event.TaskScoreProposedEvent;
@@ -33,11 +32,11 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Kafka consumer factories for Chain's Protobuf-based inbound topics: task.created, task.updated
- * (both Inbox), and task.dependencies.proposed and task.score.proposed (Mind), plus the producer templates for the
+ * Kafka consumer factories for Chain's Protobuf-based inbound topics: task.updated (Inbox)
+ * and task.dependencies.proposed and task.score.proposed (Mind), plus the producer templates for the
  * Protobuf topics Chain publishes (task.scheduling.updated). One factory per message type - Confluent's
  * KafkaProtobufDeserializer needs the concrete target class per consumer
- * (specific.protobuf.value.type), and each of these three topics carries a different message.
+ * (specific.protobuf.value.type), and each of these topics carries a different message.
  *
  * ErrorHandlingDeserializer wraps the real deserializer so a message that fails to deserialize
  * (wrong schema, corrupt bytes) surfaces as a DeserializationException the listener container
@@ -48,7 +47,7 @@ import java.util.Map;
  * {@code @RetryableTopic(kafkaTemplate = "...")}). Without an explicit template,
  * {@code @RetryableTopic} falls back to the application's single default KafkaTemplate&lt;String,
  * String&gt; - trying to serialize a
- * typed Protobuf message (e.g. TaskCreatedEvent) through a StringSerializer throws a
+ * typed Protobuf message (e.g. TaskUpdatedEvent) through a StringSerializer throws a
  * SerializationException, which itself then fails to publish to the DLT, which retries
  * indefinitely: a message that should go straight to `.errors` instead never arrives there at
  * all. Caught by DependencyProposedEventHandlerIntegrationTest's malformed-event test - a real,
@@ -148,22 +147,6 @@ public class ChainProtobufKafkaConfig {
         public void close() {
             delegate.close();
         }
-    }
-
-    @Bean
-    public ConsumerFactory<String, TaskCreatedEvent> taskCreatedEventConsumerFactory() {
-        return new DefaultKafkaConsumerFactory<>(consumerProps(TaskCreatedEvent.class));
-    }
-
-    @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, TaskCreatedEvent> taskCreatedEventKafkaListenerContainerFactory(
-            ConsumerFactory<String, TaskCreatedEvent> taskCreatedEventConsumerFactory) {
-        return listenerContainerFactory(taskCreatedEventConsumerFactory);
-    }
-
-    @Bean
-    public KafkaTemplate<String, TaskCreatedEvent> taskCreatedEventKafkaTemplate() {
-        return protobufTemplate();
     }
 
     @Bean

@@ -13,8 +13,8 @@ import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.repository.TaskRepository;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -32,11 +32,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.UnaryOperator;
 
+@Slf4j
+@RequiredArgsConstructor
 @Component
 public class TaskCounterUpdater {
-
-    private static final Logger log =
-            LoggerFactory.getLogger(TaskCounterUpdater.class);
 
     /**
      * TransactionSynchronizationManager resource key for the per-transaction
@@ -51,20 +50,6 @@ public class TaskCounterUpdater {
     private final PriorityScoreService priorityScoreService;
     private final SchedulingPublishListener schedulingPublishListener;
     private final TaskReadinessRepository taskReadinessRepository;
-
-    public TaskCounterUpdater(
-            TaskRepository taskRepository,
-            TaskDependencyRepository taskDependencyRepository,
-            PriorityScoreService priorityScoreService,
-            SchedulingPublishListener schedulingPublishListener,
-            TaskReadinessRepository taskReadinessRepository) {
-
-        this.taskRepository = taskRepository;
-        this.taskDependencyRepository = taskDependencyRepository;
-        this.priorityScoreService = priorityScoreService;
-        this.schedulingPublishListener = schedulingPublishListener;
-        this.taskReadinessRepository = taskReadinessRepository;
-    }
 
     /**
      * Creates a PENDING placeholder with epoch updatedAt for each missing task.
@@ -120,24 +105,7 @@ public class TaskCounterUpdater {
     }
 
     public static Task.Builder copyOf(Task task) {
-
-        return Task.builder()
-                .id(task.getId())
-                .parentTaskId(task.getParentTaskId())
-                .tenantId(task.getTenantId())
-                .status(task.getStatus())
-                .isReady(task.isReady())
-                .blockingCount(task.getBlockingCount())
-                .openConstraintCount(task.getOpenConstraintCount())
-                .estimatedDurationMin(task.getEstimatedDurationMin())
-                .score(task.getScore())
-                .confidence(task.getConfidence())
-                .priorityScore(task.getPriorityScore())
-                .tier(task.getTier())
-                .scoredAt(task.getScoredAt())
-                .createdAt(task.getCreatedAt())
-                .updatedAt(task.getUpdatedAt())
-                .deletedAt(task.getDeletedAt());
+        return task.toBuilder();
     }
 
     /**

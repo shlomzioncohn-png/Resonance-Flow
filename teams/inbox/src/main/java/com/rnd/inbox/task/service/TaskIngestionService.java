@@ -77,8 +77,9 @@ public class TaskIngestionService {
         Tenant tenant = requireTenant(event.getTenantId());
         Project project = findProject(event.getProjectId());
         User createdBy = findUser(event.getCreatedByUserId());
+        User suggestedOwner = findUser(event.getSuggestedOwnerUserId());
 
-        Task task = taskCreationRequestMapper.map(event, tenant, project, createdBy);
+        Task task = taskCreationRequestMapper.map(event, tenant, project, createdBy, suggestedOwner);
         List<Assignment> assignments = mapAssignments(event.getAssignees());
 
         return create(task, assignments, correlationId(event.getCorrelationId()));

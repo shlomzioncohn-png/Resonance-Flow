@@ -1,10 +1,10 @@
 package com.rnd.chain.events;
 
-import com.rnd.chain.dto.TaskTier;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.mind.event.TaskScoreProposedEvent;
+import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.annotation.RetryableTopic;
 import org.springframework.kafka.retrytopic.DltStrategy;
@@ -26,19 +26,12 @@ import static com.rnd.chain.events.EventFields.toLocalDateTime;
  * to .errors without retry, and so does a tenant that differs from the stored one. An event scored
  * earlier than the stored score is ignored.
  */
+@RequiredArgsConstructor
 @Component
 public class TaskScoreProposedEventHandler {
 
     private final TaskCounterUpdater taskCounterUpdater;
     private final ChainEventProcessingTemplate template;
-
-    public TaskScoreProposedEventHandler(
-            TaskCounterUpdater taskCounterUpdater,
-            ChainEventProcessingTemplate template) {
-
-        this.taskCounterUpdater = taskCounterUpdater;
-        this.template = template;
-    }
 
     @RetryableTopic(
             attempts = "3",
@@ -71,7 +64,7 @@ public class TaskScoreProposedEventHandler {
 
         try {
             LocalDateTime scoredAt = event.hasScoredAt() ? toLocalDateTime(event.getScoredAt()) : null;
-            taskCounterUpdater.onScoreProposed(taskId, tenantId, toTier(event), mindScore, confidence, scoredAt);
+            taskCounterUpdater.onScoreProposed(taskId, tenantId, InboxTaskTierMapper.map(event.getTier()), mindScore, confidence, scoredAt);
         } catch (InvalidRequestException ex) {
             throw new NonRetryableEventException(
                     "Mind proposed an invalid score for task " + taskId, ex);
@@ -95,14 +88,5 @@ public class TaskScoreProposedEventHandler {
             throw new NonRetryableEventException(fieldName + " must be between 0 and 1, got " + raw);
         }
         return rounded;
-    }
-
-    private static TaskTier toTier(TaskScoreProposedEvent event) {
-        return switch (event.getTier()) {
-            case TASK_TIER_OPERATIONAL -> TaskTier.OPERATIONAL;
-            case TASK_TIER_TACTICAL -> TaskTier.TACTICAL;
-            case TASK_TIER_STRATEGIC -> TaskTier.STRATEGIC;
-            default -> null;
-        };
     }
 }

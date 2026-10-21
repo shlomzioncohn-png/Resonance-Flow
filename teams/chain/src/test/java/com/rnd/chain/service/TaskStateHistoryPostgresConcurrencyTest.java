@@ -87,7 +87,7 @@ class TaskStateHistoryPostgresConcurrencyTest {
         LocalDateTime eventTime = stored.plusSeconds(10);
 
         ConcurrentTestRunner.run(16, () ->
-                service.onTaskStatusChangedIfNewer(id, TaskStatus.DONE, eventTime, TENANT));
+                service.onTaskStatusChangedIfNewer(id, TaskStatus.DONE, eventTime, TENANT, null));
 
         assertThat(rowsOf(id)).hasSize(1);
     }

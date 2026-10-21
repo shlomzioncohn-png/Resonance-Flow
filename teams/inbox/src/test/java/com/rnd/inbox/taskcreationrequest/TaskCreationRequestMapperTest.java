@@ -59,7 +59,7 @@ class TaskCreationRequestMapperTest {
         dto.setEffortEstimateMinutes(45);
         dto.setDeadline("2026-09-02T12:00:00Z");
 
-        Task task = mapper().map(dto, tenantRef, null, null);
+        Task task = mapper().map(dto, tenantRef, null, null, null);
 
         assertThat(task.getId()).isNull();
         assertThat(task.getTenant()).isSameAs(tenantRef);
@@ -80,7 +80,7 @@ class TaskCreationRequestMapperTest {
     void mapsTheUnstructuredPathAsMlInferredRatherThanEtl() {
         Tenant tenantRef = tenant();
 
-        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null);
+        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null, null);
 
         assertThat(task.getExtractionProvenance()).isEqualTo(TaskExtractionProvenance.ML_INFERRED);
     }
@@ -89,7 +89,7 @@ class TaskCreationRequestMapperTest {
     void defaultsStatusToNewWhenThePayloadOmitsIt() {
         Tenant tenantRef = tenant();
 
-        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null);
+        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null, null);
 
         assertThat(task.getStatus()).isEqualTo(TaskStatus.NEW);
     }
@@ -100,7 +100,7 @@ class TaskCreationRequestMapperTest {
         TaskCreationRequestEventDto dto = dtoFor(tenantRef.getId());
         dto.setHasDependencies(false);
 
-        assertThat(mapper().map(dto, tenantRef, null, null).isAvailable()).isTrue();
+        assertThat(mapper().map(dto, tenantRef, null, null, null).isAvailable()).isTrue();
     }
 
     @Test
@@ -109,7 +109,7 @@ class TaskCreationRequestMapperTest {
         TaskCreationRequestEventDto dto = dtoFor(tenantRef.getId());
         dto.setHasDependencies(true);
 
-        assertThat(mapper().map(dto, tenantRef, null, null).isAvailable()).isFalse();
+        assertThat(mapper().map(dto, tenantRef, null, null, null).isAvailable()).isFalse();
     }
 
     @Test
@@ -121,14 +121,14 @@ class TaskCreationRequestMapperTest {
         TaskCreationRequestEventDto dto = dtoFor(tenantRef.getId());
         dto.setProjectId(projectRef.getId().toString());
 
-        assertThat(mapper().map(dto, tenantRef, projectRef, null).getProject()).isSameAs(projectRef);
+        assertThat(mapper().map(dto, tenantRef, projectRef, null, null).getProject()).isSameAs(projectRef);
     }
 
     @Test
     void leavesTheProjectUnsetWhenThePayloadOmitsIt() {
         Tenant tenantRef = tenant();
 
-        assertThat(mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null).getProject()).isNull();
+        assertThat(mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null, null).getProject()).isNull();
     }
 
     @Test
@@ -137,7 +137,7 @@ class TaskCreationRequestMapperTest {
         User createdByRef = new User();
         createdByRef.setId(UUID.randomUUID());
 
-        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, createdByRef);
+        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, createdByRef, null);
 
         assertThat(task.getCreatedBy()).isSameAs(createdByRef);
     }
@@ -146,9 +146,52 @@ class TaskCreationRequestMapperTest {
     void leavesCreatedByUnsetWhenNoCreatorIsProvided() {
         Tenant tenantRef = tenant();
 
-        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null);
+        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null, null);
 
         assertThat(task.getCreatedBy()).isNull();
+    }
+
+    @Test
+    void mapsTheSuggestionFieldsWhenProvided() {
+        Tenant tenantRef = tenant();
+        User suggestedOwnerRef = new User();
+        suggestedOwnerRef.setId(UUID.randomUUID());
+
+        TaskCreationRequestEventDto dto = dtoFor(tenantRef.getId());
+        dto.setEffortEstimateConfidence(0.6);
+        dto.setSuggestedOwnerUserId(suggestedOwnerRef.getId().toString());
+        dto.setSuggestedOwnerConfidence(0.8);
+
+        Task task = mapper().map(dto, tenantRef, null, null, suggestedOwnerRef);
+
+        assertThat(task.getEffortEstimateConfidence()).isEqualTo(0.6f);
+        assertThat(task.getSuggestedOwnerUser()).isSameAs(suggestedOwnerRef);
+        assertThat(task.getSuggestedOwnerConfidence()).isEqualTo(0.8f);
+    }
+
+    @Test
+    void leavesTheSuggestionFieldsUnsetWhenNotProvided() {
+        Tenant tenantRef = tenant();
+
+        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null, null);
+
+        assertThat(task.getEffortEstimateConfidence()).isNull();
+        assertThat(task.getSuggestedOwnerUser()).isNull();
+        assertThat(task.getSuggestedOwnerConfidence()).isNull();
+    }
+
+    @Test
+    void doesNotTurnTheSuggestedOwnerIntoTheOwner() {
+        Tenant tenantRef = tenant();
+        User suggestedOwnerRef = new User();
+        suggestedOwnerRef.setId(UUID.randomUUID());
+
+        TaskCreationRequestEventDto dto = dtoFor(tenantRef.getId());
+        dto.setSuggestedOwnerUserId(suggestedOwnerRef.getId().toString());
+
+        Task task = mapper().map(dto, tenantRef, null, null, suggestedOwnerRef);
+
+        assertThat(task.getOwner()).isNull();
     }
 
 }

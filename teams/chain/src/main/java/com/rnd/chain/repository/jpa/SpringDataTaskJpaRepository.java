@@ -40,8 +40,8 @@ public interface SpringDataTaskJpaRepository extends JpaRepository<TaskEntity, U
                           open_constraint_count, estimated_duration_min, score, confidence,
                           priority_score, tier, scored_at, version, created_at, updated_at, deleted_at)
         VALUES (:id, :parentTaskId, :tenantId, :status, :isReady, :blockingCount,
-                :openConstraintCount, :estimatedDurationMin, :score, :confidence, :priorityScore, :tier, :scoredAt, 0,
-                :createdAt, :updatedAt, :deletedAt)
+                :openConstraintCount, :estimatedDurationMin, :score, :confidence, :priorityScore,
+                CAST(:tier AS VARCHAR), :scoredAt, 0, :createdAt, :updatedAt, :deletedAt)
         ON CONFLICT (id) DO UPDATE SET
             parent_task_id = EXCLUDED.parent_task_id,
             tenant_id = EXCLUDED.tenant_id,
@@ -51,7 +51,7 @@ public interface SpringDataTaskJpaRepository extends JpaRepository<TaskEntity, U
             open_constraint_count = EXCLUDED.open_constraint_count,
             estimated_duration_min = EXCLUDED.estimated_duration_min, score = EXCLUDED.score,
             confidence = EXCLUDED.confidence, priority_score = EXCLUDED.priority_score,
-            tier = EXCLUDED.tier, scored_at = EXCLUDED.scored_at,
+            tier = COALESCE(EXCLUDED.tier, task.tier), scored_at = EXCLUDED.scored_at,
             created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at,
             deleted_at = EXCLUDED.deleted_at, version = task.version + 1
         """, nativeQuery = true)
@@ -78,10 +78,10 @@ public interface SpringDataTaskJpaRepository extends JpaRepository<TaskEntity, U
     @Modifying(clearAutomatically = true)
     @Query(value = """
         INSERT INTO task (id, parent_task_id, tenant_id, status, is_ready, blocking_count,
-                          open_constraint_count, estimated_duration_min, score, version,
+                          open_constraint_count, estimated_duration_min, score, tier, version,
                           created_at, updated_at, deleted_at)
         VALUES (:id, :parentTaskId, :tenantId, :status, :isReady, :blockingCount,
-                :openConstraintCount, :estimatedDurationMin, :score, 0,
+                :openConstraintCount, :estimatedDurationMin, :score, CAST(:tier AS VARCHAR), 0,
                 :createdAt, :updatedAt, :deletedAt)
         ON CONFLICT (id) DO NOTHING
         """, nativeQuery = true)
@@ -94,6 +94,7 @@ public interface SpringDataTaskJpaRepository extends JpaRepository<TaskEntity, U
                        @Param("openConstraintCount") int openConstraintCount,
                        @Param("estimatedDurationMin") Integer estimatedDurationMin,
                        @Param("score") Double score,
+                       @Param("tier") String tier,
                        @Param("createdAt") LocalDateTime createdAt,
                        @Param("updatedAt") LocalDateTime updatedAt,
                        @Param("deletedAt") LocalDateTime deletedAt);

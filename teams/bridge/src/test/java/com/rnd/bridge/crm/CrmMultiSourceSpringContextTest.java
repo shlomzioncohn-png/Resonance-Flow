@@ -1,5 +1,6 @@
 package com.rnd.bridge.crm;
 
+import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.crm.repository.DealRepository;
 import com.rnd.bridge.crm.repository.JsonDealRepository;
 import com.rnd.bridge.crm.repository.hubspot.HubSpotDealRepository;
@@ -27,8 +28,10 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Boots the real CRM beans ({@code CrmLaneConfig} + the three {@code DealRepository} impls,
@@ -152,5 +155,75 @@ class CrmMultiSourceSpringContextTest {
             assertEquals(1, repositories.size());
             assertEquals("json", repositories.values().iterator().next().source());
         });
+    }
+
+    @Test
+    void onlyHubspotProfileActiveRegistersOnlyHubSpotRepository() {
+        enqueuePipeline();
+        enqueuePipeline();
+        // Empty page (no "paging") so fetchAllDeals() stops after one request with zero deals.
+        hubspotServer.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"results\": []}"));
+
+        contextRunner()
+                .withInitializer(context -> context.getEnvironment().addActiveProfile("hubspot"))
+                .run(context -> {
+                    assertNull(context.getStartupFailure());
+                    Map<String, DealRepository> repositories = context.getBeansOfType(DealRepository.class);
+                    assertEquals(1, repositories.size());
+                    assertEquals("hubspot", repositories.values().iterator().next().source());
+                    assertTrue(context.getBeansOfType(JsonDealRepository.class).isEmpty());
+
+                    CrmSyncService service = context.getBean(CrmSyncService.class);
+                    @SuppressWarnings("unchecked")
+                    List<DealRepository> injected =
+                            (List<DealRepository>) ReflectionTestUtils.getField(service, "dealRepositories");
+                    assertEquals(1, injected.size());
+
+                    CrmSourceReader reader = context.getBean(CrmSourceReader.class);
+                    assertDoesNotThrow(() -> reader.read(ReadCursor.full()));
+                });
+    }
+
+    @Test
+    void onlySalesforceProfileActiveRegistersOnlySalesforceRepository() {
+        String instanceUrl = hubspotServer.url("/").toString();
+        hubspotServer.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"access_token\": \"test-access-token\", \"instance_url\": \"" + instanceUrl
+                        + "\", \"token_type\": \"Bearer\"}"));
+        hubspotServer.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"totalSize\": 0, \"done\": true, \"records\": []}"));
+        hubspotServer.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"totalSize\": 0, \"done\": true, \"records\": []}"));
+
+        contextRunner()
+                // Reuses the (otherwise-idle, since hubspot isn't active here) hubspotServer as the
+                // OAuth/SOQL stand-in, so Salesforce's read() never dials the real example.my.salesforce.com.
+                .withPropertyValues("bridge.crm.salesforce.login-url=" + instanceUrl)
+                .withInitializer(context -> context.getEnvironment().addActiveProfile("salesforce"))
+                .run(context -> {
+                    assertNull(context.getStartupFailure());
+                    Map<String, DealRepository> repositories = context.getBeansOfType(DealRepository.class);
+                    assertEquals(1, repositories.size());
+                    assertEquals("salesforce", repositories.values().iterator().next().source());
+                    assertTrue(context.getBeansOfType(JsonDealRepository.class).isEmpty());
+
+                    CrmSyncService service = context.getBean(CrmSyncService.class);
+                    @SuppressWarnings("unchecked")
+                    List<DealRepository> injected =
+                            (List<DealRepository>) ReflectionTestUtils.getField(service, "dealRepositories");
+                    assertEquals(1, injected.size());
+
+                    CrmSourceReader reader = context.getBean(CrmSourceReader.class);
+                    assertDoesNotThrow(() -> reader.read(ReadCursor.full()));
+                });
     }
 }

@@ -1,6 +1,6 @@
 package com.rnd.chain.dto;
 
-/** Mind's classification of a task; mirrors the specified values of the shared TaskTier enum. */
+/** Inbox's task tier; absence is modeled as a null {@code Task.tier}, not an enum value. */
 public enum TaskTier {
     OPERATIONAL,
     TACTICAL,
