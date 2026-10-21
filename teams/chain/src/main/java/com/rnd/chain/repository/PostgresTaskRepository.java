@@ -3,6 +3,7 @@ package com.rnd.chain.repository;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.repository.entity.TaskEntity;
 import com.rnd.chain.repository.jpa.SpringDataTaskJpaRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,14 +16,11 @@ import java.util.function.UnaryOperator;
 
 /** Postgres-backed {@link TaskRepository}. Maps {@link TaskEntity} <-> {@link Task} here only -
  * neither type crosses this class's boundary in the other direction. */
+@RequiredArgsConstructor
 @Repository
 public class PostgresTaskRepository implements TaskRepository {
 
     private final SpringDataTaskJpaRepository jpaRepository;
-
-    public PostgresTaskRepository(SpringDataTaskJpaRepository jpaRepository) {
-        this.jpaRepository = jpaRepository;
-    }
 
     @Override
     public Optional<Task> findById(UUID id) {

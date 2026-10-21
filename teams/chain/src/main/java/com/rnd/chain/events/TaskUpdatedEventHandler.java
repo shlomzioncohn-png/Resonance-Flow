@@ -6,6 +6,7 @@ import com.rnd.chain.dto.TaskTier;
 import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.inbox.event.TaskUpdatedEvent;
+import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.annotation.RetryableTopic;
 import org.springframework.kafka.retrytopic.DltStrategy;
@@ -44,17 +45,12 @@ import static com.rnd.chain.events.EventFields.toLocalDateTime;
  * task.updated carries no event id, hence state-based idempotency; if it gains one, use
  * {@link ChainEventProcessingTemplate#processClaimed} instead.
  */
+@RequiredArgsConstructor
 @Component
 public class TaskUpdatedEventHandler {
 
     private final TaskEligibilityService taskEligibilityService;
     private final ChainEventProcessingTemplate template;
-
-    public TaskUpdatedEventHandler(TaskEligibilityService taskEligibilityService,
-                                    ChainEventProcessingTemplate template) {
-        this.taskEligibilityService = taskEligibilityService;
-        this.template = template;
-    }
 
     @RetryableTopic(
             attempts = "3",

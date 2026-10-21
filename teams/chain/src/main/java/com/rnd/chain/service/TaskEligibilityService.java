@@ -13,8 +13,8 @@ import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.repository.TaskRepository;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,11 +32,10 @@ import java.util.UUID;
  *
  * <p>{@code @Transactional} on the methods below provides atomicity and rollback.
  */
+@Slf4j
+@RequiredArgsConstructor
 @Service
 public class TaskEligibilityService {
-
-    private static final Logger log =
-            LoggerFactory.getLogger(TaskEligibilityService.class);
 
     /** How far before a DONE task.updated's own updated_at a task created from it is stamped. */
     static final Duration DONE_EVENT_UPDATED_AT_SKEW = Duration.ofSeconds(1);
@@ -47,22 +46,6 @@ public class TaskEligibilityService {
     private final TaskCounterUpdater taskCounterUpdater;
     private final TaskStateHistoryRecorder historyRecorder;
     private final TaskReadinessRepository taskReadinessRepository;
-
-    public TaskEligibilityService(
-            TaskRepository taskRepository,
-            TaskDependencyRepository taskDependencyRepository,
-            GraphLock graphLock,
-            TaskCounterUpdater taskCounterUpdater,
-            TaskStateHistoryRecorder historyRecorder,
-            TaskReadinessRepository taskReadinessRepository) {
-
-        this.taskRepository = taskRepository;
-        this.taskDependencyRepository = taskDependencyRepository;
-        this.graphLock = graphLock;
-        this.taskCounterUpdater = taskCounterUpdater;
-        this.historyRecorder = historyRecorder;
-        this.taskReadinessRepository = taskReadinessRepository;
-    }
 
     @Transactional
     public void recalculateTaskEligibility(UUID taskId) {
