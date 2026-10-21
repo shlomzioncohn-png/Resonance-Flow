@@ -5,7 +5,12 @@ import json
 import pytest
 
 from mind.extraction.models import ExtractedFieldsWithClassification
-from mind.extraction.parsing import MalformedOutput, parse_response, valid_tasks
+from mind.extraction.parsing import (
+    MalformedOutput,
+    RejectedAnswer,
+    parse_response,
+    read_rejected_answer,
+)
 
 TASK = {
     "title": "Send the Q3 report",
@@ -52,7 +57,7 @@ def test_forgives_chatter_around_the_object() -> None:
         ("   ", "empty"),
         ("I could not find a task here.", "no JSON object"),
         ('{"tasks": [{"title": "Send the report",}]}', "not valid JSON"),
-        ("[1, 2, 3]", "a list, not the object"),
+        ("[1, 2, 3]", "tasks.0: Input should be"),
     ],
 )
 def test_unreadable_answers_are_rejected_with_a_usable_reason(
@@ -122,21 +127,29 @@ def test_a_single_task_in_the_old_shape_is_told_what_is_missing() -> None:
 
 
 @pytest.mark.parametrize("count", [1, 2])
-def test_a_bare_list_of_tasks_is_told_to_wrap_them(count: int) -> None:
-    """The JSON is valid, so "not valid JSON" would send the model the wrong way."""
+def test_a_bare_list_of_tasks_is_read_as_the_list(count: int) -> None:
+    """A missing wrapper is formatting, like a code fence: forgiven, not repaired."""
 
     bare = json.dumps([TASK] * count)
 
-    with pytest.raises(MalformedOutput, match='a list, not the object.*"tasks"'):
-        parse_response(f"```json\n{bare}\n```")
+    assert len(parse_response(f"```json\n{bare}\n```")) == count
+
+
+def test_a_bare_list_is_also_read_when_the_answer_was_rejected() -> None:
+    """So its valid tasks still earn their credit in the repair round."""
+
+    rejected = read_rejected_answer(json.dumps([TASK, {**TASK, "title": "N/A"}]))
+
+    assert (rejected.task_count, len(rejected.valid)) == (2, 1)
 
 
 def test_the_valid_tasks_of_a_rejected_answer_are_found_one_by_one() -> None:
-    rejected = answer(TASK, {**TASK, "title": "N/A"}, "not a task")
+    rejected = read_rejected_answer(answer(TASK, {**TASK, "title": "N/A"}, "not a task"))
 
-    assert [fields.title for fields in valid_tasks(rejected)] == ["Send the Q3 report"]
+    assert rejected.task_count == 3
+    assert [fields.title for fields in rejected.valid] == ["Send the Q3 report"]
 
 
-@pytest.mark.parametrize("rejected", ["", "no JSON", "[1]", '{"tasks": 3}', '{"tasks": [}'])
-def test_finding_valid_tasks_never_raises(rejected: str) -> None:
-    assert valid_tasks(rejected) == []
+@pytest.mark.parametrize("rejected", ["", "no JSON", '{"tasks": 3}', '{"tasks": [}'])
+def test_reading_a_rejected_answer_never_raises(rejected: str) -> None:
+    assert read_rejected_answer(rejected) == RejectedAnswer(task_count=0, valid=[])

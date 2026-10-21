@@ -9,7 +9,12 @@ import logging
 
 import pytest
 
-from mind.extraction.models import ExtractedFields, ExtractedFieldsWithClassification
+from mind.extraction.models import (
+    MAX_MENTIONS_PER_TASK,
+    MAX_TITLE_LENGTH,
+    ExtractedFields,
+    ExtractedFieldsWithClassification,
+)
 
 
 def _task(mentions: object, has_dependencies: bool = True) -> ExtractedFields:
@@ -67,3 +72,27 @@ def test_mentions_that_were_all_placeholders_do_not_flip_it() -> None:
 
 def test_true_with_no_mention_is_allowed() -> None:
     assert _task([], has_dependencies=True).has_dependencies is True
+
+
+def test_a_runaway_mention_is_dropped_and_logged(caplog: pytest.LogCaptureFixture) -> None:
+    """A phrase as long as a paragraph is an echo of the content, not a name."""
+
+    runaway = "the DB upgrade " * (MAX_TITLE_LENGTH // 10)
+
+    with caplog.at_level(logging.WARNING, logger="mind.extraction"):
+        task = _task(["Dana's pricing review", runaway])
+
+    assert task.dependency_mentions == ["Dana's pricing review"]
+    assert "longer than" in caplog.text
+
+
+def test_past_the_cap_the_first_mentions_are_kept_and_the_rest_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    written = [f"the migration step {n}" for n in range(MAX_MENTIONS_PER_TASK + 3)]
+
+    with caplog.at_level(logging.WARNING, logger="mind.extraction"):
+        task = _task(written)
+
+    assert task.dependency_mentions == written[:MAX_MENTIONS_PER_TASK]
+    assert "3 more" in caplog.text

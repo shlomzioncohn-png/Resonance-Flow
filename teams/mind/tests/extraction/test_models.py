@@ -116,6 +116,8 @@ def test_the_rejection_tells_the_model_what_was_wrong() -> None:
 
     message = str(raised.value)
     assert "placeholder" in message
+    # In a list (#690), "no task here" is said by leaving the entry out.
+    assert "leave it out of the list" in message
     assert "N/A" in message
 
 

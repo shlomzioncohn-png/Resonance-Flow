@@ -1,6 +1,7 @@
 """Tests for prompt loading and filling."""
 
 import json
+import logging
 
 import pytest
 
@@ -59,6 +60,21 @@ def test_long_content_is_truncated_with_a_visible_marker() -> None:
 
     assert truncated.endswith(TRUNCATION_MARKER)
     assert len(truncated) == MAX_CONTENT_CHARS + len(TRUNCATION_MARKER)
+
+
+def test_truncation_is_logged_with_how_much_was_cut(caplog: pytest.LogCaptureFixture) -> None:
+    """A meeting's action items sit at its end, so a cut must not be silent (#690)."""
+
+    content = "x" * (MAX_CONTENT_CHARS + 500)
+
+    with caplog.at_level(logging.WARNING, logger="mind.extraction"):
+        extraction_prompt(SourceType.MEETING, content)
+        repair_prompt(SourceType.MEETING, content, "{}", "error")
+
+    # Once, from the first prompt: a repair round re-sends the same content.
+    assert caplog.text.count("truncated") == 1
+    assert f"MEETING content of {MAX_CONTENT_CHARS + 500} characters" in caplog.text
+    assert "the last 500 are not sent" in caplog.text
 
 
 def test_short_content_is_left_alone() -> None:

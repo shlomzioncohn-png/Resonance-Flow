@@ -8,11 +8,15 @@ catch.
 """
 
 import json
+import logging
 import re
+from dataclasses import dataclass
 
 from pydantic import ValidationError
 
 from mind.extraction.models import ExtractedFields, ExtractedTasks
+
+logger = logging.getLogger("mind.extraction")
 
 
 class MalformedOutput(Exception):
@@ -37,20 +41,39 @@ def _strip_code_fence(text: str) -> str:
 def _first_json_object(text: str) -> str:
     """Narrow to the outermost { ... } span, for answers with stray prose."""
 
-    # A model asked for a list of tasks may return the list itself and skip
-    # the object around it. Narrowing that to { ... } would cut out
-    # `{task}, {task}` and report "not valid JSON" about valid JSON, which
-    # sends the repair round looking for a syntax error that is not there.
-    if text.startswith("["):
-        raise MalformedOutput(
-            'the answer is a list, not the object; put the tasks inside {"tasks": [...]}'
-        )
-
     start = text.find("{")
     end = text.rfind("}")
     if start == -1 or end == -1 or end < start:
         raise MalformedOutput("the answer contains no JSON object")
     return text[start : end + 1]
+
+
+def _read_payload(text: str) -> object:
+    """The answer's JSON, with the formatting slips forgiven, or `MalformedOutput`."""
+
+    if not text or not text.strip():
+        raise MalformedOutput("the answer was empty")
+
+    body = _strip_code_fence(text)
+
+    # The list without the object around it is the right answer written
+    # wrong, like a code fence: wrapped here rather than repaired, which would
+    # cost a call and charge every task in it. Narrowing it to { ... } instead
+    # would cut out `{task}, {task}` and call valid JSON invalid. When it does
+    # not read as a list, it was prose that happens to open with a bracket.
+    if body.startswith("["):
+        try:
+            tasks = json.loads(body)
+        except json.JSONDecodeError:
+            pass
+        else:
+            logger.info("extraction: the answer was a bare list; reading it as the tasks")
+            return {"tasks": tasks}
+
+    try:
+        return json.loads(_first_json_object(body))
+    except json.JSONDecodeError as exc:
+        raise MalformedOutput(f"the answer is not valid JSON ({exc.msg})") from exc
 
 
 def describe_validation_error(error: ValidationError) -> str:
@@ -79,18 +102,7 @@ def parse_response(
     lead to the same repair round.
     """
 
-    if not text or not text.strip():
-        raise MalformedOutput("the answer was empty")
-
-    candidate = _first_json_object(_strip_code_fence(text))
-
-    try:
-        payload = json.loads(candidate)
-    except json.JSONDecodeError as exc:
-        raise MalformedOutput(f"the answer is not valid JSON ({exc.msg})") from exc
-
-    # No isinstance check on `payload`: it was narrowed to the outermost
-    # { ... } span above, so anything json.loads accepts here is an object.
+    payload = _read_payload(text)
 
     try:
         # mypy reads `ExtractedTasks[schema]` as a type annotation, where a
@@ -102,11 +114,21 @@ def parse_response(
         raise MalformedOutput(describe_validation_error(exc)) from exc
 
 
-def valid_tasks(
+@dataclass(frozen=True)
+class RejectedAnswer:
+    """What can still be read from an answer that failed validation."""
+
+    # How many entries its `tasks` list held, valid or not; 0 when unreadable.
+    task_count: int
+    # The entries that pass the task schema each on its own.
+    valid: list[ExtractedFields]
+
+
+def read_rejected_answer(
     text: str,
     schema: type[ExtractedFields] = ExtractedFields,
-) -> list[ExtractedFields]:
-    """The tasks in a rejected answer that pass `schema` each on its own.
+) -> RejectedAnswer:
+    """How many tasks a rejected answer held, and which pass `schema` on their own.
 
     Used for scoring and never as output, so it does not break the rule at the
     top of this module: nothing found here reaches Inbox. The extractor only
@@ -118,13 +140,13 @@ def valid_tasks(
     """
 
     try:
-        payload = json.loads(_first_json_object(_strip_code_fence(text)))
-    except (MalformedOutput, json.JSONDecodeError):
-        return []
+        payload = _read_payload(text)
+    except MalformedOutput:
+        return RejectedAnswer(task_count=0, valid=[])
 
     tasks = payload.get("tasks") if isinstance(payload, dict) else None
     if not isinstance(tasks, list):
-        return []
+        return RejectedAnswer(task_count=0, valid=[])
 
     found = []
     for task in tasks:
@@ -132,4 +154,4 @@ def valid_tasks(
             found.append(schema.model_validate(task))
         except ValidationError:
             continue
-    return found
+    return RejectedAnswer(task_count=len(tasks), valid=found)

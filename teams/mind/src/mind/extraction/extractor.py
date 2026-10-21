@@ -20,8 +20,13 @@ from mind.contracts.base_enums import SourceType
 from mind.extraction.confidence import ConfidenceBreakdown, score_confidence
 from mind.extraction.config import ExtractionConfig
 from mind.extraction.grounding import ground_source_ref
-from mind.extraction.models import ExtractedFields, response_model
-from mind.extraction.parsing import MalformedOutput, parse_response, valid_tasks
+from mind.extraction.models import MAX_TASKS_PER_TEXT, ExtractedFields, response_model
+from mind.extraction.parsing import (
+    MalformedOutput,
+    RejectedAnswer,
+    parse_response,
+    read_rejected_answer,
+)
 from mind.extraction.prompts import extraction_prompt, repair_prompt, system_prompt
 from mind.extraction.providers.base import (
     LLMError,
@@ -76,8 +81,9 @@ class ExtractionSuccess:
     """A validated answer: every task the text describes (#690), possibly none.
 
     What belongs to the answer rather than to one task stays out here: the
-    item it came from, the model, and the rounds spent. A repair round
-    re-asks for the whole list, so every task in it paid for that round.
+    item it came from, the model, and the rounds spent. Which tasks paid for
+    a repair round is decided per task (`_rounds_needed`), so the rounds here
+    and the penalty on a task can differ.
     """
 
     tasks: tuple[ExtractedTask, ...]
@@ -131,22 +137,51 @@ def _rounds_needed(
     return schema_attempts
 
 
-def _log_rewritten(
-    earlier_valid: list[tuple[ExtractedFields, int]],
-    answer: list[ExtractedFields],
-) -> None:
-    """Count the valid tasks a repair round rewrote, which `_rounds_needed`
-    then charges. How often this happens decides whether partial repair is
-    worth building, so it is logged rather than guessed."""
+def _log_repair_outcome(rejected: RejectedAnswer | None, answer: list[ExtractedFields]) -> None:
+    """Compare the repaired answer with the last rejected one, and say how.
 
-    if not earlier_valid:
+    Only the last round: a task valid in two rejected rounds is one task, not
+    two. How often valid tasks come back reworded decides whether partial
+    repair is worth building, so it is logged rather than guessed.
+
+    A warning when a valid task may have gone missing: #690's third decision
+    is that a bad task is never dropped beside a good one, and a model that
+    answers the repair with fewer tasks can break it with nothing raising.
+    Dropping the *invalid* task is expected, since the title message tells
+    the model to leave a non-task out, so that alone stays quiet.
+    """
+
+    if rejected is None:
         return
-    rewritten = sum(1 for task, _ in earlier_valid if task not in answer)
+    if rejected.task_count > MAX_TASKS_PER_TEXT:
+        logger.info(
+            "extraction: the rejected answer had %d task(s), over the cap of %d; "
+            "the repaired answer has %d",
+            rejected.task_count,
+            MAX_TASKS_PER_TEXT,
+            len(answer),
+        )
+        return
+
+    unchanged = sum(1 for task in rejected.valid if task in answer)
     logger.info(
-        "extraction: %d of %d task(s) valid in an earlier round did not come back unchanged",
-        rewritten,
-        len(earlier_valid),
+        "extraction: the rejected answer had %d task(s), %d of them valid; the repaired "
+        "answer has %d, and %d of the valid ones came back unchanged",
+        rejected.task_count,
+        len(rejected.valid),
+        len(answer),
+        unchanged,
     )
+
+    fewer = rejected.task_count - len(answer)
+    not_back = len(rejected.valid) - unchanged
+    if fewer > 0 and not_back > 0:
+        logger.warning(
+            "extraction: the repaired answer has %d task(s) fewer, and %d valid task(s) did "
+            "not come back unchanged; a valid task may have been dropped",
+            fewer,
+            not_back,
+        )
 
 
 def _ground_and_score(
@@ -217,6 +252,7 @@ class BasicExtractor:
         # Each task that passed on its own in a rejected round, with that
         # round's number: what lets a repair round be charged per task.
         earlier_valid: list[tuple[ExtractedFields, int]] = []
+        last_rejected: RejectedAnswer | None = None
 
         while True:
             provider_calls += 1
@@ -261,14 +297,16 @@ class BasicExtractor:
                         last_output=last_output,
                     )
 
-                earlier_valid += [
-                    (task, schema_attempts) for task in valid_tasks(response.text, schema)
-                ]
+                last_rejected = read_rejected_answer(response.text, schema)
+                # Over the cap, the model was listing non-tasks, so none of
+                # what it listed counts as right the first time.
+                if last_rejected.task_count <= MAX_TASKS_PER_TEXT:
+                    earlier_valid += [(task, schema_attempts) for task in last_rejected.valid]
                 logger.info("extraction: invalid output, repairing (%s)", detail)
                 user = repair_prompt(source_type, text, response.text, detail)
                 continue
 
-            _log_rewritten(earlier_valid, answer)
+            _log_repair_outcome(last_rejected, answer)
             return ExtractionSuccess(
                 tasks=tuple(
                     _ground_and_score(

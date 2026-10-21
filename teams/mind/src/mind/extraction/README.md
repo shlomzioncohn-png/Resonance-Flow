@@ -701,7 +701,7 @@ one object holding a list:
 | An empty list is a valid answer: a text with no task is the normal case | `ExtractedTasks`, `system.md` |
 | At most `MAX_TASKS_PER_TEXT` (15) tasks; more is rejected and repaired, never cut short | `models.py`; the prompt's number is filled in from the constant, not written twice |
 | One invalid task fails the whole answer; the message names it by place (`tasks.1.title`) | `parse_response` |
-| A bare list without the object gets its own message, not "not valid JSON" | `parsing._first_json_object` |
+| A bare list without the object is formatting, like a code fence: wrapped, not repaired | `parsing._read_payload` |
 | Grounding and confidence run per task; `item_key`, model and attempts stay on the answer | `ExtractedTask`, `ExtractionSuccess.tasks` |
 | One `TaskCreationRequested` per task, in order; none for an empty list | `assembly.to_task_creation_requested` |
 
@@ -713,25 +713,36 @@ Until #690 that never needed saying.
 
 A repair round re-asks for the whole list, so a shared attempt count charged
 every task for one sibling's `"N/A"`: in a meeting of eight, seven valid tasks
-lost 20% each. Instead, `valid_tasks` reads each task of a rejected answer on
-its own, and a final task **equal in every field** to one of those is charged
-only the rounds up to that one (`extractor._rounds_needed`). Matching is by
-content, not by place, because the model may reorder, merge or drop tasks
+lost 20% each. Instead, `read_rejected_answer` reads each task of a rejected
+answer on its own, and a final task **equal in every field** to one of those is
+charged only the rounds up to that one (`extractor._rounds_needed`). Matching is
+by content, not by place, because the model may reorder, merge or drop tasks
 between rounds. The rejected tasks are used for this comparison only; nothing
 from a rejected answer reaches the output.
 
+One rejection earns no credit at all: **more than 15 tasks**. A model listing
+past the cap is listing non-tasks, so none of what it listed counts as right
+the first time. An extra key beside `tasks` is formatting and keeps the credit.
+
 This narrows the problem; it does not close it. A valid task the model
 *rewords* during repair cannot be told apart from a new one, and is charged.
-`repair_user.md` asks for the untouched tasks back unchanged, and every
-success logs how many were not (`N of M task(s) valid in an earlier round did
-not come back unchanged`), so how often this happens is measured, not guessed.
+`repair_user.md` asks for the untouched tasks back unchanged, and every success
+after a repair logs the comparison with the **last** rejected answer only —
+`the rejected answer had N task(s), V of them valid; the repaired answer has R,
+and U of the valid ones came back unchanged` — so how often this happens is
+measured, not guessed.
+
+**A dropped task is a warning.** The model can break #690's third decision by
+answering the repair with fewer tasks, and nothing raises. When the repaired
+answer is shorter *and* a valid task did not come back unchanged, it logs `a
+valid task may have been dropped`. Dropping only the invalid one stays quiet:
+the title message tells the model to leave a non-task out of the list.
 
 ### Proposed: partial repair
 
 The exact fix is to send back only the failed tasks and freeze the valid ones,
-so nothing has to be matched. Envelope failures — broken JSON, a bare list,
-more than 15 tasks — would still re-ask for everything, and there every task
-is rightly charged. Not built here: it changes the repair flow, needs a guard
+so nothing has to be matched. Envelope failures — broken JSON, more than 15
+tasks — would still re-ask for everything, and there every task is charged. Not built here: it changes the repair flow, needs a guard
 against the model resending the frozen tasks as duplicates, and departs from
 #690's third decision as worded ("one invalid task sends the whole answer to
 repair"), so it is that decision's owner's call. Worth building if the logged
@@ -749,8 +760,9 @@ of every task, with the switch on or off.
   not repaired: the mention is the evidence, the `false` the slip. `true` with
   an empty list is allowed — the content may show other work without naming it.
 - **Cleaned before the rule:** blanks, placeholders and repeats (case-blind)
-  are dropped, non-strings are dropped and logged, and a bare string becomes a
-  one-item list. Cleaning runs first, so mentions that were all placeholders
+  are dropped, non-strings and phrases longer than a title (200) are dropped
+  and logged, at most `MAX_MENTIONS_PER_TASK` (10) are kept, and a bare string
+  becomes a one-item list. Cleaning runs first, so mentions that were all placeholders
   cannot turn a `false` into a `true`. One empty mention used to stall #834's
   listener; none leaves here.
 - **Not in the contract.** `TaskCreationRequested` carries only
@@ -763,7 +775,8 @@ of every task, with the switch on or off.
 ### Known gaps, left for follow-ups
 
 - **Long meetings are truncated.** `MAX_CONTENT_CHARS` (8000) cuts the tail,
-  and a meeting's action items cluster at the end ("let's wrap up"). To be
+  and a meeting's action items cluster at the end ("let's wrap up"). The cut
+  is now logged as a warning, with how much was not sent. To be
   settled against the real AMI transcripts before the demo.
 - **Urgency has no reference date.** `source_timestamp` is not in the prompt,
   so "by Friday" cannot be placed in time.

@@ -6,12 +6,15 @@ keeping them separate means a prompt change shows up in review as a prompt
 change.
 """
 
+import logging
 import re
 from functools import cache
 from pathlib import Path
 
 from mind.contracts.base_enums import SourceType
 from mind.extraction.models import MAX_TASKS_PER_TEXT
+
+logger = logging.getLogger("mind.extraction")
 
 _PROMPT_DIR = Path(__file__).parent / "prompts"
 
@@ -81,6 +84,20 @@ def system_prompt(classify: bool = False) -> str:
 
 def extraction_prompt(source_type: SourceType, content: str) -> str:
     """The first-attempt user message."""
+
+    # The marker tells the model; this tells whoever reads the run. "A task
+    # rarely hides in the tail" holds for a thread, not for a meeting, whose
+    # action items come in the closing recap (#690). Here and not in
+    # truncate(), which also runs on every repair round and on the model's
+    # own answer: once per item, about the content.
+    if len(content) > MAX_CONTENT_CHARS:
+        logger.warning(
+            "extraction: %s content of %d characters truncated to %d; the last %d are not sent",
+            source_type.value,
+            len(content),
+            MAX_CONTENT_CHARS,
+            len(content) - MAX_CONTENT_CHARS,
+        )
 
     return _fill(
         _load("extraction_user.md"),

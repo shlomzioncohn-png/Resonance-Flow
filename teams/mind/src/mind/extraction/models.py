@@ -30,6 +30,10 @@ logger = logging.getLogger("mind.extraction")
 # summarising it, and that is worth a repair attempt.
 MAX_TITLE_LENGTH = 200
 
+# Named dependencies kept per task (#690). A task waiting on more than this
+# many named pieces of work is almost always a model listing every noun.
+MAX_MENTIONS_PER_TASK = 10
+
 # Strings an LLM emits when it means "nothing here". Normalised to None so
 # that a missing value looks missing to the confidence heuristic instead of
 # masquerading as evidence.
@@ -360,17 +364,39 @@ class ExtractedFields(BaseModel):
             return []
 
         kept: list[str] = []
+        # Case-blind: "The DB upgrade" is the same mention, and the resolver
+        # would only look it up twice.
+        seen: set[str] = set()
         for item in value:
             if not isinstance(item, str):
                 logger.warning("extraction: dependency mention %r is not a phrase; dropping it", item)
                 continue
             phrase = item.strip()
-            if phrase.lower() in _NULL_PLACEHOLDERS:
+            if phrase.lower() in _NULL_PLACEHOLDERS or phrase.lower() in seen:
                 continue
-            # Case-blind: "The DB upgrade" is the same mention, and the
-            # resolver would only look it up twice.
-            if phrase.lower() not in {seen.lower() for seen in kept}:
-                kept.append(phrase)
+            # A mention names another task, so it is held to a title's length:
+            # past that it is the content echoed back, and the resolver would
+            # match it against everything.
+            if len(phrase) > MAX_TITLE_LENGTH:
+                logger.warning(
+                    "extraction: dependency mention %r is longer than %d characters; dropping it",
+                    phrase[:60] + "...",
+                    MAX_TITLE_LENGTH,
+                )
+                continue
+            seen.add(phrase.lower())
+            kept.append(phrase)
+
+        # Each mention costs #834 a vector search. Kept rather than repaired
+        # past the cap, as everything optional here is.
+        if len(kept) > MAX_MENTIONS_PER_TASK:
+            logger.warning(
+                "extraction: %d more dependency mention(s) than the %d kept; dropping %s",
+                len(kept) - MAX_MENTIONS_PER_TASK,
+                MAX_MENTIONS_PER_TASK,
+                kept[MAX_MENTIONS_PER_TASK:],
+            )
+            kept = kept[:MAX_MENTIONS_PER_TASK]
         return kept
 
     @model_validator(mode="after")
@@ -427,8 +453,8 @@ class ExtractedFields(BaseModel):
         if isinstance(value, str) and value.strip().lower() in _NULL_PLACEHOLDERS:
             raise ValueError(
                 f"{value!r} is a placeholder, not a title; summarise the task as an action, "
-                f"and if the content truly describes no task, say so rather than filling "
-                f"the field in"
+                f"and if this entry describes no task, leave it out of the list rather "
+                f"than filling the field in"
             )
         return value
 
