@@ -40,6 +40,16 @@ spec:
         alertmanager:
           alertmanagerSpec:
             retention: 120h
+        # Rules for what isn't scraped below (or doesn't exist here) - they'd only
+        # ever fire as false "target down" alerts.
+        defaultRules:
+          rules:
+            etcd: false
+            kubeControllerManager: false
+            kubeSchedulerAlerting: false
+            kubeSchedulerRecording: false
+            kubeProxy: false
+            windows: false
         grafana:
           enabled: false
         kubeEtcd:

@@ -99,6 +99,10 @@ team's sync.
 - **Infra targets.** Kafka, PostgreSQL and MinIO - see the chart's README.
   Traefik exposes its own metrics, per router. Kafka consumer-group lag comes
   from the chart's `kafka-exporter` subchart - see the chart's README.
+- **Alert rules.** The platform's PrometheusRules live in the `resonance-flow`
+  chart - see its [README](../helm/resonance-flow/README.md#alerting). Default
+  rules for components not scraped here (etcd, controller-manager, scheduler,
+  kube-proxy, Windows) are turned off in `defaultRules`.
 
 Nothing here has an Ingress. Reach Prometheus and Alertmanager with:
 
