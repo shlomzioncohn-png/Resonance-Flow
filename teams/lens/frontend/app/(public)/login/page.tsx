@@ -16,7 +16,7 @@ import { login } from '@/services/authApi';
 export default function LoginPage() {
   const { setRole } = useRole();
   const router = useRouter();
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,11 +27,14 @@ export default function LoginPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const user = await login({ username, password });
-      setRole(user.role);
-      router.push(user.role === 'manager' ? '/manager' : '/employee');
+      const response = await login({ login: email, password });
+      // Token is now stored ONLY in HttpOnly cookie set by Gateway
+      // No need to store in localStorage — browser manages the cookie automatically
+      setRole(response.user.role);
+      // Route based on role: TENANT_ADMIN and TEAM_LEAD go to /manager, EMPLOYEE goes to /employee
+      router.push(['TENANT_ADMIN', 'TEAM_LEAD'].includes(response.user.role) ? '/manager' : '/employee');
     } catch (err) {
-      setError(getErrorMessage(err));
+      setError(getErrorMessage(err, '/auth/login'));
       setSubmitting(false);
     }
   };
@@ -52,10 +55,11 @@ export default function LoginPage() {
             <Logo variant="light" />
           </Box>
           <TextField
-            label="Username"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            autoComplete="username"
+            label="Email"
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            autoComplete="email"
             required
             fullWidth
           />

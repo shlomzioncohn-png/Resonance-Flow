@@ -33,6 +33,9 @@ message TaskCreationRequestedEvent {
   optional bool has_dependencies = 16;             // optional: false must differ from absent.
   optional string created_by_user_id = 17;         // UUID as string.
   repeated Assignee assignees = 18;
+  optional double effort_estimate_confidence = 19; // 0..1.
+  optional string suggested_owner_user_id = 20;    // UUID of an existing user. A proposal - never an assignment.
+  optional double suggested_owner_confidence = 21; // 0..1. Requires suggested_owner_user_id.
 }
 
 message Assignee {

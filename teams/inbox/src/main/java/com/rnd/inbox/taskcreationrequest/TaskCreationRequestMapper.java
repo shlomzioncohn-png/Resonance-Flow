@@ -23,7 +23,8 @@ public class TaskCreationRequestMapper {
         this.clock = clock;
     }
 
-    public Task map(TaskCreationRequestEventDto dto, Tenant tenant, Project project, User createdBy) {
+    public Task map(TaskCreationRequestEventDto dto, Tenant tenant, Project project, User createdBy,
+                    User suggestedOwner) {
         Task task = new Task();
         task.setTenant(tenant);
         task.setProject(project);
@@ -41,9 +42,16 @@ public class TaskCreationRequestMapper {
         task.setAvailable(!dto.getHasDependencies());
         task.setExtractionProvenance(TaskExtractionProvenance.ML_INFERRED);
         task.setConfidence(dto.getConfidence().floatValue());
+        task.setEffortEstimateConfidence(toFloat(dto.getEffortEstimateConfidence()));
+        task.setSuggestedOwnerUser(suggestedOwner);
+        task.setSuggestedOwnerConfidence(toFloat(dto.getSuggestedOwnerConfidence()));
         Instant now = Instant.now(clock);
         task.setCreatedAt(now);
         task.setUpdatedAt(now);
         return task;
+    }
+
+    private Float toFloat(Double value) {
+        return value != null ? value.floatValue() : null;
     }
 }

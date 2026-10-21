@@ -29,7 +29,8 @@ export default function EmptyState({
       }}
     >
       <InboxOutlinedIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
-      <Typography variant="h6" color="text.primary">
+      {/* Looks like an h6, but is the next level under the page's h1, so heading order stays valid. */}
+      <Typography variant="h6" component="h2" color="text.primary">
         {title}
       </Typography>
       {description && (

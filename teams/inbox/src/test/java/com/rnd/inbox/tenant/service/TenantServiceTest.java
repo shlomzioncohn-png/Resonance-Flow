@@ -22,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.hibernate.exception.ConstraintViolationException;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.openapitools.jackson.nullable.JsonNullable;
@@ -33,6 +34,7 @@ import org.springframework.data.domain.Pageable;
 
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -41,6 +43,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -275,13 +278,27 @@ class TenantServiceTest {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(tenantRepository.save(tenant)).thenReturn(tenant);
         when(tenantMapper.toResponseDto(tenant)).thenReturn(responseDto);
+        tenant.setName("Acme Inc");
+        // tenantMapper is a mock, so it changes nothing by itself: stand in for the real mapper
+        // changing the tenant in place, which is what makes "before" and "after" differ.
+        doAnswer(invocation -> {
+            tenant.setName("Acme Incorporated");
+            return null;
+        }).when(tenantMapper).applyUpdate(tenant, request);
 
         TenantResponseDto result = tenantService.updateTenant(tenantId, request, actorId);
 
         assertThat(result).isSameAs(responseDto);
         verify(tenantMapper).applyUpdate(tenant, request);
-        verify(auditService).createAuditLog(eq("TENANT_UPDATED"), eq("Tenant"), eq(tenantId), eq(tenant),
-                eq(actor), any(), isNull());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> beforeCaptor = ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> afterCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createUpdateAuditLog(eq("TENANT_UPDATED"), eq("Tenant"), eq(tenantId), eq(tenant),
+                eq(actor), beforeCaptor.capture(), afterCaptor.capture(), isNull());
+        assertThat(beforeCaptor.getValue()).containsEntry("name", "Acme Inc");
+        assertThat(afterCaptor.getValue()).containsEntry("name", "Acme Incorporated");
     }
 
     @Test
@@ -335,13 +352,24 @@ class TenantServiceTest {
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(tenantRepository.save(tenant)).thenReturn(tenant);
         when(tenantMapper.toResponseDto(tenant)).thenReturn(responseDto);
+        doAnswer(invocation -> {
+            tenant.setStatus(TenantStatus.SUSPENDED);
+            return null;
+        }).when(tenantMapper).applyStatusChange(tenant, TenantStatus.SUSPENDED);
 
         TenantResponseDto result = tenantService.updateStatus(tenantId, request, actorId);
 
         assertThat(result).isSameAs(responseDto);
         verify(tenantMapper).applyStatusChange(tenant, TenantStatus.SUSPENDED);
-        verify(auditService).createAuditLog(eq("TENANT_STATUS_UPDATED"), eq("Tenant"), eq(tenantId), eq(tenant),
-                eq(actor), any(), isNull());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> beforeCaptor = ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> afterCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createUpdateAuditLog(eq("TENANT_STATUS_UPDATED"), eq("Tenant"), eq(tenantId),
+                eq(tenant), eq(actor), beforeCaptor.capture(), afterCaptor.capture(), isNull());
+        assertThat(beforeCaptor.getValue()).containsEntry("status", "ACTIVE");
+        assertThat(afterCaptor.getValue()).containsEntry("status", "SUSPENDED");
     }
 
     @Test

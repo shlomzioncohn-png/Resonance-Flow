@@ -1,8 +1,10 @@
 package com.rnd.inbox.task.event;
+import com.google.protobuf.util.Timestamps;
 import com.rnd.inbox.event.TaskCompletedEvent;
 import com.rnd.inbox.shared.event.EventType;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -11,6 +13,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TaskCompletedProtoMapperTest {
+
+    private static final Instant UPDATED_AT = Instant.parse("2026-10-14T09:30:00Z");
 
     private final TaskCompletedProtoMapper mapper = new TaskCompletedProtoMapper();
 
@@ -40,6 +44,13 @@ class TaskCompletedProtoMapperTest {
     }
 
     @Test
+    void toProto_mapsUpdatedAt() {
+        TaskCompletedEvent event = mapper.toProto(payload(UUID.randomUUID(), true));
+
+        assertThat(Timestamps.toMillis(event.getUpdatedAt())).isEqualTo(UPDATED_AT.toEpochMilli());
+    }
+
+    @Test
     void toProto_throwsWhenTaskIdMissing() {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("completed", true);
@@ -61,6 +72,7 @@ class TaskCompletedProtoMapperTest {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("taskId", taskId.toString());
         payload.put("completed", completed);
+        payload.put("updatedAt", UPDATED_AT.toString());
         return payload;
     }
 }

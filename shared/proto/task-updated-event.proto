@@ -35,4 +35,6 @@ message TaskUpdatedEvent {
   optional float suggested_owner_confidence = 19;    // 0..1. Set later by MIND.
   google.protobuf.Timestamp updated_at = 20;
   optional string owner_id = 21;                     // UUID as string.
+  optional string feedback_text = 22;                // Set only on a rejection that came with feedback.
+  optional string feedback_user_id = 23;             // UUID as string. The user who gave the feedback.
 }

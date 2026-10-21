@@ -114,11 +114,13 @@ public class TaskController {
         return taskService.updateTaskFromRequest(id, request, actorId);
     }
 
-    @Operation(summary = "Change a task's status (any lifecycle transition, not only completion)")
+    @Operation(summary = "Change a task's status (any lifecycle transition, not only completion)",
+            description = "Feedback (feedbackText) is optional and accepted only together with status REJECTED.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Status updated",
                     content = @Content(schema = @Schema(implementation = TaskResponseDto.class))),
-            @ApiResponse(responseCode = "400", description = "snoozedUntil missing while status is SNOOZED"),
+            @ApiResponse(responseCode = "400", description = "snoozedUntil missing while status is SNOOZED, "
+                    + "or feedback sent with a status other than REJECTED"),
             @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
             @ApiResponse(responseCode = "403", description = "Task is outside the actor's own tenant"),
             @ApiResponse(responseCode = "404", description = "Task not found")
