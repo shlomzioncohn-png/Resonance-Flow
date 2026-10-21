@@ -33,7 +33,7 @@ Kubernetes, so a plain service container is enough here.
 | `_load-schema-policy.sh` | sourced by the scripts below; loads the list + level from `<git-ref>` (the PR's base), never from the PR, plus the rows the PR adds to the list. |
 | `check-schema-compatibility.sh` | dry-run compatibility check for one schema against `$SCHEMA_REGISTRY_URL`. Also used verbatim by the cluster hook. |
 | `register-schema.sh` | registers one schema version. Used by the cluster hook (post-merge) and by `seed-registry.sh` (to load the base-branch versions). |
-| `seed-registry.sh <git-ref>` | for each schema on `<git-ref>`, loads its version into the registry, and sets the compatibility level from `<git-ref>`. `<git-ref>` is any branch/commit — CI passes the PR's base, locally you pass whichever branch you're merging into. |
+| `seed-registry.sh <git-ref>` | for each schema on `<git-ref>`, loads its version into the registry, and sets the compatibility level from `<git-ref>`. A library row this checkout adds is loaded from the checkout instead (see "Rows the PR adds"). `<git-ref>` is any branch/commit — CI passes the PR's base, locally you pass whichever branch you're merging into. |
 | `check-all-schemas.sh <git-ref>` | runs `check-schema-compatibility.sh` for every schema on `<git-ref>` (the .proto content checked is this checkout's); fails if any is incompatible. |
 | `register-added-schemas.sh <git-ref>` | registers the rows this checkout adds to `schema-subjects.tsv` relative to `<git-ref>`, so a broken new row fails the PR instead of the post-merge hook. CI-only. |
 
@@ -85,6 +85,10 @@ PR version in the throwaway registry — the same thing the hook will do after
 merge. That catches a typo'd file or subject, a schema the registry can't parse,
 or an import with no library row before merge (#857). Additions only: removals
 and the `# reset:` / `# compatibility:` lines still come from the base.
+
+A library the PR adds is the one exception: `seed-registry.sh` loads its checkout
+version up front, so a base schema the PR makes import it can resolve during the
+check. It's a new subject, so there's no base version for it to replace.
 
 ## What schema changes are allowed
 
