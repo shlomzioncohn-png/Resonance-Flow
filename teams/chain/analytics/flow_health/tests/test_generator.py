@@ -225,9 +225,12 @@ def test_everything_works_when_no_task_has_a_known_tier(tmp_path):
     assert all(d["observed"]["peer_group"]["tier_used"] is None for d in truth)
     assert all("tier" not in d["observed"]["peer_group"]["level"] for d in truth)
     assert all(d["observed"]["peer_chains"]["tier_used"] is None for d in truth if d["type"] == "slow_chain")
-    with (tmp_path / "tasks_meta.csv").open(encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-    assert all(r["tier"] == "" and r["true_tier"] for r in rows)  # hidden from the analysis, kept in the key
+    with (tmp_path / "task_meta.csv").open(encoding="utf-8") as f:
+        visible = list(csv.DictReader(f))
+    with (tmp_path / "answer_key_tasks.csv").open(encoding="utf-8") as f:
+        key = list(csv.DictReader(f))
+    assert all(r["tier"] == "" for r in visible)
+    assert all(r["true_tier"] for r in key)  # hidden from the analysis, kept in the key
 
 
 def test_the_simulation_runs_for_tasks_that_have_no_tier_at_all():
@@ -244,7 +247,7 @@ def test_the_simulation_runs_for_tasks_that_have_no_tier_at_all():
 
 def test_some_tiers_are_hidden_by_default_and_the_rest_are_visible(full, tmp_path):
     write_dataset(tmp_path, full.config, full.world, full.history)
-    with (tmp_path / "tasks_meta.csv").open(encoding="utf-8") as f:
+    with (tmp_path / "task_meta.csv").open(encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     hidden = sum(1 for r in rows if r["tier"] == "") / len(rows)
     assert abs(hidden - full.config.missing_tier_rate) < 0.02
@@ -261,7 +264,7 @@ def test_one_command_writes_independent_dev_and_eval_sets(tmp_path):
     assert eval_manifest["disease_types_held_out"] == []
     ids = []
     for name in ("dev", "eval"):
-        with (tmp_path / name / "tasks_meta.csv").open(encoding="utf-8") as f:
+        with (tmp_path / name / "tasks.csv").open(encoding="utf-8") as f:
             ids.append({r["task_id"] for r in csv.DictReader(f)})
         for table in ("dependency_history", "task_state_history", "ground_truth"):
             assert (tmp_path / name / f"{table}.csv").is_file()

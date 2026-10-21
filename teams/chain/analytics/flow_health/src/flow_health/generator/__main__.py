@@ -16,7 +16,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="python -m flow_health.generator",
         description="Generate two independent synthetic histories: dev (to build the model on, held-out "
                     "disease type excluded) and eval (different seed, every disease type, to measure it).")
-    p.add_argument("--out", type=Path, default=Path("out"), help="writes <out>/dev and <out>/eval (default: out)")
+    p.add_argument("--out", type=Path, default=Path("data"), help="writes <out>/dev and <out>/eval (default: data)")
     p.add_argument("--seed", type=int, default=GeneratorConfig.seed, help="seed of the dev set")
     p.add_argument("--eval-seed", type=int, default=DEFAULT_EVAL_SEED, help="seed of the eval set")
     p.add_argument("--tasks", type=int, default=GeneratorConfig.n_normal_tasks, help="healthy-process tasks")

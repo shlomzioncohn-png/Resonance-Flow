@@ -17,7 +17,7 @@ python -m venv .venv
 .venv\Scripts\activate              # Windows; on Linux/macOS: source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
-python -m flow_health.generator          # writes out/dev AND out/eval, validated, in one command
+python -m flow_health.generator          # writes data/dev AND data/eval, validated, in one command
 ```
 
 The generator itself uses only the standard library. Options: `--out`, `--seed` (dev), `--eval-seed`,
@@ -25,7 +25,7 @@ The generator itself uses only the standard library. Options: `--out`, `--seed` 
 
 ## Two timelines: dev and eval
 
-| | `out/dev` | `out/eval` |
+| | `data/dev` | `data/eval` |
 |---|---|---|
 | seed | 42 | 4242 (`--eval-seed`) |
 | use | build and tune the model | measure precision / recall, once, at the end |
@@ -47,10 +47,12 @@ Rows shaped exactly like Chain's two history tables (migrations `V2`, `V7`, `V9`
 | `ground_truth.csv` | **answer key**: per planted disease, one row per involved task and per involved edge, with `type`, `severity`, `tier`, `in_stage_a`, `window_start`, `window_end`, `ongoing_at_end` |
 | `ground_truth.json` | same key with parameters and what the disease actually looked like (`observed`), including how its root compares with its peers (`peer_group`, and `peer_chains` for a slow chain) |
 | `healthy_controls.csv` | **answer key**: the healthy control chains (same lengths, tiers and shape as the slow chain) with their end-to-end days |
-| `tasks_meta.csv` | **answer key**: per task `tier` (what the analysis may see, blank when unknown), `true_tier`, project archetype, kind (`normal`, `slow_legit`, `control_chain`, ...). Chain's tables have no tier column, so it lives here |
+| `tasks.csv` | analysis input: per task `task_id`, `created_at`, `project_id` |
+| `task_meta.csv` | analysis input: per task `task_id` and `tier` (blank when unknown). Chain's tables have no tier column, so it lives here |
+| `answer_key_tasks.csv` | **answer key**: per task `true_tier`, project `archetype`, `kind` (`normal`, `slow_legit`, `control_chain`, ...), `disease_id`, `control_id` |
 | `manifest.json` | seed, config, counts, `as_of` (the "now" of the analysis), held-out types |
 
-`ground_truth.*`, `healthy_controls.csv` and `tasks_meta.csv` are for evaluation only. The model's input is the two history tables.
+`ground_truth.*`, `healthy_controls.csv` and `answer_key_tasks.csv` are for evaluation only. The model's input is the two history tables plus `tasks.csv` and `task_meta.csv`.
 
 ## How it works
 
@@ -69,7 +71,7 @@ Code layout (`src/flow_health/generator/`): `config.py` (all knobs), `model.py` 
 - **Tiers:** `operational` (70%), `tactical` (22%), `strategic` (8%). Higher tiers take longer
   (work x1 / x2.5 / x6) and wait on lower ones (strategic on tactical, tactical on operational).
 - **Tiers may be missing:** `--missing-tier-rate` (default 5%) hides the tier of that share of tasks in
-  `tasks_meta.csv`; `1.0` gives a dataset with no tiers at all, like real Chain. Everything still works:
+  `task_meta.csv`; `1.0` gives a dataset with no tiers at all, like real Chain. Everything still works:
   an unknown tier runs at the average pace in the simulation, and in the peer groups the tier is simply left out.
 - **Teams:** 20 projects of different pace (fast / medium / slow), lognormal durations, working
   hours and weekdays, except about 15% of events (automation, late work) at any hour or day.
@@ -78,7 +80,7 @@ Code layout (`src/flow_health/generator/`): `config.py` (all knobs), `model.py` 
   fan-in (integration tasks that wait on 4-7 earlier ones), diamonds. Edges also appear mid-period and are sometimes removed. No cycles.
 - **Healthy control chains:** linear chains of 4 / 7 / 12 tasks (operational and tactical, per team pace) at
   normal speed. They are the "chains of the same length and shape" a slow chain is judged against.
-- **Healthy lookalikes** (hard negatives, labelled in `tasks_meta.csv`): `slow_legit` (4-8x slower
+- **Healthy lookalikes** (hard negatives, labelled in `answer_key_tasks.csv`): `slow_legit` (4-8x slower
   than its peers), `reopened_legit`, `backlog` and `abandoned` (never finished, nothing depends on them).
 - **`REJECTED` rows:** about 1% of tasks get one in `dependency_history` (as Chain writes for a
   cross-tenant edge). They never become edges and must be ignored by the analysis.

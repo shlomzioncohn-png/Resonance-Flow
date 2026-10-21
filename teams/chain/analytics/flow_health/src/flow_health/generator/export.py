@@ -92,14 +92,18 @@ def write_dataset(out_dir: Path, cfg: GeneratorConfig, world: World, history: Hi
             raise ValueError(f"{name} is empty")
         _write_csv(out_dir / f"{name}.csv", [f.name for f in fields(rows[0])], [asdict(r) for r in rows])
 
-    # generator-only side files: they describe the answer key and must never feed the model
     projects = {p.id: p for p in world.projects}
+    # the four analysis inputs (history tables + the two task files); everything else here is the answer key
+    _write_csv(out_dir / "tasks.csv", ["task_id", "created_at", "project_id"],
+               [{"task_id": t.id, "created_at": t.created_at, "project_id": t.project} for t in world.tasks])
+    # Chain's tables have no tier column, so it lives in its own file (blank when unknown)
+    _write_csv(out_dir / "task_meta.csv", ["task_id", "tier"],
+               [{"task_id": t.id, "tier": "" if peers.tier_of[t.id] == UNKNOWN_TIER else t.tier} for t in world.tasks])
+    # generator-only: describes the answer key and must never feed the analysis
     _write_csv(
-        out_dir / "tasks_meta.csv",
-        ["task_id", "tier", "true_tier", "project", "archetype", "created_at", "kind", "disease_id", "control_id"],
-        # `tier` is what the analysis may see (blank when unknown); `true_tier` is the answer key
-        [{"task_id": t.id, "tier": "" if peers.tier_of[t.id] == UNKNOWN_TIER else t.tier, "true_tier": t.tier,
-          "project": t.project, "archetype": projects[t.project].archetype, "created_at": t.created_at,
+        out_dir / "answer_key_tasks.csv",
+        ["task_id", "true_tier", "archetype", "kind", "disease_id", "control_id"],
+        [{"task_id": t.id, "true_tier": t.tier, "archetype": projects[t.project].archetype,
           "kind": t.kind, "disease_id": t.disease_id, "control_id": t.control_id} for t in world.tasks])
     control_rows = []
     for c in world.controls:
