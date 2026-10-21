@@ -10,6 +10,7 @@ import json
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 DEMO_DIR = Path(__file__).resolve().parent
 SCENARIO_DIR = DEMO_DIR / "scenario"
@@ -30,6 +31,13 @@ MEETING_AUDIO = ARTIFACTS_DIR / "meeting.m4a"
 FORM_IMAGE = ARTIFACTS_DIR / "supplier_form.jpg"
 
 SCENARIO_MONDAY = date(2026, 10, 5)
+
+# The tenant every event is sent for, unless --tenant-id or DEMO_TENANT_ID says
+# otherwise. Mind accepts only a UUID, and Inbox creates a task only for a
+# tenant it already has (tasks.tenant_id is a foreign key to tenants.id). This
+# is Inbox's built-in "System" tenant (migration V15), the one tenant every
+# Inbox database has, even an empty one.
+DEFAULT_TENANT_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
 def _at(hour: int, minute: int) -> datetime:
