@@ -28,7 +28,7 @@ from mind.task_creation.listener import (
     task_created_handler,
 )
 from mind.task_creation.pending import PendingRequests
-from tests.test_index_consumer import FakeVectorStore
+from tests.test_index_consumer import TENANT, FakeTenantStore, FakeVectorIndex
 
 ITEM = UUID("6f1c2e9a-3b4d-4c8e-9a1f-2d7e5b0c4a83")
 TASK_ID = "4d0c6f2a-8b1e-4c3d-9a7f-1e2b3c4d5e6f"
@@ -63,14 +63,19 @@ class FakeMessage:
         return self._headers
 
 
-class BrokenStore(FakeVectorStore):
+class BrokenIndex(FakeVectorIndex):
+    def for_tenant(self, tenant_id: UUID) -> FakeTenantStore:
+        return BrokenStore(self, tenant_id)
+
+
+class BrokenStore(FakeTenantStore):
     async def upsert_if_absent(
         self, task_id: str, vector: list[float], *, content_hash: str | None = None
     ) -> bool:
         raise ConnectionError("database unavailable")
 
 
-def _flow(store: FakeVectorStore) -> TaskCreationFlow:
+def _flow(store: FakeVectorIndex) -> TaskCreationFlow:
     return TaskCreationFlow(producer=FakeProducer(), index=store, pending=PendingRequests())
 
 
@@ -88,13 +93,15 @@ def _sent(flow: TaskCreationFlow, loop: asyncio.AbstractEventLoop) -> UUID:
 
 
 def _event() -> TaskCreatedEvent:
-    return TaskCreatedEvent(id=TASK_ID, title="Send the Q3 revenue report", description="Before Friday.")
+    return TaskCreatedEvent(
+        id=TASK_ID, tenant_id=str(TENANT), title="Send the Q3 revenue report", description="Before Friday."
+    )
 
 
 def test_the_handler_passes_the_event_and_the_envelopes_headers(
     loop: asyncio.AbstractEventLoop,
 ) -> None:
-    store = FakeVectorStore()
+    store = FakeVectorIndex()
     flow = _flow(store)
     correlation_id = _sent(flow, loop)
 
@@ -106,7 +113,7 @@ def test_the_handler_passes_the_event_and_the_envelopes_headers(
 def test_a_message_with_no_headers_is_ignored(loop: asyncio.AbstractEventLoop) -> None:
     """Tasks created by anyone else; confluent-kafka returns None, not []."""
 
-    store = FakeVectorStore()
+    store = FakeVectorIndex()
     flow = _flow(store)
     _sent(flow, loop)
 
@@ -118,7 +125,7 @@ def test_a_message_with_no_headers_is_ignored(loop: asyncio.AbstractEventLoop) -
 def test_a_failure_propagates_so_the_offset_is_not_committed(
     loop: asyncio.AbstractEventLoop,
 ) -> None:
-    flow = _flow(BrokenStore())
+    flow = _flow(BrokenIndex())
     correlation_id = _sent(flow, loop)
 
     with pytest.raises(ConnectionError):
@@ -233,7 +240,7 @@ def _listen(
         consumer.time = time_
     connections = iter(consumers)
     run_task_created_listener(
-        _flow(FakeVectorStore()),
+        _flow(FakeVectorIndex()),
         loop,
         consumer_factory=lambda: next(connections),
         sleep=time_.sleep,
