@@ -35,7 +35,7 @@ async def _pending() -> PendingRequests:
     pending = PendingRequests()
     await pending.add(
         REQUEST_ID,
-        PendingRequest(bridge_correlation_id=ITEM, revision=0, task_index=0, sent_at=SENT),
+        PendingRequest(bridge_correlation_id=ITEM, revision=0, task_index=0, tenant_id=TENANT, sent_at=SENT),
     )
     return pending
 
@@ -129,7 +129,7 @@ async def test_no_warning_for_a_request_answered_while_the_timer_ran(
     pending = AnsweredMidCheck()
     await pending.add(
         REQUEST_ID,
-        PendingRequest(bridge_correlation_id=ITEM, revision=0, task_index=0, sent_at=SENT),
+        PendingRequest(bridge_correlation_id=ITEM, revision=0, task_index=0, tenant_id=TENANT, sent_at=SENT),
     )
 
     with caplog.at_level(logging.WARNING, logger="mind.task_creation"):
@@ -183,6 +183,6 @@ async def test_a_discard_cannot_slip_between_mark_reporteds_check_and_write() ->
 
     await pending.add(
         REQUEST_ID,
-        PendingRequest(bridge_correlation_id=ITEM, revision=1, task_index=0, sent_at=SENT),
+        PendingRequest(bridge_correlation_id=ITEM, revision=1, task_index=0, tenant_id=TENANT, sent_at=SENT),
     )
     assert await pending.mark_reported(REQUEST_ID) is True

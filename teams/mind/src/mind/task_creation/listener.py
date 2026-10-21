@@ -32,16 +32,37 @@ class _KafkaMessage(Protocol):
     def headers(self) -> Headers: ...
 
 
+def start_background_loop() -> AbstractEventLoop:
+    """A new event loop, run forever on its own daemon thread. Hand it work
+    from any other thread with `asyncio.run_coroutine_threadsafe`."""
+
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, daemon=True, name="mind-task-creation-loop")
+    thread.start()
+    return loop
+
+
+def stop_background_loop(loop: AbstractEventLoop) -> None:
+    """Stop a loop started by `start_background_loop`. Does not join its
+    thread — the loop's daemon thread dies with the process either way."""
+
+    loop.call_soon_threadsafe(loop.stop)
+
+
 def task_created_handler(
-    flow: TaskCreationFlow, loop: AbstractEventLoop
+    flow: TaskCreationFlow, loop: AbstractEventLoop, *, result_timeout: float = 60.0
 ) -> Callable[[object, object], None]:
-    """The function `ProtobufConsumer.run` calls with (event, message)."""
+    """The function `ProtobufConsumer.run` calls with (event, message).
+
+    `result_timeout` bounds the wait on `loop`: a dead or stuck loop thread
+    would otherwise hang this call forever, with no exception for the
+    listener's reconnect logic to catch.
+    """
 
     def _handle(event: object, message: object) -> None:
         # The correlation_id is on the envelope: the message goes in for its headers.
-        loop.run_until_complete(
-            flow.on_task_created(cast(TaskCreatedEvent, event), cast(_KafkaMessage, message).headers())
-        )
+        coro = flow.on_task_created(cast(TaskCreatedEvent, event), cast(_KafkaMessage, message).headers())
+        asyncio.run_coroutine_threadsafe(coro, loop).result(result_timeout)
 
     return _handle
 
@@ -70,6 +91,7 @@ def run_task_created_listener(
     loop: AbstractEventLoop,
     *,
     max_outage: float = MAX_OUTAGE,
+    result_timeout: float = 60.0,
     consumer_factory: Callable[[], _Consumer] | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
@@ -78,11 +100,13 @@ def run_task_created_listener(
 
     Reconnects after a failure; after `max_outage` seconds of failing, lets the
     error out for the process to exit and restart. The flow's vector store must
-    already be open on `loop`.
+    already be open on `loop`. A stuck `loop` thread times out after
+    `result_timeout` seconds instead of hanging -- that timeout is itself just
+    another failure to this reconnect logic.
     """
 
     make_consumer = consumer_factory or (lambda: ProtobufConsumer(group_id=GROUP_ID, topics=[TOPIC]))
-    handle = task_created_handler(flow, loop)
+    handle = task_created_handler(flow, loop, result_timeout=result_timeout)
     outage_began: float | None = None
     failures = 0
     handling_since: float | None = None  # when the message being handled arrived
@@ -140,7 +164,10 @@ def run_overdue_timer(
     """Check for overdue requests every `interval` seconds until `stop` is set. Blocks.
 
     A failed check is logged and the timer goes on. Waits on `stop`, so a
-    shutdown does not wait out the interval.
+    shutdown does not wait out the interval. Owns its own loop, independent of
+    the listener's shared one, so neither's work delays the other -- `flow`'s
+    `on_tick` (if any) is expected to be safe to run here, on this loop, on
+    this thread, same as `check_overdue`'s own bookkeeping.
     """
 
     loop = asyncio.new_event_loop()

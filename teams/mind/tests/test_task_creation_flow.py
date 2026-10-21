@@ -314,12 +314,17 @@ async def test_an_unreadable_correlation_header_is_a_warning_not_silence(
     assert "not-a-uuid" in caplog.text
 
 
-async def test_an_unreadable_tenant_id_is_a_warning_not_silence(
+async def test_an_unreadable_tenant_id_skips_dependency_publishing(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Inbox's own event malformed this time, not the header. Must still be
-    ignored rather than raising -- an uncaught error here leaves the offset
-    uncommitted, and Kafka redelivers the same malformed event forever."""
+    """Can't confirm the task belongs to the tenant Mind requested, so
+    publishing under Mind's own tenant_id is skipped -- but it's still
+    indexed and matched; `MatchedReply.tenant_id` is unaffected."""
+
+    heard: list[MatchedReply] = []
+
+    async def on_matched(matched: MatchedReply) -> None:
+        heard.append(matched)
 
     pending, store = PendingRequests(), FakeVectorStore()
     correlation_id = await _send(pending)
@@ -327,12 +332,42 @@ async def test_an_unreadable_tenant_id_is_a_warning_not_silence(
     event.tenant_id = "not-a-uuid"
 
     with caplog.at_level(logging.WARNING, logger="mind.task_creation"):
-        matched = await handle_task_created_reply(store, pending, event, headers)
+        matched = await handle_task_created_reply(store, pending, event, headers, on_matched)
 
-    assert matched is None
     assert "not-a-uuid" in caplog.text
-    assert store.rows == {}  # not indexed
-    assert await pending.get(correlation_id) is not None  # not discarded
+    assert matched is not None and matched.tenant_id == TENANT
+    assert TASK_ID in store.rows
+    assert heard == []
+    assert await pending.get(correlation_id) is None
+
+
+async def test_a_tenant_id_mismatch_skips_dependency_publishing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Inbox echoing back a different tenant_id than Mind requested should
+    never happen, but if it does, publishing under Mind's own (possibly
+    wrong) tenant_id is skipped -- without changing which tenant the match
+    itself is recorded under."""
+
+    heard: list[MatchedReply] = []
+
+    async def on_matched(matched: MatchedReply) -> None:
+        heard.append(matched)
+
+    pending, store = PendingRequests(), FakeVectorStore()
+    correlation_id = await _send(pending)
+    event, headers = _reply(correlation_id)
+    other_tenant = UUID("22222222-2222-2222-2222-222222222222")
+    event.tenant_id = str(other_tenant)
+
+    with caplog.at_level(logging.WARNING, logger="mind.task_creation"):
+        matched = await handle_task_created_reply(store, pending, event, headers, on_matched)
+
+    assert str(other_tenant) in caplog.text
+    assert matched is not None and matched.tenant_id == TENANT
+    assert TASK_ID in store.rows
+    assert heard == []
+    assert await pending.get(correlation_id) is None
 
 
 # --- wired to DependencyAdapter, end to end (#355) ---------------------------
@@ -361,7 +396,7 @@ async def test_sending_a_request_publishes_no_dependencies_before_the_reply_arri
     )
 
     await flow.send(
-        _proposal(), bridge_correlation_id=ITEM, revision=0, dependency_mentions=["the DB upgrade"]
+        _proposal(), bridge_correlation_id=ITEM, revision=0, dependency_mentions=("the DB upgrade",)
     )
 
     assert sink.sent == []
@@ -383,7 +418,7 @@ async def test_the_full_round_trip_from_send_to_a_published_dependency() -> None
     proposal = _proposal()
 
     correlation_id = await flow.send(
-        proposal, bridge_correlation_id=ITEM, revision=0, dependency_mentions=["the DB upgrade"]
+        proposal, bridge_correlation_id=ITEM, revision=0, dependency_mentions=("the DB upgrade",)
     )
 
     with patch(

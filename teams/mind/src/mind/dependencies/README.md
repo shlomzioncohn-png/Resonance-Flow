@@ -18,13 +18,14 @@ them off #353's `MatchedReply`/`PendingRequest` itself -- `adapter.py` is the on
 that reads `matched.task_id`, `matched.tenant_id` and
 `matched.request.dependency_mentions` and passes them through.
 
-`tenant_id` is already on Inbox's `task.created` event (every task has one), so
-`MatchedReply` reads it straight from there -- no state needed. `dependency_mentions`
-is different: Inbox's schema has no such field, since it's Mind's own pre-creation
-extraction output, not part of the canonical task. The only way to recover it when
-`task.created` arrives is to have remembered it against the request's
-`correlation_id` -- so it lives on `PendingRequest`, carried from `flow.send()`'s
-own `dependency_mentions` argument the same way `revision`/`task_index` already were.
+Both `tenant_id` and `dependency_mentions` live on `PendingRequest`, carried
+from the request Mind itself sent (`flow.send()`'s own `request.tenant_id` and
+`dependency_mentions` argument), rather than parsed off Inbox's `task.created`
+event. `dependency_mentions` has no equivalent on the canonical task at all --
+it's Mind's own pre-creation extraction output -- so `PendingRequest` is the
+only place to recover it when `task.created` arrives. `tenant_id` is also on
+that event, but reading it from `PendingRequest` instead means a malformed
+`event.tenant_id` can never cost a task its dependency publishing.
 
 ## Wiring it in
 
@@ -35,10 +36,10 @@ own `dependency_mentions` argument the same way `revision`/`task_index` already 
 flow = TaskCreationFlow(..., on_matched=DependencyAdapter(publisher).on_task_created)
 ```
 
-It reads `matched.tenant_id` (straight off `task.created`) and
-`matched.request.dependency_mentions` (on `PendingRequest` since #353) and
-calls `publish_dependencies`. See its module docstring for the retry
-tracking described below.
+It reads `matched.tenant_id` and `matched.request.dependency_mentions` --
+both on `PendingRequest` since #353, carried from Mind's own request rather
+than parsed off `task.created` -- and calls `publish_dependencies`. See its
+module docstring for the retry tracking described below.
 
 ## An unresolved target isn't dropped
 
@@ -49,11 +50,13 @@ and holds the rest -- neither dropped nor force-published.
 retries it on every subsequent `on_task_created`, since any newly created
 task might be exactly what was missing, and drops it once
 `publish_dependencies` reports nothing outstanding (`True`). The per-task
-published-edge tracking means an edge already sent this process is never
-sent twice. That tracking is in-memory only -- it doesn't survive a
-restart, so the same mentions publish the same edges again afterwards,
-relying on Chain treating a re-proposed edge (same `depends_on_task_id`,
-same `task_id`) as a no-op rather than a hard duplicate.
+published-edge tracking dedups an edge only for as long as its record
+survives -- within `_MAX_PUBLISHED_AGE`, and as long as it isn't evicted by
+the `_MAX_PUBLISHED` cap -- not forever. It's in-memory only besides, so it
+doesn't survive a restart either. After expiry, eviction, or a restart, the
+same mentions publish the same edges again, relying on Chain treating a
+re-proposed edge (same `depends_on_task_id`, same `task_id`) as a no-op
+rather than a hard duplicate.
 
 ## Running the tests
 

@@ -21,6 +21,7 @@ from mind.task_creation.pending import PendingRequest, PendingRequests
 from mind.task_creation.send import TOPIC, send_creation_request
 
 ITEM = UUID("6f1c2e9a-3b4d-4c8e-9a1f-2d7e5b0c4a83")
+TENANT = UUID("11111111-1111-1111-1111-111111111111")
 
 
 class FakeProducer:
@@ -42,7 +43,7 @@ class FakeProducer:
 
 def _request(source_ref: str = "C024BE91L:1728900000.000100") -> TaskCreationRequested:
     return TaskCreationRequested(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+        tenant_id=TENANT,
         title="Send the Q3 revenue report",
         source_type=SourceType.SLACK,
         source_ref=source_ref,
@@ -94,6 +95,24 @@ async def test_what_is_registered_keeps_the_item_its_revision_and_task_number() 
     entry = await pending.get(correlation_id)
     assert entry is not None
     assert (entry.bridge_correlation_id, entry.revision, entry.task_index) == (ITEM, 3, 0)
+
+
+async def test_a_list_of_mentions_is_coerced_to_a_tuple_so_the_entry_stays_hashable() -> None:
+    """The parameter accepts any `Sequence[str]`, including the list a caller
+    naturally reaches for -- coerced to a tuple so it doesn't sit inside this
+    frozen dataclass and break hashing it."""
+
+    pending = PendingRequests()
+    correlation_id = await send_creation_request(
+        FakeProducer(pending), pending, _request(),
+        bridge_correlation_id=ITEM, revision=0,
+        dependency_mentions=["the DB upgrade"],
+    )
+
+    entry = await pending.get(correlation_id)
+    assert entry is not None
+    assert entry.dependency_mentions == ("the DB upgrade",)
+    hash(entry)  # raises TypeError if a mutable list ever sneaks in
 
 
 async def test_a_failed_publish_takes_its_registration_back() -> None:
@@ -240,7 +259,9 @@ async def test_renewing_does_not_bring_back_a_request_already_answered() -> None
 
     pending = PendingRequests()
     correlation_id = correlation_id_for(ITEM)
-    entry = PendingRequest(bridge_correlation_id=ITEM, revision=1, task_index=0)
+    entry = PendingRequest(
+        bridge_correlation_id=ITEM, revision=1, task_index=0, tenant_id=TENANT
+    )
     await pending.add(correlation_id, entry)
 
     await pending.discard(correlation_id)  # the listener matched the reply

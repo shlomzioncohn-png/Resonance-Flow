@@ -12,6 +12,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
+from typing import cast
 from uuid import UUID
 
 import pytest
@@ -25,6 +26,8 @@ from mind.task_creation.listener import (
     GROUP_ID,
     run_overdue_timer,
     run_task_created_listener,
+    start_background_loop,
+    stop_background_loop,
     task_created_handler,
 )
 from mind.task_creation.pending import PendingRequests
@@ -41,11 +44,16 @@ def _no_embedding_model(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def loop() -> Iterator[asyncio.AbstractEventLoop]:
-    """The listener's own loop, as in R3's runner: the consumer calls a plain function."""
+    """The shared loop, as in production: `run_forever` on its own thread, so
+    `task_created_handler`'s `run_coroutine_threadsafe(...).result()` has
+    something to wait on."""
 
-    loop = asyncio.new_event_loop()
+    before = {t.ident for t in threading.enumerate()}
+    loop = start_background_loop()
+    (thread,) = [t for t in threading.enumerate() if t.ident not in before]
     yield loop
-    loop.close()
+    stop_background_loop(loop)
+    thread.join(timeout=1.0)
 
 
 class FakeProducer:
@@ -84,7 +92,8 @@ def _sent(flow: TaskCreationFlow, loop: asyncio.AbstractEventLoop) -> UUID:
         has_dependencies=False,
         confidence=0.85,
     )
-    return loop.run_until_complete(flow.send(proposal, bridge_correlation_id=ITEM, revision=0))
+    coro = flow.send(proposal, bridge_correlation_id=ITEM, revision=0)
+    return asyncio.run_coroutine_threadsafe(coro, loop).result()
 
 
 def _event() -> TaskCreatedEvent:
@@ -192,6 +201,71 @@ def test_a_failed_check_is_logged_and_the_timer_goes_on(caplog: pytest.LogCaptur
 
     assert len(flow.checked_at) == 2
     assert "store unavailable" in caplog.text
+
+
+# --- one shared loop, run continuously ---------------------------------------
+
+
+class SweepingFlow:
+    """on_task_created schedules background work with `ensure_future` and
+    returns without waiting for it — as DependencyAdapter's retry sweep does."""
+
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+        self.sweep_progressed = threading.Event()
+
+    async def on_task_created(self, event: object, headers: object) -> None:
+        async def _sweep() -> None:
+            await asyncio.sleep(0.05)
+            self.sweep_progressed.set()
+
+        asyncio.ensure_future(_sweep(), loop=self._loop)
+
+
+def test_a_background_task_keeps_running_after_the_call_that_scheduled_it_returns(
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    """The bug this restructure fixes: with `run_until_complete`, the loop
+    stops the moment the handler's own call returns, freezing an unawaited
+    background task until the next message. With the loop run continuously
+    (`start_background_loop`), it keeps making progress in between."""
+
+    flow = SweepingFlow(loop)
+    handle = task_created_handler(cast(TaskCreationFlow, flow), loop)
+
+    handle(_event(), FakeMessage(None))
+
+    assert flow.sweep_progressed.wait(1.0)
+
+
+def test_start_background_loop_runs_until_stopped() -> None:
+    before = {t.ident for t in threading.enumerate()}
+    loop = start_background_loop()
+    (thread,) = [t for t in threading.enumerate() if t.ident not in before]
+
+    assert thread.is_alive()
+    assert asyncio.run_coroutine_threadsafe(asyncio.sleep(0), loop).result(1.0) is None
+
+    stop_background_loop(loop)
+    thread.join(timeout=1.0)
+
+    assert not thread.is_alive()
+
+
+# --- the listener's own cross-loop timeout ------------------------------------
+
+
+def test_task_created_handler_times_out_instead_of_hanging_on_a_loop_that_never_runs() -> None:
+    """The listener's own cross-loop hand-off, guarded the same way."""
+
+    dead_loop = asyncio.new_event_loop()
+    flow = _flow(FakeVectorStore())
+    handle = task_created_handler(flow, dead_loop, result_timeout=0.05)
+
+    with pytest.raises(TimeoutError):
+        handle(_event(), FakeMessage(None))
+
+    dead_loop.close()
 
 
 # --- recovering from a failure, for as long as the outage allows ------------

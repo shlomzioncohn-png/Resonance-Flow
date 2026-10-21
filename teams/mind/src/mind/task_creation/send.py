@@ -47,6 +47,7 @@ async def send_creation_request(
         bridge_correlation_id=bridge_correlation_id,
         revision=revision,
         task_index=task_index,
+        tenant_id=request.tenant_id,
         dependency_mentions=tuple(dependency_mentions),
     )
     registered_now = await pending.add(correlation_id, entry)

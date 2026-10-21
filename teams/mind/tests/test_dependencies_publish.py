@@ -1,8 +1,9 @@
 """#355: task.dependencies.proposed is published once per newly-resolved
-dependency edge, after the real task_id is known; never twice for the same
-edge, and never at all with nothing to say. No broker: the sink is an
-in-memory list, and resolve_dependency_targets (#245) is mocked -- its own
-behavior is tests/test_dependency_resolution.py's job, not this file's."""
+dependency edge, after the real task_id is known; deduped for as long as
+its sent-edges record survives the TTL/cap, and never published with
+nothing to say. No broker: the sink is an in-memory list, and
+resolve_dependency_targets (#245) is mocked -- its own behavior is
+tests/test_dependency_resolution.py's job, not this file's."""
 
 import asyncio
 from unittest.mock import AsyncMock, patch
@@ -13,7 +14,11 @@ from pydantic import ValidationError
 
 from mind.contracts.task_dependencies_proposed import DependencyProposed
 from mind.dependencies.event import build_dependency_event
-from mind.dependencies.publisher import DependencyPublisher
+from mind.dependencies.publisher import (
+    _EXPIRE_SWEEP_INTERVAL,
+    _MAX_PUBLISHED_AGE,
+    DependencyPublisher,
+)
 from mind.embeddings.base import SearchResult
 
 TASK_A = "3f2c1a9e-7b4d-4e8a-9c1f-0a2b3c4d5e6f"
@@ -308,6 +313,10 @@ async def test_a_mention_with_two_candidates_above_threshold_publishes_only_the_
 
 
 async def test_a_cancelled_call_does_not_lose_track_of_a_completed_send():
+    """A cancelled call whose send still reaches the sink must record the
+    edge -- otherwise a later retry bundles it with newly-resolved mentions
+    under a different event_id, and Chain's per-event_id dedup can't catch
+    the resulting duplicate delivery."""
     import time
 
     class SlowSink(ListSink):
@@ -328,9 +337,11 @@ async def test_a_cancelled_call_does_not_lose_track_of_a_completed_send():
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
-        await asyncio.sleep(0.1)  # let the background send actually finish
+        # `task` only raises after its shielded wait for the real send outcome
+        # completes, so the send is done and no thread is left running here.
 
     assert len(slow_sink.sent) == 1
+    assert TASK_A in slow_publisher._published
 
     # a second call for the same edge must not duplicate it
     with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
@@ -338,6 +349,76 @@ async def test_a_cancelled_call_does_not_lose_track_of_a_completed_send():
             task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
         )
     assert len(slow_sink.sent) == 1
+
+
+async def test_a_cancelled_call_whose_send_then_fails_logs_and_does_not_record(caplog):
+    """The one extra shielded wait can also surface a genuine send failure
+    (not a further cancellation) -- that must be logged, not swallowed, and
+    must not record anything in `_published`."""
+    import time
+
+    class SlowFailingSink(ListSink):
+        def send(self, payload):
+            time.sleep(0.05)
+            raise RuntimeError("broker down")
+
+    slow_sink = SlowFailingSink()
+    slow_publisher = DependencyPublisher(store=object(), sink=slow_sink)  # type: ignore[arg-type]
+
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+        task = asyncio.ensure_future(
+            slow_publisher.publish_dependencies(
+                task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+            )
+        )
+        await asyncio.sleep(0.01)  # let it reach the send, still in flight
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert slow_sink.sent == []
+    assert TASK_A not in slow_publisher._published
+    assert "cancelled send failed" in caplog.text
+
+
+async def test_a_second_cancellation_during_the_shielded_recovery_wait_propagates_promptly():
+    """`shield` only protects `send_task` itself -- the await point that waits
+    for its real outcome can be cancelled again. A second cancellation must
+    not be absorbed into another wait (that could hang forever if the send
+    never completes); it propagates immediately, unrecorded, bounded in time."""
+    import time
+
+    class SlowSink(ListSink):
+        def send(self, payload):
+            time.sleep(0.05)
+            super().send(payload)
+
+    slow_sink = SlowSink()
+    slow_publisher = DependencyPublisher(store=object(), sink=slow_sink)  # type: ignore[arg-type]
+
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+        task = asyncio.ensure_future(
+            slow_publisher.publish_dependencies(
+                task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+            )
+        )
+        await asyncio.sleep(0.01)  # let it reach the send, still in flight
+        task.cancel()
+        await asyncio.sleep(0.02)  # still in flight; cancel again mid-recovery wait
+        task.cancel()
+        async with asyncio.timeout(1):
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        # the second cancel propagated before the send (and its record) landed,
+        # but the send itself keeps running in the background -- drain it so no
+        # task/thread is left dangling once this test ends.
+        async with asyncio.timeout(1):
+            while not slow_sink.sent:
+                await asyncio.sleep(0.01)
+
+    assert slow_sink.sent  # the send still completed, unrecorded
+    assert TASK_A not in slow_publisher._published
 
 
 async def test_a_task_that_publishes_nothing_gets_no_published_entry(publisher, sink):
@@ -459,3 +540,165 @@ async def test_the_same_task_in_different_case_is_recognized_as_already_sent(pub
         )
 
     assert len(sink.sent) == 1
+
+
+# --- #355 code review: _published is capped and expires ----------------------
+
+
+async def test_a_published_entry_expires_after_max_published_age_and_is_re_sent(sink):
+    now = 0.0
+    publisher = DependencyPublisher(store=object(), sink=sink, clock=lambda: now)  # type: ignore[arg-type]
+
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+        await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+    assert TASK_A in publisher._published
+
+    now = now + _MAX_PUBLISHED_AGE.total_seconds() + 1
+    publisher._clock = lambda: now
+
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+        await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+
+    assert len(sink.sent) == 2  # expired, so re-sent instead of deduped
+
+
+async def test_published_is_capped_and_evicts_the_oldest_entry_once_full(sink, monkeypatch):
+    """#355 code review finding: a cap-full task must still get its edge
+    recorded, evicting the oldest entry instead of silently dropping the
+    new one -- a dropped record would resend the same edge on every retry."""
+    monkeypatch.setattr("mind.dependencies.publisher._MAX_PUBLISHED", 2)
+    now = 0.0
+    publisher = DependencyPublisher(store=object(), sink=sink, clock=lambda: now)  # type: ignore[arg-type]
+    target = str(uuid4())
+
+    with _resolved([SearchResult(task_id=target, similarity=0.9)]):
+        await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+    now = now + 1
+    publisher._clock = lambda: now
+    with _resolved([SearchResult(task_id=target, similarity=0.9)]):
+        await publisher.publish_dependencies(
+            task_id=TASK_B, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+    assert len(publisher._published) == 2
+
+    now = now + 1
+    publisher._clock = lambda: now
+    with _resolved([SearchResult(task_id=target, similarity=0.9)]):
+        await publisher.publish_dependencies(
+            task_id=TASK_C, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+
+    assert TASK_A not in publisher._published  # oldest, evicted
+    assert TASK_B in publisher._published
+    assert TASK_C in publisher._published
+    assert len(publisher._published) == 2
+
+
+async def test_eviction_prefers_a_fully_resolved_entry_over_an_older_still_pending_one(
+    sink, monkeypatch
+):
+    """#355 code review finding: a still-pending task's dedup record is the
+    only one a future retry actually needs -- a fully-resolved task is never
+    touched again, so eviction must sacrifice it first even when it is the
+    newer entry by `last_sent_at`."""
+    monkeypatch.setattr("mind.dependencies.publisher._MAX_PUBLISHED", 2)
+    now = 0.0
+    publisher = DependencyPublisher(store=object(), sink=sink, clock=lambda: now)  # type: ignore[arg-type]
+    target = str(uuid4())
+
+    with _resolved([SearchResult(task_id=target, similarity=0.9)], []):
+        await publisher.publish_dependencies(
+            task_id=TASK_B,
+            tenant_id=TENANT,
+            dependency_mentions=["the DB upgrade", "a task that doesn't exist yet"],
+        )
+    now = now + 1
+    publisher._clock = lambda: now
+    with _resolved([SearchResult(task_id=target, similarity=0.9)]):
+        await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+    assert len(publisher._published) == 2
+
+    now = now + 1
+    publisher._clock = lambda: now
+    with _resolved([SearchResult(task_id=target, similarity=0.9)]):
+        await publisher.publish_dependencies(
+            task_id=TASK_C, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+
+    assert TASK_A not in publisher._published  # newer, but fully resolved: evicted first
+    assert TASK_B in publisher._published  # older, but still pending: spared
+    assert TASK_C in publisher._published
+    assert len(publisher._published) == 2
+
+
+async def test_a_still_pending_entry_is_evicted_once_no_fully_resolved_entries_remain(
+    sink, monkeypatch
+):
+    """Only once every candidate is still-pending does eviction fall back to
+    the globally-oldest entry -- there's no lower-cost, fully-resolved record
+    left to sacrifice instead."""
+    monkeypatch.setattr("mind.dependencies.publisher._MAX_PUBLISHED", 2)
+    now = 0.0
+    publisher = DependencyPublisher(store=object(), sink=sink, clock=lambda: now)  # type: ignore[arg-type]
+    target = str(uuid4())
+
+    with _resolved([SearchResult(task_id=target, similarity=0.9)], []):
+        await publisher.publish_dependencies(
+            task_id=TASK_A,
+            tenant_id=TENANT,
+            dependency_mentions=["the DB upgrade", "a task that doesn't exist yet"],
+        )
+    now = now + 1
+    publisher._clock = lambda: now
+    with _resolved([SearchResult(task_id=target, similarity=0.9)], []):
+        await publisher.publish_dependencies(
+            task_id=TASK_B,
+            tenant_id=TENANT,
+            dependency_mentions=["the DB upgrade", "a task that doesn't exist yet"],
+        )
+    assert len(publisher._published) == 2
+
+    now = now + 1
+    publisher._clock = lambda: now
+    with _resolved([SearchResult(task_id=target, similarity=0.9)], []):
+        await publisher.publish_dependencies(
+            task_id=TASK_C,
+            tenant_id=TENANT,
+            dependency_mentions=["the DB upgrade", "a task that doesn't exist yet"],
+        )
+
+    assert TASK_A not in publisher._published  # oldest, and no resolved entry to spare instead
+    assert TASK_B in publisher._published
+    assert TASK_C in publisher._published
+    assert len(publisher._published) == 2
+
+
+async def test_the_expiry_sweep_is_throttled_and_runs_again_after_the_interval(sink):
+    """The scan over `_published` is O(n); this bounds it to roughly once per
+    `_EXPIRE_SWEEP_INTERVAL` instead of running on every call."""
+    now = 0.0
+    publisher = DependencyPublisher(store=object(), sink=sink, clock=lambda: now)  # type: ignore[arg-type]
+    publisher._expire_stale_published()  # first call always runs, sets the baseline
+    assert publisher._last_expired_at == now
+
+    # a stale entry inserted directly, old enough to be expired once the sweep runs
+    stale_at = now - _MAX_PUBLISHED_AGE.total_seconds() - 1
+    publisher._published[TASK_A] = ({}, stale_at, True)
+
+    now = now + _EXPIRE_SWEEP_INTERVAL.total_seconds() - 1
+    publisher._clock = lambda: now
+    publisher._expire_stale_published()
+    assert TASK_A in publisher._published  # sweep skipped: still within the interval
+
+    now = now + 1
+    publisher._clock = lambda: now
+    publisher._expire_stale_published()
+    assert TASK_A not in publisher._published  # interval elapsed: sweep ran
