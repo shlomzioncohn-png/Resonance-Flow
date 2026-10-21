@@ -30,11 +30,12 @@ Kubernetes, so a plain service container is enough here.
 | File | Role |
 |---|---|
 | `schema-subjects.tsv` | the one list of `proto file → registry subject`, plus the `# compatibility:` level, for both CI and the CD hook. **Add a new schema here, nowhere else.** |
-| `_load-schema-policy.sh` | sourced by the two scripts below; loads the list + level from `<git-ref>` (the PR's base), never from the PR. |
+| `_load-schema-policy.sh` | sourced by the scripts below; loads the list + level from `<git-ref>` (the PR's base), never from the PR, plus the rows the PR adds to the list. |
 | `check-schema-compatibility.sh` | dry-run compatibility check for one schema against `$SCHEMA_REGISTRY_URL`. Also used verbatim by the cluster hook. |
 | `register-schema.sh` | registers one schema version. Used by the cluster hook (post-merge) and by `seed-registry.sh` (to load the base-branch versions). |
 | `seed-registry.sh <git-ref>` | for each schema on `<git-ref>`, loads its version into the registry, and sets the compatibility level from `<git-ref>`. `<git-ref>` is any branch/commit — CI passes the PR's base, locally you pass whichever branch you're merging into. |
 | `check-all-schemas.sh <git-ref>` | runs `check-schema-compatibility.sh` for every schema on `<git-ref>` (the .proto content checked is this checkout's); fails if any is incompatible. |
+| `register-added-schemas.sh <git-ref>` | registers the rows this checkout adds to `schema-subjects.tsv` relative to `<git-ref>`, so a broken new row fails the PR instead of the post-merge hook. CI-only. |
 
 ## Compatibility level, and where the rules come from
 
@@ -76,6 +77,15 @@ new subject, and the hook's `run-all.sh` hard-deletes the subject before
 registering. Land it in its own PR before the breaking one, and remove it once
 the cluster has synced — otherwise every sync re-creates the subject with a new id.
 
+### Rows the PR adds
+
+Since the list comes from the base, a row the PR adds isn't seeded or checked.
+`register-added-schemas.sh` runs after the check and registers each added row's
+PR version in the throwaway registry — the same thing the hook will do after
+merge. That catches a typo'd file or subject, a schema the registry can't parse,
+or an import with no library row before merge (#857). Additions only: removals
+and the `# reset:` / `# compatibility:` lines still come from the base.
+
 ## What schema changes are allowed
 
 Two layers decide this:
@@ -103,6 +113,7 @@ export SCHEMA_REGISTRY_URL=http://localhost:8081/apis/ccompat/v6
 # pass the branch you intend to merge into — origin/main, origin/relay-team, ...
 bash seed-registry.sh origin/relay-team
 bash check-all-schemas.sh origin/relay-team
+bash register-added-schemas.sh origin/relay-team
 
 docker rm -f schema-registry
 ```
