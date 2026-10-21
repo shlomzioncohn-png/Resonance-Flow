@@ -12,7 +12,7 @@ import java.util.UUID;
 // container. So a test must only ever remove rows it created itself: a repository.deleteAll()
 // in a cleanup method empties the whole table for everyone. Create every row under a tenant the
 // test persisted, then hand those tenant ids to deleteTenantData.
-@SpringBootTest
+@SpringBootTest(properties = "inbox.scheduling.enabled=false")
 public abstract class PostgresIntegrationTest {
 
     @Autowired

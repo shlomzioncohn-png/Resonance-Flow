@@ -159,8 +159,9 @@ teams/inbox/src/main/java/com/rnd/inbox/
 │                       service/controller yet)
 ├── team/               Team, TeamMember, TeamMemberId, TeamStatus, TeamRepository
 │                       (placeholder — no service/controller yet)
-├── audit/              AuditLog, AuditLogRepository, AuditService — used by task and user,
-│                       but owns real behavior of its own, so it's a module, not shared infra
+├── audit/              AuditLog, AuditLogRepository, AuditService — used by task, user, team
+│                       and tenant, but owns real behavior of its own (what goes into
+│                       old_values / new_values), so it's a module, not shared infra
 ├── outbox/              OutboxEvent, OutboxStatus, OutboxEventRepository, OutboxWorker,
 │                       OutboxCleanupJob — generic transactional-outbox infra
 ├── structuredtask/      Kafka ingestion of structured-source task events (from BRIDGE, topic

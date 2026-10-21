@@ -26,22 +26,27 @@ public final class ClassificationTestSupport {
     private ClassificationTestSupport() {
     }
 
-    public static MediaClassificationProperties properties(boolean enabled, String apiKey) {
-        return properties(enabled, apiKey, "http://localhost", new MediaClassificationProperties.Documents(5, 2));
+    public static MediaClassificationProperties properties(boolean enabled) {
+        return properties(enabled, documents(5, 2));
+    }
+
+    /** The given page limits, with the default hostile-file guards. */
+    public static MediaClassificationProperties.Documents documents(int maxPagesToScan, int pagesToSend) {
+        return new MediaClassificationProperties.Documents(maxPagesToScan, pagesToSend, 26_214_400L, 25_000_000L);
     }
 
     public static MediaClassificationProperties properties(MediaClassificationProperties.Documents documents) {
-        return properties(true, "", "http://localhost", documents);
+        return properties(true, documents);
     }
 
-    public static MediaClassificationProperties properties(boolean enabled, String apiKey, String baseUrl,
-                                                    MediaClassificationProperties.Documents documents) {
+    public static MediaClassificationProperties properties(boolean enabled,
+                                                           MediaClassificationProperties.Documents documents) {
         return new MediaClassificationProperties(
                 enabled, 0.6, Duration.ofSeconds(60), 4000,
                 Set.of(MeetingCategory.TEST, MeetingCategory.SOCIAL),
                 Set.of(DocumentCategory.BLANK, DocumentCategory.ADVERTISEMENT),
                 documents,
-                new MediaClassificationProperties.Model(baseUrl, "test-model", apiKey, "v1", Duration.ofSeconds(5)));
+                "v1");
     }
 
     /** A scan that found content on the given pages of a document with pageCount pages. */

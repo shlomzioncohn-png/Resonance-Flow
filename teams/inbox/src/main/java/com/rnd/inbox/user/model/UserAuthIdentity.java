@@ -14,6 +14,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -52,6 +53,10 @@ public class UserAuthIdentity {
     private Instant updatedAt;
 
     public UserAuthIdentity() {
+    }
+
+    public static String normalizeIdentifier(String identifier) {
+        return identifier.trim().toLowerCase(Locale.ROOT);
     }
 
     public UUID getId() {

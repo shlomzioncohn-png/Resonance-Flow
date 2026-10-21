@@ -963,6 +963,14 @@ the JSON:
   (in-memory + `PostgresTaskStateHistoryRepository`); `TaskStateHistoryResponse` is the API-layer
   DTO, kept separate from the domain `TaskStateHistoryEntry`.
 
+## Dependency-flow health analytics (`analytics/health/`)
+
+A separate Python project next to the Java service (not part of the Maven build or the Docker image)
+that will flag unhealthy dependency patterns from `dependency_history` and `task_state_history`.
+Stage 1 only: a synthetic history generator that writes rows shaped like those two tables plus a
+ground-truth key of planted diseases. No model, no endpoint, nothing written to Postgres yet. See
+`analytics/health/README.md`.
+
 ## Constraint persistence (Issue #378)
 
 `ConstraintRepository` / `PostgresConstraintRepository` (in `repository/`) give `Constraint` a
