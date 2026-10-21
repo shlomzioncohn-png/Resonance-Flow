@@ -88,7 +88,8 @@ class TaskEligibilityServiceTest {
                     lock,
                     counterUpdater,
                     historyRecorder,
-                    taskReadinessRepository);
+                    taskReadinessRepository
+                    );
 
         edgeService =
             new DependencyEdgeService(
@@ -96,7 +97,8 @@ class TaskEligibilityServiceTest {
                     lock,
                     counterUpdater,
                     historyRecorder,
-                    taskReadinessRepository);
+                    taskReadinessRepository,
+                    taskRepository);
 }
 
     @Test
@@ -575,7 +577,8 @@ class TaskEligibilityServiceTest {
                     lock,
                     counterUpdater,
                     historyRecorder,
-                    taskReadinessRepository);
+                    taskReadinessRepository,
+                    taskRepository);
 
         return new Fixture(
             taskRepo,

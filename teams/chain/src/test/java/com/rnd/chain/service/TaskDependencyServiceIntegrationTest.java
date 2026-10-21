@@ -97,7 +97,7 @@ class TaskDependencyServiceIntegrationTest {
                         PgRepos.graphLock(),
                         counterUpdater,
                         TaskStateHistoryFixtures.newRecorder(),
-                        taskReadinessRepository);
+                        taskReadinessRepository,taskRepository);
 
         taskDependencyService =
                 new TaskDependencyService(

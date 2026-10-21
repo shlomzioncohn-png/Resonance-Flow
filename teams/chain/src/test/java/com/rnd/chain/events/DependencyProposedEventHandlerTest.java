@@ -96,7 +96,7 @@ class DependencyProposedEventHandlerTest {
                         PgRepos.graphLock(),
                         new TaskCounterUpdater(taskRepo, dependencyRepo, new PriorityScoreService(),
                                 new SchedulingPublishListener(taskRepo, schedulingUpdateService), taskReadinessRepository),
-                        TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
+                        TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository,taskRepo);
 
         DependencyHistoryRepository historyRepo =
                 PgRepos.history();

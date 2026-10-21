@@ -82,8 +82,10 @@ public class TaskEligibilityService {
         Objects.requireNonNull(
                 newStatus,
                 "newStatus must not be null");
+        UUID lockTenantId =
+                tenantIdForTask(taskId);
 
-        graphLock.runExclusive(() -> {
+        graphLock.runExclusive(  lockTenantId,() -> {
 
             Task current =
                     taskCounterUpdater.requireTask(taskId);
@@ -189,7 +191,7 @@ public class TaskEligibilityService {
                 tenantId,
                 "tenantId must not be null");
 
-        graphLock.runExclusive(() -> {
+        graphLock.runExclusive( tenantId,() -> {
 
             Task current =
                     taskRepository.findById(taskId)
@@ -338,7 +340,7 @@ public class TaskEligibilityService {
                 tenantId,
                 "tenantId must not be null");
 
-        graphLock.runExclusive(() -> {
+        graphLock.runExclusive( tenantId,() -> {
 
             Task current =
                     taskRepository.findById(taskId)
@@ -418,8 +420,10 @@ public class TaskEligibilityService {
         Objects.requireNonNull(
                 kafkaTimestamp,
                 "kafkaTimestamp must not be null");
+        UUID lockTenantId =
+               tenantIdForTask(taskId);
 
-        graphLock.runExclusive(() -> {
+        graphLock.runExclusive(lockTenantId, () -> {
 
             Task current =
                     taskCounterUpdater.requireTask(taskId);
@@ -591,4 +595,12 @@ public class TaskEligibilityService {
 
         return snapshot;
     }
+    private UUID tenantIdForTask(
+        UUID taskId) {
+
+        return taskRepository
+            .findById(taskId)
+            .map(Task::getTenantId)
+            .orElse(null);
+        }
 }

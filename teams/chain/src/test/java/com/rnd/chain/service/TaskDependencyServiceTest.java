@@ -100,7 +100,7 @@ class TaskDependencyServiceTest {
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {})), taskReadinessRepository),
-                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
+                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository,taskRepository);
 
         service = new TaskDependencyService(taskRepository, taskDependencyRepository,
                 historyRepository, transactionRunner, new IncrementingClock(), dependencyEdgeService);
@@ -117,7 +117,7 @@ class TaskDependencyServiceTest {
                 new TaskCounterUpdater(dummyTaskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(dummyTaskRepository, new SchedulingUpdateService(event -> {})), taskReadinessRepository),
-                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
+                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository,dummyTaskRepository);
 
         assertThatThrownBy(() -> new TaskDependencyService(null, taskDependencyRepository,
                 PgRepos.history(), PgRepos.transactionRunner(), new IncrementingClock(),
@@ -135,7 +135,7 @@ class TaskDependencyServiceTest {
                 new TaskCounterUpdater(taskRepository, dummyDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {})), taskReadinessRepository),
-                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
+                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository,taskRepository);
 
         assertThatThrownBy(() -> new TaskDependencyService(taskRepository, null,
                 PgRepos.history(), PgRepos.transactionRunner(), new IncrementingClock(),
@@ -350,7 +350,7 @@ class TaskDependencyServiceTest {
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {})), taskReadinessRepository),
-                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
+                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository,taskRepository);
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
                 PgRepos.transactionRunner(), new IncrementingClock(), dependencyEdgeService);
@@ -372,7 +372,7 @@ class TaskDependencyServiceTest {
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {})), taskReadinessRepository),
-                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
+                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository,taskRepository);
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
                 PgRepos.transactionRunner(), new IncrementingClock(), dependencyEdgeService);
@@ -592,7 +592,7 @@ void addDependency_whenSameMindEventIsRetried_shouldNotApplyDependencyTwice() {
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(taskRepository, schedulingUpdateService), taskReadinessRepository),
-                        TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
+                        TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository,taskRepository);
 
     TaskDependencyService mindService =
             new TaskDependencyService(

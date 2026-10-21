@@ -77,7 +77,8 @@ class TaskStateHistoryWritingTest {
                 lock,
                 counterUpdater,
                 recorder,
-                taskReadinessRepository);
+                taskReadinessRepository,
+                taskRepository);
     }
 
     private UUID savedTask(TaskStatus status, LocalDateTime updatedAt) {
