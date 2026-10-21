@@ -3,6 +3,7 @@
  * Keys are hierarchical, so invalidating a prefix refreshes everything under it:
  * taskKeys.all refreshes every task query, taskKeys.detail(id) only that one task.
  */
+import type { ManagerKpiFilters } from './managerApi';
 import type { WorkspaceRequest } from './workspaceApi';
 
 export const taskKeys = {
@@ -14,6 +15,11 @@ export const taskKeys = {
 
 export const workloadKeys = {
   all: ['manager', 'workload'] as const,
+};
+
+export const kpiKeys = {
+  all: ['manager', 'kpis'] as const,
+  list: (filters: ManagerKpiFilters) => [...kpiKeys.all, filters] as const,
 };
 
 export const projectKeys = {
