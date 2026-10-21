@@ -64,6 +64,46 @@ export function getTask(taskId: string): Promise<ApiTask> {
   return api.get<ApiTask>(`/api/workspace/tasks/${taskId}`);
 }
 
+/** Kinds of task history event. The first three come from Chain's state history, the rest from its dependency history. */
+export type TaskActivityType =
+  'STATUS_CHANGED' | 'BLOCKED' | 'UNBLOCKED' | 'DEPENDENCY_ADDED' | 'DEPENDENCY_REMOVED';
+
+/**
+ * One history event. Only the fields for its type are sent. There's no actor:
+ * Chain doesn't record who made a change.
+ */
+export type TaskActivityItem = {
+  id: string;
+  type: TaskActivityType;
+  /** ISO-8601 */
+  createdAt: string;
+  /** STATUS_CHANGED: Chain status PENDING / ACTIVE / DONE */
+  fromStatus?: string;
+  toStatus?: string;
+  /** BLOCKED / UNBLOCKED: how many tasks block this one after the change */
+  blockingCount?: number;
+  /** DEPENDENCY_*: the task this one depends on, by title (from Inbox) */
+  dependsOnTaskId?: string;
+  dependsOnTitle?: string;
+  /** DEPENDENCY_*: MIND, USER or SYSTEM */
+  source?: string;
+};
+
+/**
+ * A task's history from Chain, merged by the BFF, newest first. If one of
+ * Chain's two histories couldn't be loaded, the other is still here and its
+ * flag says what's missing.
+ */
+export type TaskActivity = {
+  items: TaskActivityItem[];
+  statusHistoryUnavailable: boolean;
+  dependencyHistoryUnavailable: boolean;
+};
+
+export function getTaskActivity(taskId: string): Promise<TaskActivity> {
+  return api.get<TaskActivity>(`/api/workspace/tasks/${encodeURIComponent(taskId)}/activity`);
+}
+
 // ── Task selection ("which tasks fit in N minutes?") ─────────────────────
 
 export interface SelectedTask {
