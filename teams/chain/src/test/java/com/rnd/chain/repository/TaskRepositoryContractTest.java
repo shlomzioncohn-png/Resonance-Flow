@@ -2,6 +2,7 @@ package com.rnd.chain.repository;
 
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTier;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -147,6 +148,45 @@ abstract class TaskRepositoryContractTest {
 
         assertThat(repository.findById(id).orElseThrow().getBlockingCount()).isEqualTo(5);
     }
+
+    @Test
+    void save_persistsTier_roundTrip() {
+        UUID id = UUID.randomUUID();
+        TaskRepository repository = createRepository(List.of(newTaskBuilder(id).tier(TaskTier.TACTICAL).build()));
+
+        assertThat(repository.findById(id).orElseThrow().getTier()).isEqualTo(TaskTier.TACTICAL);
+    }
+
+    @Test
+    void save_withNullTier_doesNotResetStoredTier() {
+        UUID id = UUID.randomUUID();
+        TaskRepository repository = createRepository(List.of(newTaskBuilder(id).tier(TaskTier.STRATEGIC).build()));
+
+        repository.save(newTaskBuilder(id).blockingCount(1).tier(null).build());
+
+        assertThat(repository.findById(id).orElseThrow().getTier()).isEqualTo(TaskTier.STRATEGIC);
+    }
+
+    @Test
+    void save_withNewTier_replacesStoredTier() {
+        UUID id = UUID.randomUUID();
+        TaskRepository repository = createRepository(List.of(newTaskBuilder(id).tier(TaskTier.STRATEGIC).build()));
+
+        repository.save(newTaskBuilder(id).tier(TaskTier.OPERATIONAL).build());
+
+        assertThat(repository.findById(id).orElseThrow().getTier()).isEqualTo(TaskTier.OPERATIONAL);
+    }
+
+    @Test
+    void insertIfAbsent_persistsTier() {
+        UUID id = UUID.randomUUID();
+        TaskRepository repository = createRepository(List.of());
+
+        repository.insertIfAbsent(newTaskBuilder(id).tier(TaskTier.OPERATIONAL).build());
+
+        assertThat(repository.findById(id).orElseThrow().getTier()).isEqualTo(TaskTier.OPERATIONAL);
+    }
+
     // --- insertIfAbsent -----------------------------------------------------
     @Test
 void insertIfAbsent_insertsTask_whenTaskDoesNotExist() {

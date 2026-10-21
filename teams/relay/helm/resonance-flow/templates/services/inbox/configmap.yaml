@@ -2,7 +2,6 @@
 {{- if $component.enabled }}
 {{- with $component.config }}
 {{- $cfg := .data }}
-{{- $pg := $.Values.postgresql.auth }}
 ---
 {{ include "resonance-flow.configMapHeader" (dict "root" $ "component" "inbox") }}
 
@@ -17,9 +16,9 @@ data:
         # Binds the inbox-db-credentials Secret's "password" file to ${password} below.
         import: "optional:configtree:/etc/resonance-flow/secrets/inbox-db/"
       datasource:
-        # Same host/port helper as the wait-for-postgresql initContainer; the database is
-        # the subchart's own, which Inbox's user owns (see inbox/_db-init.tpl).
-        url: "jdbc:postgresql://{{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "postgresql") }}/{{ $pg.database }}?stringtype=unspecified"
+        # Same host/port helper as the wait-for-postgresql initContainer; Inbox's own
+        # database (see inbox/_db-init.tpl).
+        url: "jdbc:postgresql://{{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "postgresql") }}/{{ $cfg.datasource.database }}?stringtype=unspecified"
         username: {{ $cfg.datasource.username | quote }}
         password: "${password}"
       kafka:

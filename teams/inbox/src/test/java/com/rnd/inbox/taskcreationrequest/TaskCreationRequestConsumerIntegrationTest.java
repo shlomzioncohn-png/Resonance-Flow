@@ -383,6 +383,39 @@ class TaskCreationRequestConsumerIntegrationTest extends PostgresIntegrationTest
         assertThat(task.getExtractionProvenance()).isEqualTo(TaskExtractionProvenance.ML_INFERRED);
     }
 
+    @Test
+    void aZoomMeetingTaskIsPersistedWithTheZoomSourceType() {
+        assertMeetingPlatformIsPersisted(com.rnd.inbox.event.SourceType.SOURCE_TYPE_ZOOM, SourceType.ZOOM);
+    }
+
+    @Test
+    void aBigBlueButtonMeetingTaskIsPersistedWithTheBigBlueButtonSourceType() {
+        assertMeetingPlatformIsPersisted(com.rnd.inbox.event.SourceType.SOURCE_TYPE_BIGBLUEBUTTON,
+                SourceType.BIGBLUEBUTTON);
+    }
+
+    private void assertMeetingPlatformIsPersisted(com.rnd.inbox.event.SourceType protoSourceType,
+                                                  SourceType expectedSourceType) {
+        Tenant tenant = persistTenant();
+        String sourceRef = "meeting:" + UUID.randomUUID();
+        TaskCreationRequestedEvent event = TaskCreationRequestedEvent.newBuilder()
+                .setEventId(UUID.randomUUID().toString())
+                .setCorrelationId(UUID.randomUUID().toString())
+                .setTenantId(tenant.getId().toString())
+                .setTitle("Follow up on the action item from the weekly sync")
+                .setSourceType(protoSourceType)
+                .setSourceRef(sourceRef)
+                .setConfidence(0.5)
+                .setHasDependencies(false)
+                .build();
+
+        producer.send(TOPIC, event);
+
+        Task task = awaitTask(tenant.getId(), expectedSourceType, sourceRef);
+
+        assertThat(task.getSourceType()).isEqualTo(expectedSourceType);
+    }
+
     /**
      * Several tests here route to the same error topic, and the consumer reads it from the
      * beginning - so {@code getSingleRecord} would trip over a previous test's record. Match on

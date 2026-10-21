@@ -121,7 +121,7 @@ class CrmSalesforceLaneIntegrationTest {
         SalesforceDealRepository repository = newRepository();
         CapturingPublisher publisher = new CapturingPublisher();
         CrmLane lane = new CrmLane(
-                new CrmSourceReader(repository),
+                new CrmSourceReader(List.of(repository)),
                 new DealToTaskMapper(VALID_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher(), 0),
                 new CrmTaskValidator(new TaskValidator()),
                 publisher);
@@ -170,7 +170,7 @@ class CrmSalesforceLaneIntegrationTest {
         SalesforceDealRepository repository = newRepository();
         CapturingPublisher publisher = new CapturingPublisher();
         CrmLane lane = new CrmLane(
-                new CrmSourceReader(repository),
+                new CrmSourceReader(List.of(repository)),
                 new DealToTaskMapper(VALID_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher(), 14),
                 new CrmTaskValidator(new TaskValidator()),
                 publisher);

@@ -1,6 +1,7 @@
 package com.rnd.inbox.task.service;
 import com.rnd.inbox.task.assignment.Assignment;
 import com.rnd.inbox.task.assignment.AssignmentRepository;
+import com.rnd.inbox.task.assignment.AssignmentService;
 import com.rnd.inbox.task.controller.TaskController;
 import com.rnd.inbox.task.dto.TaskCreateRequestDto;
 import com.rnd.inbox.task.dto.TaskFilterDto;
@@ -17,11 +18,14 @@ import com.rnd.inbox.task.exception.TaskNotFoundException;
 import com.rnd.inbox.task.mapper.TaskMapper;
 import com.rnd.inbox.task.mapper.TaskRestMapper;
 import com.rnd.inbox.task.model.Task;
+import com.rnd.inbox.task.model.TaskFeedback;
 import com.rnd.inbox.task.model.TaskStatus;
+import com.rnd.inbox.task.repository.TaskFeedbackRepository;
 import com.rnd.inbox.task.repository.TaskRepository;
 import com.rnd.inbox.task.security.TaskAuthorization;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.rnd.inbox.audit.AuditService;
 import com.rnd.inbox.outbox.OutboxEvent;
 import com.rnd.inbox.outbox.OutboxEventRepository;
@@ -50,33 +54,28 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
 public class TaskService {
 
-    // Request name -> Task property. Both spellings of a two-word name are accepted: the JSON
-    // this API returns is snake_case, the Task properties are camelCase.
     private static final Map<String, String> SORTABLE_PROPERTIES = sortableProperties();
 
-    private static Map<String, String> sortableProperties() {
-        Map<String, String> properties = new LinkedHashMap<>();
-        properties.put("deadline", "deadline");
-        properties.put("priorityScore", "priorityScore");
-        properties.put("priority_score", "priorityScore");
-        properties.put("createdAt", "createdAt");
-        properties.put("created_at", "createdAt");
-        return properties;
-    }
+    private static final Map<TaskStatus, Set<TaskStatus>> FORBIDDEN_STATUS_TRANSITIONS = Map.of(
+            TaskStatus.DONE, Set.copyOf(EnumSet.complementOf(EnumSet.of(TaskStatus.DONE))));
 
     private static final TypeReference<Map<String, Object>> PAYLOAD_TYPE = new TypeReference<>() {
     };
 
     private final TaskRepository taskRepository;
+    private final TaskFeedbackRepository taskFeedbackRepository;
     private final AuditService auditService;
     private final OutboxEventRepository outboxEventRepository;
     private final AssignmentRepository assignmentRepository;
@@ -88,8 +87,10 @@ public class TaskService {
     private final UserRepository userRepository;
     private final TaskAuthorization taskAuthorization;
     private final TaskRestMapper taskRestMapper;
+    private final AssignmentService assignmentService;
 
     public TaskService(TaskRepository taskRepository,
+                       TaskFeedbackRepository taskFeedbackRepository,
                        AuditService auditService,
                        OutboxEventRepository outboxEventRepository,
                        AssignmentRepository assignmentRepository,
@@ -100,22 +101,25 @@ public class TaskService {
                        ProjectRepository projectRepository,
                        UserRepository userRepository,
                        TaskAuthorization taskAuthorization,
-                       TaskRestMapper taskRestMapper) {
+                       TaskRestMapper taskRestMapper,
+                       AssignmentService assignmentService) {
         this.taskRepository = taskRepository;
+        this.taskFeedbackRepository = taskFeedbackRepository;
         this.auditService = auditService;
         this.outboxEventRepository = outboxEventRepository;
         this.assignmentRepository = assignmentRepository;
         this.taskMapper = taskMapper;
-        this.objectMapper = objectMapper;
+        // Outbox payloads feed the Proto mappers' camelCase keys - not the REST SNAKE_CASE setting.
+        this.objectMapper = objectMapper.copy()
+                .setPropertyNamingStrategy(PropertyNamingStrategies.LOWER_CAMEL_CASE);
         this.clock = clock;
         this.tenantRepository = tenantRepository;
         this.projectRepository = projectRepository;
         this.userRepository = userRepository;
         this.taskAuthorization = taskAuthorization;
         this.taskRestMapper = taskRestMapper;
+        this.assignmentService = assignmentService;
     }
-
-    // ---- REST-facing methods (TaskController) ----
 
     @Transactional
     public TaskResponseDto createTaskFromRequest(TaskCreateRequestDto request, UUID actorId) {
@@ -128,9 +132,11 @@ public class TaskService {
                 ? resolveUserInTenant(request.getOwnerId(), tenant)
                 : actor;
 
+        List<Assignment> assignments = assignmentService.resolve(request.getAssignees(), tenant, actor);
+
         Task task = taskRestMapper.toEntity(request, tenant, project, owner, actor);
-        Task saved = persistNewTask(task, List.of(), null, actor);
-        return taskRestMapper.toResponseDto(saved);
+        Task saved = persistNewTask(task, assignments, null, actor);
+        return taskRestMapper.toResponseDto(saved, assignments);
     }
 
     @Transactional(readOnly = true)
@@ -138,7 +144,7 @@ public class TaskService {
         User actor = findActorOrThrow(actorId);
         Task task = findTaskOrThrow(id);
         taskAuthorization.assertWithinScope(taskAuthorization.scopeOf(actor), task);
-        return taskRestMapper.toResponseDto(task);
+        return taskRestMapper.toResponseDto(task, assignmentService.findByTask(id));
     }
 
     @Transactional(readOnly = true)
@@ -146,9 +152,6 @@ public class TaskService {
         validateFilter(filter);
         Pageable sortedPageable = withSupportedSort(pageable);
         User actor = findActorOrThrow(actorId);
-        // bypassTenantScope comes only from this explicit role check - never from tenantId
-        // possibly being null - so a bug that left tenantId null for a non-admin fails closed
-        // (matches nothing) instead of silently granting cross-tenant access.
         boolean bypassTenantScope;
         UUID tenantId;
         switch (taskAuthorization.scopeOf(actor)) {
@@ -187,21 +190,223 @@ public class TaskService {
                 filter.getUserId() != null,
                 filter.getUserId(),
                 sortedPageable);
-        return PageResponseDto.from(tasks.map(taskRestMapper::toResponseDto));
+        Map<UUID, List<Assignment>> assignmentsByTask = assignmentService.findByTasks(
+                tasks.getContent().stream().map(Task::getId).toList());
+        return PageResponseDto.from(tasks.map(task -> taskRestMapper.toResponseDto(
+                task, assignmentsByTask.getOrDefault(task.getId(), List.of()))));
     }
 
-    // Sorting is a closed list, not "any Task property": every sortable column is a query the
-    // database has to serve at scale, and an arbitrary one (title, description) means sorting
-    // every matching row on each request. Adding a property here is a decision to support it -
-    // check its plan with EXPLAIN first, and give it an index if it needs one.
-    //
-    // With no sort requested the list is newest first (served by idx_tasks_tenant_created_at_id).
-    //
-    // The id is always appended as the last sort key. Without a unique tie-breaker the order of
-    // rows that share a value is undefined - every task with no deadline, every task of one bulk
-    // import - and paging through an undefined order can repeat a task on two pages or skip one.
-    // It takes the direction of the key before it, so an index on (that key, id) can serve the
-    // whole order in either direction.
+    @Transactional
+    public TaskResponseDto updateTaskFromRequest(UUID id, TaskUpdateRequestDto request, UUID actorId) {
+        User actor = findActorOrThrow(actorId);
+        Task task = findTaskOrThrow(id);
+        taskAuthorization.assertWithinScope(taskAuthorization.scopeOf(actor), task);
+
+        Project resolvedProject = request.getProjectId().isPresent()
+                ? resolveProjectInTenant(request.getProjectId().get(), task.getTenant())
+                : null;
+        User resolvedOwner = request.getOwnerId().isPresent()
+                ? resolveUserInTenant(request.getOwnerId().get(), task.getTenant())
+                : null;
+
+        List<Assignment> desiredAssignments = request.getAssignees().isPresent()
+                ? assignmentService.resolve(request.getAssignees().get(), task.getTenant(), actor)
+                : null;
+        List<Assignment> currentAssignments = assignmentService.findByTask(id);
+
+        Map<String, Object> before = auditSnapshot(task);
+        before.put("assignments", assignmentSnapshots(currentAssignments));
+        taskRestMapper.applyUpdate(task, request, resolvedProject, resolvedOwner);
+        List<Assignment> assignments = desiredAssignments != null
+                ? assignmentService.replaceAssignments(task, desiredAssignments)
+                : currentAssignments;
+        Task saved = persistUpdatedTask(task, before, null, actor, "TASK_UPDATED", null, assignments);
+        return taskRestMapper.toResponseDto(saved, assignments);
+    }
+
+    @Transactional
+    public TaskResponseDto updateTaskStatus(UUID id, TaskStatusUpdateRequestDto request, UUID actorId) {
+        User actor = findActorOrThrow(actorId);
+        Task task = findTaskOrThrow(id);
+        taskAuthorization.assertWithinScope(taskAuthorization.scopeOf(actor), task);
+
+        TaskStatus newStatus = TaskStatus.valueOf(request.getStatus());
+        validateStatusTransition(task, newStatus, request.getSnoozedUntil());
+
+        boolean hasFeedbackText = hasText(request.getFeedbackText());
+        if (hasFeedbackText && newStatus != TaskStatus.REJECTED) {
+            throw new InvalidTaskStatusTransitionException("feedback is accepted only when status is REJECTED");
+        }
+
+        Map<String, Object> before = auditSnapshot(task);
+        taskRestMapper.applyStatusChange(task, newStatus, request.getSnoozedUntil());
+
+        // DONE is the one transition with its own topic: it publishes task.completed instead of
+        // task.updated. Every other status - REJECTED included - publishes task.updated.
+        if (newStatus == TaskStatus.DONE) {
+            return taskRestMapper.toResponseDto(completeTask(task, before, actor, null),
+                    assignmentService.findByTask(id));
+        }
+
+        TaskFeedback feedback = hasFeedbackText
+                ? taskRestMapper.toFeedbackEntity(task, actor, request.getFeedbackText())
+                : null;
+        Task saved = persistUpdatedTask(task, before, null, actor, "TASK_STATUS_UPDATED", feedback);
+        return taskRestMapper.toResponseDto(saved, assignmentService.findByTask(id));
+    }
+
+    @Transactional
+    public Task createTask(Task incoming, UUID correlationId) {
+        return createTask(incoming, List.of(), correlationId);
+    }
+
+    @Transactional
+    public Task createTask(Task incoming, List<Assignment> assignments, UUID correlationId) {
+        Optional<Task> existing = findExisting(incoming);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+
+        return persistNewTask(incoming, assignments, correlationId, incoming.getCreatedBy());
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<Task> findExisting(Task incoming) {
+        return taskRepository.findByTenant_IdAndSourceTypeAndSourceRef(
+                incoming.getTenant().getId(), incoming.getSourceType(), incoming.getSourceRef());
+    }
+
+    @Transactional
+    public Task updateTask(UUID taskId, Task changes, UUID correlationId) {
+        Task existing = findTaskOrThrow(taskId);
+
+        Map<String, Object> before = auditSnapshot(existing);
+        taskMapper.applyUpdate(existing, changes);
+
+        return persistUpdatedTask(existing, before, correlationId, null, "TASK_UPDATED");
+    }
+
+    @Transactional
+    public Task completeTask(UUID taskId, User completedBy, UUID correlationId) {
+        Task existing = findTaskOrThrow(taskId);
+
+        return completeTask(existing, completedBy, correlationId);
+    }
+
+    @Transactional
+    public Task completeTask(Task task, User completedBy, UUID correlationId) {
+        return completeTask(task, auditSnapshot(task), completedBy, correlationId);
+    }
+
+    // before: as in persistUpdatedTask. The REST status path applies its change before it gets
+    // here, so it passes in the snapshot it took first.
+    private Task completeTask(Task task, Map<String, Object> before, User completedBy, UUID correlationId) {
+        task.setStatus(TaskStatus.DONE);
+        Instant now = Instant.now(clock);
+        task.setCompletedAt(now);
+        task.setUpdatedAt(now);
+        Task saved = taskRepository.save(task);
+
+        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_COMPLETED, TaskCompletedPayload.from(saved), saved, correlationId));
+        auditService.createUpdateAuditLog("TASK_COMPLETED", "Task", saved.getId(), saved.getTenant(), completedBy,
+                before, auditSnapshot(saved), correlationId);
+        return saved;
+    }
+
+    @Transactional
+    public Task applySchedulingUpdate(SchedulingEventDto event) {
+        return applySchedulingUpdate(
+                UUID.fromString(event.getTaskId()),
+                event.getAvailable(),
+                event.getPriorityScore() != null ? event.getPriorityScore().floatValue() : null,
+                event.getEventId() != null ? UUID.fromString(event.getEventId()) : UUID.randomUUID());
+    }
+
+    @Transactional
+    public Task applySchedulingUpdate(UUID taskId, boolean available, Float priorityScore, UUID correlationId) {
+        Task task = findTaskOrThrow(taskId);
+        Map<String, Object> before = schedulingSnapshot(task);
+
+        task.setAvailable(available);
+        if (priorityScore != null) {
+            task.setPriorityScore(priorityScore);
+        }
+        task.setUpdatedAt(Instant.now(clock));
+
+        Task saved = taskRepository.saveAndFlush(task);
+        Map<String, Object> after = schedulingSnapshot(saved);
+
+        if (!before.equals(after)) {
+            outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved), saved, correlationId));
+        }
+        auditService.createUpdateAuditLog("TASK_SCHEDULING_UPDATED", "Task", saved.getId(), saved.getTenant(),
+                null, before, after, correlationId);
+        return saved;
+    }
+
+    private Task persistNewTask(Task task, List<Assignment> assignments, UUID correlationId, User actor) {
+        Task saved = insertTask(task);
+
+        for (Assignment assignment : assignments) {
+            assignment.setTask(saved);
+            assignmentRepository.save(assignment);
+        }
+
+        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_CREATED, TaskCreatedPayload.from(saved), saved, correlationId));
+        Map<String, Object> snapshot = auditSnapshot(saved);
+        snapshot.put("assignments", assignments.stream().map(this::assignmentSnapshot).toList());
+        auditService.createAuditLog("TASK_CREATED", "Task", saved.getId(), saved.getTenant(), actor,
+                snapshot, correlationId);
+        return saved;
+    }
+
+    private Task insertTask(Task incoming) {
+        return taskRepository.saveAndFlush(incoming);
+    }
+
+    private Task persistUpdatedTask(Task task, Map<String, Object> before, UUID correlationId, User actor,
+                                    String auditAction, TaskFeedback feedback) {
+        return persistUpdatedTask(task, before, correlationId, actor, auditAction, feedback, null);
+    }
+
+    // assignments: the task's assignments after the change, added to the audit snapshot; null on
+    // paths that never touch assignments.
+    private Task persistUpdatedTask(Task task, Map<String, Object> before, UUID correlationId, User actor,
+                                    String auditAction, TaskFeedback feedback, List<Assignment> assignments) {
+        Task saved = taskRepository.save(task);
+        if (feedback != null) {
+            taskFeedbackRepository.save(feedback);
+        }
+
+        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved, feedback), saved, correlationId));
+        Map<String, Object> after = auditSnapshot(saved);
+        if (feedback != null) {
+            after.put("feedbackText", feedback.getFeedbackText());
+        }
+        if (assignments != null) {
+            after.put("assignments", assignmentSnapshots(assignments));
+        }
+        auditService.createUpdateAuditLog(auditAction, "Task", saved.getId(), saved.getTenant(), actor,
+                before, after, correlationId);
+        return saved;
+    }
+
+    private Task persistUpdatedTask(Task task, Map<String, Object> before, UUID correlationId, User actor,
+                                    String auditAction) {
+        return persistUpdatedTask(task, before, correlationId, actor, auditAction, null);
+    }
+
+    private void validateFilter(TaskFilterDto filter) {
+        boolean hasFrom = filter.getDeadlineFrom() != null;
+        boolean hasTo = filter.getDeadlineTo() != null;
+        if (hasFrom && hasTo && filter.getDeadlineTo().isBefore(filter.getDeadlineFrom())) {
+            throw new InvalidTaskFilterException("deadlineTo must not be before deadlineFrom");
+        }
+        if (Boolean.TRUE.equals(filter.getNoDeadline()) && (hasFrom || hasTo)) {
+            throw new InvalidTaskFilterException("noDeadline cannot be combined with deadlineFrom/deadlineTo");
+        }
+    }
+
     private Pageable withSupportedSort(Pageable pageable) {
         if (pageable.isUnpaged()) {
             return pageable;
@@ -221,165 +426,19 @@ public class TaskService {
         return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), Sort.by(orders));
     }
 
-    // Either end of the deadline range may be given alone (open-ended range); when both are given
-    // deadlineTo must not be before deadlineFrom. noDeadline=true is mutually exclusive with the
-    // range (asking for "no deadline at all" and "deadline within this range" in the same
-    // request is self-contradictory).
-    private void validateFilter(TaskFilterDto filter) {
-        boolean hasFrom = filter.getDeadlineFrom() != null;
-        boolean hasTo = filter.getDeadlineTo() != null;
-        if (hasFrom && hasTo && filter.getDeadlineTo().isBefore(filter.getDeadlineFrom())) {
-            throw new InvalidTaskFilterException("deadlineTo must not be before deadlineFrom");
-        }
-        if (Boolean.TRUE.equals(filter.getNoDeadline()) && (hasFrom || hasTo)) {
-            throw new InvalidTaskFilterException("noDeadline cannot be combined with deadlineFrom/deadlineTo");
-        }
-    }
-
-    @Transactional
-    public TaskResponseDto updateTaskFromRequest(UUID id, TaskUpdateRequestDto request, UUID actorId) {
-        User actor = findActorOrThrow(actorId);
-        Task task = findTaskOrThrow(id);
-        taskAuthorization.assertWithinScope(taskAuthorization.scopeOf(actor), task);
-
-        Project resolvedProject = request.getProjectId().isPresent()
-                ? resolveProjectInTenant(request.getProjectId().get(), task.getTenant())
-                : null;
-        User resolvedOwner = request.getOwnerId().isPresent()
-                ? resolveUserInTenant(request.getOwnerId().get(), task.getTenant())
-                : null;
-
-        taskRestMapper.applyUpdate(task, request, resolvedProject, resolvedOwner);
-        Task saved = persistUpdatedTask(task, null, actor, "TASK_UPDATED");
-        return taskRestMapper.toResponseDto(saved);
-    }
-
-    @Transactional
-    public TaskResponseDto updateTaskStatus(UUID id, TaskStatusUpdateRequestDto request, UUID actorId) {
-        User actor = findActorOrThrow(actorId);
-        Task task = findTaskOrThrow(id);
-        taskAuthorization.assertWithinScope(taskAuthorization.scopeOf(actor), task);
-
-        TaskStatus newStatus = TaskStatus.valueOf(request.getStatus());
-        if (newStatus == TaskStatus.SNOOZED && request.getSnoozedUntil() == null) {
+    private void validateStatusTransition(Task task, TaskStatus newStatus, Instant snoozedUntil) {
+        if (newStatus == TaskStatus.SNOOZED && snoozedUntil == null) {
             throw new InvalidTaskStatusTransitionException("snoozedUntil is required when status is SNOOZED");
         }
-
-        taskRestMapper.applyStatusChange(task, newStatus, request.getSnoozedUntil());
-        Task saved = persistUpdatedTask(task, null, actor, "TASK_STATUS_UPDATED");
-        return taskRestMapper.toResponseDto(saved);
-    }
-
-    // ---- Kafka ingestion / scheduling methods (TaskIngestionService, SchedulingConsumer) ----
-
-    @Transactional
-    public Task createTask(Task incoming, UUID correlationId) {
-        return createTask(incoming, List.of(), correlationId);
-    }
-
-    @Transactional
-    public Task createTask(Task incoming, List<Assignment> assignments, UUID correlationId) {
-        Optional<Task> existing = findExisting(incoming);
-        if (existing.isPresent()) {
-            return existing.get();
+        Set<TaskStatus> forbidden = FORBIDDEN_STATUS_TRANSITIONS.getOrDefault(task.getStatus(), Set.of());
+        if (forbidden.contains(newStatus)) {
+            throw new InvalidTaskStatusTransitionException(
+                    "A task in status " + task.getStatus() + " cannot move to " + newStatus);
         }
-
-        return persistNewTask(incoming, assignments, correlationId, incoming.getCreatedBy());
     }
 
-    private Task persistNewTask(Task task, List<Assignment> assignments, UUID correlationId, User actor) {
-        Task saved = insertTask(task);
-
-        for (Assignment assignment : assignments) {
-            assignment.setTask(saved);
-            assignmentRepository.save(assignment);
-        }
-
-        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_CREATED, TaskCreatedPayload.from(saved), saved, correlationId));
-        auditService.createAuditLog("TASK_CREATED", "Task", saved.getId(), saved.getTenant(), actor,
-                auditSnapshot(saved), correlationId);
-        return saved;
-    }
-
-    @Transactional
-    public Task updateTask(UUID taskId, Task changes, UUID correlationId) {
-        Task existing = findTaskOrThrow(taskId);
-
-        taskMapper.applyUpdate(existing, changes);
-
-        return updateTask(existing, correlationId);
-    }
-
-    @Transactional
-    public Task updateTask(Task task, UUID correlationId) {
-        return persistUpdatedTask(task, correlationId, null, "TASK_UPDATED");
-    }
-
-    // Shared by the Kafka ingestion/scheduling path (updateTask above - no actor) and both REST
-    // update paths (TaskController - plain update and status update, distinguished only by the
-    // audit action label; both change a Task and publish the same TASK_UPDATED outbox event).
-    private Task persistUpdatedTask(Task task, UUID correlationId, User actor, String auditAction) {
-        Task saved = taskRepository.save(task);
-
-        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved), saved, correlationId));
-        auditService.createAuditLog(auditAction, "Task", saved.getId(), saved.getTenant(), actor,
-                auditSnapshot(saved), correlationId);
-        return saved;
-    }
-
-    @Transactional
-    public Task completeTask(UUID taskId, User completedBy, UUID correlationId) {
-        Task existing = findTaskOrThrow(taskId);
-
-        return completeTask(existing, completedBy, correlationId);
-    }
-
-    @Transactional
-    public Task completeTask(Task task, User completedBy, UUID correlationId) {
-        task.setStatus(TaskStatus.DONE);
-        task.setCompletedAt(Instant.now(clock));
-        Task saved = taskRepository.save(task);
-
-        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_COMPLETED, TaskCompletedPayload.from(saved), saved, correlationId));
-        auditService.createAuditLog("TASK_COMPLETED", "Task", saved.getId(), saved.getTenant(), completedBy,
-                auditSnapshot(saved), correlationId);
-        return saved;
-    }
-
-    @Transactional(readOnly = true)
-    public Optional<Task> findExisting(Task incoming) {
-        return taskRepository.findByTenant_IdAndSourceTypeAndSourceRef(
-                incoming.getTenant().getId(), incoming.getSourceType(), incoming.getSourceRef());
-    }
-
-    public Task applySchedulingUpdate(SchedulingEventDto event) {
-        return applySchedulingUpdate(
-                UUID.fromString(event.getTaskId()),
-                event.getAvailable(),
-                event.getPriorityScore() != null ? event.getPriorityScore().floatValue() : null,
-                event.getEventId() != null ? UUID.fromString(event.getEventId()) : UUID.randomUUID());
-    }
-
-    @Transactional
-    public Task applySchedulingUpdate(UUID taskId, boolean available, Float priorityScore, UUID correlationId) {
-        Task task = findTaskOrThrow(taskId);
-
-        task.setAvailable(available);
-        if (priorityScore != null) {
-            task.setPriorityScore(priorityScore);
-        }
-        task.setUpdatedAt(Instant.now(clock));
-
-        Task saved = taskRepository.saveAndFlush(task);
-
-        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved), saved, correlationId));
-        auditService.createAuditLog("TASK_SCHEDULING_UPDATED", "Task", saved.getId(), saved.getTenant(),
-                schedulingSnapshot(saved), correlationId);
-        return saved;
-    }
-
-    private Task insertTask(Task incoming) {
-        return taskRepository.saveAndFlush(incoming);
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private Task findTaskOrThrow(UUID id) {
@@ -397,8 +456,6 @@ public class TaskService {
                 .orElseThrow(() -> new UnauthenticatedException("Actor " + actorId + " does not exist"));
     }
 
-    // rawId == null means "no project" - returns null unconditionally in that case, whether
-    // that's because create omitted it or update sent an explicit null to clear it.
     private Project resolveProjectInTenant(String rawId, Tenant tenant) {
         if (rawId == null) {
             return null;
@@ -412,7 +469,6 @@ public class TaskService {
         return project;
     }
 
-    // Same null-passthrough convention as resolveProjectInTenant above.
     private User resolveUserInTenant(String rawId, Tenant tenant) {
         if (rawId == null) {
             return null;
@@ -438,6 +494,48 @@ public class TaskService {
                 Instant.now(clock));
     }
 
+    private Map<String, Object> auditSnapshot(Task task) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("title", task.getTitle());
+        snapshot.put("description", task.getDescription());
+        snapshot.put("sourceType", task.getSourceType().name());
+        snapshot.put("sourceRef", task.getSourceRef());
+        snapshot.put("status", task.getStatus().name());
+        snapshot.put("tier", task.getTier() != null ? task.getTier().name() : null);
+        snapshot.put("roleContext", task.getRoleContext() != null ? task.getRoleContext().name() : null);
+        snapshot.put("urgency", task.getUrgency());
+        snapshot.put("effortEstimateMinutes", task.getEffortEstimateMinutes());
+        snapshot.put("effortEstimateConfidence", task.getEffortEstimateConfidence());
+        snapshot.put("deadline", task.getDeadline());
+        snapshot.put("snoozedUntil", task.getSnoozedUntil());
+        snapshot.put("completedAt", task.getCompletedAt());
+        snapshot.put("projectId", task.getProject() != null ? task.getProject().getId() : null);
+        snapshot.put("ownerId", task.getOwner() != null ? task.getOwner().getId() : null);
+        snapshot.put("suggestedOwnerUserId",
+                task.getSuggestedOwnerUser() != null ? task.getSuggestedOwnerUser().getId() : null);
+        snapshot.put("suggestedOwnerConfidence", task.getSuggestedOwnerConfidence());
+        return snapshot;
+    }
+
+    // Sorted so that the same set in a different order doesn't count as a change in the update audit diff.
+    private List<Map<String, Object>> assignmentSnapshots(List<Assignment> assignments) {
+        return assignments.stream()
+                .map(this::assignmentSnapshot)
+                .sorted(Comparator.comparing(snapshot -> String.valueOf(
+                        snapshot.get("userId") != null ? snapshot.get("userId") : snapshot.get("teamId"))))
+                .toList();
+    }
+
+    private Map<String, Object> assignmentSnapshot(Assignment assignment) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("userId", assignment.getUser() != null ? assignment.getUser().getId() : null);
+        snapshot.put("teamId", assignment.getTeam() != null ? assignment.getTeam().getId() : null);
+        snapshot.put("assignmentRole", assignment.getAssignmentRole().name());
+        snapshot.put("assignedById",
+                assignment.getAssignedBy() != null ? assignment.getAssignedBy().getId() : null);
+        return snapshot;
+    }
+
     private Map<String, Object> schedulingSnapshot(Task task) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("isAvailable", task.isAvailable());
@@ -445,12 +543,13 @@ public class TaskService {
         return snapshot;
     }
 
-    private Map<String, Object> auditSnapshot(Task task) {
-        Map<String, Object> snapshot = new LinkedHashMap<>();
-        snapshot.put("title", task.getTitle());
-        snapshot.put("sourceType", task.getSourceType().name());
-        snapshot.put("sourceRef", task.getSourceRef());
-        snapshot.put("status", task.getStatus().name());
-        return snapshot;
+    private static Map<String, String> sortableProperties() {
+        Map<String, String> properties = new LinkedHashMap<>();
+        properties.put("deadline", "deadline");
+        properties.put("priorityScore", "priorityScore");
+        properties.put("priority_score", "priorityScore");
+        properties.put("createdAt", "createdAt");
+        properties.put("created_at", "createdAt");
+        return properties;
     }
 }

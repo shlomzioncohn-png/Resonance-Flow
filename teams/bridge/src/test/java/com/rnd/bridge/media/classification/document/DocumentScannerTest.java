@@ -114,8 +114,38 @@ class DocumentScannerTest {
 
     @Test
     void pagesToSendAboveTheScanLimitIsRejected() {
-        assertThatThrownBy(() -> new MediaClassificationProperties.Documents(1, 2))
+        assertThatThrownBy(() -> ClassificationTestSupport.documents(1, 2))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void fileOverTheSizeLimitIsNeverOpened() {
+        CountingReader reader = new CountingReader(1);
+        DocumentScanner smallLimit = new DocumentScanner(List.of(reader), new BlankPageDetector(),
+                ClassificationTestSupport.properties(new MediaClassificationProperties.Documents(5, 2, 10, 25_000_000L)));
+
+        assertThat(smallLimit.scan(new byte[11], "doc.fake").outcome()).isEqualTo(DocumentScan.Outcome.UNREADABLE);
+        assertThat(reader.opened).isFalse();
+    }
+
+    @Test
+    void pageOverThePixelLimitIsNeverRendered() {
+        CountingReader reader = new CountingReader(3);
+        reader.pixels = 25_000_001L;
+        DocumentScanner guarded = new DocumentScanner(List.of(reader), new BlankPageDetector(), properties(5, 2));
+
+        assertThat(guarded.scan(new byte[1], "doc.fake").outcome()).isEqualTo(DocumentScan.Outcome.UNREADABLE);
+        assertThat(reader.renderedPages).isEmpty();
+        assertThat(reader.closed).isTrue();
+    }
+
+    @Test
+    void realReadersReportPageSizeWithoutRendering() throws IOException {
+        try (PagedDocument png = new ImageIoDocumentReader().open(ClassificationTestSupport.textPagePng());
+             PagedDocument pdf = new PdfDocumentReader().open(ClassificationTestSupport.pdf(true))) {
+            assertThat(png.pagePixels(0)).isPositive().isLessThan(25_000_000L);
+            assertThat(pdf.pagePixels(0)).isPositive().isLessThan(25_000_000L);
+        }
     }
 
     private static DocumentScanner scanner(int maxPagesToScan, int pagesToSend) {
@@ -124,8 +154,7 @@ class DocumentScannerTest {
     }
 
     private static MediaClassificationProperties properties(int maxPagesToScan, int pagesToSend) {
-        return ClassificationTestSupport.properties(
-                new MediaClassificationProperties.Documents(maxPagesToScan, pagesToSend));
+        return ClassificationTestSupport.properties(ClassificationTestSupport.documents(maxPagesToScan, pagesToSend));
     }
 
     /** A fake format whose every page has content, recording which pages were rendered. */
@@ -133,6 +162,8 @@ class DocumentScannerTest {
         final List<Integer> renderedPages = new ArrayList<>();
         final int pageCount;
         boolean closed;
+        boolean opened;
+        long pixels = 1_000_000L;
 
         CountingReader(int pageCount) {
             this.pageCount = pageCount;
@@ -145,10 +176,16 @@ class DocumentScannerTest {
 
         @Override
         public PagedDocument open(byte[] content) {
+            opened = true;
             return new PagedDocument() {
                 @Override
                 public int pageCount() {
                     return pageCount;
+                }
+
+                @Override
+                public long pagePixels(int pageIndex) {
+                    return pixels;
                 }
 
                 @Override

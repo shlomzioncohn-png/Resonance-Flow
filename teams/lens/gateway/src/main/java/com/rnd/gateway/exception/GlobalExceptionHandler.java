@@ -1,5 +1,6 @@
 package com.rnd.gateway.exception;
 import com.rnd.gateway.dto.ErrorResponse;
+import com.rnd.gateway.auth.BffAuthClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -204,6 +205,27 @@ public class GlobalExceptionHandler {
         
         return new ResponseEntity<>(error, HttpStatus.UNAUTHORIZED);
     }
+
+    /**
+     * Handle invalid credentials errors (401).
+     * Triggered when login credentials are invalid (from BFF).
+     * Catches BffAuthClient.InvalidCredentialsException (inner class).
+     */
+    @ExceptionHandler(value = {BffAuthClient.InvalidCredentialsException.class})
+    public ResponseEntity<ErrorResponse> handleInvalidCredentialsException(
+            BffAuthClient.InvalidCredentialsException ex, WebRequest request) {
+        
+        String path = getRequestPath(request);
+        logger.warn("Invalid credentials - Path: {}", path);
+        
+        ErrorResponse error = new ErrorResponse(
+                "UNAUTHORIZED",
+                "Invalid email or password.",
+                path
+        );
+        
+        return new ResponseEntity<>(error, HttpStatus.UNAUTHORIZED);
+    }
     
     /**
      * Handle authorization errors (403).
@@ -227,6 +249,7 @@ public class GlobalExceptionHandler {
     
     /**
      * Catch-all handler for unexpected errors (500).
+     * MUST be last - more specific handlers are checked first.
      */
     @ExceptionHandler(value = {Exception.class})
     public ResponseEntity<ErrorResponse> handleGeneralException(

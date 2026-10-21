@@ -12,43 +12,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Resolves HubSpot pipeline stages to {@link DealStage} by stage <em>metadata</em>
- * ({@code isClosed}/{@code probability}), never by matching the stage <em>label</em> - this is the
- * actual fix for CRM-lane audit finding F6 (a renamed or custom stage label breaking the whole
- * sync). {@code label} is now purely informational, used only in log/error messages.
- * <p>
- * HubSpot's metadata has no explicit won/lost flag (confirmed against the live API - unlike
- * Salesforce's {@code IsWon}): {@code isClosed=true} with {@code probability} exactly {@code 1.0}
- * is {@link DealStage#CLOSED_WON}, exactly {@code 0.0} is {@link DealStage#CLOSED_LOST}. Any other
- * closed-stage probability (missing, non-boundary, unparseable) can't be disambiguated and is
- * invalid. An open stage ({@code isClosed=false}) is bucketed by {@code probability} into one of
- * four configurable {@link StageProbabilityBands} (defaults 20/50/70/99 - intentionally not
- * Salesforce's 20/50/80/99, so HubSpot's own default 7-stage pipeline keeps mapping exactly like it
- * did under label matching); a missing probability on an open stage defaults to the most
- * conservative bucket, {@link DealStage#PROSPECT}, logged once per stage per run. {@link
- * DealStage#ON_HOLD} has no HubSpot equivalent and this class never produces it.
- * <p>
- * {@code isClosed}/{@code probability} both arrive as strings on the live API ({@code "false"},
- * {@code "0.2"}) - {@link #parseBoolean} accepts only {@code "true"}/{@code "false"}
- * (case-insensitive) and {@link #parseProbability} parses via {@link BigDecimal}, never
- * {@code Double}: {@code BigDecimal}'s string constructor has no NaN/Infinity representation at
- * all (unlike {@code Double.parseDouble("NaN")}, which succeeds), so a non-finite value is rejected
- * structurally, not by a separate finiteness check, and {@code BigDecimal.compareTo} (never
- * {@code equals}) is used for the {@code 0}/{@code 1} boundary check so {@code "1.0"} and {@code
- * "1.00"} both equal {@code BigDecimal.ONE} - {@code "1.0".equals(BigDecimal.ONE)} is {@code
- * false}, but {@code compareTo} is {@code 0}.
- * <p>
- * {@link #resolveIdsToStages} never throws for a single bad stage - that stage's id and the reason
- * it failed go into the returned {@link StageResolution#invalidStageReasons()} instead, so {@code
- * HubSpotDealRepository} can skip only the deals that actually reference it (see that class's
- * constructor and {@code snapshot()} for what happens with an invalid stage - a WARN at
- * resolution time, then a per-deal skip at read time for any deal that lands on it). It throws
- * {@link UnknownHubSpotStageException} only for problems severe enough that no individual deal
- * could ever be isolated from them: a stage with no id (the only key a deal's {@code dealstage}
- * could be matched against), zero stages fetched at all, or every single fetched stage turning out
- * invalid (overwhelmingly more likely a HubSpot API shape change than every stage genuinely being
- * malformed) - the same real-world signal as the "15 deals stuck on one bad stage" threshold {@code
- * HubSpotDealRepository} enforces afterward, just at zero deals instead of some ratio of them.
+ * Resolves HubSpot pipeline stages to {@link DealStage} by stage {@code isClosed}/{@code
+ * probability} metadata, never by matching the stage label (F6 fix). A stage that can't be
+ * resolved is a per-record skip, not a whole-sync failure, unless zero/every stage is invalid.
  */
 final class HubSpotStageMapping {
 
@@ -111,11 +77,7 @@ final class HubSpotStageMapping {
             return Outcome.invalid(
                     "isClosed is missing or not a recognized boolean value (\"" + metadata.isClosed() + "\")");
         }
-        // A missing probability (the JSON key itself absent, metadata.probability() == null) and a
-        // present-but-garbage one ("", "abc", "NaN", -0.1, 1.5) are deliberately NOT the same case:
-        // only the former has a safe default on an open stage. A present empty string is a value
-        // someone sent, not an absent one, so it falls into the "invalid, never defaulted" bucket
-        // below exactly like "abc" does, even on an open stage.
+        // Missing probability (null) defaults safely; a present-but-garbage value does not.
         String rawProbability = metadata.probability();
         boolean probabilityKeyAbsent = rawProbability == null;
         BigDecimal probability = probabilityKeyAbsent ? null : parseProbability(rawProbability);

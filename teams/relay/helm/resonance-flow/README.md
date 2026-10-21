@@ -80,7 +80,7 @@ Currently wired up:
   (`dependencies` in `values.yaml`).
 - **Postgres** - `bridge`, `inbox`, `mind`, and `chain` (Bridge and Chain with their own databases and
   user - see [Chain's DB credentials](#chains-db-credentials-componentschain);
-  Inbox with its own user - see [Inbox's DB credentials](#inboxs-db-credentials-componentsinbox)).
+  Inbox likewise with its own database and user - see [Inbox's DB credentials](#inboxs-db-credentials-componentsinbox)).
   pgvector's `vector.so` is overlaid from the official `pgvector/pgvector` image:
   Bitnami's own build crashes (SIGILL) building HNSW indexes on non-AVX-512 CPUs
   (#490). The Bitnami image is pinned by digest since the overlay must match its
@@ -281,11 +281,12 @@ Both hooks render from one template, `resonance-flow.dbCredentialsHook`
 (`templates/_db-credentials-hook.tpl`); each component's `db-credentials-hook.yaml`
 is a one-line include. MIND keeps its own hook, since it also creates its app
 Secret. An empty password is replaced on the next sync - restart Postgres and the
-component afterwards, since initdb only runs on a fresh volume. The difference: Inbox gets
-its own `inbox` user, not its own database - the init script
-(`templates/services/inbox/_db-init.tpl`) makes it the owner of
-`postgresql.auth.database` and creates `pgcrypto` there as superuser. The
-`postgres` superuser stays for CI's test step only.
+component afterwards, since initdb only runs on a fresh volume. Like Chain, Inbox gets
+its own `inbox` database and user - the init script
+(`templates/services/inbox/_db-init.tpl`) also creates `pgcrypto` there as
+superuser. `postgresql.auth.database` (`resonance_flow`) is left to CI's test step,
+which runs as `postgres`: tables it creates there would be owned by `postgres`
+and unreadable by Inbox's user, so no pod uses that database.
 
 ### MIND (`components.mind`)
 

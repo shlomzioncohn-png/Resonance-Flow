@@ -8,7 +8,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 import org.springframework.web.client.RestClient;
@@ -27,75 +26,17 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Reads the CRM deal feed straight from the live HubSpot API, instead of the
- * synthetic JSON file ({@code JsonDealRepository}).
- * <p>
- * <b>The shape mismatch.</b> {@link DealRepository} wants append-only
- * stage-change events, oldest first. HubSpot's deals endpoint returns
- * current state plus, when {@code propertiesWithHistory=dealstage} is
- * requested, that one property's history newest-first. This repository
- * bridges the two by reversing the history array and emitting one
- * {@link Deal} per entry, carrying that entry's stage and timestamp - every
- * other field ({@code title}, {@code closeDate}, {@code dealValue}, ...) is
- * copied from the deal's <em>current</em> state onto every historical
- * record, because HubSpot only tracks history for the property actually
- * requested. A deal whose amount changed shows today's amount on all of its
- * historical rows. Requesting history for every property to avoid this
- * would mean merging several independently-timestamped histories for fields
- * nothing downstream reads -
- * {@link com.rnd.bridge.crm.mapper.DealToTaskMapper} only reads {@code
- * stage}, {@code closeDate}, {@code title} and {@code dealId} - so that
- * complexity is deliberately not taken on.
- * <p>
- * <b>Fields with no direct HubSpot source</b> - {@code description},
- * {@code ownerEmail}, {@code ownerName}, {@code currency},
- * {@code crmAccountSlug}, {@code sourceUrl} - are left {@code null} rather
- * than guessed at. Populating them would mean extra lookups (owners,
- * portal id for a deal URL, a currency property) that nothing in this
- * program's mapping path needs.
- * <p>
- * <b>Stage mapping.</b> HubSpot stage ids are opaque and portal-specific, so they are never
- * hardcoded. {@link #snapshot()} fetches the pipeline definition and resolves it fresh on every
- * call, by stage <em>metadata</em> ({@code isClosed}/{@code probability}), never by label - see
- * {@link HubSpotStageMapping} for the mapping rules (the actual fix for F6: a renamed or custom
- * stage label no longer breaks anything). The constructor ALSO resolves it once, eagerly,
- * discarding the result, purely to fail fast at startup on a pipeline/stage-level problem severe
- * enough that no individual deal could be isolated from it - a known tradeoff ({@code CLAUDE.md}):
- * the first {@link #snapshot()} call after startup re-does that same fetch. {@link
- * DealStage#ON_HOLD} has no HubSpot equivalent and this repository never produces it.
- * <p>
- * <b>Two different failure shapes for "a stage can't be mapped," by design, not by accident.</b> A
- * deal whose HISTORY references a stage id {@link HubSpotStageMapping} marked invalid (or that
- * isn't present in the pipeline at all) is a per-record skip - counted in {@link
- * DealSnapshot#skippedAtRead()}, the rest of the fetch proceeds; the constructor and every {@link
- * #snapshot()} call also log one WARN per run listing every invalid stage id and why, independent
- * of whether any deal currently references it. A pipeline/stage-level problem {@link
- * HubSpotStageMapping#resolveIdsToStages} can't isolate to one stage - zero stages fetched, a
- * stage with no id, or every fetched stage turning out invalid - fails {@link #snapshot()}
- * entirely, before the deals endpoint is ever called. On top of both: if the fraction of deals
- * skipped this way in one {@link #snapshot()} call exceeds {@code
- * bridge.crm.hubspot.max-skipped-ratio} (one bad stage used by many deals), the whole run fails
- * with {@link HubSpotSkipThresholdExceededException} instead of publishing a mostly-skipped
- * snapshot as if it were a normal sync.
- * <p>
- * <b>Freshness.</b> {@link #snapshot()} performs one fresh, fully independent fetch - pipeline and
- * deals both - every time it is called, and returns an immutable {@link DealSnapshot} whose {@code
- * asOf()} and every deal in it come from that one fetch. There is no cache field anywhere on this
- * class; every call is a real HTTP round trip. This is deliberate (CRM-lane audit finding F1): a
- * long-lived singleton bean that cached one fetch for its whole lifetime meant every sync after the
- * first silently republished whatever the first fetch saw, until the pod restarted.
- * <p>
- * The token is read once, from configuration backed by the {@code
- * HUBSPOT_TOKEN} environment variable, purely to build the {@code
- * Authorization} header - it is never hardcoded, logged, or included in an
- * error message (see {@link HubSpotClientException}).
+ * Reads the CRM deal feed from the live HubSpot API, one {@link Deal} per {@code dealstage}
+ * history entry. Stages resolve by {@code isClosed}/{@code probability} metadata, never by label
+ * (see {@link HubSpotStageMapping}); every {@link Deal} carries sourceRef {@code "crm:hubspot:<id>"}.
  */
 @Repository
 @Profile("hubspot")
-@Primary
 public class HubSpotDealRepository implements DealRepository {
 
     private static final Logger log = LoggerFactory.getLogger(HubSpotDealRepository.class);
+
+    private static final String SOURCE_REF_PREFIX = "crm:hubspot:";
 
     private final HubSpotClient client;
     private final Clock clock;
@@ -135,11 +76,7 @@ public class HubSpotDealRepository implements DealRepository {
         this.clock = clock;
         this.stageMapping = stageMapping;
         this.maxSkippedRatio = maxSkippedRatio;
-        // Fail fast at startup on a pipeline/stage-level problem resolveIdsToStages can't isolate
-        // to one stage (see its Javadoc). A per-stage problem it CAN isolate never throws here -
-        // only logged, below - so the app still starts even with one malformed stage in the
-        // portal. The result itself is discarded - snapshot() always resolves its own fresh copy
-        // (see the class Javadoc's "Stage mapping" note).
+        // Eager fetch here only to fail fast at startup; snapshot() always re-resolves fresh.
         warnIfAnyInvalid(stageMapping.resolveIdsToStages(client.fetchPipelines()));
     }
 
@@ -151,18 +88,17 @@ public class HubSpotDealRepository implements DealRepository {
         }
     }
 
-    /**
-     * One fresh fetch - pipeline and deals both - every call. Never reuses a previous call's data,
-     * so a sync made an hour (or a stage change) after the last one reflects HubSpot's current
-     * state. See the class Javadoc's "Freshness" section.
-     */
+    @Override
+    public String source() {
+        return "hubspot";
+    }
+
     @Override
     public DealSnapshot snapshot() {
         StageResolution resolution = stageMapping.resolveIdsToStages(client.fetchPipelines());
         warnIfAnyInvalid(resolution);
 
-        // The one clock read for this fetch. Every Deal built below shares this instant as the
-        // snapshot's asOf(), regardless of how many pages or deals are behind it.
+        // Single clock read - every Deal below shares this same asOf.
         Instant asOf = clock.instant();
 
         List<Deal> deals = new ArrayList<>();
@@ -170,13 +106,7 @@ public class HubSpotDealRepository implements DealRepository {
         int totalRecordsRead = 0;
         for (HubSpotDealRecord record : client.fetchAllDeals()) {
             totalRecordsRead++;
-            // toDealHistory() parses this one record's date/amount/stage
-            // history - each of those is a claim about HubSpot's response
-            // shape, not something this lane controls. Catching broadly and
-            // by record, not by exception type, is deliberate: any parsing
-            // rule added to toDealHistory() later - a new field, a new
-            // format assumption - gets this same per-record safety net
-            // without a matching catch clause added here.
+            // Broad catch deliberate: isolates one malformed record without a matching catch per new field.
             try {
                 deals.addAll(toDealHistory(record, resolution));
             } catch (RuntimeException e) {
@@ -203,13 +133,7 @@ public class HubSpotDealRepository implements DealRepository {
                 asOf, allDeals, Collections.unmodifiableMap(unmodifiableHistory), dealIds, skippedAtRead);
     }
 
-    /**
-     * Fails the whole run instead of returning a partial {@link DealSnapshot} once {@code
-     * skippedAtRead} exceeds {@code bridge.crm.hubspot.max-skipped-ratio} of the deals actually
-     * read this call - one invalid stage used by many deals makes every one of them fail the same
-     * way, and past this ratio a "mostly successful" sync is really a broken one. Zero records
-     * read is never a failure - there is nothing to divide by, and nothing was skipped either.
-     */
+    // Exceeding max-skipped-ratio fails the whole run instead of publishing a partial snapshot.
     private void failIfTooManySkipped(int skippedAtRead, int totalRecordsRead) {
         if (totalRecordsRead == 0) {
             return;
@@ -223,14 +147,6 @@ public class HubSpotDealRepository implements DealRepository {
         }
     }
 
-    /**
-     * One fresh fetch - the single deal, then the pipeline, both real HTTP round trips every call
-     * - never reusing a previous {@link #snapshot()} or {@link #fetchDeal(String)} call's data.
-     * The pipeline fetch only happens when the deal itself was found, so a 404 costs one request,
-     * not two. See the class Javadoc's "Freshness" and "Stage mapping" sections, and {@link
-     * DealRepository#fetchDeal(String)}'s own Javadoc for the "latest state" / "no asOf" contract
-     * this satisfies.
-     */
     @Override
     public Optional<Deal> fetchDeal(String dealId) {
         if (dealId == null || dealId.isBlank()) {
@@ -279,6 +195,7 @@ public class HubSpotDealRepository implements DealRepository {
             }
             deals.add(Deal.builder()
                     .dealId(record.id())
+                    .sourceRefPrefix(SOURCE_REF_PREFIX)
                     .title(title)
                     .stage(stage)
                     .closeDate(closeDate)

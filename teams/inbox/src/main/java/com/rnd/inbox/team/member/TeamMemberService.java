@@ -49,6 +49,7 @@ public class TeamMemberService {
     public TeamMemberResponseDto addMember(UUID teamId, TeamMemberRequestDto request, UUID actorId) {
         User actor = findActorOrThrow(actorId);
         Team team = findTeamOrThrow(teamId);
+        teamAuthorization.assertWithinScope(teamAuthorization.scopeOf(actor), team);
 
         User user = resolveUserInTenant(request.getUserId(), team.getTenant());
         if (teamMemberRepository.findByTeam_IdAndUser_IdAndLeftAtIsNull(teamId, user.getId()).isPresent()) {
@@ -67,14 +68,18 @@ public class TeamMemberService {
     public void removeMember(UUID teamId, UUID userId, UUID actorId) {
         User actor = findActorOrThrow(actorId);
         Team team = findTeamOrThrow(teamId);
+        teamAuthorization.assertWithinScope(teamAuthorization.scopeOf(actor), team);
 
         TeamMember membership = teamMemberRepository.findByTeam_IdAndUser_IdAndLeftAtIsNull(teamId, userId)
                 .orElseThrow(() -> new TeamMembershipNotFoundException(teamId, userId));
+        // Removing a member does not delete the row, it fills in left_at - so it is audited as
+        // an update of the membership, with the previous (empty) left_at in old_values.
+        Map<String, Object> before = memberSnapshot(membership);
         membership.setLeftAt(Instant.now(clock));
         TeamMember saved = teamMemberRepository.save(membership);
 
-        auditService.createAuditLog("TEAM_MEMBER_REMOVED", "Team", teamId, team.getTenant(), actor,
-                memberSnapshot(saved), null);
+        auditService.createUpdateAuditLog("TEAM_MEMBER_REMOVED", "Team", teamId, team.getTenant(), actor,
+                before, memberSnapshot(saved), null);
     }
 
     @Transactional(readOnly = true)
@@ -93,13 +98,17 @@ public class TeamMemberService {
     // as team_lead_id should not require a separate call to also add them as a member. Public
     // (not a REST endpoint) since TeamService now lives in a sibling package after the layered
     // sub-package split.
+    // actor is whoever appointed the team lead: the membership is a side effect of that
+    // appointment, and it is audited under the same actor as an ordinary addMember.
     @Transactional
-    public void ensureMembership(Team team, User user) {
+    public void ensureMembership(Team team, User user, User actor) {
         boolean alreadyMember = teamMemberRepository
                 .findByTeam_IdAndUser_IdAndLeftAtIsNull(team.getId(), user.getId())
                 .isPresent();
         if (!alreadyMember) {
-            teamMemberRepository.save(teamMapper.toMemberEntity(team, user));
+            TeamMember saved = teamMemberRepository.save(teamMapper.toMemberEntity(team, user));
+            auditService.createAuditLog("TEAM_MEMBER_ADDED", "Team", team.getId(), team.getTenant(), actor,
+                    memberSnapshot(saved), null);
         }
     }
 
