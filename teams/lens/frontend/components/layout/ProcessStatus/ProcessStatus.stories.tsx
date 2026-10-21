@@ -5,12 +5,6 @@ const meta = {
   title: 'Admin/ProcessStatus',
   component: ProcessStatus,
   tags: ['autodocs'],
-  parameters: {
-    // TODO(a11y): known color-contrast failures that come from the palette itself
-    // (design decision, not a code fix). Only this one rule is off, and only here -
-    // every other a11y rule still fails CI. Remove once the colors are revised.
-    a11y: { config: { rules: [{ id: 'color-contrast', enabled: false }] } },
-  },
 } satisfies Meta<typeof ProcessStatus>;
 
 export default meta;
@@ -43,6 +37,24 @@ export const PartialStages: Story = {
       { name: 'Backlog', count: 5 },
       { name: 'In Progress', count: 8 },
       { name: 'Done', count: 15 },
+    ],
+  },
+};
+
+/**
+ * Demonstrates the color override capability - stages can provide
+ * custom color values that override the theme defaults.
+ * This story shows accessibility works even with custom colors:
+ * - ARIA labels describe each stage and task count
+ * - Stage names and numbers provide semantic meaning beyond color
+ */
+export const WithCustomColors: Story = {
+  args: {
+    title: 'Custom Color Stages',
+    stages: [
+      { name: 'Backlog', count: 5, color: '#6366f1' },
+      { name: 'In Progress', count: 8, color: '#8b5cf6' },
+      { name: 'Done', count: 15, color: '#06b6d4' },
     ],
   },
 };

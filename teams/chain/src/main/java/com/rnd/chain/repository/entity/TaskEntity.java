@@ -1,6 +1,7 @@
 package com.rnd.chain.repository.entity;
 
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTier;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -8,6 +9,10 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -17,6 +22,9 @@ import java.util.UUID;
  * inside {@link com.rnd.chain.repository.PostgresTaskRepository} - never crosses that boundary. */
 @Entity
 @Table(name = "task")
+@Getter
+@Setter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class TaskEntity {
 
     @Id
@@ -54,7 +62,12 @@ public class TaskEntity {
     @Column(name = "priority_score")
     private Double priorityScore;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "tier")
+    private TaskTier tier;
+
     @Version
+    @Setter(AccessLevel.NONE)
     private long version;
 
     @Column(name = "created_at", nullable = false)
@@ -65,123 +78,4 @@ public class TaskEntity {
 
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
-
-    protected TaskEntity() {
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public void setId(UUID id) {
-        this.id = id;
-    }
-
-    public UUID getParentTaskId() {
-        return parentTaskId;
-    }
-
-    public void setParentTaskId(UUID parentTaskId) {
-        this.parentTaskId = parentTaskId;
-    }
-
-    public UUID getTenantId() {
-        return tenantId;
-    }
-
-    public void setTenantId(UUID tenantId) {
-        this.tenantId = tenantId;
-    }
-
-    public TaskStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(TaskStatus status) {
-        this.status = status;
-    }
-
-    public boolean isReady() {
-        return isReady;
-    }
-
-    public void setReady(boolean ready) {
-        isReady = ready;
-    }
-
-    public int getBlockingCount() {
-        return blockingCount;
-    }
-
-    public void setBlockingCount(int blockingCount) {
-        this.blockingCount = blockingCount;
-    }
-
-    public int getOpenConstraintCount() {
-        return openConstraintCount;
-    }
-
-    public void setOpenConstraintCount(int openConstraintCount) {
-        this.openConstraintCount = openConstraintCount;
-    }
-
-    public Integer getEstimatedDurationMin() {
-        return estimatedDurationMin;
-    }
-
-    public void setEstimatedDurationMin(Integer estimatedDurationMin) {
-        this.estimatedDurationMin = estimatedDurationMin;
-    }
-
-    public Double getScore() {
-        return score;
-    }
-
-    public void setScore(Double score) {
-        this.score = score;
-    }
-
-    public Double getConfidence() {
-        return confidence;
-    }
-
-    public void setConfidence(Double confidence) {
-        this.confidence = confidence;
-    }
-
-    public Double getPriorityScore() {
-        return priorityScore;
-    }
-
-    public void setPriorityScore(Double priorityScore) {
-        this.priorityScore = priorityScore;
-    }
-
-    public long getVersion() {
-        return version;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
-
-    public LocalDateTime getDeletedAt() {
-        return deletedAt;
-    }
-
-    public void setDeletedAt(LocalDateTime deletedAt) {
-        this.deletedAt = deletedAt;
-    }
 }

@@ -2,6 +2,10 @@ package com.rnd.inbox.user.dto;
 import com.rnd.inbox.user.model.UserRole;
 import com.rnd.inbox.shared.messaging.validation.ValidEnum;
 import com.rnd.inbox.shared.messaging.validation.ValidUuid;
+import com.rnd.inbox.validation.MaxUtf8Bytes;
+import com.rnd.inbox.validation.OptionalNotBlank;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -35,6 +39,25 @@ public class UserCreateRequestDto {
     @NotBlank
     @ValidEnum(enumClass = UserRole.class)
     private String role;
+
+    @OptionalNotBlank
+    @Size(min = 8)
+    @MaxUtf8Bytes(72)
+    private String password;
+
+    @JsonIgnore
+    @AssertTrue(message = "username is required to log in with a password")
+    public boolean isUsernamePresentForPassword() {
+        return password == null || (username != null && !username.isBlank());
+    }
+
+    public String getPassword() {
+        return password;
+    }
+
+    public void setPassword(String password) {
+        this.password = password;
+    }
 
     public String getTenantId() {
         return tenantId;

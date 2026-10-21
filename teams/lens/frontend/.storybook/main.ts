@@ -12,6 +12,8 @@ const config: StorybookConfig = {
     '@storybook/addon-mcp',
     'msw-storybook-addon',
   ],
+  // Serves public/mockServiceWorker.js, which MSW registers in the browser.
+  staticDirs: ['../public'],
   framework: '@storybook/nextjs-vite',
   // Serves public/mockServiceWorker.js, the Service Worker MSW registers in stories
   staticDirs: ['../public'],

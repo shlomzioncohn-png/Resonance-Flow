@@ -86,11 +86,6 @@ public class JiraIssueMapper extends AbstractTaskMapper<JiraIssue> {
     }
 
     @Override
-    protected Instant toSnoozedUntil(JiraIssue issue) {
-        return null;
-    }
-
-    @Override
     protected Instant toCompletedAt(JiraIssue issue) {
         // Jira API currently exposes no business completion date field we reliably source,
         // so we leave completedAt to be derived downstream.

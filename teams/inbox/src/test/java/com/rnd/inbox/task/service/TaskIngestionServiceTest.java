@@ -355,6 +355,41 @@ class TaskIngestionServiceTest {
     }
 
     @Test
+    void ingest_taskCreationRequestEvent_withASuggestedOwner_resolvesItWithoutAssigningIt() {
+        stubTenant();
+        User suggestedOwner = user();
+        when(userRepository.findById(suggestedOwner.getId())).thenReturn(Optional.of(suggestedOwner));
+        when(taskService.createTask(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
+
+        TaskCreationRequestEventDto event = taskCreationRequestEvent();
+        event.setSuggestedOwnerUserId(suggestedOwner.getId().toString());
+        event.setSuggestedOwnerConfidence(0.8);
+
+        service.ingest(event);
+
+        ArgumentCaptor<Task> captor = ArgumentCaptor.forClass(Task.class);
+        verify(taskService).createTask(captor.capture(), eq(List.of()), any());
+        assertThat(captor.getValue().getSuggestedOwnerUser()).isSameAs(suggestedOwner);
+        assertThat(captor.getValue().getSuggestedOwnerConfidence()).isEqualTo(0.8f);
+        assertThat(captor.getValue().getOwner()).isNull();
+    }
+
+    @Test
+    void ingest_taskCreationRequestEvent_whenTheSuggestedOwnerDoesNotExist_throwsBeforeAnythingIsSaved() {
+        stubTenant();
+        UUID suggestedOwnerId = UUID.randomUUID();
+        when(userRepository.findById(suggestedOwnerId)).thenReturn(Optional.empty());
+
+        TaskCreationRequestEventDto event = taskCreationRequestEvent();
+        event.setSuggestedOwnerUserId(suggestedOwnerId.toString());
+
+        assertThatThrownBy(() -> service.ingest(event))
+                .isInstanceOf(UserNotFoundException.class);
+
+        verify(taskService, never()).createTask(any(), any(), any());
+    }
+
+    @Test
     void ingest_taskCreationRequestEvent_whenAnAssigneeUserDoesNotExist_throwsBeforeAnythingIsSaved() {
         stubTenant();
         UUID assigneeId = UUID.randomUUID();

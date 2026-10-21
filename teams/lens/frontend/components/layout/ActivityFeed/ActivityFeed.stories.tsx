@@ -79,3 +79,89 @@ export const CustomTitle: Story = {
     title: 'Project Timeline',
   },
 };
+
+/**
+ * Displays all four activity types together to demonstrate how each type
+ * is visually distinct through:
+ * - Semantic icons (Info, CheckCircle, WarningAmber, Error)
+ * - Theme colors (not just visual, but semantically meaningful)
+ * - Hidden text labels for screen readers
+ */
+export const AllTypes: Story = {
+  args: {
+    activities: [
+      {
+        id: '1',
+        actor: { name: 'System', avatar: 'https://i.pravatar.cc/150?img=0' },
+        action: 'notified',
+        description: 'Database backup completed',
+        timestamp: '5 min ago',
+        type: 'default' as const,
+      },
+      {
+        id: '2',
+        actor: { name: 'Jordan Martinez', avatar: 'https://i.pravatar.cc/150?img=1' },
+        action: 'completed',
+        description: '"User auth refactor" task',
+        timestamp: '10 min ago',
+        type: 'success' as const,
+      },
+      {
+        id: '3',
+        actor: { name: 'System', avatar: 'https://i.pravatar.cc/150?img=0' },
+        action: 'alerted',
+        description: 'Project approaching deadline',
+        timestamp: '1h ago',
+        type: 'warning' as const,
+      },
+      {
+        id: '4',
+        actor: { name: 'Priya Sharma', avatar: 'https://i.pravatar.cc/150?img=3' },
+        action: 'reported',
+        description: 'Critical deployment failure',
+        timestamp: '3h ago',
+        type: 'error' as const,
+      },
+    ],
+  },
+};
+
+/**
+ * Demonstrates that the component handles long description text properly,
+ * without truncation issues or layout breaking.
+ * Accessibility is maintained: icons and hidden labels ensure type is clear
+ * even with longer descriptions.
+ */
+export const LongDescriptions: Story = {
+  args: {
+    activities: [
+      {
+        id: '1',
+        actor: { name: 'Jordan Martinez', avatar: 'https://i.pravatar.cc/150?img=1' },
+        action: 'completed',
+        description:
+          'Successfully completed the comprehensive user authentication refactor that included OAuth2 integration, session management improvements, and security audit fixes across all endpoints',
+        timestamp: '2 min ago',
+        type: 'success' as const,
+      },
+      {
+        id: '2',
+        actor: { name: 'System', avatar: 'https://i.pravatar.cc/150?img=0' },
+        action: 'changed',
+        description:
+          'Project status changed from "On Track" to "At Risk" due to resource allocation issues and upcoming deadline conflicts with other initiatives',
+        timestamp: '30 min ago',
+        type: 'warning' as const,
+      },
+      {
+        id: '3',
+        actor: { name: 'Priya Sharma', avatar: 'https://i.pravatar.cc/150?img=3' },
+        action: 'reported',
+        description:
+          'Critical issue discovered in production deployment: database connection pooling causing intermittent service interruptions under high load conditions',
+        timestamp: '2h ago',
+        type: 'error' as const,
+      },
+    ],
+  },
+};

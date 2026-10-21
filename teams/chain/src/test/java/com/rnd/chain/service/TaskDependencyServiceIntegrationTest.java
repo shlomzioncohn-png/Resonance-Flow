@@ -1,9 +1,9 @@
 package com.rnd.chain.service;
 
 import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
-
 import com.rnd.chain.testsupport.PgRepos;
 import org.junit.jupiter.api.Tag;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,12 +13,9 @@ import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.events.SchedulingUpdatePublisher;
 import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
-import com.rnd.chain.repository.ConstraintRepository;
-import com.rnd.chain.repository.DependencyHistoryRepository;
-import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.repository.TaskRepository;
-import com.rnd.chain.repository.TransactionRunner;
 import com.rnd.chain.testsupport.IncrementingClock;
 import com.rnd.chain.testsupport.TestTransactions;
 
@@ -49,6 +46,9 @@ class TaskDependencyServiceIntegrationTest {
     private RecordingSchedulingUpdatePublisher schedulingPublisher;
 
     private TaskDependencyService taskDependencyService;
+
+    @Autowired
+    private TaskReadinessRepository taskReadinessRepository;
 
     @BeforeEach
     void setUp() {
@@ -81,15 +81,23 @@ class TaskDependencyServiceIntegrationTest {
                 new SchedulingUpdateService(
                         schedulingPublisher);
 
+        TaskCounterUpdater counterUpdater =
+                new TaskCounterUpdater(
+                        taskRepository,
+                        dependencyRepository,
+                        new PriorityScoreService(),
+                        new SchedulingPublishListener(
+                                taskRepository,
+                                schedulingUpdateService),
+                        taskReadinessRepository);
+
         DependencyEdgeService dependencyEdgeService =
                 new DependencyEdgeService(
                         dependencyRepository,
                         PgRepos.graphLock(),
-                        new TaskCounterUpdater(
-                                taskRepository,
-                                dependencyRepository,
-                                new PriorityScoreService(),
-                                new SchedulingPublishListener(taskRepository, schedulingUpdateService)), TaskStateHistoryFixtures.newRecorder());
+                        counterUpdater,
+                        TaskStateHistoryFixtures.newRecorder(),
+                        taskReadinessRepository);
 
         taskDependencyService =
                 new TaskDependencyService(
@@ -324,7 +332,7 @@ class TaskDependencyServiceIntegrationTest {
         }
 
         public List<TaskSchedulingUpdatedEvent>
-                getPublishedEvents() {
+        getPublishedEvents() {
 
             return publishedEvents;
         }

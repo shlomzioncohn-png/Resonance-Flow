@@ -93,8 +93,7 @@ public class GlobalExceptionHandler {
                 HttpStatus.METHOD_NOT_ALLOWED);
     }
 
-    /**
-     * Triggered when a downstream dependency (Inbox, Chain, Mind) cannot be
+    /** Triggered when a downstream dependency (Inbox, Chain, Mind) cannot be
      * reached and no recommendation is possible without it — see
      * WorkspaceService.recommend() and
      * docs/workspace-screen-integration-plan.md.
@@ -112,6 +111,18 @@ public class GlobalExceptionHandler {
                         path,
                         "Service: " + ex.getServiceName()),
                 HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
+    /** Triggered when authentication credentials are invalid (incorrect password, unknown user, etc.) */
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidCredentialsException(
+            InvalidCredentialsException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Invalid credentials - Path: {}", path);
+
+        return new ResponseEntity<>(
+                new ErrorResponse("UNAUTHORIZED", "Invalid credentials", path, null),
+                HttpStatus.UNAUTHORIZED);
     }
 
     /**

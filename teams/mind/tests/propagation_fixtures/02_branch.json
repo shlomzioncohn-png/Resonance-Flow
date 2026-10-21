@@ -1,0 +1,16 @@
+{
+  "name": "branch",
+  "description": "One high-importance parent with children vs. an unrelated low-importance parent whose children look more urgent on their own features. Proves propagation changes the outcome, not just that it runs.",
+  "graph": {
+    "nodes": [
+      {"task_id": "goal_high", "parent_task_id": null, "importance": 0.9, "label": "Top strategic goal"},
+      {"task_id": "goal_low", "parent_task_id": null, "importance": 0.15, "label": "Routine, deprioritized goal"},
+      {"task_id": "task_high_1", "parent_task_id": "goal_high", "importance": 0.3, "label": "Child of the strategic goal, low own urgency"},
+      {"task_id": "task_high_2", "parent_task_id": "goal_high", "importance": 0.2, "label": "Another child of the strategic goal, even lower own urgency"},
+      {"task_id": "task_low_1", "parent_task_id": "goal_low", "importance": 0.8, "label": "Child of the routine goal, looks urgent on its own"},
+      {"task_id": "task_low_2", "parent_task_id": "goal_low", "importance": 0.7, "label": "Another child of the routine goal"}
+    ]
+  },
+  "expected_order": ["task_high_1", "task_high_2", "task_low_1", "task_low_2"],
+  "notes": "task_low_1/2 have higher own importance (0.7-0.8) than task_high_1/2 (0.2-0.3), but must still rank below them once the parent goal's importance is applied -- that across-group order is the fixture's real claim, and it holds under any reasonable combination formula. The within-group order (task_high_1 over task_high_2, task_low_1 over task_low_2) is weaker: it only follows for formulas where a task's own importance still matters once combined with its parent's, e.g. additive/weighted-sum formulas. It is not guaranteed under a pure max-style formula, where task_high_1 and task_high_2 can legitimately tie."
+}

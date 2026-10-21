@@ -17,8 +17,8 @@ import java.util.regex.Pattern;
 
 /**
  * Builds Inbox's real {@code bridge.structured.tasks} wire message
- * ({@code com.rnd.inbox.event.StructuredTaskEvent}, copied byte-for-byte from Inbox's own
- * `.proto` - see {@code src/main/proto/README.md}) directly from a {@link Task}.
+ * ({@code com.rnd.inbox.event.StructuredTaskEvent}, compiled from the registered schema in
+ * {@code shared/proto/structured-task-event.proto}) directly from a {@link Task}.
  * <p>
  * Lives alongside {@link BridgeTaskEventDto}, not in place of it: that DTO still backs the JSON
  * path ({@code TaskEnrichmentConsumer}, and whichever producer config keeps
@@ -159,7 +159,6 @@ public final class StructuredTaskEventMapper {
             case IN_REVIEW -> com.rnd.inbox.event.TaskStatus.TASK_STATUS_IN_REVIEW;
             case APPROVED -> com.rnd.inbox.event.TaskStatus.TASK_STATUS_APPROVED;
             case IN_PROGRESS -> com.rnd.inbox.event.TaskStatus.TASK_STATUS_IN_PROGRESS;
-            case SNOOZED -> com.rnd.inbox.event.TaskStatus.TASK_STATUS_SNOOZED;
             case DONE -> com.rnd.inbox.event.TaskStatus.TASK_STATUS_DONE;
             case REJECTED -> com.rnd.inbox.event.TaskStatus.TASK_STATUS_REJECTED;
             case CANCELLED -> com.rnd.inbox.event.TaskStatus.TASK_STATUS_CANCELLED;

@@ -180,8 +180,7 @@
                     <!-- Registered cross-team schemas, owned by Relay - see shared/proto/README.md. -->
                     <protoSourceRoot>${proto.root}</protoSourceRoot>
                     <includes>
-                        <include>task-created-event.proto</include>
-                        <include>task-updated-event.proto</include>
+                        <include>chain-task-updated-event.proto</include>
                         <include>task-completed-event.proto</include>
                         <include>task-dependencies-proposed-event.proto</include>
                         <include>scheduling-updated-event.proto</include>
