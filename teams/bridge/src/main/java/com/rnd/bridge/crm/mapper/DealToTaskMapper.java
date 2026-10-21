@@ -41,7 +41,7 @@ public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
     public static TaskStatus toTaskStatus(DealStage stage) {
         return switch (stage) {
             case PROSPECT, QUALIFIED, PROPOSAL, NEGOTIATION -> TaskStatus.NEW;
-            // Not SNOOZED: Inbox requires snoozed_until, and a Deal has no resume date to give it.
+            // Not a paused/snoozed status - a Deal has no resume date, so ON_HOLD stays NEW.
             case ON_HOLD -> TaskStatus.NEW;
             case CLOSED_WON -> TaskStatus.DONE;
             case CLOSED_LOST -> TaskStatus.CANCELLED;
@@ -156,10 +156,7 @@ public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
         return toDeadline(deal.closeDate());
     }
 
-    @Override
-    protected Instant toSnoozedUntil(Deal deal) {
-        return null; // never SNOOZED on this lane, so never populated
-    }
+
 
     @Override
     protected Instant toCompletedAt(Deal deal) {

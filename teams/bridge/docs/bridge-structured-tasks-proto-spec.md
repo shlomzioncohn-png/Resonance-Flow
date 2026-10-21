@@ -24,9 +24,10 @@ this document: Protobuf field naming is independent of JSON casing debates entir
 own point that wire-level field naming doesn't apply to a binary, number-keyed format.
 
 **Topic:** `bridge.structured.tasks`
-**Producers:** Bridge CRM lane (`CrmLaneConfig` → `KafkaPayloadPublisher`) and Bridge JIRA lane
-(`JiraKafkaProducer`) — both build `BridgeTaskEventDto` from a `Task` and publish it to this same
-topic. Any schema decision here affects both lanes identically; they share one DTO and one topic.
+**Producers:** the shared `KafkaPayloadPublisher` (`publish.kafka`, bean in
+`BridgeTaskKafkaConfig`) — every lane (CRM, Jira, GitHub) injects `PayloadPublisher<Task>`,
+which it maps to Protobuf `StructuredTaskEvent` via `StructuredTaskEventMapper`. One producer,
+one topic: any schema decision affects all lanes identically.
 **Consumer:** Inbox's `StructuredTaskConsumer`/`StructuredTaskEventDto`
 (`teams/inbox/src/main/java/com/rnd/inbox/structuredtask/`) — currently a raw `StringDeserializer`
 + hand-written Jackson JSON DTO, not Protobuf (verified against `origin/main` 2026-09-15).
