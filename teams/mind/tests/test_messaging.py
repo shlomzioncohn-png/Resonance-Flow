@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 
+from mind.config_file import ConfigFileError
 from mind.messaging.config import load_settings
 from mind.messaging.task_dependencies_proposed_event_pb2 import (
     Dependency,
@@ -37,11 +38,22 @@ def test_config_reads_kafka_from_the_mounted_files(tmp_path, monkeypatch):
     assert s.consumer_conf("g")["group.id"] == "g"
 
 
-def test_config_missing_files_is_safe(tmp_path, monkeypatch):
+def test_config_missing_config_file_fails(tmp_path, monkeypatch):
+    # #481: no silent fallback -- a missing config.yaml stops the caller.
     monkeypatch.setenv("CONFIG_FILE_PATH", str(tmp_path / "nope.yaml"))
     monkeypatch.setenv("SECRETS_FILE_PATH", str(tmp_path / "nope2.yaml"))
+    with pytest.raises(ConfigFileError, match="does not exist"):
+        load_settings()
+
+
+def test_config_missing_secrets_file_is_safe(tmp_path, monkeypatch):
+    # The Secret is mounted optional: no secrets.yaml just means no SASL.
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("kafka:\n  bootstrap_servers: broker:9092\n")
+    monkeypatch.setenv("CONFIG_FILE_PATH", str(cfg))
+    monkeypatch.setenv("SECRETS_FILE_PATH", str(tmp_path / "nope2.yaml"))
     s = load_settings()
-    assert s.bootstrap_servers == ""
+    assert s.bootstrap_servers == "broker:9092"
     assert not s.sasl.enabled
     assert s.producer_conf()["acks"] == "all"
 
@@ -106,7 +118,10 @@ def test_a_consumer_can_override_its_conf(tmp_path, monkeypatch, overrides, expe
     # max.poll.interval.ms; other consumers keep the defaults untouched.
     from mind.messaging import consumer as consumer_module
 
-    monkeypatch.setenv("CONFIG_FILE_PATH", str(tmp_path / "nope.yaml"))
+    # #481: config.yaml must exist (load_settings is strict); secrets.yaml may not.
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("kafka:\n  bootstrap_servers: broker:9092\n")
+    monkeypatch.setenv("CONFIG_FILE_PATH", str(cfg))
     monkeypatch.setenv("SECRETS_FILE_PATH", str(tmp_path / "nope2.yaml"))
     monkeypatch.setattr(consumer_module, "Consumer", _RecordingConsumer)
 

@@ -162,23 +162,37 @@ licensing constraints.
 cp .env.example .env             # already filled with working defaults today
 make dev                         # install with dev dependencies
 make lint                        # ruff + mypy
-docker compose up vector-store -d # bring up just the DB -- make test/make run need it
-make migrate                     # apply database migrations (alembic upgrade head)
+docker compose up vector-store -d # bring up just the DB -- make run-local needs it
+make migrate-local               # apply database migrations (alembic upgrade head)
 make test                        # run the test suite
 make eval                        # run the evaluation harness against eval/personas/
-make run                         # run the API locally
+make run-local                   # run the API locally
 make docker-up                   # or run everything via docker compose (API + vector-store)
 ```
 
-`make test` and `make run` connect to Postgres over `MIND_VECTOR_STORE__DSN`
-(already set in `.env.example` against `localhost:5432`), so the
-`vector-store` container above must be up first even when you're running
-`mind` itself outside Docker. `make migrate` must then run once against a
-fresh database -- the app itself no longer creates its own schema (see
-[`migrations/`](./migrations) and issue #441); it only checks the schema
-is already there, and fails fast with a clear message if it isn't.
-`make docker-up` doesn't need either step -- it brings up `vector-store`
-and runs the migration itself.
+MIND reads its connection settings only from the file `CONFIG_FILE_PATH`
+names (#481) -- there are no hardcoded hosts and no DSN env var.
+`make run-local` / `make migrate-local` point it at the committed
+`config.example.yml` + `secrets.example.yml` (placeholders only, against
+`localhost:5432`); plain `make run` / `make migrate` refuse to start
+unless you set the two variables yourself. Which settings come from the
+file, what each missing piece fails with, and what's been verified are in
+[`src/mind/api/README.md`](./src/mind/api/README.md) ("Configuration
+(#481)").
+
+The `vector-store` container above must be up first, even when you're
+running `mind` itself outside Docker. `make migrate-local` must then run
+once against a fresh database -- the app itself no longer creates its own
+schema (see [`migrations/`](./migrations) and issue #441); it only checks
+the schema is already there, and fails fast with a clear message if it
+isn't. `make docker-up` doesn't need either step -- it brings up
+`vector-store` and runs the migration itself, with `config.compose.yml`.
+
+`make test` doesn't need the config files: `tests/conftest.py` writes its
+own. The tests that need a real database read its DSN from
+`TEST_DATABASE_URL` (CI sets it) or `MIND_VECTOR_STORE__DSN`, which
+`.env.example` no longer carries. To run them locally:
+`TEST_DATABASE_URL=postgresql://mind:mind@localhost:5432/mind make test`.
 
 `make docker-up` (`docker compose up`) now brings up the full stack —
 migrations, the API, **and** its `vector-store` (pgvector) dependency —

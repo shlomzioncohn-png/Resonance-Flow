@@ -6,12 +6,17 @@ pytest was invoked directly (not via `make test`), see `make proto`.
 """
 
 import asyncio
+import atexit
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 import pytest
+import yaml
 from dotenv import load_dotenv
 
 if sys.platform == "win32":
@@ -36,6 +41,42 @@ load_dotenv(_ROOT / ".env")
 if "TEST_DATABASE_URL" in os.environ:
     os.environ.setdefault("MIND_VECTOR_STORE__DSN", os.environ["TEST_DATABASE_URL"])
 os.environ.setdefault("MIND_ENVIRONMENT", "ci")
+
+
+def _write_session_config_files() -> None:
+    """Give the session the mounted files mind.config now requires (#481).
+
+    Settings reads vector_store only from $CONFIG_FILE_PATH/$SECRETS_FILE_PATH,
+    never from MIND_VECTOR_STORE__DSN -- so turn that DSN (from .env or CI's
+    TEST_DATABASE_URL, above) into the two files, the same split Relay's chart
+    uses. Without one, a placeholder that nothing connects to: DB tests read
+    MIND_VECTOR_STORE__DSN themselves and skip/fail on its absence as before.
+    """
+    dsn = urlsplit(
+        os.environ.get(
+            "MIND_VECTOR_STORE__DSN", "postgresql://mind:placeholder@db.invalid:5432/mind"
+        )
+    )
+    directory = Path(tempfile.mkdtemp(prefix="mind-test-config-"))
+    atexit.register(shutil.rmtree, directory, ignore_errors=True)
+    config = {
+        "vector_store": {
+            "url": f"{dsn.hostname}:{dsn.port or 5432}",
+            "user": unquote(dsn.username or ""),
+            "db": dsn.path.lstrip("/"),
+        }
+    }
+    secrets = {"vector_store": {"password": unquote(dsn.password or "")}}
+    (directory / "config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    (directory / "secrets.yaml").write_text(yaml.safe_dump(secrets), encoding="utf-8")
+    os.environ["CONFIG_FILE_PATH"] = str(directory / "config.yaml")
+    os.environ["SECRETS_FILE_PATH"] = str(directory / "secrets.yaml")
+
+
+# A caller that already points at a config file (e.g. a local run against a
+# real one) keeps it.
+if "CONFIG_FILE_PATH" not in os.environ:
+    _write_session_config_files()
 
 
 @pytest.fixture(autouse=True)

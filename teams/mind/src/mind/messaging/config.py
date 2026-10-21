@@ -17,14 +17,9 @@ Only the messaging-relevant keys are read here:
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
-from pathlib import Path
 
-import yaml
-
-_DEFAULT_CONFIG = "/etc/resonance-flow/config/config.yaml"
-_DEFAULT_SECRETS = "/etc/resonance-flow/secret/secrets.yaml"
+from mind import config_file
 
 
 @dataclass
@@ -77,26 +72,10 @@ class MessagingSettings:
         }
 
 
-def _read_yaml(path: str) -> dict:
-    p = Path(path)
-    return yaml.safe_load(p.read_text()) if p.is_file() else {}
-
-
-def _deep_merge(base: dict, over: dict) -> dict:
-    out = dict(base)
-    for k, v in over.items():
-        out[k] = _deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
-    return out
-
-
 def load_settings() -> MessagingSettings:
-    merged = _deep_merge(
-        _read_yaml(os.environ.get("CONFIG_FILE_PATH", _DEFAULT_CONFIG)),
-        _read_yaml(os.environ.get("SECRETS_FILE_PATH", _DEFAULT_SECRETS)),
-    )
-    kafka = merged.get("kafka", {}) or {}
-    producer = kafka.get("producer", {}) or {}
-    sasl = kafka.get("sasl", {}) or {}
+    kafka = config_file.section(config_file.load_merged(), "kafka")
+    producer = config_file.section(kafka, "producer")
+    sasl = config_file.section(kafka, "sasl")
     return MessagingSettings(
         bootstrap_servers=kafka.get("bootstrap_servers", ""),
         schema_registry_url=kafka.get("schema_registry_url", ""),
