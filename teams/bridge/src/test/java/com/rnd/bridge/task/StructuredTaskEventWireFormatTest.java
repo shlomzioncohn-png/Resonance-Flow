@@ -87,7 +87,7 @@ class StructuredTaskEventWireFormatTest {
                 TaskStatus.NEW, null, null,
                 null, ExtractionProvenance.ETL, null,
                 SourceType.CRM_DEAL, "crm:D-minimal",
-                null, null, null, null);
+                null, null, null);
         StructuredTaskEvent sent = StructuredTaskEventMapper.from(minimal);
 
         StructuredTaskEvent received = deserialize(serialize(sent));
@@ -125,6 +125,6 @@ class StructuredTaskEventWireFormatTest {
                 TaskStatus.NEW, 4, 0.75,
                 Tier.TACTICAL, ExtractionProvenance.ETL, RoleContext.SALESPERSON,
                 SourceType.CRM_DEAL, "crm:D-1",
-                90, Instant.parse("2026-11-01T00:00:00Z"), null, null);
+                90, Instant.parse("2026-11-01T00:00:00Z"), null);
     }
 }

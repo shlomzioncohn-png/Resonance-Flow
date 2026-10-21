@@ -84,7 +84,6 @@ public class TaskEnrichmentConsumer {
                 event.sourceRef(),
                 event.effortEstimateMinutes(),
                 event.deadline(),
-                null,
                 null);
     }
 
@@ -107,7 +106,6 @@ public class TaskEnrichmentConsumer {
                 draft.sourceRef(),
                 output.effortEstimateMinutes() != null ? output.effortEstimateMinutes() : draft.effortEstimateMinutes(),
                 output.deadline() != null ? output.deadline() : draft.deadline(),
-                draft.snoozedUntil(),
                 draft.completedAt());
     }
 

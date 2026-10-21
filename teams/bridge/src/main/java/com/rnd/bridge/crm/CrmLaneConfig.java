@@ -4,21 +4,22 @@ import com.rnd.bridge.crm.mapper.DealToTaskMapper;
 import com.rnd.bridge.publish.LoggingPayloadPublisher;
 import com.rnd.bridge.task.enrichment.EnrichmentProperties;
 import com.rnd.bridge.task.enrichment.TaskEnricher;
-import com.rnd.bridge.publish.kafka.KafkaPayloadPublisher;
 import com.rnd.bridge.task.TaskValidator;
 import com.rnd.bridge.task.model.Task;
-import com.rnd.inbox.event.StructuredTaskEvent;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
-import org.springframework.context.annotation.Profile;
 import org.springframework.core.env.Environment;
-import org.springframework.kafka.core.KafkaTemplate;
 
 /**
- * Bean wiring for {@link CrmLane}'s collaborators (the mapper, validator, and publisher).
+ * Bean wiring for {@link CrmLane}'s collaborators that intentionally carry
+ * no Spring annotations of their own - {@link DealToTaskMapper} and
+ * {@link CrmTaskValidator} are plain, framework-free classes shared or shareable
+ * across lanes - plus the publisher, which is the logging stand-in unless
+ * the {@code kafka} profile is active (the Protobuf {@code KafkaPayloadPublisher}
+ * lives in {@code publish.kafka.BridgeTaskKafkaConfig} - shared infrastructure, not
+ * CRM-owned), mirroring how the {@code hubspot} profile overrides
+ * {@code JsonDealRepository} elsewhere in this package.
  * The {@code kafka} profile requires a real tenant UUID for {@code bridge.crm.organization-id}, not the placeholder.
  */
 @Configuration
@@ -74,12 +75,4 @@ class CrmLaneConfig {
         return new LoggingPayloadPublisher<>();
     }
 
-    @Bean
-    @Profile("kafka")
-    @Primary
-    KafkaPayloadPublisher kafkaTaskPublisher(
-            @Qualifier("bridgeTaskEventKafkaTemplate") KafkaTemplate<String, StructuredTaskEvent> kafkaTemplate,
-            @Value("${bridge.structured-tasks-topic:bridge.structured.tasks}") String topic) {
-        return new KafkaPayloadPublisher(kafkaTemplate, topic);
-    }
 }
