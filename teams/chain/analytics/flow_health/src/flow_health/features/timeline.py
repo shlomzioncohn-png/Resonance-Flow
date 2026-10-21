@@ -48,11 +48,19 @@ def build_timeline(ds: Dataset) -> Timeline:
         warn(f"task_state_history has events for unknown task {tid}")
 
     return Timeline(
-        status_segments=pd.DataFrame(status_rows, columns=STATUS_COLUMNS),
-        block_segments=pd.DataFrame(block_rows, columns=BLOCK_COLUMNS),
-        edge_intervals=_edge_intervals(ds, warn),
+        status_segments=_typed(pd.DataFrame(status_rows, columns=STATUS_COLUMNS)),
+        block_segments=_typed(pd.DataFrame(block_rows, columns=BLOCK_COLUMNS)),
+        edge_intervals=_typed(_edge_intervals(ds, warn)),
         warnings=warnings,
     )
+
+
+def _typed(df: pd.DataFrame) -> pd.DataFrame:
+    """Keeps the column types when a table is empty."""
+    for column in ("start", "end"):
+        df[column] = pd.to_datetime(df[column], utc=True)
+    df["is_open"] = df["is_open"].astype(bool)
+    return df
 
 
 def _status_segments(task, rows, as_of, warn) -> list[tuple]:
