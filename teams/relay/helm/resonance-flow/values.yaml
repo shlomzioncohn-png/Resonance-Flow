@@ -197,6 +197,8 @@ components:
       - name: notification-delivery
         port: 80
     config:
+      server:
+        port: 8082
       inbox:
         service:
           url: http://resonance-flow-inbox:80
