@@ -3,6 +3,7 @@ import { getRouter } from '@storybook/nextjs-vite/navigation.mock';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { expect, waitFor, within } from 'storybook/test';
+import { sampleGraph } from '@/mocks/dependencyGraphData';
 import { bottlenecksGraphEmptyHandler, bottlenecksGraphErrorHandler } from '@/mocks/handlers';
 import ManagerBottlenecksPage from './page';
 
@@ -45,10 +46,27 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+const BIG_BLOCKER_ID = sampleGraph.nodes[0].id;
+const MIGRATE_LOGIN_ID = sampleGraph.nodes[1].id;
+
 export const Default: Story = {
   play: async ({ canvas, userEvent }) => {
-    // Clicking the big blocker opens its details.
+    // Clicking a task puts it in the URL; the drawer opens from there.
     await userEvent.click(await canvas.findByText('Finalize auth token service', { selector: 'p' }));
+    await waitFor(() =>
+      expect(getRouter().replace).toHaveBeenCalledWith(expect.stringContaining(`taskId=${BIG_BLOCKER_ID}`), {
+        scroll: false,
+      }),
+    );
+  },
+};
+
+/** What the Dashboard links to: /manager/bottlenecks?taskId=... opens that task's details. */
+export const OpenedFromDashboard: Story = {
+  parameters: {
+    nextjs: { appDirectory: true, navigation: { query: { taskId: BIG_BLOCKER_ID } } },
+  },
+  play: async ({ userEvent }) => {
     const drawer = within(await within(document.body).findByRole('dialog'));
     await expect(drawer.getByRole('heading', { name: 'Finalize auth token service' })).toBeInTheDocument();
     await expect(drawer.getByText('Blocks (3)')).toBeInTheDocument();
@@ -56,8 +74,11 @@ export const Default: Story = {
 
     // A task in the drawer moves the drawer to it.
     await userEvent.click(drawer.getByRole('button', { name: /Migrate login screen/ }));
-    await expect(drawer.getByRole('heading', { name: 'Migrate login screen' })).toBeInTheDocument();
-    await expect(drawer.getByText('Waiting on (1)')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(getRouter().replace).toHaveBeenCalledWith(expect.stringContaining(`taskId=${MIGRATE_LOGIN_ID}`), {
+        scroll: false,
+      }),
+    );
   },
 };
 
