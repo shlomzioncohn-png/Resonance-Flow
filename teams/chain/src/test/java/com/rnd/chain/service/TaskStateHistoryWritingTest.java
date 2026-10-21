@@ -103,7 +103,7 @@ class TaskStateHistoryWritingTest {
         LocalDateTime stored = LocalDateTime.now();
         UUID id = savedTask(TaskStatus.ACTIVE, stored);
 
-        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, stored.plusSeconds(10), TENANT);
+        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, stored.plusSeconds(10), TENANT, null);
 
         List<TaskStateHistoryEntry> rows = rowsOf(id);
         assertThat(rows).hasSize(1);
@@ -117,7 +117,7 @@ class TaskStateHistoryWritingTest {
         LocalDateTime stored = LocalDateTime.now();
         UUID id = savedTask(TaskStatus.ACTIVE, stored);
 
-        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, stored.minusSeconds(10), TENANT);
+        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, stored.minusSeconds(10), TENANT, null);
 
         assertThat(rowsOf(id)).isEmpty();
         assertThat(taskRepository.findById(id).orElseThrow().getStatus()).isEqualTo(TaskStatus.ACTIVE);
@@ -129,8 +129,8 @@ class TaskStateHistoryWritingTest {
         UUID id = savedTask(TaskStatus.ACTIVE, stored);
         LocalDateTime eventTime = stored.plusSeconds(10);
 
-        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, eventTime, TENANT);
-        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, eventTime, TENANT);
+        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, eventTime, TENANT, null);
+        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, eventTime, TENANT, null);
 
         assertThat(rowsOf(id)).hasSize(1);
     }
@@ -140,7 +140,7 @@ class TaskStateHistoryWritingTest {
         LocalDateTime stored = LocalDateTime.now();
         UUID id = savedTask(TaskStatus.ACTIVE, stored);
 
-        service.onTaskStatusChangedIfNewer(id, TaskStatus.ACTIVE, stored.plusSeconds(10), TENANT);
+        service.onTaskStatusChangedIfNewer(id, TaskStatus.ACTIVE, stored.plusSeconds(10), TENANT, null);
 
         assertThat(rowsOf(id)).isEmpty();
     }
@@ -244,7 +244,7 @@ class TaskStateHistoryWritingTest {
         taskRepository.save(original);
         LocalDateTime eventTime = stored.plusSeconds(10);
 
-        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, eventTime, TENANT);
+        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, eventTime, TENANT, null);
 
         Task after = taskRepository.findById(id).orElseThrow();
         assertThat(after.getStatus()).isEqualTo(TaskStatus.PENDING);

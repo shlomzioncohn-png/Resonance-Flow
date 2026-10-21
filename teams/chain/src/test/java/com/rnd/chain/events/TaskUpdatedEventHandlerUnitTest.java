@@ -2,6 +2,7 @@ package com.rnd.chain.events;
 
 import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTier;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.service.TaskEligibilityService;
@@ -45,7 +46,20 @@ class TaskUpdatedEventHandlerUnitTest {
 
         handler.onMessage(event(taskId.toString(), TENANT_ID.toString()));
 
-        verify(service).onTaskStatusChangedIfNewer(taskId, TaskStatus.ACTIVE, UPDATED_AT, TENANT_ID);
+        verify(service).onTaskStatusChangedIfNewer(taskId, TaskStatus.ACTIVE, UPDATED_AT, TENANT_ID, null);
+    }
+
+    @Test
+    void eventWithTier_passesTheMappedTierToTheService() {
+        UUID taskId = UUID.randomUUID();
+        TaskUpdatedEvent withTier = event(taskId.toString(), TENANT_ID.toString()).toBuilder()
+                .setTier(com.rnd.inbox.event.TaskTier.TASK_TIER_STRATEGIC)
+                .build();
+
+        handler.onMessage(withTier);
+
+        verify(service).onTaskStatusChangedIfNewer(
+                taskId, TaskStatus.ACTIVE, UPDATED_AT, TENANT_ID, TaskTier.STRATEGIC);
     }
 
     @Test
@@ -72,7 +86,7 @@ class TaskUpdatedEventHandlerUnitTest {
         handler.onMessage(done);
 
         verify(service).onTaskUpdatedAsDone(taskId, UPDATED_AT, TENANT_ID);
-        verify(service, never()).onTaskStatusChangedIfNewer(any(), any(), any(), any());
+        verify(service, never()).onTaskStatusChangedIfNewer(any(), any(), any(), any(), any());
     }
 
     // Since #777 an unknown task is created by the service itself, so the handler no longer maps
@@ -81,7 +95,7 @@ class TaskUpdatedEventHandlerUnitTest {
     void unexpectedTaskNotFound_isTreatedAsTransient() {
         UUID taskId = UUID.randomUUID();
         doThrow(new TaskNotFoundException(taskId)).when(service)
-                .onTaskStatusChangedIfNewer(any(), any(), any(), any());
+                .onTaskStatusChangedIfNewer(any(), any(), any(), any(), any());
 
         assertThrows(ChainTransientProcessingException.class,
                 () -> handler.onMessage(event(taskId.toString(), TENANT_ID.toString())));
@@ -90,7 +104,7 @@ class TaskUpdatedEventHandlerUnitTest {
     @Test
     void tenantReassignment_isNonRetryable() {
         doThrow(new TenantReassignmentException("tenant changed"))
-                .when(service).onTaskStatusChangedIfNewer(any(), any(), any(), any());
+                .when(service).onTaskStatusChangedIfNewer(any(), any(), any(), any(), any());
 
         assertThrows(NonRetryableEventException.class,
                 () -> handler.onMessage(event(UUID.randomUUID().toString(), TENANT_ID.toString())));
@@ -99,7 +113,7 @@ class TaskUpdatedEventHandlerUnitTest {
     @Test
     void unexpectedFailure_becomesTransientSoItIsRetried() {
         doThrow(new IllegalStateException("db down")).when(service)
-                .onTaskStatusChangedIfNewer(any(), any(), any(), any());
+                .onTaskStatusChangedIfNewer(any(), any(), any(), any(), any());
 
         assertThrows(ChainTransientProcessingException.class,
                 () -> handler.onMessage(event(UUID.randomUUID().toString(), TENANT_ID.toString())));
