@@ -3,6 +3,7 @@ field the score depends on changes, and not re-published otherwise.
 No broker: the sink is an in-memory list."""
 
 import threading
+import time
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -564,3 +565,26 @@ def test_a_request_after_the_task_was_taken_is_queued_again(propagating, model):
     propagating.rescore(TASK_A)
 
     assert propagating.drain_rescores() == 1
+
+
+# --- stopping the rescore worker (#920) -------------------------------------
+
+
+def test_the_rescore_worker_handles_the_queue_then_stops_when_asked(propagating, sink, model):
+    # In the API the worker runs in a thread and must end on shutdown, even
+    # while it waits on an empty queue.
+    propagating.handle_task_created(_created())
+    model.base = 0.9
+    propagating.rescore(TASK_A)
+    stop = threading.Event()
+
+    worker = threading.Thread(target=propagating.run_rescores, args=(stop,))
+    worker.start()
+    deadline = time.monotonic() + 2
+    while len(sink.sent) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    stop.set()
+    worker.join(timeout=3)
+
+    assert not worker.is_alive()
+    assert [p.mind_score for p in sink.sent] == [0.5, 0.9]

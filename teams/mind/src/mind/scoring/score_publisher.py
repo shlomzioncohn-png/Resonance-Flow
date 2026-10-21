@@ -88,6 +88,10 @@ logger = logging.getLogger(__name__)
 _CREATED = 0
 _UPDATED = 1
 
+# How long the rescore worker waits on an empty queue before checking whether
+# it was asked to stop: a shutdown waits at most this long for it.
+_STOP_CHECK_SECONDS = 1.0
+
 
 @dataclass(slots=True)
 class _TaskState:
@@ -239,10 +243,18 @@ class ScorePublisher:
             self._pending.add(task_id)
         self._rescores.put(task_id)
 
-    def run_rescores(self) -> None:
-        """The worker: re-score queued tasks, one at a time, forever."""
-        while True:
-            self._rescore_now(self._take(self._rescores.get()))
+    def run_rescores(self, stop: threading.Event | None = None) -> None:
+        """The worker: re-score queued tasks, one at a time, until `stop` is set.
+
+        Waits for the queue at most _STOP_CHECK_SECONDS at a time, so it notices
+        `stop` even when no request comes. Without `stop`, it runs forever.
+        """
+        while stop is None or not stop.is_set():
+            try:
+                task_id = self._rescores.get(timeout=_STOP_CHECK_SECONDS)
+            except queue.Empty:
+                continue
+            self._rescore_now(self._take(task_id))
 
     def drain_rescores(self) -> int:
         """Re-score every task queued so far, and return how many were sent."""
