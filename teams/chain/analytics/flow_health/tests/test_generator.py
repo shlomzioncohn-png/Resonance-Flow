@@ -8,11 +8,11 @@ from dataclasses import replace
 
 import pytest
 
-from health.generator import DISEASE_TYPES, HOLDOUT_DISEASES, SEVERITIES, GeneratorConfig, generate, validate
-from health.generator.__main__ import main as generate_cli
-from health.generator.diseases import REGISTRY, Disease
-from health.generator.export import write_dataset
-from health.generator.model import TIER_PROFILES, TIERS
+from flow_health.generator import DISEASE_TYPES, HOLDOUT_DISEASES, SEVERITIES, GeneratorConfig, generate, validate
+from flow_health.generator.__main__ import main as generate_cli
+from flow_health.generator.diseases import REGISTRY, Disease
+from flow_health.generator.export import write_dataset
+from flow_health.generator.model import TIER_PROFILES, TIERS
 
 SMALL = replace(GeneratorConfig(), n_normal_tasks=300, n_projects=6, instances_per_severity=1)
 
@@ -231,8 +231,8 @@ def test_everything_works_when_no_task_has_a_known_tier(tmp_path):
 
 
 def test_the_simulation_runs_for_tasks_that_have_no_tier_at_all():
-    from health.generator.planner import plan_world
-    from health.generator.simulation import simulate
+    from flow_health.generator.planner import plan_world
+    from flow_health.generator.simulation import simulate
 
     world = plan_world(SMALL)
     for i, task in enumerate(world.tasks):

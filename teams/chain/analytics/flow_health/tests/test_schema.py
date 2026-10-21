@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from health.generator import GeneratorConfig, generate
-from health.generator.export import write_dataset
+from flow_health.generator import GeneratorConfig, generate
+from flow_health.generator.export import write_dataset
 from dataclasses import replace
 
 

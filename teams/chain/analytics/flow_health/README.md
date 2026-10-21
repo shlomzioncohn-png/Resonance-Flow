@@ -17,7 +17,7 @@ python -m venv .venv
 .venv\Scripts\activate              # Windows; on Linux/macOS: source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
-python -m health.generator          # writes out/dev AND out/eval, validated, in one command
+python -m flow_health.generator          # writes out/dev AND out/eval, validated, in one command
 ```
 
 The generator itself uses only the standard library. Options: `--out`, `--seed` (dev), `--eval-seed`,
@@ -61,7 +61,7 @@ open dependency appears, `UNBLOCKED` exactly when the last one is done or remove
 `validate.py` replays the output from the rows alone and checks it against the tables' constraints
 and the counter rules; the generator refuses to write data that fails it.
 
-Code layout (`src/health/generator/`): `config.py` (all knobs), `model.py` (tiers, task/edge specs),
+Code layout (`src/flow_health/generator/`): `config.py` (all knobs), `model.py` (tiers, task/edge specs),
 `planner.py` (healthy world), `controls.py` (healthy control chains), `peers.py` (peer groups), `diseases/` (one module per disease), `simulation.py`, `validate.py`,
 `export.py`, `__main__.py`.
 

@@ -13,7 +13,7 @@ DEFAULT_EVAL_SEED = 4242
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
-        prog="python -m health.generator",
+        prog="python -m flow_health.generator",
         description="Generate two independent synthetic histories: dev (to build the model on, held-out "
                     "disease type excluded) and eval (different seed, every disease type, to measure it).")
     p.add_argument("--out", type=Path, default=Path("out"), help="writes <out>/dev and <out>/eval (default: out)")
