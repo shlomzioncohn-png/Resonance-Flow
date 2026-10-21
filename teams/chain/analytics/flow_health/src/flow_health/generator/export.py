@@ -57,7 +57,7 @@ def _observed(cfg: GeneratorConfig, world: World, history: History, peers: PeerI
         longest[task] = max(longest[task], (cfg.end - since).total_seconds() / 86400)
     edges_by_task: dict = defaultdict(list)
     for r in history.dependency_rows:
-        if r.action == "ADDED":
+        if r.action == "ADDED" and r.depends_on_task_id not in edges_by_task[r.task_id]:
             edges_by_task[r.task_id].append(r.depends_on_task_id)
 
     out = {}

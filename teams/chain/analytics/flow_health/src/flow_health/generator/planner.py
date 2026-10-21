@@ -95,11 +95,9 @@ def _plan_normal(cfg: GeneratorConfig, rng: random.Random) -> tuple[list[TaskSpe
         roll = rng.random()
         if roll < cfg.slow_legit_rate:
             spec.kind, spec.work_mult = "slow_legit", rng.uniform(4.0, 8.0)
-        elif roll < cfg.slow_legit_rate + cfg.reopened_legit_rate:
-            spec.kind, spec.reopen_budget, spec.reopen_gap_hours = "reopened_legit", 1, (24.0, 120.0)
-        elif roll < cfg.slow_legit_rate + cfg.reopened_legit_rate + cfg.backlog_rate:
+        elif roll < cfg.slow_legit_rate + cfg.backlog_rate:
             spec.kind, spec.hold_start_until = "backlog", never_ends
-        elif roll < cfg.slow_legit_rate + cfg.reopened_legit_rate + cfg.backlog_rate + cfg.abandoned_rate:
+        elif roll < cfg.slow_legit_rate + cfg.backlog_rate + cfg.abandoned_rate:
             spec.kind, spec.hold_finish_until = "abandoned", never_ends
 
         if rng.random() < cfg.fan_in_rate:  # integration task: leans on many earlier ones

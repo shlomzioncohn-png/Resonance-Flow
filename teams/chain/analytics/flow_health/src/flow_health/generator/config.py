@@ -18,7 +18,6 @@ class GeneratorConfig:
     instances_per_severity: int = 5
     excluded_diseases: tuple[str, ...] = HOLDOUT_DISEASES
     slow_legit_rate: float = 0.03  # healthy tasks that are just slow: hard negatives
-    reopened_legit_rate: float = 0.03  # healthy tasks reopened once
     backlog_rate: float = 0.08  # healthy tasks nobody ever picks up; nothing depends on them
     abandoned_rate: float = 0.04  # healthy tasks started and never finished; nothing depends on them
     late_dependency_rate: float = 0.08  # extra edges added after creation, per task

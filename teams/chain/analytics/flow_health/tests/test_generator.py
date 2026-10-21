@@ -82,19 +82,23 @@ def test_planted_diseases_leave_their_signature(full):
             blocked_days[r.task_id] = max(blocked_days[r.task_id], (r.created_at - opened.pop(r.task_id)).days)
     for task, since in opened.items():
         blocked_days[task] = max(blocked_days[task], (end - since).days)
-    done = defaultdict(int)
+    blocks = defaultdict(int)
     for r in rows:
-        if r.event_type == "STATUS_CHANGED" and r.to_status == "DONE":
-            done[r.task_id] += 1
+        if r.event_type == "BLOCKED":
+            blocks[r.task_id] += 1
 
     for d in full.world.diseases:
         days_available = (end - d.start).days  # late starters are cut off by the end of the history
         if d.type in ("chronic_blocking", "stuck_subgraph") and d.severity == "severe":
             assert max(blocked_days[t] for t in d.task_ids) >= 0.75 * min(d.params["hold_days"], days_available) - 3, d.id
         if d.type == "recurring_blocker":
-            assert done[d.root_task_id] >= min(d.params["cycles"], days_available // 9) - 1, d.id
+            assert max(blocks[t] for t in d.task_ids) >= min(d.params["cycles"], days_available // 7) - 1, d.id
         if d.type == "growing_bottleneck":
             assert len(d.task_ids) == d.params["dependents"] + 1
+
+
+def test_no_task_ever_leaves_done(full):
+    assert not [r for r in full.history.state_rows if r.event_type == "STATUS_CHANGED" and r.from_status == "DONE"]
 
 
 def test_chronic_and_stuck_roots_are_long_for_their_own_tier(full):
@@ -105,7 +109,7 @@ def test_chronic_and_stuck_roots_are_long_for_their_own_tier(full):
 
 def test_normal_world_has_healthy_lookalikes_and_dead_ends(full):
     kinds = {t.kind for t in full.world.tasks}
-    assert {"slow_legit", "reopened_legit", "backlog", "abandoned"} <= kinds
+    assert {"slow_legit", "backlog", "abandoned"} <= kinds
     # nothing depends on backlog/abandoned tasks, so they can't masquerade as chronic blockers
     dead = {t.id for t in full.world.tasks if t.kind in ("backlog", "abandoned")}
     real = [e for e in full.history.dependency_rows if e.action != "REJECTED"]

@@ -81,7 +81,7 @@ Code layout (`src/flow_health/generator/`): `config.py` (all knobs), `model.py` 
 - **Healthy control chains:** linear chains of 4 / 7 / 12 tasks (operational and tactical, per team pace) at
   normal speed. They are the "chains of the same length and shape" a slow chain is judged against.
 - **Healthy lookalikes** (hard negatives, labelled in `answer_key_tasks.csv`): `slow_legit` (4-8x slower
-  than its peers), `reopened_legit`, `backlog` and `abandoned` (never finished, nothing depends on them).
+  than its peers), `backlog` and `abandoned` (never finished, nothing depends on them).
 - **`REJECTED` rows:** about 1% of tasks get one in `dependency_history` (as Chain writes for a
   cross-tenant edge). They never become edges and must be ignored by the analysis.
 
@@ -97,7 +97,7 @@ tier (`peer_typical_days` in the ground truth). About a third of the hold-based 
 | Type | What is planted | subtle / moderate / severe |
 |---|---|---|
 | `chronic_blocking` | one blocker stays open far longer than peers of its tier; dependents wait | 5x / 10x / 20x peers (floor 10 / 20 / 40 days), 1-3 dependents |
-| `recurring_blocker` | blocker is finished and reopened again and again; dependents flap BLOCKED/UNBLOCKED | 3 / 6 / 10 cycles |
+| `recurring_blocker` | an edge is removed and added back again and again while its target stays open; the dependent flaps BLOCKED/UNBLOCKED | 3 / 6 / 10 blocks per dependent, 1-2 dependents |
 | `slow_chain` | same-tier chain where every link is several times slower than peers | length 4 / 7 / 12, 3x / 5x / 8x |
 | `growing_bottleneck` | unfinished task that gains dependents over weeks | 6 / 12 / 24 dependents |
 | `stuck_subgraph` (held out of dev) | multi-level subtree stalled behind one held root | 4 / 8 / 15 tasks, 6x / 12x / 24x peers (floor 14 / 28 / 50 days) |
@@ -118,6 +118,6 @@ and returns the root task and a params dict. It is discovered automatically; not
 - Planted structures hang off the healthy world only through an optional upstream task of their root;
   healthy tasks never depend on diseased ones.
 - Dependencies only point at earlier-created tasks, so the graph is acyclic by construction (Chain
-  rejects cycles anyway). The "recurring blocker" disease is therefore reopen/finish flapping, not a graph cycle.
+  rejects cycles anyway). The "recurring blocker" disease is therefore an edge that is repeatedly removed and re-added, not a graph cycle. Tasks never leave DONE in this data.
 - Normal-world timing is a plausible guess, not calibrated against real Chain data. Re-check the
   numbers once real history exists.
