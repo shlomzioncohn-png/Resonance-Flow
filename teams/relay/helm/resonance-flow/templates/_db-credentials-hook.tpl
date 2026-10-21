@@ -40,10 +40,10 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]
-  # get/delete only on this Secret - to reuse its password or repair an empty one.
+  # get/patch only on this Secret - to reuse its passwords or fill in a missing one.
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "delete"]
+    verbs: ["get", "patch"]
     resourceNames:
       - {{ $secretName }}
 ---
@@ -143,29 +143,32 @@ spec:
                     cat /tmp/get-response.json >&2
                     exit 1
                   fi
-                  VALID=true
+                  MISSING=""
                   {{- range $secretKeys }}
-                  [ -n "$(sed -n 's/.*"{{ . }}": *"\([^"]*\)".*/\1/p' /tmp/get-response.json | base64 -d)" ] || VALID=false
-                  {{- end }}
-                  if [ "$VALID" = true ]; then
-                    echo "{{ $secretName }} already exists and looks valid - reusing its password"
-                  else
-                    echo "{{ $secretName }} exists but a password is missing or empty - recreating it" >&2
-                    DELETE_CODE=$(curl -sS -o /tmp/delete-response -w '%{http_code}' \
-                      --cacert "$SA/ca.crt" \
-                      -H "Authorization: Bearer $(cat "$SA/token")" \
-                      -X DELETE "$API/{{ $secretName }}")
-                    case "$DELETE_CODE" in
-                      200|202) ;;
-                      *) echo "Unexpected HTTP $DELETE_CODE deleting the broken {{ $secretName }}:" >&2; cat /tmp/delete-response >&2; exit 1 ;;
-                    esac
-                    RECREATE_CODE=$(create "$DB_BODY")
-                    if [ "$RECREATE_CODE" != "201" ]; then
-                      echo "Unexpected HTTP $RECREATE_CODE recreating {{ $secretName }}:" >&2
-                      cat /tmp/response >&2
+                  if [ -z "$(sed -n 's/.*"{{ . }}": *"\([^"]*\)".*/\1/p' /tmp/get-response.json | base64 -d)" ]; then
+                    PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)"
+                    if [ -z "$PASSWORD" ]; then
+                      echo "Generated an empty password, refusing to continue" >&2
                       exit 1
                     fi
-                    echo "Recreated {{ $secretName }} with a new password"
+                    MISSING="${MISSING:+$MISSING,}\"{{ . }}\":\"$PASSWORD\""
+                  fi
+                  {{- end }}
+                  if [ -z "$MISSING" ]; then
+                    echo "{{ $secretName }} already exists and looks valid - reusing its passwords"
+                  else
+                    echo "{{ $secretName }} has a missing or empty password - filling in only those keys" >&2
+                    PATCH_CODE=$(curl -sS -o /tmp/patch-response -w '%{http_code}' \
+                      --cacert "$SA/ca.crt" \
+                      -H "Authorization: Bearer $(cat "$SA/token")" \
+                      -H "Content-Type: application/merge-patch+json" \
+                      -X PATCH "$API/{{ $secretName }}" -d "{\"stringData\":{$MISSING}}")
+                    if [ "$PATCH_CODE" != "200" ]; then
+                      echo "Unexpected HTTP $PATCH_CODE patching {{ $secretName }}:" >&2
+                      cat /tmp/patch-response >&2
+                      exit 1
+                    fi
+                    echo "Filled in the missing passwords of {{ $secretName }}"
                   fi
                   ;;
                 *) echo "Unexpected HTTP $CODE creating {{ $secretName }}:" >&2; cat /tmp/response >&2; exit 1 ;;
