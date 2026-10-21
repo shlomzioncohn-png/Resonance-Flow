@@ -41,6 +41,8 @@ class CsvLoader:
         latest = max(deps["created_at"].max(), states["created_at"].max())
         as_of = latest.to_pydatetime() if as_of is None else _utc(as_of)
 
+        tasks = self._until(tasks, as_of, "tasks")
+        meta = meta[meta["task_id"].isin(tasks["task_id"])].reset_index(drop=True)
         deps = self._until(deps, as_of, "dependency_history")
         states = self._until(states, as_of, "task_state_history")
         return Dataset(tasks=tasks, task_meta=meta,

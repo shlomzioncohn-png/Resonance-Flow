@@ -130,3 +130,18 @@ and returns the root task and a params dict. It is discovered automatically; not
 that reads Chain. Only the contract columns are read; `REJECTED` dependency rows are dropped (logged); history is
 ordered by `created_at`, then `sequence`; `as_of` defaults to the latest event, and later events are cut off when it
 is set earlier. A test checks that analysis code never mentions the answer files.
+
+## Timeline reconstruction (`flow_health.features.timeline`)
+
+`build_timeline(dataset)` returns a `Timeline` with three tables and a list of warnings:
+
+| Table | One row per | Columns |
+|---|---|---|
+| `status_segments` | PENDING / ACTIVE stretch of a task, plus a zero-length `DONE` marker at the finish time | `task_id, status, start, end, is_open` |
+| `block_segments` | BLOCKED -> UNBLOCKED pair | `task_id, start, end, is_open` |
+| `edge_intervals` | ADDED -> REMOVED stretch of an edge (an edge that is removed and re-added has several) | `task_id, depends_on_task_id, start, end, is_open` |
+
+Anything still running at `as_of` is cut there and flagged `is_open = true`; it is never dropped. An event that
+contradicts the sequence (UNBLOCKED without BLOCKED, a second BLOCKED, ADDED twice, REMOVED of an edge that is not
+there, a status change that does not follow the previous one, a task leaving DONE) is logged as a warning, kept in
+`Timeline.warnings` and skipped. The generator's data produces none.

@@ -59,6 +59,7 @@ def test_an_earlier_as_of_hides_later_events(data_dir):
     ds = CsvLoader(data_dir).load(as_of=datetime(2026, 1, 3, tzinfo=timezone.utc))
     assert list(ds.dependency_history["sequence"]) == [1]
     assert ds.task_state_history.empty
+    assert len(ds.tasks) == 2  # both created on day 1
 
 
 def test_a_naive_as_of_is_read_as_utc(data_dir):
@@ -69,3 +70,10 @@ def test_a_missing_file_is_reported(data_dir):
     (data_dir / "task_meta.csv").unlink()
     with pytest.raises(FileNotFoundError, match="task_meta.csv"):
         CsvLoader(data_dir).load()
+
+
+def test_tasks_created_after_as_of_are_dropped_with_their_meta(data_dir):
+    _write(data_dir / "tasks.csv", "task_id,created_at,project_id",
+           f"a,{T.format(d=1)},3", f"b,{T.format(d=4)},3")
+    ds = CsvLoader(data_dir).load(as_of=datetime(2026, 1, 3, tzinfo=timezone.utc))
+    assert list(ds.tasks["task_id"]) == ["a"] and list(ds.task_meta["task_id"]) == ["a"]
