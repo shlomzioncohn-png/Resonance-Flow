@@ -8,7 +8,10 @@ import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import org.springframework.stereotype.Service;
+import com.rnd.chain.dto.TaskReadinessSnapshot;
+import com.rnd.chain.repository.TaskReadinessRepository;
 
+import java.util.Map;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -43,10 +46,12 @@ public class TaskTraversalService {
 
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
+    private final TaskReadinessRepository taskReadinessRepository;
 
-    public TaskTraversalService(TaskRepository taskRepository, TaskDependencyRepository taskDependencyRepository) {
+    public TaskTraversalService(TaskRepository taskRepository, TaskDependencyRepository taskDependencyRepository, TaskReadinessRepository taskReadinessRepository) {
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
+        this.taskReadinessRepository = taskReadinessRepository;
     }
 
     /**
@@ -250,10 +255,42 @@ public class TaskTraversalService {
      * the graph is a traversal-safety case, not an error.
      */
     private List<TaskResponse> toResponses(List<UUID> ids) {
-        List<TaskResponse> result = new ArrayList<>();
-        for (UUID id : ids) {
-            taskRepository.findById(id).ifPresent(task -> result.add(TaskResponse.from(task)));
+
+        if (ids.isEmpty()) {
+            return List.of();
         }
+
+        Map<UUID, TaskReadinessSnapshot> readinessById =
+                taskReadinessRepository.findByIds(ids);
+
+        List<TaskResponse> result =
+                new ArrayList<>();
+
+        for (UUID id : ids) {
+
+            Optional<Task> task =
+                    taskRepository.findById(id);
+
+            if (task.isEmpty()) {
+                // dangling edge / parent reference - preserve existing behavior
+                continue;
+            }
+
+            TaskReadinessSnapshot readiness =
+                    readinessById.get(id);
+
+            if (readiness == null) {
+                throw new IllegalStateException(
+                        "No task_readiness row found for task "
+                                + id);
+            }
+
+            result.add(
+                    TaskResponse.from(
+                            task.get(),
+                            readiness));
+        }
+
         return result;
     }
 }

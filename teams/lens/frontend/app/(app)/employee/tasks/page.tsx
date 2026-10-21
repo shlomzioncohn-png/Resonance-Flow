@@ -12,6 +12,7 @@ import Typography from '@mui/material/Typography';
 import SearchIcon from '@mui/icons-material/Search';
 import PageContainer from '@/components/layout/PageContainer';
 import DataTable, { type Column } from '@/components/ui/DataTable';
+import WorkInsights from '@/components/ui/WorkInsights';
 import { getErrorMessage } from '@/services/api';
 import { listTasks, type ApiTask, type TaskListFilter } from '@/services/workspaceApi';
 import { PriorityChip, softToneSx, statusTone } from '../shared';
@@ -207,6 +208,8 @@ export default function EmployeeTasksPage() {
           },
         }}
       />
+
+      <WorkInsights />
     </PageContainer>
   );
 }

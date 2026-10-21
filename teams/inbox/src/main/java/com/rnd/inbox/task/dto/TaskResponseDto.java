@@ -10,6 +10,7 @@ import com.rnd.inbox.tenant.dto.TenantSummaryDto;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -54,6 +55,7 @@ public final class TaskResponseDto {
     @Schema(type = "string", example = "12/10/2026 14:30")
     private final Instant completedAt;
     private final Map<String, Object> metadata;
+    private final List<AssignmentResponseDto> assignees;
 
     public TaskResponseDto(UUID id, TenantSummaryDto tenant, UUID projectId, String projectName, String title,
                             String description, SourceType sourceType, String sourceRef, TaskTier tier,
@@ -62,7 +64,8 @@ public final class TaskResponseDto {
                             Instant snoozedUntil, TaskExtractionProvenance extractionProvenance, Float confidence,
                             UUID ownerId, String ownerDisplayName, Float effortEstimateConfidence,
                             UUID suggestedOwnerUserId, Float suggestedOwnerConfidence, UUID createdById,
-                            Instant createdAt, Instant updatedAt, Instant completedAt, Map<String, Object> metadata) {
+                            Instant createdAt, Instant updatedAt, Instant completedAt, Map<String, Object> metadata,
+                            List<AssignmentResponseDto> assignees) {
         this.id = id;
         this.tenant = tenant;
         this.projectId = projectId;
@@ -92,6 +95,7 @@ public final class TaskResponseDto {
         this.updatedAt = updatedAt;
         this.completedAt = completedAt;
         this.metadata = metadata;
+        this.assignees = assignees;
     }
 
     public UUID getId() {
@@ -208,5 +212,9 @@ public final class TaskResponseDto {
 
     public Map<String, Object> getMetadata() {
         return metadata;
+    }
+
+    public List<AssignmentResponseDto> getAssignees() {
+        return assignees;
     }
 }

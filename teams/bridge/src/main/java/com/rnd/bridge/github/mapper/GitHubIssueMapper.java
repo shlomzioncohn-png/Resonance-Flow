@@ -74,11 +74,6 @@ public class GitHubIssueMapper extends AbstractTaskMapper<GitHubIssue> {
     }
 
     @Override
-    protected Instant toSnoozedUntil(GitHubIssue issue) {
-        return null;
-    }
-
-    @Override
     protected Instant toCompletedAt(GitHubIssue issue) {
         // No business completion date to map: closed_at is when the issue
         // was closed in GitHub, not the same thing as a business completion

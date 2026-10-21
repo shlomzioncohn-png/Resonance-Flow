@@ -471,7 +471,9 @@ components:
     config:
       data:
         datasource:
-          # Own user, owning postgresql.auth.database - not the subchart's superuser.
+          # Own database and user - CI's tests run as postgres on postgresql.auth.database,
+          # and tables they create there would be unreadable by this user.
+          database: inbox
           username: inbox
         kafka:
           consumerGroupId: inbox-service
@@ -665,7 +667,7 @@ postgresql:
   enabled: true
   architecture: standalone
   # Pinned: the subchart otherwise generates a random password and only creates the
-  # default "postgres" database. Inbox's user owns auth.database (inbox/_db-init.tpl).
+  # default "postgres" database. Only CI's test step uses auth.database - no pod does.
   auth:
     postgresPassword: postgres
     database: resonance_flow

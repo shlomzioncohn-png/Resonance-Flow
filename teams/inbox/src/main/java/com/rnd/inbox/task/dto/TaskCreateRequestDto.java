@@ -1,10 +1,13 @@
 package com.rnd.inbox.task.dto;
 import com.rnd.inbox.shared.messaging.validation.ValidUuid;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 
 import java.time.Instant;
+import java.util.List;
 
 public class TaskCreateRequestDto {
 
@@ -31,6 +34,8 @@ public class TaskCreateRequestDto {
     private Integer effortEstimateMinutes;
 
     private Instant deadline;
+
+    private List<@NotNull @Valid TaskAssigneeRequestDto> assignees;
 
     public String getTenantId() {
         return tenantId;
@@ -94,5 +99,13 @@ public class TaskCreateRequestDto {
 
     public void setDeadline(Instant deadline) {
         this.deadline = deadline;
+    }
+
+    public List<TaskAssigneeRequestDto> getAssignees() {
+        return assignees;
+    }
+
+    public void setAssignees(List<TaskAssigneeRequestDto> assignees) {
+        this.assignees = assignees;
     }
 }

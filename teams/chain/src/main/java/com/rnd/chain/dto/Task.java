@@ -60,11 +60,14 @@ public final class Task {
      * {@code TaskEligibilityService}. */
     private final Double priorityScore;
 
+    /** Latest tier Inbox sent (issue #864); null until Inbox classifies the task. */
+    private final TaskTier tier;
+
     private final LocalDateTime createdAt;
     private final LocalDateTime updatedAt;
     private final LocalDateTime deletedAt;
 
-    @lombok.Builder(builderClassName = "Builder")
+    @lombok.Builder(builderClassName = "Builder", toBuilder = true)
     private Task(UUID id,
                  UUID parentTaskId,
                  UUID tenantId,
@@ -76,6 +79,7 @@ public final class Task {
                  Double score,
                  Double confidence,
                  Double priorityScore,
+                 TaskTier tier,
                  LocalDateTime createdAt,
                  LocalDateTime updatedAt,
                  LocalDateTime deletedAt) {
@@ -102,6 +106,7 @@ public final class Task {
         this.score = score;
         this.confidence = confidence;
         this.priorityScore = priorityScore;
+        this.tier = tier;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.deletedAt = deletedAt;
@@ -116,10 +121,7 @@ public final class Task {
      */
     public static Task copyOf(Task source) {
         Objects.requireNonNull(source, "source must not be null");
-        return new Task(source.id, source.parentTaskId, source.tenantId, source.status,
-                source.isReady, source.blockingCount, source.openConstraintCount,
-                source.estimatedDurationMin, source.score, source.confidence, source.priorityScore,
-                source.createdAt, source.updatedAt, source.deletedAt);
+        return source.toBuilder().build();
     }
 
     @Override

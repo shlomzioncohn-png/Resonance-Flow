@@ -145,6 +145,7 @@ class ProtoEventPublishingIntegrationTest {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("taskId", taskId.toString());
         payload.put("completed", true);
+        payload.put("updatedAt", "2026-10-14T09:30:00Z");
         Event<Map<String, Object>> event = Event.newEvent(EventType.TASK_COMPLETED, "inbox", null, payload);
 
         CompletableFuture<Void> result = publisher.publish(COMPLETED_TOPIC, taskId.toString(), event);
@@ -154,6 +155,7 @@ class ProtoEventPublishingIntegrationTest {
 
         assertThat(received.getTaskId()).isEqualTo(taskId.toString());
         assertThat(received.getIsCompleted()).isTrue();
+        assertThat(received.getUpdatedAt().getSeconds()).isEqualTo(Instant.parse("2026-10-14T09:30:00Z").getEpochSecond());
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})

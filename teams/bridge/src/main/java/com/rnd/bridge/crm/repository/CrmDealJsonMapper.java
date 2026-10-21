@@ -6,10 +6,8 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 /**
- * The single Jackson configuration for reading the synthetic CRM deal feed,
- * shared by {@link JsonDealRepository} and {@link SyntheticDealsLoader} so
- * the two paths that read the same file cannot silently drift apart in how
- * they parse it.
+ * The single Jackson configuration for reading the synthetic CRM deal feed, shared by {@link
+ * JsonDealRepository} and {@link SyntheticDealsLoader} so the two can't drift apart in parsing it.
  */
 final class CrmDealJsonMapper {
 

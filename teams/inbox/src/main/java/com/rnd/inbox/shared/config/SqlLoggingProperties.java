@@ -6,7 +6,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class SqlLoggingProperties {
 
     private boolean enabled = true;
-    private boolean includeParameters = true;
+    // Off by default: bound values can be sensitive (e.g. an OTP hash). Enable only for local development.
+    private boolean includeParameters = false;
     private long slowQueryThresholdMs = 200;
 
     public boolean isEnabled() {

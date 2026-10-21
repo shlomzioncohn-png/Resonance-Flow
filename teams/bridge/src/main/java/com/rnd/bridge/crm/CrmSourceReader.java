@@ -6,32 +6,30 @@ import com.rnd.bridge.crm.model.Deal;
 import com.rnd.bridge.crm.repository.DealRepository;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.stream.Stream;
 
 /**
- * Generic {@link SourceReader} entry point, for {@code AbstractIntakeLane}'s
- * {@code run(ReadCursor, Instant)} overload (used by {@code CrmLaneIntegrationTest} and any future
- * generic caller). {@code CrmBridgeController} and {@code CrmSyncJob} don't go through this:
- * each takes one {@code DealSnapshot} per run and calls the {@code run(Stream, Instant)} overload
- * directly, so the deals and the {@code asOf} they publish are guaranteed to come from the same
- * fetch. This reader exists so a caller using the {@code ReadCursor} overload sees the same
- * latest-per-deal behavior those two do, not a second, inconsistent one.
+ * Generic {@link SourceReader} entry point for {@code AbstractIntakeLane}'s {@code
+ * run(ReadCursor, Instant)} overload (test-only today). Single CRM source only - {@link
+ * #read(ReadCursor)} throws if more than one is active; {@code CrmSyncService} is the multi-source path.
  */
 @Component
 public class CrmSourceReader implements SourceReader<Deal> {
 
-    private final DealRepository dealRepository;
+    private final List<DealRepository> dealRepositories;
 
-    public CrmSourceReader(DealRepository dealRepository) {
-        this.dealRepository = dealRepository;
+    public CrmSourceReader(List<DealRepository> dealRepositories) {
+        this.dealRepositories = dealRepositories;
     }
 
     @Override
     public Stream<Deal> read(ReadCursor cursor) {
-        // cursor is accepted but ignored: only full sync exists today - the
-        // synthetic feed has no since-timestamp query to run an incremental
-        // read against. Wiring the parameter through now means adding real
-        // incremental support later doesn't change this method's signature.
-        return dealRepository.snapshot().latestPerDeal().stream();
+        if (dealRepositories.size() > 1) {
+            throw new IllegalStateException(
+                    "CrmSourceReader supports a single CRM source; use CrmSyncService");
+        }
+        // cursor ignored - only full sync exists today.
+        return dealRepositories.get(0).snapshot().latestPerDeal().stream();
     }
 }

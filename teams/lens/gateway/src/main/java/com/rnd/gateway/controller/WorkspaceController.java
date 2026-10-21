@@ -20,6 +20,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -96,6 +99,34 @@ public class WorkspaceController {
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Extract userId from JWT authentication.
+     * If no JWT found, returns 401 Unauthorized.
+     * 
+     * @return userId from JWT
+     * @throws ResponseStatusException with 401 if JWT not found
+     */
+    private String getUserIdFromJwt() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        
+        if (auth != null && auth.getPrincipal() instanceof org.springframework.security.oauth2.jwt.Jwt) {
+            org.springframework.security.oauth2.jwt.Jwt jwt = 
+                (org.springframework.security.oauth2.jwt.Jwt) auth.getPrincipal();
+            String sub = jwt.getSubject();
+            if (sub != null && !sub.isBlank()) {
+                logger.debug("Extracted userId from JWT: {}", sub);
+                return sub;
+            }
+        }
+        
+        // No JWT found - return 401 Unauthorized
+        logger.warn("No JWT token found in request");
+        throw new ResponseStatusException(
+            HttpStatus.UNAUTHORIZED, 
+            "Missing or invalid authentication token"
+        );
+    }
 
     /**
      * Get mock user ID for dev/test flow.
@@ -262,7 +293,7 @@ public class WorkspaceController {
             @Parameter(description = "Page size (default 20, clamped to 1-100)")
             @RequestParam(required = false) Integer size) {
 
-        String userId = getMockUserId("workspace.tasks.list"); // TODO: extract from JWT
+        String userId = getUserIdFromJwt();
 
         logger.info("Task list request - userId: {}, filter: {}, search: {}, page: {}, size: {}",
                 userId, filter, search, page, size);
