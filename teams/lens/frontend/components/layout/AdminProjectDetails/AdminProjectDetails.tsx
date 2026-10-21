@@ -17,6 +17,7 @@ import TableRow from '@mui/material/TableRow';
 import EditIcon from '@mui/icons-material/Edit';
 import ArchiveIcon from '@mui/icons-material/Archive';
 import DeleteIcon from '@mui/icons-material/Delete';
+import { useTheme } from '@mui/material/styles';
 import StatusBadge from '@/components/ui/StatusBadge/StatusBadge';
 import KpiTile from '@/components/ui/KpiTile/KpiTile';
 import ProcessStatus from '@/components/layout/ProcessStatus/ProcessStatus';
@@ -96,6 +97,7 @@ export default function AdminProjectDetails({
   onArchive,
   onDelete,
 }: AdminProjectDetailsProps) {
+  const theme = useTheme();
   const progressPercentageCalc =
     totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
@@ -187,13 +189,13 @@ export default function AdminProjectDetails({
               <TableContainer>
                 <Table>
                   <TableHead>
-                    <TableRow sx={{ bgcolor: '#f9fafb' }}>
-                      <TableCell sx={{ fontWeight: 600, color: '#374151' }}>Member</TableCell>
-                      <TableCell sx={{ fontWeight: 600, color: '#374151' }}>Role</TableCell>
-                      <TableCell align="center" sx={{ fontWeight: 600, color: '#374151' }}>
+                    <TableRow sx={{ bgcolor: theme.palette.grey[50] }}>
+                      <TableCell sx={{ fontWeight: 600, color: theme.palette.text.primary }}>Member</TableCell>
+                      <TableCell sx={{ fontWeight: 600, color: theme.palette.text.primary }}>Role</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 600, color: theme.palette.text.primary }}>
                         Active Tasks
                       </TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 600, color: '#374151' }}>
+                      <TableCell align="right" sx={{ fontWeight: 600, color: theme.palette.text.primary }}>
                         Workload
                       </TableCell>
                     </TableRow>
@@ -223,7 +225,7 @@ export default function AdminProjectDetails({
                             </Typography>
                           </TableCell>
                           <TableCell align="center">
-                            <Typography variant="body2" sx={{ fontWeight: 500, color: '#f97316' }}>
+                            <Typography variant="body2" sx={{ fontWeight: 500, color: theme.palette.status.warning.main }}>
                               {member.activeTasks || 0}
                             </Typography>
                           </TableCell>
