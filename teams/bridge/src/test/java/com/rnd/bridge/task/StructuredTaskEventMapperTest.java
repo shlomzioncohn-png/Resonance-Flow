@@ -404,10 +404,14 @@ class StructuredTaskEventMapperTest {
             Map.entry(SourceType.CALENDAR, com.rnd.inbox.event.SourceType.SOURCE_TYPE_CALENDAR));
 
     // Inbox-only values: MANUAL means "typed directly into the product, no adapter involved" -
-    // bypasses Bridge entirely. DRIVE has no Bridge lane today. See teams/bridge/CLAUDE.md §6.
+    // bypasses Bridge entirely. DRIVE has no Bridge lane today. ZOOM and BIGBLUEBUTTON (added by
+    // Inbox, #749): Bridge hands meetings off as RawObjectEvent, never as a structured Task.
+    // See teams/bridge/CLAUDE.md §6.
     private static final Set<com.rnd.inbox.event.SourceType> SOURCE_TYPE_NOT_SENT_BY_BRIDGE = Set.of(
             com.rnd.inbox.event.SourceType.SOURCE_TYPE_MANUAL,
-            com.rnd.inbox.event.SourceType.SOURCE_TYPE_DRIVE);
+            com.rnd.inbox.event.SourceType.SOURCE_TYPE_DRIVE,
+            com.rnd.inbox.event.SourceType.SOURCE_TYPE_ZOOM,
+            com.rnd.inbox.event.SourceType.SOURCE_TYPE_BIGBLUEBUTTON);
 
     @ParameterizedTest
     @EnumSource(SourceType.class)
