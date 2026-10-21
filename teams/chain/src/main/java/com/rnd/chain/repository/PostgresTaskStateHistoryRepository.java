@@ -44,7 +44,7 @@ public class PostgresTaskStateHistoryRepository implements TaskStateHistoryRepos
     public PageResponse<TaskStateHistoryEntry> findByTaskId(UUID taskId, Instant from, Instant to, int page,
                                                             int size) {
         Objects.requireNonNull(taskId, "taskId must not be null");
-        // Newest first; sequence is the same-millisecond tiebreaker (mirrors the in-memory repository).
+        // Newest first; sequence is the same-millisecond tiebreaker.
         Sort sort = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("sequence"));
         Page<TaskStateHistoryEntity> result = jpaRepository.findByTaskIdAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
                 taskId, from == null ? OPEN_FROM : from, to == null ? OPEN_TO : to,

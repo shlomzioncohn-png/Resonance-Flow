@@ -1,0 +1,304 @@
+{
+  "nodes": [
+    {
+      "task_id": "mgr_reorg_annual_goal",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Annual goal: organizational effectiveness"
+    },
+    {
+      "task_id": "mgr_reorg_quarterly_initiative",
+      "parent_task_id": "mgr_reorg_annual_goal",
+      "importance": 0.8,
+      "label": "Q4 team restructuring that leadership decides on Monday"
+    },
+    {
+      "task_id": "mgr_reorg_status_reporting",
+      "parent_task_id": null,
+      "importance": 0.2,
+      "label": "Routine weekly status reporting"
+    },
+    {
+      "task_id": "dev_crash_selfservice_roadmap",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Customer self-service roadmap (widget not yet scheduled)"
+    },
+    {
+      "task_id": "dev_arch_payments_redesign",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Payments-service architecture redesign initiative"
+    },
+    {
+      "task_id": "dev_oauth_sso_rollout",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Q4 single sign-on rollout initiative"
+    },
+    {
+      "task_id": "mgr_sprint_quarterly_delivery",
+      "parent_task_id": null,
+      "importance": 0.5,
+      "label": "Team's planned Q4 delivery cadence"
+    },
+    {
+      "task_id": "hm_renewal_revenue_retention",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Protect current divisional revenue this year"
+    },
+    {
+      "task_id": "hm_renewal_market_exploration",
+      "parent_task_id": null,
+      "importance": 0.5,
+      "label": "Exploratory growth into adjacent markets"
+    },
+    {
+      "task_id": "sales_vertex_deal",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Vertex deal, a key opportunity in this quarter's pipeline"
+    },
+    {
+      "task_id": "sales_acme_deal",
+      "parent_task_id": null,
+      "importance": 0.5,
+      "label": "Acme contract"
+    },
+    {
+      "task_id": "sales_acme_new_logo_target",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "New-logo acquisition this quarter"
+    },
+    {
+      "task_id": "hm_filing_three_year_strategy",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Division's three-year strategy"
+    },
+    {
+      "task_id": "ceo_board_corporate_governance",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Corporate governance and board oversight"
+    },
+    {
+      "task_id": "ceo_board_thursday_session",
+      "parent_task_id": "ceo_board_corporate_governance",
+      "importance": 0.8,
+      "label": "Thursday's board session"
+    },
+    {
+      "task_id": "mgr_hire_team_growth",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "This year's backend team growth plan"
+    },
+    {
+      "task_id": "mgr_hire_budget_cycle",
+      "parent_task_id": null,
+      "importance": 0.5,
+      "label": "Regular quarterly budget cycle"
+    },
+    {
+      "task_id": "ceo_launch_product_launch",
+      "parent_task_id": null,
+      "importance": 0.2,
+      "label": "Product launch campaign, already shipped"
+    },
+    {
+      "task_id": "ceo_launch_investor_relations",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Investor relations and quarterly reporting"
+    },
+    {
+      "task_id": "hm_memo_board_meeting",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Tomorrow's board meeting"
+    },
+    {
+      "task_id": "hm_memo_reorg_exploration",
+      "parent_task_id": null,
+      "importance": 0.2,
+      "label": "Early-stage exploration of a department reorganization"
+    },
+    {
+      "task_id": "ceo_investor_investor_relations",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Ongoing investor relations"
+    },
+    {
+      "task_id": "ceo_investor_company_communication",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Company-wide communication with employees"
+    },
+    {
+      "task_id": "sales_q3_bookings_target",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "This quarter's sales bookings target"
+    },
+    {
+      "task_id": "hm_plan_department_planning",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Department planning cycle (budget and headcount)"
+    },
+    {
+      "task_id": "mgr_esc_customer_accounts",
+      "parent_task_id": null,
+      "importance": 0.5,
+      "label": "Ongoing support for customer accounts"
+    },
+    {
+      "task_id": "mgr_esc_platform_reliability",
+      "parent_task_id": null,
+      "importance": 0.5,
+      "label": "Platform reliability goal"
+    },
+    {
+      "task_id": "mgr_esc_notifications_redesign",
+      "parent_task_id": "mgr_esc_platform_reliability",
+      "importance": 0.5,
+      "label": "Notifications-service design program"
+    },
+    {
+      "task_id": "fe_tooling_field_productivity",
+      "parent_task_id": null,
+      "importance": 0.5,
+      "label": "Improving the field team's internal tooling"
+    },
+    {
+      "task_id": "sales_rfp_northwind_deal",
+      "parent_task_id": null,
+      "importance": 0.2,
+      "label": "Northwind deal, already lost to a competitor"
+    },
+    {
+      "task_id": "sales_rfp_lakeshore_deal",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Lakeshore deal, targeted to sign this quarter"
+    },
+    {
+      "task_id": "ceo_keynote_extension_round",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Extension funding round led by the lead investor"
+    },
+    {
+      "task_id": "ceo_keynote_2027_exploration",
+      "parent_task_id": null,
+      "importance": 0.2,
+      "label": "Exploratory thinking for 2027 strategy"
+    },
+    {
+      "task_id": "hm_vision_platform_vision",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Three-year platform vision"
+    },
+    {
+      "task_id": "hm_vision_q1_ml_capacity",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Training capacity for the ML team's Q1 release"
+    },
+    {
+      "task_id": "hd_mgr_annual_goal",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "This year's organizational goal"
+    },
+    {
+      "task_id": "hd_mgr_q4_restructuring",
+      "parent_task_id": "hd_mgr_annual_goal",
+      "importance": 0.8,
+      "label": "Q4 restructuring initiative the Atlas team is part of"
+    },
+    {
+      "task_id": "hd_mgr_routine_maintenance",
+      "parent_task_id": null,
+      "importance": 0.2,
+      "label": "Routine maintenance work the Birchwood team carries"
+    },
+    {
+      "task_id": "hd_sales_core_bookings",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "This quarter's core bookings target"
+    },
+    {
+      "task_id": "hd_sales_paused_retail_push",
+      "parent_task_id": null,
+      "importance": 0.2,
+      "label": "Retail vertical push, paused by leadership this quarter"
+    },
+    {
+      "task_id": "hd_hm_platform_migration",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Platform migration, the company's top strategic initiative this year"
+    },
+    {
+      "task_id": "hd_hm_reporting_refresh",
+      "parent_task_id": null,
+      "importance": 0.2,
+      "label": "Routine refresh of the internal reporting tools"
+    },
+    {
+      "task_id": "hd_ceo_enterprise_expansion",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Enterprise expansion, this year's company goal"
+    },
+    {
+      "task_id": "hd_ceo_enterprise_partnerships",
+      "parent_task_id": "hd_ceo_enterprise_expansion",
+      "importance": 0.5,
+      "label": "Partnerships program for the enterprise expansion"
+    },
+    {
+      "task_id": "hd_ceo_consumer_line",
+      "parent_task_id": null,
+      "importance": 0.2,
+      "label": "Consumer app line, which the board decided to wind down this year"
+    },
+    {
+      "task_id": "hd_ceo_consumer_partnerships",
+      "parent_task_id": "hd_ceo_consumer_line",
+      "importance": 0.5,
+      "label": "Partnerships program for the consumer app line"
+    },
+    {
+      "task_id": "hd_dev_platform_goal",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Platform migration, this year's engineering goal"
+    },
+    {
+      "task_id": "hd_dev_migration_wave",
+      "parent_task_id": "hd_dev_platform_goal",
+      "importance": 0.8,
+      "label": "Q4 migration wave for the billing service"
+    },
+    {
+      "task_id": "hd_fe_maintenance_contracts",
+      "parent_task_id": null,
+      "importance": 0.2,
+      "label": "Routine maintenance contracts with existing customers"
+    },
+    {
+      "task_id": "hd_fe_edge_rollout",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Edge-device rollout, the field team's priority program this year"
+    }
+  ]
+}

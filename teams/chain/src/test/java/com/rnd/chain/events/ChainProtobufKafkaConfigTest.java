@@ -28,15 +28,13 @@ class ChainProtobufKafkaConfigTest {
         kafkaProperties.getProperties().put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_PLAINTEXT");
         kafkaProperties.getProperties().put(SaslConfigs.SASL_MECHANISM, "PLAIN");
 
-        assertEquals("SASL_PLAINTEXT", config.taskCreatedEventConsumerFactory()
-                .getConfigurationProperties().get(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
         assertEquals("SASL_PLAINTEXT", config.taskUpdatedEventConsumerFactory()
                 .getConfigurationProperties().get(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
         assertEquals("SASL_PLAINTEXT", config.dependencyProposedEventConsumerFactory()
                 .getConfigurationProperties().get(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
         assertEquals("SASL_PLAINTEXT", config.schedulingUpdatedEventKafkaTemplate().getProducerFactory()
                 .getConfigurationProperties().get(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
-        assertEquals("SASL_PLAINTEXT", config.taskCreatedEventKafkaTemplate().getProducerFactory()
+        assertEquals("SASL_PLAINTEXT", config.taskUpdatedEventKafkaTemplate().getProducerFactory()
                 .getConfigurationProperties().get(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
         assertEquals(List.of("localhost:9092"), config.schedulingUpdatedEventKafkaTemplate().getProducerFactory()
                 .getConfigurationProperties().get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
@@ -44,8 +42,6 @@ class ChainProtobufKafkaConfigTest {
 
     @Test
     void consumerFactories_disableAutoCommit() {
-        assertEquals(Boolean.FALSE, config.taskCreatedEventConsumerFactory()
-                .getConfigurationProperties().get(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG));
         assertEquals(Boolean.FALSE, config.taskUpdatedEventConsumerFactory()
                 .getConfigurationProperties().get(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG));
         assertEquals(Boolean.FALSE, config.dependencyProposedEventConsumerFactory()
@@ -54,8 +50,6 @@ class ChainProtobufKafkaConfigTest {
 
     @Test
     void listenerContainerFactories_commitPerRecord() {
-        assertEquals(ContainerProperties.AckMode.RECORD, config.taskCreatedEventKafkaListenerContainerFactory(
-                config.taskCreatedEventConsumerFactory()).getContainerProperties().getAckMode());
         assertEquals(ContainerProperties.AckMode.RECORD, config.taskUpdatedEventKafkaListenerContainerFactory(
                 config.taskUpdatedEventConsumerFactory()).getContainerProperties().getAckMode());
         assertEquals(ContainerProperties.AckMode.RECORD, config.dependencyProposedEventKafkaListenerContainerFactory(

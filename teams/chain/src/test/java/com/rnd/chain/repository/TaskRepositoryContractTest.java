@@ -166,6 +166,18 @@ void insertIfAbsent_insertsTask_whenTaskDoesNotExist() {
     assertThat(persisted.getStatus()).isEqualTo(TaskStatus.PENDING);
     assertThat(persisted.getBlockingCount()).isZero();
 }
+
+@Test
+void insertIfAbsent_persistsTenantId() {
+    UUID id = UUID.randomUUID();
+    UUID tenantId = UUID.randomUUID();
+    TaskRepository repository = createRepository(List.of());
+
+    repository.insertIfAbsent(newTaskBuilder(id).tenantId(tenantId).build());
+
+    assertThat(repository.findById(id).orElseThrow().getTenantId()).isEqualTo(tenantId);
+}
+
 @Test
 void insertIfAbsent_doesNotOverwriteExistingTaskWithSameId() {
     UUID id = UUID.randomUUID();

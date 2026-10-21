@@ -77,6 +77,10 @@ class EvaluationOutput(BaseModel):
     - `groups`: one report per scenario group (e.g. `same_tier`, `cross_tier`).
     - `roles`: one report per `persona.role`, split out of `combined` (see
       `split_by_role`), so they always add up to it.
+    - `original_set`: the report over every group except `hierarchy_decides`, i.e.
+      the set as it was before the hierarchy group was added (#507), so the three
+      numbers (original set, hierarchy group, everything) are each one line. None
+      when the personas directory has no `hierarchy_decides` group.
     """
 
     model_config = _REPORT_CONFIG
@@ -85,6 +89,7 @@ class EvaluationOutput(BaseModel):
     combined: Report
     groups: dict[str, Report]
     roles: dict[str, Report] = {}
+    original_set: Report | None = None
 
 
 def run(model: RankingModel, scenarios: list[PersonaEvaluationScenario]) -> Report:

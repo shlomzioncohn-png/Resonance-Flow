@@ -1,6 +1,14 @@
 package com.rnd.chain.service;
 
 import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
+
+import com.rnd.chain.testsupport.PgRepos;
+import org.junit.jupiter.api.Tag;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
+import com.rnd.chain.repository.TaskReadinessRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
@@ -12,10 +20,10 @@ import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.exception.TenantReassignmentException;
-import com.rnd.chain.repository.InMemoryConstraintRepository;
-import com.rnd.chain.repository.InMemoryGraphLock;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.repository.ConstraintRepository;
+import com.rnd.chain.repository.GraphLock;
+import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.testsupport.TestTransactions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,30 +36,68 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Ported from the in-memory version; runs against the real Postgres repositories (rolled back per test). */
+@Tag("postgres")
+@SpringBootTest
+@Transactional
 class TaskEligibilityServiceTest {
 
-    private InMemoryTaskRepository taskRepository;
-    private InMemoryTaskDependencyRepository dependencyRepository;
+    private TaskRepository taskRepository;
+    private TaskDependencyRepository dependencyRepository;
 
     private RecordingSchedulingUpdatePublisher publisher;
 
     private TaskEligibilityService service;
     private DependencyEdgeService edgeService;
+    @Autowired
+    private TaskReadinessRepository taskReadinessRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void setUp() {
-        taskRepository = new InMemoryTaskRepository(List.of());
-        dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
+        taskRepository = PgRepos.tasks(List.of());
+        dependencyRepository = PgRepos.dependencies(List.of());
+
         publisher = new RecordingSchedulingUpdatePublisher();
-        SchedulingUpdateService schedulingUpdateService = new SchedulingUpdateService(publisher);
-        InMemoryGraphLock lock = new InMemoryGraphLock();
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(
-                taskRepository, dependencyRepository, new PriorityScoreService(),
-                new SchedulingPublishListener(taskRepository, schedulingUpdateService));
-        service = new TaskEligibilityService(
-                taskRepository, dependencyRepository, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
-        edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
-    }
+
+        SchedulingUpdateService schedulingUpdateService =
+            new SchedulingUpdateService(publisher);
+
+        GraphLock lock =
+            PgRepos.graphLock();
+
+        TaskCounterUpdater counterUpdater =
+            new TaskCounterUpdater(
+                    taskRepository,
+                    dependencyRepository,
+                    new PriorityScoreService(),
+                    new SchedulingPublishListener(
+                            taskRepository,
+                            schedulingUpdateService),
+                    taskReadinessRepository);
+
+        TaskStateHistoryRecorder historyRecorder =
+            TaskStateHistoryFixtures.newRecorder();
+
+        service =
+            new TaskEligibilityService(
+                    taskRepository,
+                    dependencyRepository,
+                    lock,
+                    counterUpdater,
+                    historyRecorder,
+                    taskReadinessRepository);
+
+        edgeService =
+            new DependencyEdgeService(
+                    dependencyRepository,
+                    lock,
+                    counterUpdater,
+                    historyRecorder,
+                    taskReadinessRepository);
+}
 
     @Test
     void onTaskStatusChanged_whenDependencyBecomesDone_shouldUnblockDependent() {
@@ -234,19 +280,6 @@ class TaskEligibilityServiceTest {
         assertTrue(fixture.taskRepo().findById(taskId).orElseThrow().isReady());
     }
 
-    @Test
-    void alreadyCorrectState_doesNotReplaceStoredTaskInstance() {
-        // Regression test for the code review finding: recalculateTaskEligibility used to write
-        // an unconditional new Task even when nothing had actually changed.
-        UUID taskId = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
-        Task before = fixture.taskRepo().findById(taskId).orElseThrow();
-
-        fixture.service().recalculateTaskEligibility(taskId);
-
-        assertSame(before, fixture.taskRepo().findById(taskId).orElseThrow(),
-                "no-op recalculation must not write a new Task instance");
-    }
 
     @Test
     void staleState_recalculation_replacesStoredTaskInstance() {
@@ -483,31 +516,76 @@ class TaskEligibilityServiceTest {
         }
     }
 
-    private record Fixture(InMemoryTaskRepository taskRepo,
-                            InMemoryTaskDependencyRepository dependencyRepo,
-                            InMemoryConstraintRepository constraintRepo,
+    private record Fixture(TaskRepository taskRepo,
+                            TaskDependencyRepository dependencyRepo,
+                            ConstraintRepository constraintRepo,
                             RecordingSchedulingUpdatePublisher publisher,
                             TaskEligibilityService service,
                             DependencyEdgeService edgeService,
                             TaskCounterUpdater counterUpdater) {
     }
 
-    private static Fixture newFixture(List<Task> tasks, List<TaskDependency> edges) {
-        InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
-        InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
-        InMemoryConstraintRepository constraintRepo = new InMemoryConstraintRepository();
-        RecordingSchedulingUpdatePublisher fixturePublisher = new RecordingSchedulingUpdatePublisher();
-        SchedulingUpdateService scheduling = new SchedulingUpdateService(fixturePublisher);
-        InMemoryGraphLock lock = new InMemoryGraphLock();
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(
-                taskRepo, dependencyRepo, new PriorityScoreService(),
-                new SchedulingPublishListener(taskRepo, scheduling));
+    private Fixture newFixture(
+        List<Task> tasks,
+        List<TaskDependency> edges) {
+
+        TaskRepository taskRepo =
+            PgRepos.tasks(tasks);
+
+        TaskDependencyRepository dependencyRepo =
+            PgRepos.dependencies(edges);
+
+        ConstraintRepository constraintRepo =
+            PgRepos.constraints();
+
+        RecordingSchedulingUpdatePublisher fixturePublisher =
+            new RecordingSchedulingUpdatePublisher();
+
+        SchedulingUpdateService scheduling =
+            new SchedulingUpdateService(fixturePublisher);
+
+        GraphLock lock =
+            PgRepos.graphLock();
+
+        TaskCounterUpdater counterUpdater =
+            new TaskCounterUpdater(
+                    taskRepo,
+                    dependencyRepo,
+                    new PriorityScoreService(),
+                    new SchedulingPublishListener(
+                            taskRepo,
+                            scheduling),
+                    taskReadinessRepository);
+
+        TaskStateHistoryRecorder historyRecorder =
+            TaskStateHistoryFixtures.newRecorder();
+
         TaskEligibilityService eligibilityService =
-                new TaskEligibilityService(taskRepo, dependencyRepo, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
-        DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepo, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
-        return new Fixture(taskRepo, dependencyRepo, constraintRepo, fixturePublisher, eligibilityService,
-                edgeService, counterUpdater);
-    }
+            new TaskEligibilityService(
+                    taskRepo,
+                    dependencyRepo,
+                    lock,
+                    counterUpdater,
+                    historyRecorder,
+                    taskReadinessRepository);
+
+        DependencyEdgeService edgeService =
+            new DependencyEdgeService(
+                    dependencyRepo,
+                    lock,
+                    counterUpdater,
+                    historyRecorder,
+                    taskReadinessRepository);
+
+        return new Fixture(
+            taskRepo,
+            dependencyRepo,
+            constraintRepo,
+            fixturePublisher,
+            eligibilityService,
+            edgeService,
+            counterUpdater);
+}
 
     private static Task buildTask(UUID id, int blockingCount, int openConstraintCount, boolean isReady) {
         return buildTask(id, blockingCount, openConstraintCount, isReady, TaskStatus.ACTIVE);
@@ -616,6 +694,7 @@ class TaskEligibilityServiceTest {
         fixture.counterUpdater().onScoreProposed(taskId, 0.8, 1.0);
         fixture.edgeService().addDependencies(taskId, Map.of(blockerId, 0.2));
         Double withLowConfidence = fixture.taskRepo().findById(taskId).orElseThrow().getPriorityScore();
+        PgRepos.clearPersistenceContext(); // the native upsert changes confidence behind the JPA cache
 
         fixture.edgeService().addDependencies(taskId, Map.of(blockerId, 0.9));
 
@@ -676,6 +755,102 @@ class TaskEligibilityServiceTest {
         assertEquals(new PriorityScoreService().compute(0.8, 1.0, 0, 0, 0), task.getPriorityScore());
         assertEquals(1, fixture.publisher().getEvents().size());
     }
+    @Test
+    void duplicateStatusEvent_doesNotPublishOrRecordHistoryTwice() {
+
+        UUID blockerId =
+            UUID.randomUUID();
+
+        UUID dependentId =
+            UUID.randomUUID();
+
+        LocalDateTime eventTime =
+            LocalDateTime.now().plusMinutes(5);
+
+        Fixture fixture =
+            newFixture(
+                    List.of(
+                            buildTask(
+                                    blockerId,
+                                    0,
+                                    0,
+                                    true,
+                                    TaskStatus.ACTIVE),
+
+                            buildTask(
+                                    dependentId,
+                                    1,
+                                    0,
+                                    false,
+                                    TaskStatus.ACTIVE)),
+                    List.of(
+                            new TaskDependency(
+                                    dependentId,
+                                    blockerId)));
+
+        fixture.publisher().clear();
+
+        TestTransactions.runCommitted(
+            () -> fixture.service()
+                    .onTaskStatusChangedIfNewer(
+                            blockerId,
+                            TaskStatus.DONE,
+                            eventTime,
+                            TaskTestFixtures.DEFAULT_TENANT_ID));
+
+        assertEquals(
+            1,
+            fixture.publisher()
+                    .getEvents()
+                    .size(),
+            "first event should publish exactly once");
+
+        Integer historyAfterFirst =
+            jdbcTemplate.queryForObject(
+                    """
+                    SELECT COUNT(*)
+                    FROM task_state_history
+                    WHERE task_id IN (?, ?)
+                    """,
+                    Integer.class,
+                    blockerId,
+                    dependentId);
+
+    /*
+     * Exact same event delivered again.
+     * updatedAt is equal, so it must be treated as a duplicate/no-op.
+     */
+        TestTransactions.runCommitted(
+            () -> fixture.service()
+                    .onTaskStatusChangedIfNewer(
+                            blockerId,
+                            TaskStatus.DONE,
+                            eventTime,
+                            TaskTestFixtures.DEFAULT_TENANT_ID));
+
+        assertEquals(
+            1,
+            fixture.publisher()
+                    .getEvents()
+                    .size(),
+            "duplicate event must not publish task.scheduling.updated again");
+
+        Integer historyAfterDuplicate =
+            jdbcTemplate.queryForObject(
+                    """
+                    SELECT COUNT(*)
+                    FROM task_state_history
+                    WHERE task_id IN (?, ?)
+                    """,
+                    Integer.class,
+                    blockerId,
+                    dependentId);
+
+        assertEquals(
+            historyAfterFirst,
+            historyAfterDuplicate,
+            "duplicate event must not create another history row");
+}
 
     @Test
     void noOpRecalculation_doesNotPublishAgain() {

@@ -1,0 +1,52 @@
+{
+  "scenario_id": "field_engineer_site_outage_vs_rollout_survey",
+  "persona": {
+    "role": "Field Engineer",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-10-26T09:30:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_site_restore",
+      "title": "Restore Customer K's offline warehouse scanners",
+      "description": "Customer K's warehouse scanners have been offline since 08:30; their support contract requires service to be restored within four hours, by 12:30.",
+      "deadline": "2026-10-26T12:30:00",
+      "effort_estimate": 45,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": "hd_fe_maintenance_contracts"
+    },
+    {
+      "task_id": "task_rollout_survey",
+      "title": "Survey Customer L's site for the edge-device rollout",
+      "description": "Survey Customer L's site for the next phase of the edge-device rollout; the rollout team needs your report to schedule the installs. Customer L has set aside Thursday afternoon for the visit.",
+      "deadline": "2026-10-29T17:00:00",
+      "effort_estimate": 50,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": "hd_fe_edge_rollout"
+    },
+    {
+      "task_id": "task_filler_mileage",
+      "title": "Log this month's service-van mileage",
+      "description": "Log this month's service-van mileage; no date set.",
+      "deadline": null,
+      "effort_estimate": 15,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_site_restore",
+  "expected_reason": "task_site_restore brings back a customer site that is down right now, inside a contractual four-hour restore window that ends at 12:30; task_rollout_survey serves the field team's priority program this year, but is not due until Thursday.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false
+}

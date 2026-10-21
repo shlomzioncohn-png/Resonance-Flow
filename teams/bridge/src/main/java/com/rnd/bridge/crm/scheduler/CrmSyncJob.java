@@ -1,42 +1,29 @@
 package com.rnd.bridge.crm.scheduler;
 
 import com.rnd.bridge.core.IntakeResult;
+import com.rnd.bridge.core.error.LaneException;
 import com.rnd.bridge.core.sync.SyncJob;
 import com.rnd.bridge.core.sync.SyncJobScheduler;
-import com.rnd.bridge.crm.CrmLane;
-import com.rnd.bridge.crm.repository.DealRepository;
-import com.rnd.bridge.crm.repository.DealSnapshot;
+import com.rnd.bridge.crm.CrmSourceResult;
+import com.rnd.bridge.crm.CrmSyncService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
- * Daily CRM sync as a {@link SyncJob} - the team lead's call (2026-09-07) is to stay on a
- * once-a-day pull for now, not move to real-time, until told otherwise. {@link #runOnce()} takes
- * exactly one {@link DealSnapshot} per run and calls {@code crmLane.run(Stream, Instant)} against
- * its {@code latestPerDeal()}/{@code asOf()} together - the same single-snapshot-per-run shape
- * {@code CrmBridgeController} uses, so a scheduled run and a manual trigger agree on what "one
- * sync" means, and neither can see a mix of two different fetches the way calling
- * {@code dealRepository.snapshot()} and a separate read could.
- * <p>
- * Enabled/disabled checking, start/complete logging, and catching a failed run so it never
- * propagates are now {@link SyncJobScheduler}'s job, shared by every {@link SyncJob} - this class
- * (formerly {@code CrmSyncScheduler}) only still logs {@code skippedAtRead}, which has no
- * equivalent on {@link IntakeResult} or any other job. Logged at WARN, not INFO, whenever it's
- * greater than zero - {@link SyncJobScheduler}'s shared "complete: N read, N published, N
- * rejected" summary has no room for it, so without this line a partial sync (some deals silently
- * skipped at read - see {@code HubSpotDealRepository}) would otherwise report success on the
- * scheduled path exactly like a clean one. The HTTP path doesn't need this: {@code
- * CrmSyncResponse} already surfaces {@code skippedAtRead} in its JSON body.
+ * Daily CRM sync as a {@link SyncJob} - once-a-day pull, not real-time (team lead's call, 2026-09-07).
+ * Delegates to {@link CrmSyncService#syncAll()}; throws after all sources ran if any failed.
  */
 @Component
 public class CrmSyncJob implements SyncJob {
 
     private static final Logger log = LoggerFactory.getLogger(CrmSyncJob.class);
 
-    private final CrmLane crmLane;
-    private final DealRepository dealRepository;
+    private final CrmSyncService crmSyncService;
 
     @Value("${bridge.crm.sync.cron.enabled:false}")
     private boolean syncEnabled;
@@ -44,9 +31,8 @@ public class CrmSyncJob implements SyncJob {
     @Value("${bridge.crm.sync.cron.expression:0 0 3 * * ?}")
     private String cronExpression;
 
-    public CrmSyncJob(CrmLane crmLane, DealRepository dealRepository) {
-        this.crmLane = crmLane;
-        this.dealRepository = dealRepository;
+    public CrmSyncJob(CrmSyncService crmSyncService) {
+        this.crmSyncService = crmSyncService;
     }
 
     @Override
@@ -66,13 +52,36 @@ public class CrmSyncJob implements SyncJob {
 
     @Override
     public IntakeResult runOnce() {
-        DealSnapshot snapshot = dealRepository.snapshot();
-        IntakeResult result = crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf());
-        if (snapshot.skippedAtRead() > 0) {
-            log.warn("CRM sync: partial sync, {} deal(s) skipped at read.", snapshot.skippedAtRead());
-        } else {
-            log.info("CRM sync: {} skipped at read.", snapshot.skippedAtRead());
+        List<CrmSourceResult> results = crmSyncService.syncAll();
+
+        int read = 0;
+        int published = 0;
+        int rejected = 0;
+        List<LaneException> errors = new ArrayList<>();
+        List<String> failed = new ArrayList<>();
+
+        for (CrmSourceResult result : results) {
+            read += result.read();
+            published += result.published();
+            rejected += result.rejected();
+            result.errors().forEach(message -> errors.add(new LaneException(message)));
+
+            if (result.error() != null) {
+                log.error("CRM sync for source '{}' failed: {}", result.source(), result.error());
+                failed.add(result.source() + " (" + result.error() + ")");
+            } else if (result.skippedAtRead() > 0) {
+                log.warn("CRM sync for source '{}': {} read, {} published, {} rejected, {} skipped at read.",
+                        result.source(), result.read(), result.published(), result.rejected(), result.skippedAtRead());
+            } else {
+                log.info("CRM sync for source '{}': {} read, {} published, {} rejected.",
+                        result.source(), result.read(), result.published(), result.rejected());
+            }
         }
-        return result;
+
+        IntakeResult summed = new IntakeResult(read, published, rejected, errors);
+        if (!failed.isEmpty()) {
+            throw new RuntimeException("CRM sync failed for source(s): " + String.join(", ", failed));
+        }
+        return summed;
     }
 }

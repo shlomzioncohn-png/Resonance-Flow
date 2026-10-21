@@ -8,7 +8,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 import org.springframework.web.client.RestClient;
@@ -29,53 +28,12 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Reads the CRM deal feed from the live Salesforce REST API (SOQL against {@code Opportunity} and
- * {@code OpportunityStage}), instead of the synthetic JSON file ({@code JsonDealRepository}) or
- * HubSpot ({@code HubSpotDealRepository}). See {@code teams/bridge/docs/crm-salesforce-design.md}
- * for the full rationale this class implements.
- * <p>
- * <b>Current state only, by default - one {@code Deal} per Opportunity.</b> Unlike HubSpot, which
- * tracks per-property history, Salesforce's default read here is just the Opportunity's current
- * row - {@link #snapshot()} and {@link #fetchDeal(String)} both produce exactly one history entry
- * per deal id. This does not violate {@link DealRepository}'s append-only-history contract, it
- * just means the history is always exactly one row long (design doc §2).
- * <p>
- * <b>{@code dealId} is always the bare {@code Opportunity.Id}.</b> {@link Deal#dealId()} never
- * carries a source-specific prefix - {@link #fetchDeal(String)}'s own parameter (what a future CDC
- * event's {@code getRecordId()} would carry, design doc §7, and what every
- * {@code WHERE Id = '...'} SOQL clause needs) and the {@code dealId()} on every {@link Deal} this
- * class returns are the same bare id, so {@code fetchDeal(deal.dealId())} always round-trips. The
- * design doc requires Salesforce's {@code sourceRef} to read {@code "crm:salesforce:<Id>"},
- * distinct from HubSpot's {@code "crm:<id>"} (§4) - that comes from {@link Deal#sourceRefPrefix()}
- * instead: this class sets it to {@code "crm:salesforce:"} (see {@link #SOURCE_REF_PREFIX}), and
- * {@code DealToTaskMapper.toSourceRef} (shared with every other CRM source) builds {@code
- * sourceRef} as {@code deal.sourceRefPrefix() + deal.dealId()} - no per-source branch there, and
- * HubSpot/JSON are unaffected since {@link Deal}'s default prefix is {@code "crm:"}.
- * <p>
- * <b>{@code stageChangedAt} - one configurable field, no automatic runtime fallback.</b> Read from
- * whichever Opportunity field {@code bridge.crm.salesforce.stage-changed-at-field} names (default
- * {@code LastStageChangeDate}, existence UNVERIFIED against a real org - design doc §2). A
- * deployer who finds it missing switches the config value to {@code LastModifiedDate} - this
- * class does not try one field, fail, and silently retry the other at runtime.
- * <p>
- * <b>Stage mapping.</b> {@link #snapshot()} and {@link #fetchDeal(String)} both resolve
- * {@code OpportunityStage} metadata fresh, on every call, via {@link SalesforceStageMapping} - see
- * that class's Javadoc for why there is no construction-time validation of the fetched metadata
- * the way {@code HubSpotDealRepository} has for its pipeline. A {@code StageName} absent from the
- * resolved metadata is a per-record skip in {@link #snapshot()} (counted in
- * {@link DealSnapshot#skippedAtRead()}), and a thrown {@link IllegalStateException} in
- * {@link #fetchDeal(String)} - never a whole-sync failure in either case.
- * <p>
- * <b>{@code load-history: true} is not supported yet.</b> See the constructor - enabling it fails
- * fast at startup with a clear message rather than silently behaving like current-state-only mode.
- * <p>
- * <b>Freshness.</b> No cache field anywhere on this class - every {@link #snapshot()} and
- * {@link #fetchDeal(String)} call is a fresh, independent set of SOQL queries, mirroring
- * {@code HubSpotDealRepository}'s same rule (CRM-lane audit finding F1).
+ * Reads the CRM deal feed from the live Salesforce REST API (SOQL against {@code Opportunity}/
+ * {@code OpportunityStage}). {@code stageChangedAt} reads the configured field, falling back to
+ * {@code CreatedDate} when null (never {@code LastModifiedDate}) - see {@code crm-salesforce-design.md}.
  */
 @Repository
 @Profile("salesforce")
-@Primary
 public class SalesforceDealRepository implements DealRepository {
 
     private static final Logger log = LoggerFactory.getLogger(SalesforceDealRepository.class);
@@ -129,13 +87,7 @@ public class SalesforceDealRepository implements DealRepository {
             boolean loadHistory,
             SalesforceStageMapping stageMapping) {
         if (loadHistory) {
-            // TODO(load-history): read OpportunityHistory (full scan, grouped client-side by
-            // OpportunityId, oldest first by CreatedDate - design doc §2) instead of current-state
-            // -only Opportunity rows, and resolve each row's StageName label against the
-            // OpportunityStage metadata fetched that same call - a label with no current match
-            // (an admin renamed/removed the stage since that history row was written) is a
-            // per-record skip, not a failure. Not implemented yet - deliberately scoped out of
-            // this step rather than built partially; see crm-salesforce-design.md §2/§8.
+            // TODO(load-history): full OpportunityHistory read not implemented yet - see crm-salesforce-design.md §2.
             throw new IllegalStateException(
                     "bridge.crm.salesforce.load-history=true is not supported yet - leave it false/unset. "
                             + "See SalesforceDealRepository's constructor for what full-history mode would "
@@ -148,16 +100,16 @@ public class SalesforceDealRepository implements DealRepository {
         this.stageMapping = stageMapping;
     }
 
-    /**
-     * One fresh fetch - stage metadata and Opportunities both - every call. Never reuses a
-     * previous call's data; see the class Javadoc's "Freshness" section.
-     */
+    @Override
+    public String source() {
+        return "salesforce";
+    }
+
     @Override
     public DealSnapshot snapshot() {
         Map<String, DealStage> stageByLabel = stageMapping.resolveLabelsToStages(client.query(STAGE_METADATA_SOQL));
 
-        // The one clock read for this fetch. Every Deal built below shares this instant as the
-        // snapshot's asOf(), regardless of how many Opportunities are behind it.
+        // Single clock read - every Deal below shares this same asOf.
         Instant asOf = clock.instant();
         String instanceUrl = client.instanceUrl();
 
@@ -189,16 +141,6 @@ public class SalesforceDealRepository implements DealRepository {
                 asOf, allDeals, Collections.unmodifiableMap(unmodifiableHistory), dealIds, skippedAtRead);
     }
 
-    /**
-     * One fresh fetch - the single Opportunity, then stage metadata, both real HTTP round trips
-     * every call. The stage-metadata fetch only happens when the Opportunity itself was found, so
-     * a nonexistent id costs one request, not two - same ordering {@code HubSpotDealRepository}
-     * uses for its 404 case, adapted to Salesforce's "not found is zero records" (design doc §2).
-     *
-     * @param dealId the bare Salesforce {@code Opportunity.Id} - the same value {@link
-     *               Deal#dealId()} returns, so {@code fetchDeal(deal.dealId())} round-trips; see
-     *               the class Javadoc
-     */
     @Override
     public Optional<Deal> fetchDeal(String dealId) {
         if (dealId == null || dealId.isBlank()) {
@@ -226,6 +168,12 @@ public class SalesforceDealRepository implements DealRepository {
         }
 
         Map<String, Object> owner = asMap(row.get("Owner"));
+        Instant createdAt = parseInstant((String) row.get("CreatedDate"));
+        Instant stageChangedAt = parseInstant((String) row.get(stageChangedAtField));
+        if (stageChangedAt == null) {
+            // Never changed stage -> falls back to CreatedDate, never LastModifiedDate (bumps on any edit).
+            stageChangedAt = createdAt;
+        }
 
         return Deal.builder()
                 .dealId(rawId)
@@ -237,11 +185,11 @@ public class SalesforceDealRepository implements DealRepository {
                 .ownerEmail(owner == null ? null : (String) owner.get("Email"))
                 .closeDate(parseLocalDate((String) row.get("CloseDate")))
                 .dealValue(toBigDecimal(row.get("Amount")))
-                .currency(null) // CurrencyIsoCode is never queried - see class Javadoc / design doc §3
-                .crmAccountSlug(null) // nothing downstream reads it - see design doc §3
+                .currency(null) // not queried - see design doc §3
+                .crmAccountSlug(null) // unused downstream - see design doc §3
                 .sourceUrl(instanceUrl + "/" + rawId)
-                .createdAt(parseInstant((String) row.get("CreatedDate")))
-                .stageChangedAt(parseInstant((String) row.get(stageChangedAtField)))
+                .createdAt(createdAt)
+                .stageChangedAt(stageChangedAt)
                 .build();
     }
 
