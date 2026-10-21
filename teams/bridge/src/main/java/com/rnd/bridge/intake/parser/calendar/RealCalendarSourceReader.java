@@ -172,7 +172,8 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
         return new SourceRecord(
                 RawSourceType.CALENDAR, properties.tenantId(), event.getId(), state.correlationId(),
                 occurredAt, organizer, participants(event, organizer), event.getSummary(), event.getDescription(),
-                event.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), state.revision());
+                event.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), state.revision())
+                .withSourceRef(event.getId());
     }
 
     private static boolean isCancelled(Event event) {
@@ -201,7 +202,7 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
                 RawSourceType.CALENDAR, properties.tenantId(), event.getId(), state.correlationId(),
                 occurredAt, null, List.of(), null, null,
                 event.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), state.revision(),
-                ChangeType.DELETE_REVIEW);
+                ChangeType.DELETE_REVIEW).withSourceRef(event.getId());
     }
 
     /** Organizer plus every attendee - the Calendar equivalent of an email's To/Cc list. */

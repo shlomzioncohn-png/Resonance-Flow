@@ -67,7 +67,8 @@ public class FixtureDriveSourceReader implements DriveSourceReader {
                     0,
                     0,
                     List.of(),
-                    state.revision()));
+                    state.revision())
+                    .withSourceRef(fileId));
         }
         // Fixtures never support incremental sync - no token to advance to.
         return new DriveReadResult(records, null);
@@ -85,6 +86,6 @@ public class FixtureDriveSourceReader implements DriveSourceReader {
         return new SourceRecord(
                 RawSourceType.DRIVE, tenantId, fileId, state.correlationId(), Instant.now(), null, List.of(),
                 null, null, node.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(),
-                state.revision(), ChangeType.DELETE_REVIEW);
+                state.revision(), ChangeType.DELETE_REVIEW).withSourceRef(fileId);
     }
 }

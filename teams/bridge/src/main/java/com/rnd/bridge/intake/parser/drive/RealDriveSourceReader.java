@@ -176,7 +176,8 @@ public class RealDriveSourceReader implements DriveSourceReader {
         return new SourceRecord(
                 RawSourceType.DRIVE, properties.tenantId(), file.getId(), state.correlationId(),
                 occurredAt, owner, owner == null ? List.of() : List.of(owner), file.getName(),
-                file.getDescription(), content, file.getMimeType(), null, 0, 0, List.of(), state.revision());
+                file.getDescription(), content, file.getMimeType(), null, 0, 0, List.of(), state.revision())
+                .withSourceRef(file.getId());
     }
 
     /**
@@ -196,7 +197,7 @@ public class RealDriveSourceReader implements DriveSourceReader {
                 RawSourceType.DRIVE, properties.tenantId(), file.getId(), state.correlationId(),
                 occurredAt, null, List.of(), null, null,
                 file.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), state.revision(),
-                ChangeType.DELETE_REVIEW);
+                ChangeType.DELETE_REVIEW).withSourceRef(file.getId());
     }
 
     private byte[] fetchContent(Drive drive, File file) {

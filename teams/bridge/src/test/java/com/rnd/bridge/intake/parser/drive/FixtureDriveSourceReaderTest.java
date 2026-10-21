@@ -75,6 +75,17 @@ class FixtureDriveSourceReaderTest {
     }
 
     @Test
+    void liveAndTrashedFilesBothCarryTheirFileIdAsSourceRef() {
+        List<SourceRecord> records = reader.read(ReadCursor.full()).records();
+
+        SourceRecord live = records.stream().filter(r -> "1a2b3c4d5e".equals(r.naturalId())).findFirst().orElseThrow();
+        SourceRecord trashed = records.stream().filter(r -> "del-7a8b9c".equals(r.naturalId())).findFirst().orElseThrow();
+
+        assertThat(live.sourceRef()).isEqualTo("1a2b3c4d5e");
+        assertThat(trashed.sourceRef()).isEqualTo("del-7a8b9c");
+    }
+
+    @Test
     void readNeverSupportsIncrementalSyncSoNextTokenIsAlwaysNull() {
         DriveReadResult result = reader.read(ReadCursor.full());
 

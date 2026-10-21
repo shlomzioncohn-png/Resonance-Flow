@@ -55,7 +55,8 @@ class RealEmailSourceReaderTest {
         MessagePart payload = new MessagePart()
                 .setHeaders(List.of(
                         new MessagePartHeader().setName("From").setValue("ruth@kamatech.org"),
-                        new MessagePartHeader().setName("Subject").setValue("subject")));
+                        new MessagePartHeader().setName("Subject").setValue("subject"),
+                        new MessagePartHeader().setName("Message-ID").setValue("<" + id + "@mail.gmail.com>")));
         return new Message()
                 .setId(id)
                 .setInternalDate(1_700_000_000_000L)
@@ -79,7 +80,28 @@ class RealEmailSourceReaderTest {
 
         assertThat(result.records()).hasSize(1);
         assertThat(result.nextHistoryId()).isEqualTo("100");
+        assertThat(result.records().get(0).sourceRef()).isEqualTo("<m1@mail.gmail.com>");
         verify(history, never()).list(any());
+    }
+
+    @Test
+    void messageWithNoMessageIdHeaderGetsANullSourceRef() throws IOException {
+        Gmail.Users.Messages.List listRequest =
+                mock(Gmail.Users.Messages.List.class, Mockito.RETURNS_SELF);
+        Gmail.Users.Messages.Get getRequest =
+                mock(Gmail.Users.Messages.Get.class, Mockito.RETURNS_SELF);
+        when(messages.list("me")).thenReturn(listRequest);
+        when(listRequest.execute()).thenReturn(new ListMessagesResponse()
+                .setMessages(List.of(new Message().setId("m1"))));
+        when(messages.get("me", "m1")).thenReturn(getRequest);
+        MessagePart payloadWithoutMessageId = new MessagePart()
+                .setHeaders(List.of(new MessagePartHeader().setName("From").setValue("ruth@kamatech.org")));
+        when(getRequest.execute()).thenReturn(new Message().setId("m1").setInternalDate(1_700_000_000_000L)
+                .setPayload(payloadWithoutMessageId));
+
+        EmailReadResult result = reader().read(ReadCursor.full());
+
+        assertThat(result.records().get(0).sourceRef()).isNull();
     }
 
     @Test

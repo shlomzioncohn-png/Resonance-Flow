@@ -179,6 +179,7 @@ public class RealEmailSourceReader implements EmailSourceReader {
         MessagePart payload = message.getPayload();
         String from = extractEmailAddress(header(payload, "From"));
         String subject = header(payload, "Subject");
+        String messageId = header(payload, "Message-ID");
         Instant occurredAt = Instant.ofEpochMilli(message.getInternalDate());
         String naturalId = "EMAIL|" + message.getId();
         String correlationId = UUID.randomUUID().toString();
@@ -192,7 +193,8 @@ public class RealEmailSourceReader implements EmailSourceReader {
         records.add(new SourceRecord(
                 RawSourceType.EMAIL, properties.tenantId(), naturalId, correlationId, occurredAt, from,
                 participants, subject, plainTextBody.isEmpty() ? null : plainTextBody.toString(),
-                message.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, attachmentCount, List.of(), 0));
+                message.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, attachmentCount, List.of(), 0)
+                .withSourceRef(messageId));
 
         int index = 0;
         for (MessagePart attachment : attachmentParts) {

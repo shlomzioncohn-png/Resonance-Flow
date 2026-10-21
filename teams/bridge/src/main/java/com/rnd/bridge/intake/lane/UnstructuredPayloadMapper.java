@@ -61,7 +61,7 @@ final class UnstructuredPayloadMapper implements PayloadMapper<List<SourceRecord
                     primary.correlationId(),
                     primary.revision(),
                     primary.changeType(),
-                    objects);
+                    objects).withSourceRef(primary.sourceRef());
         } catch (RuntimeException e) {
             throw new LaneException(
                     "Failed to map sourceType=" + primary.sourceType() + " correlationId=" + primary.correlationId(), e);

@@ -264,6 +264,37 @@ class ChatSourceRecordMapperTest {
     }
 
     @Test
+    void statelessSlackSessionGetsAChannelIdColonTsSourceRef() {
+        List<ChatMessage> session = List.of(
+                threadMessage("chat-a", "malki", "2026-08-18T09:00:00Z", "root question", "t1", "t1"));
+
+        List<SourceRecord> records = mapper.toSourceRecords(session);
+
+        assertThat(records.get(0).sourceRef()).isEqualTo("chat-a:t1");
+    }
+
+    @Test
+    void statelessWhatsAppSessionGetsNoSourceRef() {
+        List<ChatMessage> session = List.of(message("chat-a", "malki", "2026-08-18T09:00:00Z", "hi"));
+
+        List<SourceRecord> records = mapper.toSourceRecords(session);
+
+        assertThat(records.get(0).sourceRef()).isNull();
+    }
+
+    @Test
+    void persistedSlackGroupGetsAChannelIdColonTsSourceRef() {
+        GroupState mergedGroup = new GroupState(
+                "t1", RawSourceType.SLACK, "kamatech", "chat-a", "t1", "fixed-correlation-uuid",
+                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi", 0)),
+                false, 0, null);
+
+        List<SourceRecord> records = mapper.toSourceRecords(mergedGroup, List.of());
+
+        assertThat(records.get(0).sourceRef()).isEqualTo("chat-a:m1");
+    }
+
+    @Test
     void anEmptiedGroupProducesExactlyOneDeleteReviewRecord() {
         GroupState emptiedGroup = new GroupState(
                 "g1", RawSourceType.SLACK, "kamatech", "chat-a", null, "fixed-correlation-uuid", List.of(), false, 1,

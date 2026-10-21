@@ -84,4 +84,38 @@ class UnstructuredPayloadMapperTest {
         assertThat(event.objects()).containsExactly(ref);
         assertThat(event.changeType()).isEqualTo(ChangeType.UPSERT);
     }
+
+    @Test
+    void sourceRefIsCarriedFromThePrimaryRecordOntoTheEvent() {
+        SourceRecord record = new SourceRecord(
+                RawSourceType.DRIVE, "kamatech", "file-1", "corr-1", NOW, "malki@kamatech.org",
+                List.of("malki@kamatech.org"), "name", "desc", "bytes".getBytes(StandardCharsets.UTF_8), null, null,
+                0, 0, List.of(), 0).withSourceRef("drive-file-id-1");
+        when(scopingFilter.decide(record)).thenReturn(ScopeDecision.INCLUDED);
+        RawObjectRef ref = new RawObjectRef(
+                Role.BODY, "DRIVE/kamatech/2026-10-18/x.json", "sha256:" + "0".repeat(64), "application/octet-stream",
+                5L, Modality.TEXT);
+        when(refMapper.toRef(record, NOW)).thenReturn(ref);
+
+        RawObjectEvent event = mapper.map(List.of(record), NOW);
+
+        assertThat(event.sourceRef()).isEqualTo("drive-file-id-1");
+    }
+
+    @Test
+    void nullSourceRefOnThePrimaryRecordProducesANullSourceRefOnTheEvent() {
+        SourceRecord record = new SourceRecord(
+                RawSourceType.WHATSAPP, "kamatech", "chat-1", "corr-1", NOW, "malki",
+                List.of("malki"), null, "hi", "bytes".getBytes(StandardCharsets.UTF_8), null, null,
+                0, 0, List.of(), 0);
+        when(scopingFilter.decide(record)).thenReturn(ScopeDecision.INCLUDED);
+        RawObjectRef ref = new RawObjectRef(
+                Role.BODY, "WHATSAPP/kamatech/2026-10-18/x.json", "sha256:" + "0".repeat(64),
+                "application/octet-stream", 5L, Modality.TEXT);
+        when(refMapper.toRef(record, NOW)).thenReturn(ref);
+
+        RawObjectEvent event = mapper.map(List.of(record), NOW);
+
+        assertThat(event.sourceRef()).isNull();
+    }
 }

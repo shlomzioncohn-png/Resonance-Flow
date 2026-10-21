@@ -347,6 +347,30 @@ class RealCalendarSourceReaderTest {
         assertThat(record.changeType()).isEqualTo(com.rnd.bridge.raw.model.ChangeType.DELETE_REVIEW);
     }
 
+    @Test
+    void ordinaryEventCarriesItsEventIdAsSourceRef() throws IOException {
+        Calendar.Events.List request = mockRequest();
+        when(events.list("primary")).thenReturn(request);
+        when(request.execute()).thenReturn(new Events()
+                .setItems(List.of(event("evt-1"))).setNextSyncToken("sync-token-1"));
+
+        SourceRecord record = reader().read(ReadCursor.full()).records().get(0);
+
+        assertThat(record.sourceRef()).isEqualTo("evt-1");
+    }
+
+    @Test
+    void cancelledEventAlsoCarriesItsEventIdAsSourceRef() throws IOException {
+        Calendar.Events.List request = mockRequest();
+        when(events.list("primary")).thenReturn(request);
+        when(request.execute()).thenReturn(new Events()
+                .setItems(List.of(cancelledEvent("evt-sparse", "etag-1"))).setNextSyncToken("sync-token-1"));
+
+        SourceRecord record = reader().read(ReadCursor.full()).records().get(0);
+
+        assertThat(record.sourceRef()).isEqualTo("evt-sparse");
+    }
+
     private static GoogleJsonResponseException expiredTokenException() {
         HttpResponseException.Builder builder = new HttpResponseException.Builder(410, "Gone", new HttpHeaders());
         return new GoogleJsonResponseException(builder, null);

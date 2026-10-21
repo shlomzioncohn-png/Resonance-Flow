@@ -242,8 +242,25 @@ class RealDriveSourceReaderTest {
         assertThat(result.records()).hasSize(1);
         SourceRecord record = result.records().get(0);
         assertThat(record.changeType()).isEqualTo(ChangeType.DELETE_REVIEW);
+        assertThat(record.sourceRef()).isEqualTo("f1");
         verify(files, Mockito.never()).get(anyString());
         verify(files, Mockito.never()).export(anyString(), anyString());
+    }
+
+    @Test
+    void ordinaryFileCarriesItsFileIdAsSourceRef() throws IOException {
+        Drive.Files.List request = mockListRequest();
+        when(files.list()).thenReturn(request);
+        when(request.execute()).thenReturn(new FileList().setFiles(List.of(file("f1", "application/pdf"))));
+        stubStartPageToken("start-1");
+        Drive.Files.Get getRequest = mock(Drive.Files.Get.class);
+        when(files.get("f1")).thenReturn(getRequest);
+        when(getRequest.executeMediaAsInputStream())
+                .thenReturn(new ByteArrayInputStream("bytes".getBytes(StandardCharsets.UTF_8)));
+
+        SourceRecord record = reader().read(ReadCursor.full()).records().get(0);
+
+        assertThat(record.sourceRef()).isEqualTo("f1");
     }
 
     @Test

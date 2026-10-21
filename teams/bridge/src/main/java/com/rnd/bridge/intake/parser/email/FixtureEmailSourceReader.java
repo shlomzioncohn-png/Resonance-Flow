@@ -49,7 +49,8 @@ public class FixtureEmailSourceReader implements EmailSourceReader {
             records.add(new SourceRecord(
                     RawSourceType.EMAIL, tenantId, naturalId, correlationId, occurredAt, from, List.of(from),
                     textOrNull(node.get("subject")), textOrNull(node.get("body")),
-                    node.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, attachmentCount, List.of(), 0));
+                    node.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, attachmentCount, List.of(), 0)
+                    .withSourceRef(textOrNull(node.get("messageId"))));
 
             if (attachments != null) {
                 int index = 0;
