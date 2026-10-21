@@ -26,7 +26,7 @@ class ClassificationRulesTest {
             """;
 
     private final ClassificationRules rules =
-            new ClassificationRules(ClassificationTestSupport.properties(true, ""));
+            new ClassificationRules(ClassificationTestSupport.properties(true));
 
     @Test
     void meetingShorterThanTheMinimumIsATest() {

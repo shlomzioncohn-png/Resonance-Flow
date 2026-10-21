@@ -5,6 +5,7 @@ import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskEligibilityResponse;
 import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTier;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.repository.GraphLock;
@@ -12,8 +13,8 @@ import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.repository.TaskRepository;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,11 +32,10 @@ import java.util.UUID;
  *
  * <p>{@code @Transactional} on the methods below provides atomicity and rollback.
  */
+@Slf4j
+@RequiredArgsConstructor
 @Service
 public class TaskEligibilityService {
-
-    private static final Logger log =
-            LoggerFactory.getLogger(TaskEligibilityService.class);
 
     /** How far before a DONE task.updated's own updated_at a task created from it is stamped. */
     static final Duration DONE_EVENT_UPDATED_AT_SKEW = Duration.ofSeconds(1);
@@ -46,22 +46,6 @@ public class TaskEligibilityService {
     private final TaskCounterUpdater taskCounterUpdater;
     private final TaskStateHistoryRecorder historyRecorder;
     private final TaskReadinessRepository taskReadinessRepository;
-
-    public TaskEligibilityService(
-            TaskRepository taskRepository,
-            TaskDependencyRepository taskDependencyRepository,
-            GraphLock graphLock,
-            TaskCounterUpdater taskCounterUpdater,
-            TaskStateHistoryRecorder historyRecorder,
-            TaskReadinessRepository taskReadinessRepository) {
-
-        this.taskRepository = taskRepository;
-        this.taskDependencyRepository = taskDependencyRepository;
-        this.graphLock = graphLock;
-        this.taskCounterUpdater = taskCounterUpdater;
-        this.historyRecorder = historyRecorder;
-        this.taskReadinessRepository = taskReadinessRepository;
-    }
 
     @Transactional
     public void recalculateTaskEligibility(UUID taskId) {
@@ -178,13 +162,16 @@ public class TaskEligibilityService {
      *
      * @throws TenantReassignmentException if tenantId differs from
      * the already stored tenant
+     *
+     * <p>{@code tier} is stored under the same staleness check; null keeps the stored tier.
      */
     @Transactional
     public void onTaskStatusChangedIfNewer(
             UUID taskId,
             TaskStatus newStatus,
             LocalDateTime eventUpdatedAt,
-            UUID tenantId) {
+            UUID tenantId,
+            TaskTier tier) {
 
         Objects.requireNonNull(
                 taskId,
@@ -215,7 +202,10 @@ public class TaskEligibilityService {
                                 taskId,
                                 tenantId,
                                 newStatus,
-                                eventUpdatedAt));
+                                eventUpdatedAt)
+                                .toBuilder()
+                                .tier(tier)
+                                .build());
 
                 return;
             }
@@ -293,6 +283,7 @@ public class TaskEligibilityService {
                                     .status(newStatus)
                                     .updatedAt(eventUpdatedAt)
                                     .tenantId(tenantId)
+                                    .tier(tier != null ? tier : task.getTier())
                                     .build()),
                     taskId);
 

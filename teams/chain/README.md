@@ -30,7 +30,8 @@ open follow-up, not done as part of this merge. **Postgres-backed implementation
 - Java 21
 - Spring Boot 3.3.13 (Maven)
 - Spring Kafka, with Confluent Protobuf (de)serialization against a Schema Registry
-- Lombok (`Task`/`TaskDependency` accessors/builder/equals-hashCode; `Constraint`'s
+- Lombok (`Task`/`TaskDependency` accessors/builder/equals-hashCode, `TaskEntity` accessors,
+  `@RequiredArgsConstructor`/`@Slf4j` in services and handlers; `Constraint`'s
   equals/hashCode are hand-written, see the 2026-09-08 fixes below)
 - Docker / Docker Compose
 
@@ -129,7 +130,8 @@ src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_
                                   # V10 processed_events - Kafka event dedup claims,
                                   # V11 task readiness view + indexes,
                                   # V12 constraint_history - issue #815,
-                                  # V13 drops unresolved_dependencies - replaced by placeholder tasks)
+                                  # V13 drops unresolved_dependencies - replaced by placeholder tasks,
+                                  # V14 task.tier - issue #864)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskDependencyServicePostgresIntegrationTest,
@@ -223,6 +225,14 @@ Javadoc for what a claim does and doesn't guarantee.
 not what releases a `DONE` task, though: `task.updated` intercepts Inbox's `DONE` before the mapper, and
 only `task.completed` releases it. `CANCELLED` and `REJECTED` still release through `task.updated`. `IN_PROGRESS`
 maps to `ACTIVE`, and every other status maps to `PENDING`.
+
+**Tier (Issue #864)**: `task.updated` may carry an optional `tier` (strategic / tactical / operational).
+Chain stores only the latest one in `task.tier` (V14, nullable, CHECK on the three values). It is not exposed
+in any API and has no effect on `priority_score` or `is_available`. `InboxTaskTierMapper` reads it only
+when `hasTier()`; a missing, `UNSPECIFIED` or unrecognized tier maps to null. Merge rule: an event with a tier
+replaces the stored one, an event without a tier keeps it, so a stored tier can never be cleared. The tier is
+written in the same transaction and under the same newest-wins check as the status, both when the task is
+created from `task.updated` and when it already exists. A tier-only change writes no `task_state_history` row.
 
 **Publishing**: the only publisher for `task.scheduling.updated` is `KafkaSchedulingUpdatePublisher`
 (`com.rnd.chain.events` - the same package as the consumers, see #543), used by `SchedulingUpdateService`. It maps `TaskSchedulingUpdatedEvent` to the
@@ -962,6 +972,14 @@ the JSON:
 - Code: `TaskStateHistoryController` -> `TaskStateHistoryService` -> `TaskStateHistoryRepository`
   (in-memory + `PostgresTaskStateHistoryRepository`); `TaskStateHistoryResponse` is the API-layer
   DTO, kept separate from the domain `TaskStateHistoryEntry`.
+
+## Dependency-flow health analytics (`analytics/health/`)
+
+A separate Python project next to the Java service (not part of the Maven build or the Docker image)
+that will flag unhealthy dependency patterns from `dependency_history` and `task_state_history`.
+Stage 1 only: a synthetic history generator that writes rows shaped like those two tables plus a
+ground-truth key of planted diseases. No model, no endpoint, nothing written to Postgres yet. See
+`analytics/health/README.md`.
 
 ## Constraint persistence (Issue #378)
 

@@ -1,5 +1,6 @@
 package com.rnd.bridge.media.classification;
 
+import com.rnd.bridge.ai.LlmQuotaExhaustedException;
 import com.rnd.bridge.media.classification.document.DocumentScan;
 import com.rnd.bridge.media.classification.document.DocumentScanner;
 import com.rnd.bridge.raw.model.Classification;
@@ -8,6 +9,7 @@ import com.rnd.bridge.raw.model.Label;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +27,12 @@ import org.springframework.stereotype.Service;
  * than forwarding a junk one, so this never throws and never blocks intake. A result is only
  * EXCLUDED when its category is configured as excluded <em>and</em> its confidence reaches
  * min-confidence-to-exclude; a less confident result is still attached, but stays INCLUDED.
+ * <p>
+ * No model quota left (the free tier's daily cap, or bridge.ai's own daily-call-limit) is the
+ * same fail-open, chosen on purpose: the item is published now, INCLUDED and unclassified, rather
+ * than held back until the quota renews. It gets one WARN line with the marker
+ * {@code CLASSIFICATION_SKIPPED_QUOTA} and the renewal time, so a day's worth of unclassified
+ * items is easy to find; the rules (which cost no quota) still run first.
  */
 @Service
 public class MediaClassificationService {
@@ -43,12 +51,14 @@ public class MediaClassificationService {
         this.documentScanner = documentScanner;
         this.properties = properties;
         log.info("Media classification {}", !properties.enabled() ? "disabled"
-                : properties.model().configured() ? "enabled (rules + model " + properties.model().name() + ")"
+                : model.meetingModelConfigured() || model.documentModelConfigured()
+                ? "enabled (rules + model, see bridge.ai usages " + ModelMediaClassifier.MEETING_USAGE
+                        + "/" + ModelMediaClassifier.DOCUMENT_USAGE + ")"
                 : "enabled (rules only - no model api key set)");
     }
 
     public Triage triageMeeting(MeetingClassificationInput input, String itemName) {
-        return triage(itemName, properties.excludedMeetingCategories(),
+        return triage(itemName, properties.excludedMeetingCategories(), model::meetingModelConfigured,
                 () -> rules.classifyMeeting(input), () -> model.classifyMeeting(input));
     }
 
@@ -57,11 +67,12 @@ public class MediaClassificationService {
             return Triage.UNCLASSIFIED;
         }
         DocumentScan scan = documentScanner.scan(input.content(), input.filename());
-        return triage(input.filename(), properties.excludedDocumentCategories(),
+        return triage(input.filename(), properties.excludedDocumentCategories(), model::documentModelConfigured,
                 () -> rules.classifyDocument(scan), () -> model.classifyDocument(scan));
     }
 
     private Triage triage(String itemName, Set<? extends ItemCategory> excludedCategories,
+                          BooleanSupplier modelConfigured,
                           Supplier<Optional<Classification>> ruleStep,
                           Supplier<Optional<Classification>> modelStep) {
         if (!properties.enabled()) {
@@ -69,7 +80,7 @@ public class MediaClassificationService {
         }
         try {
             Optional<Classification> classification = ruleStep.get();
-            if (classification.isEmpty() && properties.model().configured()) {
+            if (classification.isEmpty() && modelConfigured.getAsBoolean()) {
                 classification = modelStep.get();
             }
             Triage triage = classification
@@ -77,6 +88,10 @@ public class MediaClassificationService {
                     .orElse(Triage.UNCLASSIFIED);
             logOutcome(itemName, triage);
             return triage;
+        } catch (LlmQuotaExhaustedException e) {
+            log.warn("CLASSIFICATION_SKIPPED_QUOTA item={} retry_at={} - published INCLUDED and unclassified ({})",
+                    itemName, e.retryAt(), e.getMessage());
+            return Triage.UNCLASSIFIED;
         } catch (RuntimeException e) {
             log.warn("Classification failed for {} - landing it INCLUDED and unclassified", itemName, e);
             return Triage.UNCLASSIFIED;

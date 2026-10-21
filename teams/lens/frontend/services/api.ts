@@ -42,7 +42,7 @@ export class ApiError extends Error {
 export function getErrorMessage(error: unknown, path?: string): string {
   if (!(error instanceof ApiError)) {
     // fetch() throws a TypeError when the Gateway can't be reached at all
-    return 'The service is unreachable. Check your connection and try again.';
+    return 'The task service is unreachable. Check your connection and try again.';
   }
 
   // Login-specific errors
@@ -76,7 +76,7 @@ export function getErrorMessage(error: unknown, path?: string): string {
     case 502:
     case 503:
     case 504:
-      return 'The service is temporarily unavailable. Please try again in a moment.';
+      return 'The task service is temporarily unavailable. Please try again in a moment.';
     default:
       return 'Something went wrong. Please try again.';
   }
