@@ -17,6 +17,9 @@ analysis = ["pandas>=2.2", "scikit-learn>=1.5"]  # features and clustering; the 
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+flow_health = ["features/feature_spec.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

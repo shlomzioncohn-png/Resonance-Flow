@@ -145,3 +145,20 @@ Anything still running at `as_of` is cut there and flagged `is_open = true`; it 
 contradicts the sequence (UNBLOCKED without BLOCKED, a second BLOCKED, ADDED twice, REMOVED of an edge that is not
 there, a status change that does not follow the previous one, a task leaving DONE) is logged as a warning, kept in
 `Timeline.warnings` and skipped. The generator's data produces none.
+
+## Features and clustering (`flow_health.features`, `flow_health.clustering`)
+
+```bash
+python -m flow_health.generator                                 # writes data/dev and data/eval
+python -m flow_health.features --data data/dev --out out/dev
+```
+
+Writes to `out/dev`: `features_task.csv`, `features_edge.csv`, `features_chain.csv`, `clusters_task.csv` (task_id,
+cluster, distance_to_centroid), `cluster_report.md` (size, feature medians and tier mix per cluster, silhouette) and
+`feature_spec.md` (every feature: definition, unit, treatment of open items). `--as-of` overrides the end of the
+observation window. Two runs on the same input give byte-identical files.
+
+Clustering is one KMeans (random_state 42) over eight task features, standardised; k is the best silhouette in 2-6.
+`tier` and `project_id` stay in `features_task.csv` but are not clustered. The code never reads the answer key; the
+tests do, as a sanity check. One of them (chronic blockers in the top decile) currently fails on dev and is recorded
+as an expected failure with its reason.
