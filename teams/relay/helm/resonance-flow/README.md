@@ -171,13 +171,15 @@ components:
       enabled: true
       path: /prometheus        # default /actuator/prometheus
       interval: 30s            # default
-      team: bridge             # default: the component name
+      team: bridge             # default: components.bridge.team, else the component name
 ```
 
 `templates/servicemonitor.yaml` then renders a ServiceMonitor for the component's
 Service, on its `http` port. Every series gets two labels: `component` (the
-`components.<name>` key) and `team` (`metrics.team`), for per-team dashboards and
-alert routing.
+`components.<name>` key) and `team` (`components.<name>.team`, else
+`metrics.team`, else the component name), for per-team dashboards and alert
+routing. Set `components.<name>.team` on a component that isn't scraped but whose
+alerts should still reach its team (e.g. `lens-frontend`) - see "Alerting".
 
 - **The app must expose the endpoint first.** For Spring Boot that's
   `io.micrometer:micrometer-registry-prometheus` plus `prometheus` in

@@ -26,7 +26,7 @@ spec:
         - targetLabel: component
           replacement: {{ $componentName }}
         - targetLabel: team
-          replacement: {{ $component.metrics.team | default $componentName }}
+          replacement: {{ include "resonance-flow.componentTeam" (dict "name" $componentName "component" $component) }}
 {{- end }}
 {{- end }}
 {{- end }}

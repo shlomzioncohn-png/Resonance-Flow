@@ -324,6 +324,8 @@ components:
         port: 9000
   lens-frontend:
     enabled: true
+    # Not scraped (no metrics block), but its pod alerts still route to lens.
+    team: lens
     replicaCount: 1
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-frontend"
@@ -473,6 +475,8 @@ components:
             mindTaskCreationRequested: task.creation.requested
   schema-registry:
     enabled: true
+    # Serves the Relay-owned shared/proto schemas.
+    team: relay
     replicaCount: 1
     image:
       # In-memory Apicurio registry - not durable, fine for dev/CI only.
