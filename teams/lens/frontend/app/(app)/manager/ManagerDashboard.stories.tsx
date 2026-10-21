@@ -103,6 +103,11 @@ export const FiltersFromUrl: Story = {
       await canvas.findByRole('button', { name: /Period: Last 7 days/ }),
     ).toBeInTheDocument();
     await waitFor(() => expect(kpiRequestQuery).toBe('?period=7d&project=p-1'));
+    // The full graph opens on the same project.
+    await expect(canvas.getByRole('link', { name: 'View all' })).toHaveAttribute(
+      'href',
+      '/manager/bottlenecks?projectId=p-1',
+    );
   },
 };
 

@@ -8,7 +8,6 @@ import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import AddIcon from '@mui/icons-material/Add';
 import AutoAwesomeOutlinedIcon from '@mui/icons-material/AutoAwesomeOutlined';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import FilterChip from '@/components/ui/FilterChip';
@@ -55,19 +54,20 @@ export default function DashboardHeader({
 }: DashboardHeaderProps) {
   const [projectMenuAnchor, setProjectMenuAnchor] = useState<HTMLElement | null>(null);
 
-  const selectedProjectIds = filters.projectIds ?? [];
-  const selectedProjects = projects.filter((project) => selectedProjectIds.includes(project.id));
-  const addableProjects = projects.filter((project) => !selectedProjectIds.includes(project.id));
+  // One project at a time for now: the dashboard endpoints filter by a single project,
+  // so the chip never shows a selection the tiles can't apply.
+  const selectedProjectId = filters.projectIds?.[0];
+  // A project from a shared link still shows, even before (or without) the project list.
+  const selectedProjectName =
+    projects.find((project) => project.id === selectedProjectId)?.name ?? selectedProjectId;
 
   const openProjectMenu = (event: MouseEvent<HTMLElement>) =>
     setProjectMenuAnchor(event.currentTarget);
   const closeProjectMenu = () => setProjectMenuAnchor(null);
-  const handleAddProject = (projectId: string) => {
-    onApplyFilters({ projectIds: [...selectedProjectIds, projectId] });
+  const handleSelectProject = (projectId: string) => {
+    onApplyFilters({ projectIds: [projectId] });
     closeProjectMenu();
   };
-  const handleRemoveProject = (projectId: string) =>
-    onApplyFilters({ projectIds: selectedProjectIds.filter((id) => id !== projectId) });
 
   return (
     <Stack spacing={2}>
@@ -120,39 +120,31 @@ export default function DashboardHeader({
           onChange={(value) => onApplyFilters({ period: value as DashboardFilters['period'] })}
         />
 
-        {selectedProjects.map((project) => (
-          <Chip
-            key={project.id}
-            variant="outlined"
-            label={`Project: ${project.name}`}
-            onDelete={() => handleRemoveProject(project.id)}
-          />
-        ))}
-
-        {addableProjects.length > 0 && (
-          <>
-            <Chip
-              variant="outlined"
-              clickable
-              icon={<AddIcon />}
-              label={selectedProjects.length === 0 ? 'Project: All' : 'Add project'}
-              onClick={openProjectMenu}
-              aria-haspopup="listbox"
-              aria-expanded={Boolean(projectMenuAnchor)}
-            />
-            <Menu
-              anchorEl={projectMenuAnchor}
-              open={Boolean(projectMenuAnchor)}
-              onClose={closeProjectMenu}
+        {/* Click to change the project, the X (or Delete key) to go back to all projects. */}
+        <Chip
+          variant="outlined"
+          clickable
+          label={`Project: ${selectedProjectName ?? 'All'}`}
+          onClick={openProjectMenu}
+          onDelete={selectedProjectId ? () => onApplyFilters({ projectIds: [] }) : undefined}
+          aria-haspopup="listbox"
+          aria-expanded={Boolean(projectMenuAnchor)}
+        />
+        <Menu
+          anchorEl={projectMenuAnchor}
+          open={Boolean(projectMenuAnchor)}
+          onClose={closeProjectMenu}
+        >
+          {projects.map((project) => (
+            <MenuItem
+              key={project.id}
+              selected={project.id === selectedProjectId}
+              onClick={() => handleSelectProject(project.id)}
             >
-              {addableProjects.map((project) => (
-                <MenuItem key={project.id} onClick={() => handleAddProject(project.id)}>
-                  {project.name}
-                </MenuItem>
-              ))}
-            </Menu>
-          </>
-        )}
+              {project.name}
+            </MenuItem>
+          ))}
+        </Menu>
       </Stack>
     </Stack>
   );

@@ -21,6 +21,15 @@ import ManagerKpiTiles from './ManagerKpiTiles';
 /** No API returns the tenant's display name yet. */
 const ORG_NAME = 'Your organization';
 
+/** The full Bottlenecks screen, on the same project as the dashboard and optionally with a task open. */
+function bottlenecksHref(projectId?: string, taskId?: string) {
+  const params = new URLSearchParams();
+  if (projectId) params.set('projectId', projectId);
+  if (taskId) params.set('taskId', taskId);
+  const query = params.toString();
+  return query ? `/manager/bottlenecks?${query}` : '/manager/bottlenecks';
+}
+
 /** Seconds since `timestamp`, ticking once a second. */
 function useSecondsSince(timestamp: number) {
   const [now, setNow] = useState(() => Date.now());
@@ -36,14 +45,13 @@ function useSecondsSince(timestamp: number) {
 export default function ManagerDashboardView() {
   const router = useRouter();
   const { filters, applyFilters } = useDashboardFilters();
+  // The dashboard endpoints filter by a single project, so the header lets the manager pick one.
+  const projectId = filters.projectIds?.[0];
   // Same cache entry as /manager/bottlenecks, so opening the full graph from here doesn't refetch.
-  const graph = useDependencyGraph();
-  // The KPI endpoint takes a single project, so it narrows to one only when exactly one is selected.
-  const kpis = useManagerKpis({
-    period: filters.period,
-    project: filters.projectIds?.length === 1 ? filters.projectIds[0] : undefined,
-  });
-  // Only feeds the Project chip's options: if it fails, the chip just offers nothing to add.
+  // It has no period: Chain's graph is always "right now".
+  const graph = useDependencyGraph(projectId);
+  const kpis = useManagerKpis({ period: filters.period, project: projectId });
+  // Only feeds the Project chip's options: if it fails, the chip just offers no projects.
   const projectsQuery = useQuery({ queryKey: projectKeys.all, queryFn: getProjects });
   const updatedSecondsAgo = useSecondsSince(Math.max(kpis.dataUpdatedAt, graph.dataUpdatedAt));
 
@@ -78,7 +86,12 @@ export default function ManagerDashboardView() {
               The tasks holding up the most work. Click one to see what it blocks.
             </Typography>
           </div>
-          <Button component={Link} href="/manager/bottlenecks" variant="outlined" size="small">
+          <Button
+            component={Link}
+            href={bottlenecksHref(projectId)}
+            variant="outlined"
+            size="small"
+          >
             View all
           </Button>
         </Stack>
@@ -90,9 +103,7 @@ export default function ManagerDashboardView() {
           loading={graph.isPending}
           error={graph.isError ? getErrorMessage(graph.error) : null}
           onRetry={() => graph.refetch()}
-          onNodeSelect={(id) =>
-            router.push(`/manager/bottlenecks?taskId=${encodeURIComponent(id)}`)
-          }
+          onNodeSelect={(id) => router.push(bottlenecksHref(projectId, id))}
         />
       </Card>
     </Stack>
