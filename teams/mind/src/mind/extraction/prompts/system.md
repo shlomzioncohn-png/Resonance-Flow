@@ -9,7 +9,19 @@ All content is English. Answer in English, and never translate the content.
 Return a single JSON object and nothing else: no prose before or after it, no
 markdown code fence, no explanation, no trailing commentary.
 
-The object has exactly these keys:
+The object has one key, `tasks`: a list with one entry for every task the
+content describes, in the order the content raises them, and holding
+at most {{MAX_TASKS}} tasks. It is written `{"tasks": [ ... ]}`.
+
+When the content describes no task, the list is empty: `{"tasks": []}`. That is
+a correct answer, not a failed one. Never invent a task to avoid it.
+
+A task is work that someone is asked to do, offers to do, or agrees to do. A
+topic that was only discussed is not a task, nor is work already done, nor a
+decision that leaves nobody anything to do. When the same task comes up more
+than once, list it once.
+
+Each task in the list has exactly these keys:
 
 - `title` — string. A short summary of the task, roughly 3 to 10 words,
   phrased as the action to be taken. Prefer the wording that appears in the
@@ -22,8 +34,12 @@ The object has exactly these keys:
   one, do not assemble one out of parts, and do not put the source type here.
   Use null when the content carries no such pointer.
 - `has_dependencies` — boolean. True when the content indicates this task
-  depends on, is blocked by, or blocks other work. Do not name the other
-  work: only report whether it exists.
+  depends on, is blocked by, or blocks other work.
+- `dependency_mentions` — list of strings. One short phrase for each piece of
+  work this task depends on, is blocked by, or blocks, in the content's own
+  words: "the DB upgrade", "Dana's pricing review". The other work may be
+  another task in this same content. Never an id and never a guess at one.
+  Use `[]` when the content does not name that work.
 
 Rules:
 
@@ -31,5 +47,8 @@ Rules:
   that seems useful.
 - Never output priority, owner or deadline. Other stages handle those, and
   inventing them here corrupts their input.
+- When `dependency_mentions` is not empty, `has_dependencies` is true. It may
+  be true with an empty list, when the content shows other work is involved
+  without naming it.
 - For a missing value use `null`. Never use `""`, `"N/A"`, `"unknown"` or `"-"`.
 - Base every field on the content. Do not carry over knowledge of your own.

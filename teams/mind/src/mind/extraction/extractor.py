@@ -21,7 +21,7 @@ from mind.extraction.confidence import ConfidenceBreakdown, score_confidence
 from mind.extraction.config import ExtractionConfig
 from mind.extraction.grounding import ground_source_ref
 from mind.extraction.models import ExtractedFields, response_model
-from mind.extraction.parsing import MalformedOutput, parse_response
+from mind.extraction.parsing import MalformedOutput, parse_response, valid_tasks
 from mind.extraction.prompts import extraction_prompt, repair_prompt, system_prompt
 from mind.extraction.providers.base import (
     LLMError,
@@ -59,14 +59,30 @@ class ExtractionItem:
 
 
 @dataclass(frozen=True)
-class ExtractionSuccess:
-    """A validated proposal: the basic fields, plus the classification and the
-    effort estimate (#351, #352) when the switch asked for them."""
+class ExtractedTask:
+    """One task from the answer: its fields and how far to trust them.
+
+    The basic fields, plus the classification and the effort estimate
+    (#351, #352) when the switch asked for them. Grounded and scored on its
+    own, so a pointer one task invented costs that task alone.
+    """
 
     fields: ExtractedFields
+    confidence: ConfidenceBreakdown
+
+
+@dataclass(frozen=True)
+class ExtractionSuccess:
+    """A validated answer: every task the text describes (#690), possibly none.
+
+    What belongs to the answer rather than to one task stays out here: the
+    item it came from, the model, and the rounds spent. A repair round
+    re-asks for the whole list, so every task in it paid for that round.
+    """
+
+    tasks: tuple[ExtractedTask, ...]
     source_type: SourceType
     item_key: str | None
-    confidence: ConfidenceBreakdown
     model: str
 
     # Rounds spent getting the schema right, and total calls made. They
@@ -92,6 +108,71 @@ class ExtractionFailure:
 
 
 ExtractionOutcome = ExtractionSuccess | ExtractionFailure
+
+
+def _rounds_needed(
+    fields: ExtractedFields,
+    earlier_valid: list[tuple[ExtractedFields, int]],
+    schema_attempts: int,
+) -> int:
+    """The rounds this task took: the first in which it was valid unchanged.
+
+    A repair round re-asks for the whole list, so a task that was already
+    valid comes back again. When it comes back equal in every field, the
+    repair was not for it and it is not charged. A task the model rewrote is
+    charged in full: it cannot be told apart from a new one. Partial repair
+    — sending back only the failed tasks — would close that gap; see the
+    README.
+    """
+
+    for task, round_number in earlier_valid:
+        if task == fields:
+            return round_number
+    return schema_attempts
+
+
+def _log_rewritten(
+    earlier_valid: list[tuple[ExtractedFields, int]],
+    answer: list[ExtractedFields],
+) -> None:
+    """Count the valid tasks a repair round rewrote, which `_rounds_needed`
+    then charges. How often this happens decides whether partial repair is
+    worth building, so it is logged rather than guessed."""
+
+    if not earlier_valid:
+        return
+    rewritten = sum(1 for task, _ in earlier_valid if task not in answer)
+    logger.info(
+        "extraction: %d of %d task(s) valid in an earlier round did not come back unchanged",
+        rewritten,
+        len(earlier_valid),
+    )
+
+
+def _ground_and_score(
+    fields: ExtractedFields,
+    source_type: SourceType,
+    text: str,
+    attempts: int,
+) -> ExtractedTask:
+    """Check one task's pointer against the content, then score that task.
+
+    The content is untrusted, so a pointer it did not contain does not
+    travel. Done here because this is the one place holding both the answer
+    and the text it was supposed to come from.
+    """
+
+    fields, invented_ref = ground_source_ref(fields, text)
+    return ExtractedTask(
+        fields=fields,
+        confidence=score_confidence(
+            fields,
+            source_type,
+            text,
+            attempts=attempts,
+            invented_source_ref=invented_ref,
+        ),
+    )
 
 
 class BasicExtractor:
@@ -133,6 +214,9 @@ class BasicExtractor:
         provider_calls = 0
         transient_retries = 0
         last_output: str | None = None
+        # Each task that passed on its own in a rejected round, with that
+        # round's number: what lets a repair round be charged per task.
+        earlier_valid: list[tuple[ExtractedFields, int]] = []
 
         while True:
             provider_calls += 1
@@ -162,7 +246,7 @@ class BasicExtractor:
             last_output = response.text
 
             try:
-                fields = parse_response(response.text, schema)
+                answer = parse_response(response.text, schema)
             except MalformedOutput as exc:
                 detail = str(exc)
 
@@ -177,26 +261,26 @@ class BasicExtractor:
                         last_output=last_output,
                     )
 
+                earlier_valid += [
+                    (task, schema_attempts) for task in valid_tasks(response.text, schema)
+                ]
                 logger.info("extraction: invalid output, repairing (%s)", detail)
                 user = repair_prompt(source_type, text, response.text, detail)
                 continue
 
-            # The content is untrusted, so a pointer it did not contain does
-            # not travel. Done here because this is the one place holding
-            # both the answer and the text it was supposed to come from.
-            fields, invented_ref = ground_source_ref(fields, text)
-
+            _log_rewritten(earlier_valid, answer)
             return ExtractionSuccess(
-                fields=fields,
+                tasks=tuple(
+                    _ground_and_score(
+                        fields,
+                        source_type,
+                        text,
+                        _rounds_needed(fields, earlier_valid, schema_attempts),
+                    )
+                    for fields in answer
+                ),
                 source_type=source_type,
                 item_key=item_key,
-                confidence=score_confidence(
-                    fields,
-                    source_type,
-                    text,
-                    attempts=schema_attempts,
-                    invented_source_ref=invented_ref,
-                ),
                 model=response.model,
                 schema_attempts=schema_attempts,
                 provider_calls=provider_calls,

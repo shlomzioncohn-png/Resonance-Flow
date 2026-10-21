@@ -6,7 +6,6 @@ issue keeps working:
     pytest tests/test_basic_extraction.py -v
 """
 
-import json
 import logging
 from uuid import UUID
 
@@ -26,7 +25,7 @@ from mind.extraction.extractor import (
 )
 from mind.extraction.providers.base import LLMRejected, LLMTimeout
 from mind.observability.tracking import _reset_for_tests, get_recent_calls
-from tests.extraction.fakes import ScriptedProvider
+from tests.extraction.fakes import ScriptedProvider, answer_of, only
 
 TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
 
@@ -36,7 +35,7 @@ EMAIL_TEXT = (
     "Thread: https://mail.example.com/thread/8821"
 )
 
-GOOD_ANSWER = json.dumps(
+GOOD_ANSWER = answer_of(
     {
         "title": "Send the Q3 revenue report to the board",
         "description": "Send the Q3 revenue report to the board before Friday.",
@@ -63,12 +62,12 @@ def test_clean_extraction_produces_every_required_field() -> None:
     result = extractor(GOOD_ANSWER).extract(EMAIL_TEXT, SourceType.EMAIL)
 
     assert isinstance(result, ExtractionSuccess)
-    assert result.fields.title == "Send the Q3 revenue report to the board"
-    assert result.fields.description is not None
-    assert result.fields.source_ref == "https://mail.example.com/thread/8821"
-    assert result.fields.has_dependencies is True
+    assert only(result).fields.title == "Send the Q3 revenue report to the board"
+    assert only(result).fields.description is not None
+    assert only(result).fields.source_ref == "https://mail.example.com/thread/8821"
+    assert only(result).fields.has_dependencies is True
     assert result.source_type is SourceType.EMAIL
-    assert 0.0 <= result.confidence.value <= 1.0
+    assert 0.0 <= only(result).confidence.value <= 1.0
     assert result.schema_attempts == 1
 
 
@@ -83,14 +82,14 @@ def test_extraction_output_validates_against_the_contract() -> None:
     result = extractor(GOOD_ANSWER).extract(EMAIL_TEXT, SourceType.EMAIL)
     assert isinstance(result, ExtractionSuccess)
 
-    request = to_task_creation_requested(result, tenant_id=TENANT_ID)
+    [request] = to_task_creation_requested(result, tenant_id=TENANT_ID)
 
     assert isinstance(request, TaskCreationRequested)
     assert request.tenant_id == TENANT_ID
-    assert request.title == result.fields.title
+    assert request.title == only(result).fields.title
     assert request.source_type is SourceType.EMAIL
     assert request.has_dependencies is True
-    assert request.confidence == result.confidence.value
+    assert request.confidence == only(result).confidence.value
     # The fields owned by #351 and #352 stay unset here.
     assert request.tier is None
     assert request.urgency is None
@@ -110,7 +109,7 @@ def test_malformed_response_does_not_crash_the_pipeline() -> None:
 
 
 def test_a_repair_prompt_is_sent_after_invalid_output() -> None:
-    provider = ScriptedProvider('{"title": 12, "has_dependencies": false}', GOOD_ANSWER)
+    provider = ScriptedProvider(answer_of({"title": 12, "has_dependencies": False}), GOOD_ANSWER)
     extraction = BasicExtractor(provider=provider, sleep=lambda _seconds: None)
 
     extraction.extract(EMAIL_TEXT, SourceType.EMAIL)
@@ -124,7 +123,7 @@ def test_a_repair_prompt_is_sent_after_invalid_output() -> None:
 
 
 def test_hallucinated_extra_field_is_rejected_and_repaired() -> None:
-    hallucinated = json.dumps(
+    hallucinated = answer_of(
         {
             "title": "Send the Q3 revenue report",
             "has_dependencies": False,
@@ -149,10 +148,10 @@ def test_retry_then_success_lowers_confidence_but_still_succeeds() -> None:
 
     assert isinstance(clean, ExtractionSuccess)
     assert isinstance(repaired, ExtractionSuccess)
-    assert repaired.fields == clean.fields
+    assert only(repaired).fields == only(clean).fields
     assert repaired.schema_attempts == 2
-    assert repaired.confidence.value < clean.confidence.value
-    assert "repair_attempts" in {p.reason for p in repaired.confidence.penalties}
+    assert only(repaired).confidence.value < only(clean).confidence.value
+    assert "repair_attempts" in {p.reason for p in only(repaired).confidence.penalties}
 
 
 def test_transient_provider_failure_is_retried_without_spending_a_repair() -> None:
@@ -162,7 +161,7 @@ def test_transient_provider_failure_is_retried_without_spending_a_repair() -> No
     assert result.provider_calls == 2
     # The timeout was not the model failing the schema, so confidence is intact.
     assert result.schema_attempts == 1
-    assert result.confidence.penalties == ()
+    assert only(result).confidence.penalties == ()
 
 
 def test_a_rejected_request_is_not_retried() -> None:
@@ -221,7 +220,7 @@ def test_one_bad_item_does_not_stall_the_batch() -> None:
 
 
 def test_missing_source_ref_is_a_normal_outcome() -> None:
-    answer = json.dumps(
+    answer = answer_of(
         {
             "title": "Reconcile the warehouse stock count",
             "description": "Recount shelf B and reconcile against the ledger.",
@@ -235,16 +234,16 @@ def test_missing_source_ref_is_a_normal_outcome() -> None:
     )
 
     assert isinstance(result, ExtractionSuccess)
-    assert result.fields.source_ref is None
+    assert only(result).fields.source_ref is None
     # A scanned document has no pointer to carry, so nothing is deducted.
-    assert "missing_source_ref" not in {p.reason for p in result.confidence.penalties}
+    assert "missing_source_ref" not in {p.reason for p in only(result).confidence.penalties}
 
-    request = to_task_creation_requested(result, tenant_id=TENANT_ID)
+    [request] = to_task_creation_requested(result, tenant_id=TENANT_ID)
     assert request.source_ref is None
 
 
 def test_placeholder_source_ref_is_normalised_to_none() -> None:
-    answer = json.dumps(
+    answer = answer_of(
         {
             "title": "Reconcile the warehouse stock count",
             "description": "Recount shelf B.",
@@ -256,7 +255,7 @@ def test_placeholder_source_ref_is_normalised_to_none() -> None:
     result = extractor(answer).extract("Recount shelf B.", SourceType.MANUAL)
 
     assert isinstance(result, ExtractionSuccess)
-    assert result.fields.source_ref is None
+    assert only(result).fields.source_ref is None
 
 
 # --- every call is recorded, including the ones that failed ---------------

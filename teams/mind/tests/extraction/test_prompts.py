@@ -5,7 +5,8 @@ import json
 import pytest
 
 from mind.contracts.base_enums import SourceType
-from mind.extraction.models import response_model
+from mind.extraction.models import MAX_TASKS_PER_TEXT, response_model
+from mind.extraction.parsing import parse_response
 from mind.extraction.prompts import (
     MAX_CONTENT_CHARS,
     TRUNCATION_MARKER,
@@ -179,16 +180,17 @@ def test_every_example_is_an_answer_the_parser_accepts() -> None:
     examples = _examples()
     shape = response_model(classify=True)
 
-    assert len(examples) == 6
+    assert len(examples) == 8
     for example in examples:
-        assert set(example) == set(shape.model_fields)
-        shape.model_validate(example)
+        for task in parse_response(json.dumps(example), shape):
+            assert task.model_fields_set == set(shape.model_fields)
 
 
 def test_the_examples_include_one_whose_answer_is_null() -> None:
     """An example of declining to answer is the one most worth giving."""
 
-    assert any(example["role_context"] is None for example in _examples())
+    tasks = [task for example in _examples() for task in example["tasks"]]
+    assert any(task["role_context"] is None for task in tasks)
     assert "Null there is the right answer" in system_prompt(classify=True)
 
 
@@ -242,7 +244,9 @@ def test_the_examples_show_every_kind_of_estimate() -> None:
     the words rather than from the work.
     """
 
-    bases = {example["effort_estimate_basis"] for example in _examples()}
+    bases = {
+        task["effort_estimate_basis"] for example in _examples() for task in example["tasks"]
+    }
 
     assert bases == {"STATED", "INFERRED", None}
 
@@ -292,3 +296,71 @@ def test_a_unit_whose_length_is_assumed_makes_the_estimate_inferred() -> None:
     # stating a duration is STATED.
     assert "a unit whose length you would have to assume" in prompt
     assert prompt.count("two sprints") == 1
+
+
+# --- the answer is a list of tasks (#690) ---------------------------------
+
+
+@pytest.mark.parametrize("classify", [False, True])
+def test_the_prompt_asks_for_the_list_and_allows_it_to_be_empty(classify: bool) -> None:
+    prompt = system_prompt(classify)
+
+    assert '{"tasks": [' in prompt
+    assert '{"tasks": []}' in prompt
+
+
+@pytest.mark.parametrize("classify", [False, True])
+def test_the_cap_the_prompt_states_is_the_one_the_model_enforces(classify: bool) -> None:
+    """Filled from MAX_TASKS_PER_TEXT, not written in: a fact in two files drifts."""
+
+    prompt = system_prompt(classify)
+
+    assert f"at most {MAX_TASKS_PER_TEXT} tasks" in prompt
+    assert "{{" not in prompt
+
+
+def test_the_examples_show_a_text_with_several_tasks() -> None:
+    assert any(len(example["tasks"]) > 1 for example in _examples())
+
+
+def test_a_repair_asks_for_every_task_again_and_unchanged() -> None:
+    """Without it a model may return only the task it fixed, and a valid
+    answer would silently lose the others: decision 3 of #690, undone."""
+
+    prompt = repair_prompt(SourceType.EMAIL, "text", '{"tasks": []}', "tasks.1.title: ...")
+
+    assert "every task" in prompt
+    assert "unchanged" in prompt
+
+
+# --- dependency_mentions (#690, was #842) ---------------------------------
+
+
+@pytest.mark.parametrize("classify", [False, True])
+def test_the_mentions_are_defined_beside_has_dependencies_in_both_modes(classify: bool) -> None:
+    """A field of every task, so it cannot live in the block the switch removes."""
+
+    prompt = system_prompt(classify)
+
+    assert prompt.index("`has_dependencies`") < prompt.index("`dependency_mentions`")
+    assert "`dependency_mentions` is not empty, `has_dependencies` is true" in prompt
+
+
+def test_an_example_shows_one_task_naming_another_from_the_same_text() -> None:
+    linked = [example for example in _examples() if len(example["tasks"]) > 1]
+
+    assert any(
+        task["dependency_mentions"] and task["has_dependencies"]
+        for example in linked
+        for task in example["tasks"]
+    )
+
+
+def test_the_repair_prompt_lists_no_keys_of_its_own() -> None:
+    """It points at the instructions instead. Listing keys here once dropped
+    three classification fields from every repaired answer (#587)."""
+
+    prompt = repair_prompt(SourceType.EMAIL, "text", "{}", "error")
+
+    for key in response_model(classify=True).model_fields:
+        assert key not in prompt

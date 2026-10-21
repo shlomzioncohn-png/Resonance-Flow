@@ -11,6 +11,7 @@ from functools import cache
 from pathlib import Path
 
 from mind.contracts.base_enums import SourceType
+from mind.extraction.models import MAX_TASKS_PER_TEXT
 
 _PROMPT_DIR = Path(__file__).parent / "prompts"
 
@@ -69,10 +70,13 @@ def system_prompt(classify: bool = False) -> str:
     second call's system prompt, unchanged.
     """
 
+    # The cap is filled in from the model that enforces it, so the number the
+    # model is told and the number it is held to cannot drift apart.
+    system = _fill(_load("system.md"), {"MAX_TASKS": str(MAX_TASKS_PER_TEXT)})
     if not classify:
-        return _load("system.md")
+        return system
 
-    return _load("system.md") + "\n\n" + _load("classification.md")
+    return system + "\n\n" + _load("classification.md")
 
 
 def extraction_prompt(source_type: SourceType, content: str) -> str:

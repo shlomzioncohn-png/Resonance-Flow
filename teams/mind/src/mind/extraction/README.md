@@ -675,3 +675,89 @@ Caveats, all load-bearing:
   by someone else.
 - it says nothing about the confidence values. Whether `INFERRED` estimates
   land near the truth is the persona calibration above, and that is R1's run.
+
+## Several tasks per text (#690)
+
+Until #690 the model was asked for one object, so every text yielded exactly
+one task and a meeting with eight action items lost seven. The answer is now
+one object holding a list:
+
+```json
+{"tasks": [{"title": "...", "has_dependencies": false, "dependency_mentions": []}]}
+```
+
+| Decision | Where |
+|---|---|
+| An empty list is a valid answer: a text with no task is the normal case | `ExtractedTasks`, `system.md` |
+| At most `MAX_TASKS_PER_TEXT` (15) tasks; more is rejected and repaired, never cut short | `models.py`; the prompt's number is filled in from the constant, not written twice |
+| One invalid task fails the whole answer; the message names it by place (`tasks.1.title`) | `parse_response` |
+| A bare list without the object gets its own message, not "not valid JSON" | `parsing._first_json_object` |
+| Grounding and confidence run per task; `item_key`, model and attempts stay on the answer | `ExtractedTask`, `ExtractionSuccess.tasks` |
+| One `TaskCreationRequested` per task, in order; none for an empty list | `assembly.to_task_creation_requested` |
+
+`system.md` now also says what a task is: work someone is asked to do, offers
+to do, or agrees to do — not a topic only discussed, not work already done.
+Until #690 that never needed saying.
+
+### Which tasks pay for a repair round
+
+A repair round re-asks for the whole list, so a shared attempt count charged
+every task for one sibling's `"N/A"`: in a meeting of eight, seven valid tasks
+lost 20% each. Instead, `valid_tasks` reads each task of a rejected answer on
+its own, and a final task **equal in every field** to one of those is charged
+only the rounds up to that one (`extractor._rounds_needed`). Matching is by
+content, not by place, because the model may reorder, merge or drop tasks
+between rounds. The rejected tasks are used for this comparison only; nothing
+from a rejected answer reaches the output.
+
+This narrows the problem; it does not close it. A valid task the model
+*rewords* during repair cannot be told apart from a new one, and is charged.
+`repair_user.md` asks for the untouched tasks back unchanged, and every
+success logs how many were not (`N of M task(s) valid in an earlier round did
+not come back unchanged`), so how often this happens is measured, not guessed.
+
+### Proposed: partial repair
+
+The exact fix is to send back only the failed tasks and freeze the valid ones,
+so nothing has to be matched. Envelope failures — broken JSON, a bare list,
+more than 15 tasks — would still re-ask for everything, and there every task
+is rightly charged. Not built here: it changes the repair flow, needs a guard
+against the model resending the frozen tasks as duplicates, and departs from
+#690's third decision as worded ("one invalid task sends the whole answer to
+repair"), so it is that decision's owner's call. Worth building if the logged
+rewording count turns out to be high.
+
+### `dependency_mentions` (moved here from #842)
+
+Each task names the work it depends on or blocks, in the content's own words
+("the DB upgrade"), so that #834's resolver can look up the real `task_id`.
+It is defined in `system.md`, beside `has_dependencies`, because it is a field
+of every task, with the switch on or off.
+
+- **The rule:** non-empty `dependency_mentions` means `has_dependencies` is
+  true. A `false` beside a named mention is corrected to `true` and logged,
+  not repaired: the mention is the evidence, the `false` the slip. `true` with
+  an empty list is allowed — the content may show other work without naming it.
+- **Cleaned before the rule:** blanks, placeholders and repeats (case-blind)
+  are dropped, non-strings are dropped and logged, and a bare string becomes a
+  one-item list. Cleaning runs first, so mentions that were all placeholders
+  cannot turn a `false` into a `true`. One empty mention used to stall #834's
+  listener; none leaves here.
+- **Not in the contract.** `TaskCreationRequested` carries only
+  `has_dependencies`. The mentions stay on `ExtractedTask.fields` and travel
+  separately, through `flow.send(..., dependency_mentions=...)` in #359.
+- **`repair_user.md` names no keys.** It refers to "the keys the instructions
+  list". Naming fields there once dropped three of them from every repaired
+  answer (#587), so a new field is never added to it.
+
+### Known gaps, left for follow-ups
+
+- **Long meetings are truncated.** `MAX_CONTENT_CHARS` (8000) cuts the tail,
+  and a meeting's action items cluster at the end ("let's wrap up"). To be
+  settled against the real AMI transcripts before the demo.
+- **Urgency has no reference date.** `source_timestamp` is not in the prompt,
+  so "by Friday" cannot be placed in time.
+- **An email body and its attachment are extracted separately**, and never
+  seen together.
+- **With classification switched off the model sees no examples at all**,
+  including the multi-task and dependency ones. The switch defaults to on.

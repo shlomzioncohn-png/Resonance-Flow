@@ -19,4 +19,5 @@ Why it was rejected:
 
 Fix exactly what the rejection describes and change nothing else. Return the
 corrected JSON object on its own, with exactly the keys the instructions
-list and no others.
+list and no others. Return every task again, including the ones the
+rejection does not mention, and leave those unchanged.

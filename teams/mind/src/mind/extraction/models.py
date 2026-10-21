@@ -331,6 +331,67 @@ class ExtractedFields(BaseModel):
     # Resolving the actual targets belongs to R3, not to this stage.
     has_dependencies: bool
 
+    # Short phrases naming the tasks this one depends on or blocks, in the
+    # content's own words: "the DB upgrade" (#690, was #842). Never in the
+    # contract. They travel beside it to #834's resolver, which turns them into
+    # task ids, so a phrase that cannot be resolved there must not leave here.
+    dependency_mentions: list[str] = []
+
+    @field_validator("dependency_mentions", mode="before")
+    @classmethod
+    def only_usable_mentions_survive(cls, value: object) -> list[str]:
+        """Keep each phrase once, and drop what is not a phrase.
+
+        Optional, so nothing here raises: an unusable mention is dropped and
+        logged rather than sending the whole answer, every task of a meeting,
+        back for repair. One empty mention used to stall #834's listener.
+        """
+
+        if value is None:
+            return []
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, list):
+            logger.warning(
+                "extraction: dependency_mentions came back as %r, which is not a list; "
+                "recording it as empty",
+                value,
+            )
+            return []
+
+        kept: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                logger.warning("extraction: dependency mention %r is not a phrase; dropping it", item)
+                continue
+            phrase = item.strip()
+            if phrase.lower() in _NULL_PLACEHOLDERS:
+                continue
+            # Case-blind: "The DB upgrade" is the same mention, and the
+            # resolver would only look it up twice.
+            if phrase.lower() not in {seen.lower() for seen in kept}:
+                kept.append(phrase)
+        return kept
+
+    @model_validator(mode="after")
+    def a_mention_is_a_dependency(self) -> Self:
+        """A named dependency means there is one; the reverse is not required.
+
+        Runs after the cleanup above, so mentions that were all placeholders
+        are already gone and cannot turn a `false` into a `true`. Corrected
+        rather than repaired: the mention is the concrete evidence, and the
+        `false` beside it the slip.
+        """
+
+        if self.dependency_mentions and not self.has_dependencies:
+            logger.warning(
+                "extraction: dependency_mentions named %s but has_dependencies was false; "
+                "recording it as true",
+                self.dependency_mentions,
+            )
+            self.has_dependencies = True
+        return self
+
     @field_validator("description", "source_ref", mode="after")
     @classmethod
     def blank_to_none(cls, value: str | None) -> str | None:
@@ -378,6 +439,29 @@ class ExtractedFieldsWithClassification(ExtractedFields, ClassificationFields):
     either model changes here with it, which is what stops the switched-off
     and switched-on shapes from drifting apart.
     """
+
+
+# More than this from one text is a model listing every sentence, not a meeting
+# with that many commitments. Rejected and repaired rather than cut short:
+# keeping the first fifteen would drop the rest without anyone seeing it.
+MAX_TASKS_PER_TEXT = 15
+
+
+class ExtractedTasks[TaskT: ExtractedFields](BaseModel):
+    """The whole answer: every task the text describes (#690).
+
+    `TaskT` is the shape `response_model` chose, so each task in the list is
+    validated by exactly the rules a single task always was, switch on or off.
+
+    One invalid task fails the whole answer. Keeping the valid ones would
+    quietly drop the bad one, and the repair round can name it by its place in
+    the list (`tasks.1.title`). An empty list is a valid answer: a text with no
+    task in it is the normal case, not a failure.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tasks: list[TaskT] = Field(max_length=MAX_TASKS_PER_TEXT)
 
 
 def response_model(classify: bool) -> type[ExtractedFields]:

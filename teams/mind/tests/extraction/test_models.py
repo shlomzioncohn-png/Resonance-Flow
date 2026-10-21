@@ -3,7 +3,13 @@
 import pytest
 from pydantic import ValidationError
 
-from mind.extraction.models import MAX_TITLE_LENGTH, ExtractedFields
+from mind.extraction.models import (
+    MAX_TASKS_PER_TEXT,
+    MAX_TITLE_LENGTH,
+    ExtractedFields,
+    ExtractedFieldsWithClassification,
+    ExtractedTasks,
+)
 
 
 def test_accepts_minimal_valid_fields() -> None:
@@ -111,3 +117,43 @@ def test_the_rejection_tells_the_model_what_was_wrong() -> None:
     message = str(raised.value)
     assert "placeholder" in message
     assert "N/A" in message
+
+
+# --- the answer is a list of tasks (#690) ---------------------------------
+
+TASK = {"title": "Send the Q3 report", "has_dependencies": False}
+
+
+def test_each_task_is_read_into_the_shape_that_was_asked_for() -> None:
+    answer = {"tasks": [TASK, {**TASK, "tier": "OPERATIONAL"}]}
+
+    tasks = ExtractedTasks[ExtractedFieldsWithClassification].model_validate(answer).tasks
+
+    assert [type(task) for task in tasks] == [ExtractedFieldsWithClassification] * 2
+    assert tasks[0].tier is None
+
+
+def test_an_empty_list_is_a_valid_answer() -> None:
+    assert ExtractedTasks[ExtractedFields].model_validate({"tasks": []}).tasks == []
+
+
+def test_more_tasks_than_the_cap_are_rejected() -> None:
+    ExtractedTasks[ExtractedFields].model_validate({"tasks": [TASK] * MAX_TASKS_PER_TEXT})
+
+    with pytest.raises(ValidationError):
+        ExtractedTasks[ExtractedFields].model_validate(
+            {"tasks": [TASK] * (MAX_TASKS_PER_TEXT + 1)}
+        )
+
+
+def test_one_bad_task_rejects_the_answer_and_says_which_one() -> None:
+    with pytest.raises(ValidationError) as raised:
+        ExtractedTasks[ExtractedFields].model_validate({"tasks": [TASK, {**TASK, "title": "N/A"}]})
+
+    assert raised.value.errors()[0]["loc"][:2] == ("tasks", 1)
+
+
+@pytest.mark.parametrize("answer", [TASK, {"tasks": [TASK], "summary": "one task"}])
+def test_a_single_task_or_an_extra_key_is_not_the_list(answer: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        ExtractedTasks[ExtractedFields].model_validate(answer)
