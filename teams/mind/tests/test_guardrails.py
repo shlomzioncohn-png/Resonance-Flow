@@ -177,10 +177,15 @@ def _replay_extraction(case_id: str) -> tuple[str, dict[str, Any]]:
 # Observed against the live model on the first recording (see the recorded files):
 # a task invented from small talk, and a Hebrew task silently translated to English,
 # both above the 0.5 audit marker. The extraction confidence scores extraction
-# quality, not whether a task exists or is in scope.
-_EXTRACTION_FINDING = (
-    "finding (#488): extraction has no signal for 'no task here' or 'not English'; "
-    "the output carries confidence >= 0.5"
+# quality, not whether a task exists or is in scope. Only the first is a finding
+# to fix; the second is out of scope by the English-only decision.
+_NO_TASK_FINDING = (
+    "finding (#488): extraction has no 'no task here' outcome, so small talk becomes "
+    "a task at confidence >= 0.5; to be handled in #690"
+)
+_ENGLISH_ONLY_LIMITATION = (
+    "accepted limitation: the pipeline is English-only by decision, so non-English "
+    "content is documented, not a finding to fix"
 )
 
 
@@ -189,11 +194,13 @@ _EXTRACTION_FINDING = (
     [
         pytest.param(
             "no_action_items",
-            marks=pytest.mark.xfail(strict=True, raises=AssertionError, reason=_EXTRACTION_FINDING),
+            marks=pytest.mark.xfail(strict=True, raises=AssertionError, reason=_NO_TASK_FINDING),
         ),
         pytest.param(
             "non_english_text",
-            marks=pytest.mark.xfail(strict=True, raises=AssertionError, reason=_EXTRACTION_FINDING),
+            marks=pytest.mark.xfail(
+                strict=True, raises=AssertionError, reason=_ENGLISH_ONLY_LIMITATION
+            ),
         ),
     ],
 )
@@ -265,7 +272,12 @@ def test_crosstalk_lowers_asr_confidence_against_the_clean_recording() -> None:
 
 
 @_needs_whisper
-def test_non_english_audio_is_not_transcribed_as_confident_english() -> None:
+def test_non_english_audio_does_not_crash() -> None:
+    """An accepted limitation (English-only), so only a crash fails it.
+
+    The confidence is printed for the report but deliberately not judged against
+    a threshold: see the case's `deviation` in cases.json.
+    """
     case = _case("non_english_audio")
     recording = _ROOT / case["input"]["path"]
     if not recording.exists():
@@ -273,7 +285,11 @@ def test_non_english_audio_is_not_transcribed_as_confident_english() -> None:
 
     result = transcribe(recording.read_bytes(), filename=recording.name)
 
-    outcome = _media_outcome(result, case["threshold"])
+    _skip_on_environment_failure(result)
+    if result.success:
+        outcome = "output"
+    else:
+        outcome = "graceful_failure" if result.failure_category is FailureCategory.DATA else "crash"
     _observe(
         "non_english_audio",
         outcome,

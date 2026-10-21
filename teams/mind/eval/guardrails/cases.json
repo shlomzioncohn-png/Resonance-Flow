@@ -5,7 +5,8 @@
     "low_confidence": "The component returned output, but its confidence is below the case's threshold.",
     "partial": "Confidence reacted (lower than the clean reference) but stayed above the threshold. Documented, not asserted.",
     "silent": "Output with confidence at or above the threshold: confident-looking output from garbage or out-of-scope input.",
-    "crash": "An exception instead of a result. Never acceptable."
+    "crash": "An exception instead of a result. Never acceptable.",
+    "output": "Output returned. Its confidence is recorded but not judged against a threshold (accepted-limitation cases only)."
   },
   "cases": [
     {
@@ -52,7 +53,8 @@
       "acceptable": ["graceful_failure", "low_confidence"],
       "threshold": 0.5,
       "threshold_source": "Same R1 audit marker as no_action_items.",
-      "note": "A real task in the wrong language. The pipeline is English-only by decision, so a correctly translated English task with confidence >= threshold still counts as silent."
+      "note": "A real task in the wrong language. The pipeline is English-only by decision, so a correctly translated English task with confidence >= threshold still counts as silent.",
+      "accepted_limitation": "English-only by team-lead decision: the observed behaviour is documented, not reported as a finding to fix (mentor review on PR #866)."
     },
     {
       "id": "non_english_audio",
@@ -65,11 +67,10 @@
         "language": "he",
         "content": "The same sentence as non_english_text, recorded by R1."
       },
-      "acceptable": ["graceful_failure", "low_confidence"],
-      "threshold": 0.368,
-      "threshold_field": "mean_confidence",
-      "threshold_source": "R4's own LOW_CONFIDENCE_THRESHOLD = exp(-1.0) (asr.py, #478), 0-1 scale.",
-      "note": "ASR is pinned to language=\"en\" with base.en, so Hebrew speech is forced through an English decoder."
+      "acceptable": ["graceful_failure", "output"],
+      "note": "ASR is pinned to language=\"en\" with base.en, so Hebrew speech is forced through an English decoder.",
+      "accepted_limitation": "English-only by team-lead decision: only a crash fails this case; the values are printed for the report.",
+      "deviation": "Changed after the first run, by mentor review on PR #866: originally acceptable = [graceful_failure, low_confidence] below R4's 0.368. The threshold check was dropped because non-English input is out of scope by decision, not because of the result (which was below it: 0.309)."
     },
     {
       "id": "crosstalk_audio",
