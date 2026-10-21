@@ -52,13 +52,19 @@ class TaskStateHistoryWritingTest {
         TaskDependencyRepository dependencyRepository = PgRepos.dependencies(List.of());
         GraphLock lock = PgRepos.graphLock();
 
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
+                        taskRepository,
+                        dependencyRepository,
+                        taskReadinessRepository,
+                        new SchedulingUpdateService(event -> { }),
+                        new SchedulingPublishListener(
+                        taskRepository,
+                        new SchedulingUpdateService(event -> { })));
+
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(
                 taskRepository,
-                dependencyRepository,
-                new PriorityScoreService(),
-                new SchedulingPublishListener(
-                        taskRepository,
-                        new SchedulingUpdateService(event -> { })),
+                priorityScoreService,
                 taskReadinessRepository);
 
         TaskStateHistoryRecorder recorder =
@@ -69,10 +75,12 @@ class TaskStateHistoryWritingTest {
                 dependencyRepository,
                 lock,
                 counterUpdater,
+                priorityScoreService,
                 recorder,
                 taskReadinessRepository);
 
         edgeService = new DependencyEdgeService(
+                taskRepository,
                 dependencyRepository,
                 lock,
                 counterUpdater,

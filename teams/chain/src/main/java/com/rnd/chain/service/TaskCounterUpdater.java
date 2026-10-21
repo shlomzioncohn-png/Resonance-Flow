@@ -1,13 +1,8 @@
 package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Task;
-import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskReadinessSnapshot;
-import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.events.SchedulingPublishListener;
-import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
-import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.repository.TaskRepository;
 
@@ -15,16 +10,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.UnaryOperator;
@@ -34,76 +22,9 @@ import java.util.function.UnaryOperator;
 @Component
 public class TaskCounterUpdater {
 
-    /**
-     * TransactionSynchronizationManager resource key for the per-transaction
-     * set of taskIds queued to publish at commit.
-     */
-    private static final String PENDING_PUBLISH_RESOURCE_KEY =
-            TaskCounterUpdater.class.getName()
-                    + ".pendingSchedulingPublishes";
-
     private final TaskRepository taskRepository;
-    private final TaskDependencyRepository taskDependencyRepository;
     private final PriorityScoreService priorityScoreService;
-    private final SchedulingPublishListener schedulingPublishListener;
     private final TaskReadinessRepository taskReadinessRepository;
-
-    /**
-     * Creates a PENDING placeholder with epoch updatedAt for each missing task.
-     * Existing tasks are never modified.
-     */
-    @Transactional
-    public void insertPlaceholdersIfAbsent(
-            UUID taskId,
-            UUID dependsOnTaskId,
-            UUID tenantId) {
-
-        insertPlaceholderIfAbsent(
-                taskId,
-                tenantId);
-
-        insertPlaceholderIfAbsent(
-                dependsOnTaskId,
-                tenantId);
-    }
-
-    private void insertPlaceholderIfAbsent(
-            UUID taskId,
-            UUID tenantId) {
-
-        taskRepository.insertIfAbsent(
-                Task.builder()
-                        .id(taskId)
-                        .tenantId(tenantId)
-                        .status(TaskStatus.PENDING)
-                        .isReady(true)
-                        .createdAt(LocalDateTime.now())
-                        .updatedAt(
-                                LocalDateTime.ofEpochSecond(
-                                        0,
-                                        0,
-                                        ZoneOffset.UTC))
-                        .build());
-    }
-
-    public Task requireTask(UUID taskId) {
-
-        return taskRepository.findById(taskId)
-                .orElseThrow(
-                        () -> new TaskNotFoundException(taskId));
-    }
-
-    public static <T> T requireUpdated(
-            Optional<T> updated,
-            UUID taskId) {
-
-        return updated.orElseThrow(
-                () -> new TaskNotFoundException(taskId));
-    }
-
-    public static Task.Builder copyOf(Task task) {
-        return task.toBuilder();
-    }
 
     /**
      * Stored counters are still maintained during this migration stage.
@@ -127,7 +48,7 @@ public class TaskCounterUpdater {
             return task;
         }
 
-        return copyOf(task)
+        return task.toBuilder()
                 .blockingCount(blockingCount)
                 .openConstraintCount(openConstraintCount)
                 .isReady(isReady)
@@ -179,304 +100,6 @@ public class TaskCounterUpdater {
     }
 
     /**
-     * Recomputes priorityScore using task_readiness as the authoritative
-     * source for openConstraintCount.
-     *
-     * Publishing is based on the View readiness transition, never on
-     * Task.isReady().
-     */
-    @Transactional
-    public Task recomputePriorityScoreAndPublish(
-            UUID taskId,
-            Task oldTask,
-            Task current,
-            TaskReadinessSnapshot beforeReadiness,
-            TaskReadinessSnapshot afterReadiness) {
-
-        Objects.requireNonNull(
-                beforeReadiness,
-                "beforeReadiness must not be null");
-
-        Objects.requireNonNull(
-                afterReadiness,
-                "afterReadiness must not be null");
-
-        if (current.getDeletedAt() != null) {
-            return current;
-        }
-
-        Double recomputed =
-                priorityScoreService.compute(
-                        current.getScore(),
-                        current.getConfidence(),
-                        blockingConfidenceSum(taskId),
-                        afterReadiness.openConstraintCount(),
-                        dependentConfidenceSum(taskId));
-
-        Task finalTask =
-                current;
-
-        if (!Objects.equals(
-                recomputed,
-                current.getPriorityScore())) {
-
-            finalTask =
-                    requireUpdated(
-                            taskRepository.update(
-                                    taskId,
-                                    task -> copyOf(task)
-                                            .priorityScore(recomputed)
-                                            .build()),
-                            taskId);
-        }
-
-        if (oldTask != null) {
-
-            boolean availabilityChanged =
-                    beforeReadiness.isReady()
-                            != afterReadiness.isReady();
-
-            boolean priorityChanged =
-                    !Objects.equals(
-                            oldTask.getPriorityScore(),
-                            finalTask.getPriorityScore());
-
-            if (availabilityChanged
-                    || priorityChanged) {
-
-                requestPublishAfterCommit(taskId);
-            }
-        }
-
-        return finalTask;
-    }
-
-    /**
-     * Compatibility overload.
-     *
-     * It is safe only for mutations that do not themselves change the
-     * task_readiness View. Readiness and openConstraintCount still come from
-     * the View rather than the stored Task columns.
-     */
-    @Transactional
-    public Task recomputePriorityScoreAndPublish(
-            UUID taskId,
-            Task oldTask,
-            Task current) {
-
-        TaskReadinessSnapshot readiness =
-                requireReadinessSnapshot(taskId);
-
-        return recomputePriorityScoreAndPublish(
-                taskId,
-                oldTask,
-                current,
-                readiness,
-                readiness);
-    }
-
-    /**
-     * Sum of dependency confidence for direct blockers that are not DONE.
-     */
-    private double blockingConfidenceSum(
-            UUID taskId) {
-
-        double sum =
-                0.0;
-
-        for (TaskDependency edge :
-                taskDependencyRepository.findByTaskId(taskId)) {
-
-            Task blocker =
-                    taskRepository.findById(
-                                    edge.dependsOnTaskId())
-                            .orElse(null);
-
-            if (blocker == null
-                    || blocker.getStatus() != TaskStatus.DONE) {
-
-                sum +=
-                        edge.confidence() != null
-                                ? edge.confidence()
-                                : 1.0;
-            }
-        }
-
-        return sum;
-    }
-
-    /**
-     * Sum of confidence for all tasks depending on this task.
-     */
-    private double dependentConfidenceSum(
-            UUID taskId) {
-
-        double sum =
-                0.0;
-
-        for (TaskDependency edge :
-                taskDependencyRepository
-                        .findByDependsOnTaskId(taskId)) {
-
-            sum +=
-                    edge.confidence() != null
-                            ? edge.confidence()
-                            : 1.0;
-        }
-
-        return sum;
-    }
-
-    /**
-     * Queues one scheduling update per taskId per transaction.
-     *
-     * Publishing occurs only after a successful commit.
-     */
-    private void requestPublishAfterCommit(
-            UUID taskId) {
-
-        if (!TransactionSynchronizationManager
-                .isSynchronizationActive()) {
-
-            log.error(
-                    "requestPublishAfterCommit({}) called with no active "
-                            + "transaction - publish dropped",
-                    taskId);
-
-            return;
-        }
-
-        @SuppressWarnings("unchecked")
-        Set<UUID> pending =
-                (Set<UUID>)
-                        TransactionSynchronizationManager
-                                .getResource(
-                                        PENDING_PUBLISH_RESOURCE_KEY);
-
-        if (pending == null) {
-
-            pending =
-                    new LinkedHashSet<>();
-
-            TransactionSynchronizationManager
-                    .bindResource(
-                            PENDING_PUBLISH_RESOURCE_KEY,
-                            pending);
-        }
-
-        if (!pending.add(taskId)) {
-            return;
-        }
-
-        if (pending.size() == 1) {
-
-            TransactionSynchronizationManager
-                    .registerSynchronization(
-                            new TransactionSynchronization() {
-
-                                @Override
-                                public void afterCommit() {
-
-                                    @SuppressWarnings("unchecked")
-                                    Set<UUID> idsToPublish =
-                                            (Set<UUID>)
-                                                    TransactionSynchronizationManager
-                                                            .getResource(
-                                                                    PENDING_PUBLISH_RESOURCE_KEY);
-
-                                    for (UUID id :
-                                            idsToPublish) {
-
-                                        schedulingPublishListener
-                                                .onCommit(id);
-                                    }
-                                }
-
-                                @Override
-                                public void afterCompletion(
-                                        int status) {
-
-                                    TransactionSynchronizationManager
-                                            .unbindResourceIfPossible(
-                                                    PENDING_PUBLISH_RESOURCE_KEY);
-                                }
-                            });
-        }
-    }
-
-    /**
-     * Applies a Mind score/confidence update.
-     *
-     * Priority recomputation uses openConstraintCount from task_readiness,
-     * not from the stored Task columns.
-     */
-    @Transactional
-    public void onScoreProposed(
-            UUID taskId,
-            Double mindScore,
-            Double confidence) {
-
-        Objects.requireNonNull(
-                taskId,
-                "taskId must not be null");
-
-        requireInUnitRangeIfPresent(
-                mindScore,
-                "mindScore");
-
-        requireInUnitRangeIfPresent(
-                confidence,
-                "confidence");
-
-        /*
-         * Score/confidence changes do not themselves modify readiness,
-         * therefore one View snapshot represents both before and after.
-         */
-        TaskReadinessSnapshot readiness =
-                requireReadinessSnapshot(taskId);
-
-        AtomicReference<Task> previous =
-                new AtomicReference<>();
-
-        Task updated =
-                requireUpdated(
-                        taskRepository.update(
-                                taskId,
-                                task -> {
-
-                                    previous.set(task);
-
-                                    return copyOf(task)
-                                            .score(mindScore)
-                                            .confidence(confidence)
-                                            .build();
-                                }),
-                        taskId);
-
-        recomputePriorityScoreAndPublish(
-                taskId,
-                previous.get(),
-                updated,
-                readiness,
-                readiness);
-    }
-
-    private static void requireInUnitRangeIfPresent(
-            Double value,
-            String name) {
-
-        if (value != null
-                && (value < 0.0
-                || value > 1.0)) {
-
-            throw new InvalidRequestException(
-                    name
-                            + " must be between 0 and 1, got "
-                            + value);
-        }
-    }
-
-    /**
      * Updates the stored compatibility counters while using authoritative
      * before/after View snapshots for all readiness and publish decisions.
      */
@@ -499,8 +122,7 @@ public class TaskCounterUpdater {
                 new AtomicReference<>();
 
         Task updated =
-                requireUpdated(
-                        taskRepository.update(
+                taskRepository.update(
                                 taskId,
                                 task -> {
 
@@ -508,8 +130,9 @@ public class TaskCounterUpdater {
 
                                     return countersMutator.apply(
                                             task);
-                                }),
-                        taskId);
+                                })
+                        .orElseThrow(
+                                () -> new TaskNotFoundException(taskId));
 
         Task oldTask =
                 previous.get();
@@ -527,7 +150,7 @@ public class TaskCounterUpdater {
                     updated.isReady());
         }
 
-        return recomputePriorityScoreAndPublish(
+        return priorityScoreService.recomputePriorityScoreAndPublish(
                 taskId,
                 oldTask,
                 updated,

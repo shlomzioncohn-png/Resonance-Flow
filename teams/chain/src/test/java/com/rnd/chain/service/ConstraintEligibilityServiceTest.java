@@ -72,11 +72,14 @@ class ConstraintEligibilityServiceTest {
         TaskCounterUpdater counterUpdater =
                 new TaskCounterUpdater(
                         taskRepository,
-                        dependencyRepository,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(
+                        new PriorityScoreService(
                                 taskRepository,
-                                schedulingUpdateService),
+                                dependencyRepository,
+                                taskReadinessRepository,
+                                schedulingUpdateService,
+                                new SchedulingPublishListener(
+                                taskRepository,
+                                schedulingUpdateService)),
                         taskReadinessRepository);
 
         constraintRepository = PgRepos.constraints();
@@ -84,6 +87,7 @@ class ConstraintEligibilityServiceTest {
 
         service =
                 new ConstraintEligibilityService(
+                        taskRepository,
                         constraintRepository,
                         historyRepository,
                         counterUpdater,
@@ -521,15 +525,19 @@ class ConstraintEligibilityServiceTest {
         TaskCounterUpdater counterUpdater =
                 new TaskCounterUpdater(
                         taskRepo,
-                        dependencyRepo,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(
+                        new PriorityScoreService(
                                 taskRepo,
-                                scheduling),
+                                dependencyRepo,
+                                taskReadinessRepository,
+                                scheduling,
+                                new SchedulingPublishListener(
+                                taskRepo,
+                                scheduling)),
                         taskReadinessRepository);
 
         ConstraintEligibilityService constraintService =
                 new ConstraintEligibilityService(
+                        taskRepo,
                         constraintRepo,
                         mock(ConstraintHistoryRepository.class),
                         counterUpdater,

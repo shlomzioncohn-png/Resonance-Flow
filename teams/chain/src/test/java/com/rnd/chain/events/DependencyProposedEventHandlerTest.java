@@ -92,10 +92,18 @@ class DependencyProposedEventHandlerTest {
         SchedulingUpdateService schedulingUpdateService = mock(SchedulingUpdateService.class);
         DependencyEdgeService edgeService =
                 new DependencyEdgeService(
+                        taskRepo,
                         dependencyRepo,
                         PgRepos.graphLock(),
-                        new TaskCounterUpdater(taskRepo, dependencyRepo, new PriorityScoreService(),
-                                new SchedulingPublishListener(taskRepo, schedulingUpdateService), taskReadinessRepository),
+                        new TaskCounterUpdater(
+                                taskRepo,
+                                new PriorityScoreService(
+                                        taskRepo,
+                                        dependencyRepo,
+                                        taskReadinessRepository,
+                                        schedulingUpdateService,
+                                        new SchedulingPublishListener(taskRepo, schedulingUpdateService)),
+                                taskReadinessRepository),
                         TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
 
         DependencyHistoryRepository historyRepo =

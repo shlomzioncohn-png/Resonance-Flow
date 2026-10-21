@@ -81,9 +81,16 @@ class TaskUpdatedEventHandlerTest {
         TaskRepository taskRepo = PgRepos.tasks(tasks);
         TaskDependencyRepository dependencyRepo = PgRepos.dependencies(edges);
         SchedulingUpdateService scheduling = mock(SchedulingUpdateService.class);
+        PriorityScoreService priorityScoreService = new PriorityScoreService(
+                taskRepo,
+                dependencyRepo,
+                taskReadinessRepository,
+                scheduling,
+                new SchedulingPublishListener(taskRepo, scheduling));
         TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
-                PgRepos.graphLock(), new TaskCounterUpdater(taskRepo, dependencyRepo,
-                        new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling), taskReadinessRepository),
+                PgRepos.graphLock(),
+                new TaskCounterUpdater(taskRepo, priorityScoreService, taskReadinessRepository),
+                priorityScoreService,
                 TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(PgRepos.processedEvents());
         return new Fixture(taskRepo, new TaskUpdatedEventHandler(eligibilityService, template), eligibilityService, dependencyRepo);

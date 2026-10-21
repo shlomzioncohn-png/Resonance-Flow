@@ -73,15 +73,19 @@ class DependencyEdgeServiceTest {
         TaskCounterUpdater counterUpdater =
                 new TaskCounterUpdater(
                         taskRepository,
-                        dependencyRepository,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(
+                        new PriorityScoreService(
                                 taskRepository,
-                                schedulingUpdateService),
+                                dependencyRepository,
+                                taskReadinessRepository,
+                                schedulingUpdateService,
+                                new SchedulingPublishListener(
+                                taskRepository,
+                                schedulingUpdateService)),
                         taskReadinessRepository);
 
         service =
                 new DependencyEdgeService(
+                        taskRepository,
                         dependencyRepository,
                         lock,
                         counterUpdater,
@@ -1455,15 +1459,19 @@ class DependencyEdgeServiceTest {
         TaskCounterUpdater counterUpdater =
                 new TaskCounterUpdater(
                         taskRepo,
-                        dependencyRepo,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(
+                        new PriorityScoreService(
                                 taskRepo,
-                                scheduling),
+                                dependencyRepo,
+                                taskReadinessRepository,
+                                scheduling,
+                                new SchedulingPublishListener(
+                                taskRepo,
+                                scheduling)),
                         taskReadinessRepository);
 
         DependencyEdgeService edgeService =
                 new DependencyEdgeService(
+                        taskRepo,
                         dependencyRepo,
                         lock,
                         counterUpdater,

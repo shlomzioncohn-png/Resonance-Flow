@@ -104,14 +104,20 @@ class TaskCompletedEventHandlerTest {
         SchedulingUpdateService scheduling =
                 mock(SchedulingUpdateService.class);
 
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
+                                taskRepo,
+                                dependencyRepo,
+                                taskReadinessRepository,
+                                scheduling,
+                                new SchedulingPublishListener(
+                                taskRepo,
+                                scheduling));
+
         TaskCounterUpdater counterUpdater =
                 new TaskCounterUpdater(
                         taskRepo,
-                        dependencyRepo,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(
-                                taskRepo,
-                                scheduling),
+                        priorityScoreService,
                         taskReadinessRepository);
 
         TaskEligibilityService service =
@@ -120,6 +126,7 @@ class TaskCompletedEventHandlerTest {
                         dependencyRepo,
                         PgRepos.graphLock(),
                         counterUpdater,
+                        priorityScoreService,
                         TaskStateHistoryFixtures.newRecorder(),
                         taskReadinessRepository);
 

@@ -1,14 +1,32 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.dto.Task;
+import com.rnd.chain.dto.TaskDependency;
+import com.rnd.chain.dto.TaskReadinessSnapshot;
+import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.events.SchedulingPublishListener;
+import com.rnd.chain.exception.InvalidRequestException;
+import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskReadinessRepository;
+import com.rnd.chain.repository.TaskRepository;
+
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Computes {@code Task.priorityScore} (issue #445): Mind's per-task importance score, adjusted by
  * Chain's own feasibility state, in the 1..10 range Inbox's {@code priority_score} column
- * requires. Pure function of its inputs - no repository access, no side effects - so
- * {@code TaskEligibilityService} is the only place that gathers those inputs (blocking/dependent
- * confidence sums from the dependency graph, openConstraintCount from the task itself) and feeds
- * them in.
+ * requires. {@link #compute} is a pure function of its inputs - no repository access, no side
+ * effects. {@link #recomputePriorityScoreAndPublish} is the only place that gathers those inputs
+ * (blocking/dependent confidence sums from the dependency graph, openConstraintCount from
+ * task_readiness), persists the result and queues the scheduling-update publish.
  *
  * <h2>Formula</h2>
  * {@code score = null} if {@code mindScore} is null (not yet scored by Mind - see
@@ -39,12 +57,19 @@ import org.springframework.stereotype.Service;
  * ranking feels wrong in practice.
  */
 @Service
+@RequiredArgsConstructor
 public class PriorityScoreService {
 
     private static final double WEIGHT_BLOCKING = 0.4;
     private static final double WEIGHT_CONSTRAINTS = 0.3;
     private static final double WEIGHT_DEPENDENTS = 0.2;
     private static final double WEIGHT_MIND = 0.1;
+
+    private final TaskRepository taskRepository;
+    private final TaskDependencyRepository taskDependencyRepository;
+    private final TaskReadinessRepository taskReadinessRepository;
+    private final SchedulingUpdateService schedulingUpdateService;
+    private final SchedulingPublishListener schedulingPublishListener;
 
     /** Confidence to assume for {@code confidence == null} - an edge/task with no Mind-supplied
      * confidence is treated as fully trusted, not as zero-weight. */
@@ -110,5 +135,248 @@ public class PriorityScoreService {
         if (value < 0.0 || value > 1.0) {
             throw new IllegalArgumentException(name + " must be between 0 and 1, got " + value);
         }
+    }
+
+    /**
+     * Recomputes priorityScore using task_readiness as the authoritative
+     * source for openConstraintCount.
+     *
+     * Publishing is based on the View readiness transition, never on
+     * Task.isReady().
+     */
+    @Transactional
+    public Task recomputePriorityScoreAndPublish(
+            UUID taskId,
+            Task oldTask,
+            Task current,
+            TaskReadinessSnapshot beforeReadiness,
+            TaskReadinessSnapshot afterReadiness) {
+
+        Objects.requireNonNull(
+                beforeReadiness,
+                "beforeReadiness must not be null");
+
+        Objects.requireNonNull(
+                afterReadiness,
+                "afterReadiness must not be null");
+
+        if (current.getDeletedAt() != null) {
+            return current;
+        }
+
+        Double recomputed =
+                compute(
+                        current.getScore(),
+                        current.getConfidence(),
+                        blockingConfidenceSum(taskId),
+                        afterReadiness.openConstraintCount(),
+                        dependentConfidenceSum(taskId));
+
+        Task finalTask =
+                current;
+
+        if (!Objects.equals(
+                recomputed,
+                current.getPriorityScore())) {
+
+            finalTask =
+                    taskRepository.update(
+                                    taskId,
+                                    task -> task.toBuilder()
+                                            .priorityScore(recomputed)
+                                            .build())
+                            .orElseThrow(
+                                    () -> new TaskNotFoundException(taskId));
+        }
+
+        if (oldTask != null) {
+
+            boolean availabilityChanged =
+                    beforeReadiness.isReady()
+                            != afterReadiness.isReady();
+
+            boolean priorityChanged =
+                    !Objects.equals(
+                            oldTask.getPriorityScore(),
+                            finalTask.getPriorityScore());
+
+            if (availabilityChanged
+                    || priorityChanged) {
+
+                schedulingUpdateService
+                        .requestPublishAfterCommit(
+                                taskId,
+                                schedulingPublishListener);
+            }
+        }
+
+        return finalTask;
+    }
+
+    /**
+     * Compatibility overload.
+     *
+     * It is safe only for mutations that do not themselves change the
+     * task_readiness View. Readiness and openConstraintCount still come from
+     * the View rather than the stored Task columns.
+     */
+    @Transactional
+    public Task recomputePriorityScoreAndPublish(
+            UUID taskId,
+            Task oldTask,
+            Task current) {
+
+        TaskReadinessSnapshot readiness =
+                requireReadinessSnapshot(taskId);
+
+        return recomputePriorityScoreAndPublish(
+                taskId,
+                oldTask,
+                current,
+                readiness,
+                readiness);
+    }
+
+    /**
+     * Applies a Mind score/confidence update.
+     *
+     * Priority recomputation uses openConstraintCount from task_readiness,
+     * not from the stored Task columns.
+     */
+    @Transactional
+    public void onScoreProposed(
+            UUID taskId,
+            Double mindScore,
+            Double confidence) {
+
+        Objects.requireNonNull(
+                taskId,
+                "taskId must not be null");
+
+        requireInUnitRangeIfPresent(
+                mindScore,
+                "mindScore");
+
+        requireInUnitRangeIfPresent(
+                confidence,
+                "confidence");
+
+        /*
+         * Score/confidence changes do not themselves modify readiness,
+         * therefore one View snapshot represents both before and after.
+         */
+        TaskReadinessSnapshot readiness =
+                requireReadinessSnapshot(taskId);
+
+        AtomicReference<Task> previous =
+                new AtomicReference<>();
+
+        Task updated =
+                taskRepository.update(
+                                taskId,
+                                task -> {
+
+                                    previous.set(task);
+
+                                    return task.toBuilder()
+                                            .score(mindScore)
+                                            .confidence(confidence)
+                                            .build();
+                                })
+                        .orElseThrow(
+                                () -> new TaskNotFoundException(taskId));
+
+        recomputePriorityScoreAndPublish(
+                taskId,
+                previous.get(),
+                updated,
+                readiness,
+                readiness);
+    }
+
+    /**
+     * Sum of dependency confidence for direct blockers that are not DONE.
+     */
+    private double blockingConfidenceSum(
+            UUID taskId) {
+
+        double sum =
+                0.0;
+
+        for (TaskDependency edge :
+                taskDependencyRepository.findByTaskId(taskId)) {
+
+            Task blocker =
+                    taskRepository.findById(
+                                    edge.dependsOnTaskId())
+                            .orElse(null);
+
+            if (blocker == null
+                    || blocker.getStatus() != TaskStatus.DONE) {
+
+                sum +=
+                        edge.confidence() != null
+                                ? edge.confidence()
+                                : 1.0;
+            }
+        }
+
+        return sum;
+    }
+
+    /**
+     * Sum of confidence for all tasks depending on this task.
+     */
+    private double dependentConfidenceSum(
+            UUID taskId) {
+
+        double sum =
+                0.0;
+
+        for (TaskDependency edge :
+                taskDependencyRepository
+                        .findByDependsOnTaskId(taskId)) {
+
+            sum +=
+                    edge.confidence() != null
+                            ? edge.confidence()
+                            : 1.0;
+        }
+
+        return sum;
+    }
+
+    private static void requireInUnitRangeIfPresent(
+            Double value,
+            String name) {
+
+        if (value != null
+                && (value < 0.0
+                || value > 1.0)) {
+
+            throw new InvalidRequestException(
+                    name
+                            + " must be between 0 and 1, got "
+                            + value);
+        }
+    }
+
+    private TaskReadinessSnapshot requireReadinessSnapshot(
+            UUID taskId) {
+
+        TaskReadinessSnapshot snapshot =
+                taskReadinessRepository
+                        .findByIds(
+                                List.of(taskId))
+                        .get(taskId);
+
+        if (snapshot == null) {
+
+            throw new IllegalStateException(
+                    "No task_readiness row found for task "
+                            + taskId);
+        }
+
+        return snapshot;
     }
 }

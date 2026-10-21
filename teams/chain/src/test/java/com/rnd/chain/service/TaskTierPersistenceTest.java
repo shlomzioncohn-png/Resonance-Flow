@@ -46,12 +46,20 @@ class TaskTierPersistenceTest {
         history = PgRepos.stateHistory();
         TaskDependencyRepository dependencyRepository = PgRepos.dependencies(List.of());
         GraphLock lock = PgRepos.graphLock();
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
-                new PriorityScoreService(),
-                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> { })),
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
+                        taskRepository,
+                        dependencyRepository,
+                        taskReadinessRepository,
+                        new SchedulingUpdateService(event -> { }),
+                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> { })));
+
+        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(
+                taskRepository,
+                priorityScoreService,
                 taskReadinessRepository);
         TaskStateHistoryRecorder recorder = new TaskStateHistoryRecorder(history, Clock.systemUTC());
-        service = new TaskEligibilityService(taskRepository, dependencyRepository, lock, counterUpdater, recorder,
+        service = new TaskEligibilityService(taskRepository, dependencyRepository, lock, counterUpdater, priorityScoreService, recorder,
                 taskReadinessRepository);
     }
 

@@ -8,15 +8,19 @@ import com.rnd.chain.exception.CrossTenantDependencyException;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
+import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskReadinessRepository;
+import com.rnd.chain.repository.TaskRepository;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -36,6 +40,7 @@ public class DependencyEdgeService {
     private static final Logger log =
             LoggerFactory.getLogger(DependencyEdgeService.class);
 
+    private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
     private final GraphLock graphLock;
     private final TaskCounterUpdater taskCounterUpdater;
@@ -43,17 +48,57 @@ public class DependencyEdgeService {
     private final TaskReadinessRepository taskReadinessRepository;
 
     public DependencyEdgeService(
+            TaskRepository taskRepository,
             TaskDependencyRepository taskDependencyRepository,
             GraphLock graphLock,
             TaskCounterUpdater taskCounterUpdater,
             TaskStateHistoryRecorder historyRecorder,
             TaskReadinessRepository taskReadinessRepository) {
 
+        this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
         this.graphLock = graphLock;
         this.taskCounterUpdater = taskCounterUpdater;
         this.historyRecorder = historyRecorder;
         this.taskReadinessRepository = taskReadinessRepository;
+    }
+
+    /**
+     * Creates a PENDING placeholder with epoch updatedAt for each missing task.
+     * Existing tasks are never modified.
+     */
+    @Transactional
+    public void insertPlaceholdersIfAbsent(
+            UUID taskId,
+            UUID dependsOnTaskId,
+            UUID tenantId) {
+
+        insertPlaceholderIfAbsent(
+                taskId,
+                tenantId);
+
+        insertPlaceholderIfAbsent(
+                dependsOnTaskId,
+                tenantId);
+    }
+
+    private void insertPlaceholderIfAbsent(
+            UUID taskId,
+            UUID tenantId) {
+
+        taskRepository.insertIfAbsent(
+                Task.builder()
+                        .id(taskId)
+                        .tenantId(tenantId)
+                        .status(TaskStatus.PENDING)
+                        .isReady(true)
+                        .createdAt(LocalDateTime.now())
+                        .updatedAt(
+                                LocalDateTime.ofEpochSecond(
+                                        0,
+                                        0,
+                                        ZoneOffset.UTC))
+                        .build());
     }
 
     /**
@@ -160,7 +205,7 @@ public class DependencyEdgeService {
 
 
             if (tenantId != null) {
-                taskCounterUpdater.insertPlaceholdersIfAbsent(taskId, dependsOnTaskId, tenantId);
+                insertPlaceholdersIfAbsent(taskId, dependsOnTaskId, tenantId);
 
             }
 
@@ -191,8 +236,12 @@ public class DependencyEdgeService {
             }
 
 
-            Task task = taskCounterUpdater.requireTask(taskId);
-            Task dependencyTask = taskCounterUpdater.requireTask(dependsOnTaskId);
+            Task task = taskRepository.findById(taskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(taskId));
+            Task dependencyTask = taskRepository.findById(dependsOnTaskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(dependsOnTaskId));
             if (tenantId != null) {
                 requireTenant(task, tenantId);
                 requireTenant(dependencyTask, tenantId);
@@ -307,10 +356,14 @@ public class DependencyEdgeService {
         }
 
         Task task =
-                taskCounterUpdater.requireTask(taskId);
+                taskRepository.findById(taskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(taskId));
 
         Task dependsOnTask =
-                taskCounterUpdater.requireTask(dependsOnTaskId);
+                taskRepository.findById(dependsOnTaskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(dependsOnTaskId));
 
         requireSameTenant(
                 task,
@@ -546,12 +599,14 @@ public class DependencyEdgeService {
 
         graphLock.runExclusive(() -> {
 
-            taskCounterUpdater.requireTask(
-                    taskId);
+            taskRepository.findById(taskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(taskId));
 
             Task dependencyTask =
-                    taskCounterUpdater.requireTask(
-                            dependsOnTaskId);
+                    taskRepository.findById(dependsOnTaskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(dependsOnTaskId));
 
             /*
              * Capture BEFORE while the edge still exists.

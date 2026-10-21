@@ -14,7 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Issue #445 Phase 3 guardrail: every public mutator on the classes below MUST be
- * {@code @Transactional}, because {@link TaskCounterUpdater}'s {@code requestPublishAfterCommit}
+ * {@code @Transactional}, because {@link SchedulingUpdateService}'s {@code requestPublishAfterCommit}
  * silently drops a scheduling-update publish when there is no active transaction
  * ({@code fallbackExecution=false}, a locked decision - see that method's Javadoc for why "drop
  * silently" was chosen over "publish anyway").
@@ -27,10 +27,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * method" from that silent runtime failure mode into an immediate, obvious test failure instead.
  *
  * <p>Covers every class issue #649 split {@code TaskEligibilityService} into that can reach
- * {@code TaskCounterUpdater.updateCounters}/{@code recomputePriorityScoreAndPublish} (directly or
- * through another one of these): {@link TaskEligibilityService}, {@link DependencyEdgeService},
- * {@link ConstraintEligibilityService}, and {@link TaskCounterUpdater} itself (its own
- * {@code onScoreProposed}). {@link DependencyGraphService} is deliberately excluded - it's pure
+ * {@code TaskCounterUpdater.updateCounters}/{@code PriorityScoreService.recomputePriorityScoreAndPublish}
+ * (directly or through another one of these): {@link TaskEligibilityService},
+ * {@link DependencyEdgeService}, {@link ConstraintEligibilityService}, {@link TaskCounterUpdater},
+ * and {@link PriorityScoreService} itself (its own {@code onScoreProposed}). {@link DependencyGraphService} is deliberately excluded - it's pure
  * reads (getBlockers/getAncestors/getDescendants), nothing to publish.
  */
 class SchedulingPublishTransactionalCoverageTest {
@@ -40,13 +40,15 @@ class SchedulingPublishTransactionalCoverageTest {
      * here, not given a pointless {@code @Transactional}. */
     private static final Map<Class<?>, Set<String>> EXEMPT_READ_ONLY_METHODS = Map.of(
             TaskEligibilityService.class, Set.of("getTaskEligibility"),
-            TaskCounterUpdater.class, Set.of("requireTask", "requireUpdated", "copyOf", "withCounters"));
+            TaskCounterUpdater.class, Set.of("withCounters"),
+            PriorityScoreService.class, Set.of("compute"));
 
     private static final List<Class<?>> COVERED_CLASSES = List.of(
             TaskEligibilityService.class,
             DependencyEdgeService.class,
             ConstraintEligibilityService.class,
-            TaskCounterUpdater.class);
+            TaskCounterUpdater.class,
+            PriorityScoreService.class);
 
     @Test
     void everyPublicMutatorMethod_isTransactional() {
@@ -63,7 +65,7 @@ class SchedulingPublishTransactionalCoverageTest {
         assertThat(notTransactional)
                 .withFailMessage(() -> "These public methods are missing @Transactional, so issue "
                         + "#445's scheduling-update publish will be silently dropped for them "
-                        + "(fallbackExecution=false - see TaskCounterUpdater#requestPublishAfterCommit's "
+                        + "(fallbackExecution=false - see SchedulingUpdateService#requestPublishAfterCommit's "
                         + "Javadoc): " + String.join(", ", notTransactional)
                         + ". Add @Transactional, or add the method's name to "
                         + "EXEMPT_READ_ONLY_METHODS above if it's a genuine read with nothing to publish.")

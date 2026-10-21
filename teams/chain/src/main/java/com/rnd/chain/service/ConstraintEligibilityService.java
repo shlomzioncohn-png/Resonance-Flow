@@ -8,6 +8,7 @@ import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.ConstraintHistoryRepository;
 import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.TaskReadinessRepository;
+import com.rnd.chain.repository.TaskRepository;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +28,7 @@ public class ConstraintEligibilityService {
     private static final Logger log =
             LoggerFactory.getLogger(ConstraintEligibilityService.class);
 
+    private final TaskRepository taskRepository;
     private final ConstraintRepository constraintRepository;
     private final ConstraintHistoryRepository constraintHistoryRepository;
     private final TaskCounterUpdater taskCounterUpdater;
@@ -34,12 +36,14 @@ public class ConstraintEligibilityService {
     private final TaskStateHistoryRecorder historyRecorder;
 
     public ConstraintEligibilityService(
+            TaskRepository taskRepository,
             ConstraintRepository constraintRepository,
             ConstraintHistoryRepository constraintHistoryRepository,
             TaskCounterUpdater taskCounterUpdater,
             TaskReadinessRepository taskReadinessRepository,
             TaskStateHistoryRecorder historyRecorder) {
 
+        this.taskRepository = taskRepository;
         this.constraintRepository = constraintRepository;
         this.constraintHistoryRepository = constraintHistoryRepository;
         this.taskCounterUpdater = taskCounterUpdater;
@@ -76,7 +80,9 @@ public class ConstraintEligibilityService {
         /*
          * Validate that the task exists and isn't soft-deleted.
          */
-        taskCounterUpdater.requireTask(taskId);
+        taskRepository.findById(taskId)
+                .orElseThrow(
+                        () -> new TaskNotFoundException(taskId));
 
         /*
          * Must be read BEFORE writing the constraint,
@@ -161,7 +167,9 @@ public class ConstraintEligibilityService {
          * Validate the task and capture the authoritative state
          * before changing the constraint.
          */
-        taskCounterUpdater.requireTask(taskId);
+        taskRepository.findById(taskId)
+                .orElseThrow(
+                        () -> new TaskNotFoundException(taskId));
 
         TaskReadinessSnapshot beforeReadiness =
                 requireReadinessSnapshot(taskId);

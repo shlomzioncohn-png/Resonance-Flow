@@ -96,10 +96,17 @@ class TaskDependencyServiceTest {
         historyRepository = PgRepos.history();
         transactionRunner = PgRepos.transactionRunner();
         dependencyEdgeService = new DependencyEdgeService(
+                taskRepository,
                 taskDependencyRepository, PgRepos.graphLock(),
-                new TaskCounterUpdater(taskRepository, taskDependencyRepository,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {})), taskReadinessRepository),
+                new TaskCounterUpdater(
+                        taskRepository,
+                        new PriorityScoreService(
+                                taskRepository,
+                                taskDependencyRepository,
+                                taskReadinessRepository,
+                                new SchedulingUpdateService(event -> {}),
+                                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))),
+                        taskReadinessRepository),
                 TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
 
         service = new TaskDependencyService(taskRepository, taskDependencyRepository,
@@ -113,10 +120,17 @@ class TaskDependencyServiceTest {
         TaskDependencyRepository taskDependencyRepository = PgRepos.dependencies(List.of());
         TaskRepository dummyTaskRepository = PgRepos.tasks(List.of());
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
+                dummyTaskRepository,
                 taskDependencyRepository, PgRepos.graphLock(),
-                new TaskCounterUpdater(dummyTaskRepository, taskDependencyRepository,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(dummyTaskRepository, new SchedulingUpdateService(event -> {})), taskReadinessRepository),
+                new TaskCounterUpdater(
+                        dummyTaskRepository,
+                        new PriorityScoreService(
+                                dummyTaskRepository,
+                                taskDependencyRepository,
+                                taskReadinessRepository,
+                                new SchedulingUpdateService(event -> {}),
+                                new SchedulingPublishListener(dummyTaskRepository, new SchedulingUpdateService(event -> {}))),
+                        taskReadinessRepository),
                 TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
 
         assertThatThrownBy(() -> new TaskDependencyService(null, taskDependencyRepository,
@@ -131,10 +145,17 @@ class TaskDependencyServiceTest {
         TaskRepository taskRepository = PgRepos.tasks(List.of());
         TaskDependencyRepository dummyDependencyRepository = PgRepos.dependencies(List.of());
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
+                taskRepository,
                 dummyDependencyRepository, PgRepos.graphLock(),
-                new TaskCounterUpdater(taskRepository, dummyDependencyRepository,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {})), taskReadinessRepository),
+                new TaskCounterUpdater(
+                        taskRepository,
+                        new PriorityScoreService(
+                                taskRepository,
+                                dummyDependencyRepository,
+                                taskReadinessRepository,
+                                new SchedulingUpdateService(event -> {}),
+                                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))),
+                        taskReadinessRepository),
                 TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
 
         assertThatThrownBy(() -> new TaskDependencyService(taskRepository, null,
@@ -346,10 +367,17 @@ class TaskDependencyServiceTest {
         TaskRepository taskRepository = PgRepos.tasks(
                 List.of(newTask(taskA), newTask(taskB)));
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
+                taskRepository,
                 taskDependencyRepository, PgRepos.graphLock(),
-                new TaskCounterUpdater(taskRepository, taskDependencyRepository,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {})), taskReadinessRepository),
+                new TaskCounterUpdater(
+                        taskRepository,
+                        new PriorityScoreService(
+                                taskRepository,
+                                taskDependencyRepository,
+                                taskReadinessRepository,
+                                new SchedulingUpdateService(event -> {}),
+                                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))),
+                        taskReadinessRepository),
                 TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
@@ -368,10 +396,17 @@ class TaskDependencyServiceTest {
         TaskRepository taskRepository = PgRepos.tasks(
                 List.of(newTask(taskA), newTask(taskB)));
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
+                taskRepository,
                 taskDependencyRepository, PgRepos.graphLock(),
-                new TaskCounterUpdater(taskRepository, taskDependencyRepository,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {})), taskReadinessRepository),
+                new TaskCounterUpdater(
+                        taskRepository,
+                        new PriorityScoreService(
+                                taskRepository,
+                                taskDependencyRepository,
+                                taskReadinessRepository,
+                                new SchedulingUpdateService(event -> {}),
+                                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))),
+                        taskReadinessRepository),
                 TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
@@ -587,11 +622,18 @@ void addDependency_whenSameMindEventIsRetried_shouldNotApplyDependencyTwice() {
 
     DependencyEdgeService edgeService =
         new DependencyEdgeService(
+                taskRepository,
                 taskDependencyRepository,
                 PgRepos.graphLock(),
-                new TaskCounterUpdater(taskRepository, taskDependencyRepository,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(taskRepository, schedulingUpdateService), taskReadinessRepository),
+                new TaskCounterUpdater(
+                        taskRepository,
+                        new PriorityScoreService(
+                                taskRepository,
+                                taskDependencyRepository,
+                                taskReadinessRepository,
+                                schedulingUpdateService,
+                                new SchedulingPublishListener(taskRepository, schedulingUpdateService)),
+                        taskReadinessRepository),
                         TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
 
     TaskDependencyService mindService =
