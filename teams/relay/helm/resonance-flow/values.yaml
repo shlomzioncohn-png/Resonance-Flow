@@ -59,6 +59,13 @@ ingress:
 # Components opt in with components.<name>.metrics - see README.md "Metrics scraping".
 monitoring:
   namespace: monitoring
+# PrometheusRules - see README.md "Alerting".
+alerts:
+  # Lag on bridge.structured.tasks, summed per consumer group. inbox is its only
+  # consumer today. The threshold is a first guess - tune it with inbox.
+  bridgeTasksLag:
+    threshold: 1000
+    team: inbox
 pipeConsumerGroupSweep:
   enabled: true
   schedule: "0 * * * *"
