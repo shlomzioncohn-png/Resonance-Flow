@@ -6,9 +6,9 @@
  *
  * Real call all the way down: Gateway → BFF → Inbox's canonical `users`
  * table (see com.bff.client.InboxUserClient's javadoc) — not mock data.
- * MANAGER-only: Gateway enforces hasRole("MANAGER") once a real token is
- * sent (Auth stage 3 — see api.ts). Until then, every request is open, same
- * as every other /api/** route today.
+ * Meant for managers only, but the role check itself is still pending (Auth
+ * stage 2) — until then, every request is open, same as every other /api/**
+ * route today.
  */
 import { api, ApiError } from './api';
 
@@ -73,6 +73,25 @@ export interface UserEditFields {
 
 export function updateUser(id: string, fields: UserEditFields): Promise<UserDetails> {
   return api.patch<UserDetails>(`/api/manager/users/${id}`, fields);
+}
+
+/**
+ * No tenant here — the BFF always creates the user in the acting manager's own tenant.
+ * `email` is required and unique (Inbox's uq_users_email; 409 if taken). The form never
+ * asks for a username: it sends the email as the username.
+ */
+export interface UserCreateFields {
+  displayName: string;
+  firstName?: string;
+  lastName?: string;
+  email: string;
+  phone?: string;
+  username?: string;
+  role: 'MANAGER' | 'EMPLOYEE';
+}
+
+export function createUser(fields: UserCreateFields): Promise<UserDetails> {
+  return api.post<UserDetails>('/api/manager/users', fields);
 }
 
 export type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'DISABLED';

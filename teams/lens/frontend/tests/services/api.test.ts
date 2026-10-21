@@ -59,6 +59,30 @@ describe('api client', () => {
     });
   });
 
+  it('patch() exposes the errorCode from the error body as ApiError.code', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      json: () =>
+        Promise.resolve({
+          status: 'ERROR',
+          errorCode: 'INVALID_TASK_STATUS_TRANSITION',
+          message: 'Task is DONE',
+          path: '/api/workspace/tasks/t1/status',
+          timestamp: '2026-10-11T00:00:00Z',
+        }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      api.patch('/api/workspace/tasks/t1/status', { status: 'READY' }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: 'INVALID_TASK_STATUS_TRANSITION',
+    });
+  });
+
   it('get() falls back to response.statusText when the error body is not valid JSON', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,

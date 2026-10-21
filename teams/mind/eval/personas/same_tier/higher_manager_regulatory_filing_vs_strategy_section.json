@@ -29,7 +29,7 @@
       "effort_estimate": 50,
       "tier": "strategic",
       "blocked": false,
-      "parent_task_id": null
+      "parent_task_id": "hm_filing_three_year_strategy"
     }
   ],
   "expected_top_task_id": "task_filing",

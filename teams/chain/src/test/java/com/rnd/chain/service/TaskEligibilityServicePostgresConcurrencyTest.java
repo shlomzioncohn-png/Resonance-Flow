@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Same scenarios as {@link TaskEligibilityServiceConcurrencyTest}, run against the real
+ * Concurrency scenarios run against the real
  * Postgres-backed repositories instead of the in-memory pair. Deliberately NOT @Transactional:
  * each thread must open its own independent transaction/connection for TaskRepository#update's
  * pessimistic row lock to actually contend for real, which is the whole point of this test (a

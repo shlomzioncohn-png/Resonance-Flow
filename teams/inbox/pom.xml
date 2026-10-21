@@ -219,21 +219,8 @@
                                 <include>task-completed-event.proto</include>
                                 <include>task-creation-requested-event.proto</include>
                                 <include>scheduling-updated-event.proto</include>
+                                <include>structured-task-event.proto</include>
                             </includes>
-                        </configuration>
-                    </execution>
-                    <!-- Inbox-only, unregistered -->
-                    <execution>
-                        <id>compile-local-proto</id>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                        <configuration>
-                            <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
-                            <!-- they import shared ones -->
-                            <additionalProtoPathElements>
-                                <additionalProtoPathElement>${proto.root}</additionalProtoPathElement>
-                            </additionalProtoPathElements>
                         </configuration>
                     </execution>
                 </executions>

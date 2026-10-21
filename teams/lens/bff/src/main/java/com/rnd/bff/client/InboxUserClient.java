@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -64,6 +65,17 @@ public class InboxUserClient {
                 InboxUserPageResponse.class).getBody();
     }
 
+    /** @param body Inbox's UserCreateRequestDto fields (camelCase keys) — tenantId and an Inbox role, already resolved by the caller. */
+    public InboxUserRecord createUser(String actorId, Map<String, Object> body) {
+        String url = UriComponentsBuilder.fromHttpUrl(inboxServiceUrl).path("/api/v1/users").toUriString();
+
+        HttpHeaders headers = authHeaders(actorId);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        return restTemplate.exchange(
+                url, HttpMethod.POST, new HttpEntity<>(toSnakeCase(body), headers), InboxUserRecord.class).getBody();
+    }
+
     public InboxUserRecord getUser(String actorId, String userId) {
         String url = UriComponentsBuilder.fromHttpUrl(inboxServiceUrl)
                 .path("/api/v1/users/{id}").buildAndExpand(userId).toUriString();
@@ -81,7 +93,7 @@ public class InboxUserClient {
         headers.setContentType(MediaType.APPLICATION_JSON);
 
         return restTemplate.exchange(
-                url, HttpMethod.PATCH, new HttpEntity<>(fields, headers), InboxUserRecord.class).getBody();
+                url, HttpMethod.PATCH, new HttpEntity<>(toSnakeCase(fields), headers), InboxUserRecord.class).getBody();
     }
 
     public InboxUserRecord updateStatus(String actorId, String userId, String status) {
@@ -94,6 +106,17 @@ public class InboxUserClient {
         return restTemplate.exchange(
                 url, HttpMethod.PATCH, new HttpEntity<>(Map.of("status", status), headers),
                 InboxUserRecord.class).getBody();
+    }
+
+    /**
+     * Inbox reads JSON in snake_case (spring.jackson.property-naming-strategy),
+     * so "displayName" must go out as "display_name" — a camelCase key would
+     * just be ignored. Keeps the caller's key order and any explicit nulls.
+     */
+    private static Map<String, Object> toSnakeCase(Map<String, Object> fields) {
+        Map<String, Object> snake = new LinkedHashMap<>();
+        fields.forEach((key, value) -> snake.put(key.replaceAll("([a-z0-9])([A-Z])", "$1_$2").toLowerCase(), value));
+        return snake;
     }
 
     private HttpHeaders authHeaders(String actorId) {

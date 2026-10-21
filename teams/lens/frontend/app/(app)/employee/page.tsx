@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import Alert from '@mui/material/Alert';
 import Avatar from '@mui/material/Avatar';
@@ -38,8 +38,13 @@ import {
   softToneSx,
   statusTone,
 } from './shared';
-import { getErrorMessage } from '@/services/api';
-import { recommendTask, updateTaskStatus, type TaskRecommendation } from '@/services/workspaceApi';
+import { ApiError, getErrorMessage } from '@/services/api';
+import {
+  INVALID_TASK_STATUS_TRANSITION,
+  recommendTask,
+  updateTaskStatus,
+  type TaskRecommendation,
+} from '@/services/workspaceApi';
 
 const TIME_OPTIONS_MIN = [15, 30, 45, 60, 90];
 
@@ -89,7 +94,11 @@ export default function EmployeeWorkspacePage() {
       // Reflect the new status in the displayed recommendation
       setRecommendation((prev) => (prev ? { ...prev, task: updated } : prev));
     } catch (err) {
-      setError(getErrorMessage(err));
+      if (err instanceof ApiError && err.code === INVALID_TASK_STATUS_TRANSITION) {
+        setError('This task is already done, so its status can no longer be changed.');
+      } else {
+        setError(getErrorMessage(err));
+      }
     } finally {
       setStarting(false);
     }
@@ -98,22 +107,6 @@ export default function EmployeeWorkspacePage() {
   const task = recommendation?.task ?? null;
   // The server decides (it also knows when the effort is unknown) - not recomputed here
   const fitsWindow = recommendation?.fitsInTime ?? false;
-
-  // Test utility: Allow tests to set form values directly
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      (window as any).__testUtils = {
-        setFormValues: (newMinutes: number, newProjectFilter?: string) => {
-          setMinutes(newMinutes);
-          if (newProjectFilter !== undefined) {
-            setProjectFilter(newProjectFilter);
-          }
-        },
-        getFormValues: () => ({ minutes, projectFilter }),
-        submitForm: async () => await findBestTask(),
-      };
-    }
-  }, []);
 
   return (
     <PageContainer title="My Workspace" description="Make the most of your available time.">

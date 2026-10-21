@@ -31,8 +31,8 @@ import java.util.UUID;
  * same event will see it as already claimed and skip it, rather than
  * retrying it. Closing that gap for good requires tying the claim to
  * whatever the handler actually persists, in the same transaction - which
- * needs a real persistence decision Chain hasn't made yet (see
- * InMemoryProcessedEventStore's own Javadoc, and PLAN.md decision D2).
+ * needs a persistence decision beyond PostgresProcessedEventStore's own-statement claim (see
+ * PLAN.md decision D2).
  * Handlers registered with this consumer should be written with that in
  * mind: safe to be skipped after a crash, not dependent on being retried.
  *

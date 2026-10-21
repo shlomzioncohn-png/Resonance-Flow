@@ -1,18 +1,21 @@
 package com.rnd.chain.service;
 
 import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
+import com.rnd.chain.testsupport.PgRepos;
+import org.junit.jupiter.api.Tag;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.events.SchedulingUpdatePublisher;
 import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
-import com.rnd.chain.repository.InMemoryConstraintRepository;
-import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
-import com.rnd.chain.repository.InMemoryGraphLock;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
-import com.rnd.chain.repository.InMemoryTransactionRunner;
+import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskReadinessRepository;
+import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.testsupport.IncrementingClock;
 import com.rnd.chain.testsupport.TestTransactions;
 
@@ -26,6 +29,10 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Ported from the in-memory version; runs against the real Postgres repositories (rolled back per test). */
+@Tag("postgres")
+@SpringBootTest
+@Transactional
 class TaskDependencyServiceIntegrationTest {
 
     private static final UUID TENANT_ID = UUID.randomUUID();
@@ -33,12 +40,15 @@ class TaskDependencyServiceIntegrationTest {
     private UUID taskId;
     private UUID dependencyTaskId;
 
-    private InMemoryTaskRepository taskRepository;
-    private InMemoryTaskDependencyRepository dependencyRepository;
+    private TaskRepository taskRepository;
+    private TaskDependencyRepository dependencyRepository;
 
     private RecordingSchedulingUpdatePublisher schedulingPublisher;
 
     private TaskDependencyService taskDependencyService;
+
+    @Autowired
+    private TaskReadinessRepository taskReadinessRepository;
 
     @BeforeEach
     void setUp() {
@@ -57,11 +67,11 @@ class TaskDependencyServiceIntegrationTest {
                 true);
 
         taskRepository =
-                new InMemoryTaskRepository(
+                PgRepos.tasks(
                         List.of(task, dependencyTask));
 
         dependencyRepository =
-                new InMemoryTaskDependencyRepository(
+                PgRepos.dependencies(
                         List.of());
 
         schedulingPublisher =
@@ -71,22 +81,30 @@ class TaskDependencyServiceIntegrationTest {
                 new SchedulingUpdateService(
                         schedulingPublisher);
 
+        TaskCounterUpdater counterUpdater =
+                new TaskCounterUpdater(
+                        taskRepository,
+                        dependencyRepository,
+                        new PriorityScoreService(),
+                        new SchedulingPublishListener(
+                                taskRepository,
+                                schedulingUpdateService),
+                        taskReadinessRepository);
+
         DependencyEdgeService dependencyEdgeService =
                 new DependencyEdgeService(
                         dependencyRepository,
-                        new InMemoryGraphLock(),
-                        new TaskCounterUpdater(
-                                taskRepository,
-                                dependencyRepository,
-                                new PriorityScoreService(),
-                                new SchedulingPublishListener(taskRepository, schedulingUpdateService)), TaskStateHistoryFixtures.newRecorder());
+                        PgRepos.graphLock(),
+                        counterUpdater,
+                        TaskStateHistoryFixtures.newRecorder(),
+                        taskReadinessRepository);
 
         taskDependencyService =
                 new TaskDependencyService(
                         taskRepository,
                         dependencyRepository,
-                        new InMemoryDependencyHistoryRepository(),
-                        new InMemoryTransactionRunner(),
+                        PgRepos.history(),
+                        PgRepos.transactionRunner(),
                         new IncrementingClock(),
                         dependencyEdgeService);
     }
@@ -314,7 +332,7 @@ class TaskDependencyServiceIntegrationTest {
         }
 
         public List<TaskSchedulingUpdatedEvent>
-                getPublishedEvents() {
+        getPublishedEvents() {
 
             return publishedEvents;
         }

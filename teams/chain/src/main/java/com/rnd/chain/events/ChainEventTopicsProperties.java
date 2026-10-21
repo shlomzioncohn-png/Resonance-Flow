@@ -9,8 +9,8 @@ import java.util.Map;
  * - topics: event type -> Kafka topic. Used by {@code events.KafkaSchedulingUpdatePublisher}
  *   (#564) to resolve where to publish task.scheduling.updated.
  * - consumerGroupId: the consumer group id every one of Chain's
- *   per-topic @KafkaListener methods joins (TaskCreatedEventHandler,
- *   TaskUpdatedEventHandler, DependencyProposedEventHandler) - one shared
+ *   per-topic @KafkaListener methods joins (TaskUpdatedEventHandler,
+ *   DependencyProposedEventHandler) - one shared
  *   group for the whole service, matching Inbox's "inbox-service"
  *   convention, set explicitly rather than left to Spring's
  *   ${spring.application.name} default ("chain").
