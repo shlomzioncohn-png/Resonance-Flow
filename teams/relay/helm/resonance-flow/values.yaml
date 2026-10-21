@@ -345,6 +345,8 @@ components:
         port: 9000
       - name: postgresql
         port: 5432
+      - name: schema-registry
+        port: 8080
   lens-frontend:
     enabled: true
     replicaCount: 1
