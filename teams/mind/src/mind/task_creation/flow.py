@@ -4,7 +4,7 @@ so all three use one pending store. How to compose it: README.md, "Running it".
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -32,20 +32,15 @@ class TaskCreationFlow:
         pending: PendingStore,
         max_wait: timedelta = DEFAULT_MAX_WAIT,
         on_matched: OnMatched | None = None,
-        on_tick: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
-        """`on_matched` is told of each request Inbox turned into a task (#355's
-        hook) — at least once, maybe twice. `on_tick` runs on every overdue
-        check, independent of on_matched, for work that needs to happen
-        periodically regardless of whether Mind sent the request that created
-        the task being waited on."""
+        """`on_matched` is told of each request Inbox turned into a task
+        (#355's hook) — at least once, maybe twice."""
 
         self._producer = producer
         self._index = index
         self._pending = pending
         self._max_wait = max_wait
         self._on_matched = on_matched
-        self._on_tick = on_tick
 
     async def send(
         self,
@@ -78,6 +73,4 @@ class TaskCreationFlow:
     async def check_overdue(self, now: datetime) -> list[UUID]:
         """What the timer calls, about once a minute."""
 
-        if self._on_tick is not None:
-            await self._on_tick()
         return await report_overdue(self._pending, now=now, max_wait=self._max_wait)

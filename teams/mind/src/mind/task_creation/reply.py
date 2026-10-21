@@ -66,13 +66,13 @@ async def handle_task_created_reply(
     headers: Headers,
     on_matched: OnMatched | None = None,
 ) -> MatchedReply | None:
-    """Index a task Mind asked for and forget the request; ignore a task it
-    did not ask for. `MatchedReply.tenant_id` always comes from
-    `PendingRequest` -- Mind's own data -- never parsed from Inbox's event.
-    `on_matched` (dependency publishing) only fires when `event.tenant_id`
-    confirms that value; an unreadable or mismatched `event.tenant_id` skips
-    it instead, logged, since Inbox -- not Mind -- owns which tenant a task
-    actually belongs to. Errors propagate."""
+    """Index a task Mind asked for, tell `on_matched`, then forget the
+    request; ignore a task it did not ask for. `MatchedReply.tenant_id`
+    always comes from `PendingRequest` -- Mind's own data from when it sent
+    the request -- never parsed from Inbox's event, so a malformed or
+    mismatched `event.tenant_id` cannot cost a task its dependency
+    publishing; it's only compared for a warning, which never gates
+    `on_matched`. Errors propagate."""
 
     correlation_id = correlation_id_from(headers)
     if correlation_id is None:
@@ -109,18 +109,19 @@ async def handle_task_created_reply(
         event_tenant_id = None
     if event_tenant_id is None:
         logger.warning(
-            "task_creation: task.created %s has an unreadable tenant_id %r; skipping dependency publishing",
-            event.id,
-            event.tenant_id,
-        )
-    elif event_tenant_id != request.tenant_id:
-        logger.warning(
-            "task_creation: task.created %s has tenant_id %r, Mind requested %s; skipping dependency publishing",
+            "task_creation: task.created %s has an unreadable tenant_id %r; Mind requested %s",
             event.id,
             event.tenant_id,
             request.tenant_id,
         )
-    elif on_matched is not None:
+    elif event_tenant_id != request.tenant_id:
+        logger.warning(
+            "task_creation: task.created %s has tenant_id %r, Mind requested %s",
+            event.id,
+            event.tenant_id,
+            request.tenant_id,
+        )
+    if on_matched is not None:
         await on_matched(matched)
     await pending.discard(correlation_id)
     logger.info(

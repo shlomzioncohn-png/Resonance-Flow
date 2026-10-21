@@ -163,15 +163,17 @@ here starts on its own. Whoever builds it composes one `TaskCreationFlow` and
 runs the listener and the timer beside it, **in the same process**:
 
 ```python
-loop = start_background_loop()       # one loop, run forever on its own thread
+loop = asyncio.new_event_loop()      # the listener calls run_until_complete on this, per message
 index = PgVectorStore(get_settings().vector_store)
-asyncio.run_coroutine_threadsafe(index.open(), loop).result()   # on the loop that will use it
+loop.run_until_complete(index.open())   # on the loop that will use it
 
 producer = ProtobufProducer()
 pending = PendingRequests()          # one store, shared by everything below
 
-# #355: resolves dependency_mentions and publishes task.dependencies.proposed.
-# Shares this same producer and index -- no second store or connection needed.
+# #355: resolves dependency_mentions and publishes task.dependencies.proposed,
+# once, when task.created confirms the task exists. No retry -- see
+# dependencies/README.md. Shares this same producer and index -- no second
+# store or connection needed.
 sink = KafkaDependencySink(producer)
 publisher = DependencyPublisher(store=index, sink=sink)
 adapter = DependencyAdapter(publisher)
@@ -195,38 +197,23 @@ threading.Thread(target=run_overdue_timer, args=(flow, stop)).start()
 await flow.send(proposal, bridge_correlation_id=event.correlation_id, revision=event.revision)
 ```
 
-- **The timer has its own loop and thread, fully independent of the
-  listener's — `on_tick` is not wired to anything.** `DependencyAdapter`'s
-  `retry_pending` only ever runs from `on_task_created` (the listener's own
-  loop, triggered by a Mind-originated reply): one sweep at a time, with a
-  rerun flag so a trigger arriving mid-sweep isn't lost. An earlier version
-  of this wired `retry_pending` as `on_tick` too, so the overdue timer could
-  also retry a target created directly in Inbox (never matching a
-  Mind-originated reply) — that meant crossing `DependencyPublisher`'s
-  `asyncio.Lock` instances between the timer's thread/loop and the
-  listener's, which is only safe if both submit through one shared loop, which
-  in turn coupled the timer's own bookkeeping (`report_overdue`) to Kafka
-  traffic and produced its own failures (`on_tick` blocking overdue reporting,
-  a timed-out handler still running and double-processing on redelivery, a
-  sweep cut off mid-pass by the cross-loop timeout). None of that is worth it
-  for a case the in-memory `_pending`/`_published` stores can't retry reliably
-  anyway (lost on restart, bounded by `_MAX_PENDING`/`_MAX_PUBLISHED`). **A
-  target created directly in Inbox is therefore not retried at all today** —
-  its mentions expire unresolved after `_MAX_PENDING_AGE` and are logged, not
-  published. A proper fix needs its own design (e.g. a durable, Postgres-backed
-  retry store, triggered from wherever a task gets indexed rather than from a
-  timer) and is tracked as a separate follow-up, not attempted here.
+- **The listener and the timer each have their own loop and thread,
+  entirely independent of each other.** They do share `pending`
+  (`PendingRequests`), from two threads -- but that's `PendingRequests`'
+  own job: every method takes its own lock (see "Three threads, one
+  store" above), so this was already safe before either of them had a
+  loop of its own. Neither's *async* work depends on the other's anymore,
+  so neither can delay the other's handling. `on_task_created`
+  (`adapter.on_task_created`, via `on_matched`) does all of #355's work
+  inline, synchronously, as part of handling that one message — nothing is
+  scheduled to run afterward, so the listener's loop never needs to keep
+  running between messages; `loop.run_until_complete` per message is all it
+  takes.
 - **The listener has its own consumer group** (`mind-task-creation`). R3's
   index consumer reads `task.created` too, and within one group each message
   reaches one member — so sharing R3's group would split the messages between
   them, in silence: replies unmatched here, other teams' tasks never indexed
   there.
-- **The listener's cross-loop wait has a timeout.** `task_created_handler`'s
-  hand-off to the shared loop (`result_timeout`, default 60 s) bounds how
-  long it waits — a dead or stuck loop thread now surfaces as an ordinary
-  `TimeoutError` through the listener's reconnect logic, instead of hanging
-  forever with nothing to show for it. The timer has no cross-loop wait of
-  its own to guard, now that it owns its own loop entirely.
 - **A failure in the listener is retried, then fatal.** `ProtobufConsumer.run`
   closes the consumer on an error, so the listener reconnects itself — waits
   doubling from 1 s to 60 s — and Kafka hands the uncommitted message to the

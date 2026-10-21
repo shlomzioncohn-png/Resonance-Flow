@@ -277,25 +277,6 @@ async def test_a_failed_on_matched_keeps_the_request_so_redelivery_tries_again()
     assert await pending.get(correlation_id) is None
 
 
-async def test_on_tick_runs_on_every_overdue_check() -> None:
-    ticks = 0
-
-    async def on_tick() -> None:
-        nonlocal ticks
-        ticks += 1
-
-    flow = TaskCreationFlow(
-        producer=FakeProducer(), index=FakeVectorStore(), pending=PendingRequests(),
-        on_tick=on_tick,
-    )
-    correlation_id = await flow.send(_proposal(), bridge_correlation_id=ITEM, revision=0)
-
-    overdue = await flow.check_overdue(now=datetime.now(UTC) + timedelta(minutes=11))
-
-    assert ticks == 1
-    assert overdue == [correlation_id]
-
-
 async def test_an_unreadable_correlation_header_is_a_warning_not_silence(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -314,12 +295,12 @@ async def test_an_unreadable_correlation_header_is_a_warning_not_silence(
     assert "not-a-uuid" in caplog.text
 
 
-async def test_an_unreadable_tenant_id_skips_dependency_publishing(
+async def test_an_unreadable_tenant_id_is_a_warning_not_lost_dependencies(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Can't confirm the task belongs to the tenant Mind requested, so
-    publishing under Mind's own tenant_id is skipped -- but it's still
-    indexed and matched; `MatchedReply.tenant_id` is unaffected."""
+    """Can't confirm event.tenant_id against what Mind requested -- logged,
+    but `on_matched` still fires under Mind's own tenant_id (never Inbox's
+    unreadable one), so dependency publishing is not lost over this."""
 
     heard: list[MatchedReply] = []
 
@@ -337,17 +318,17 @@ async def test_an_unreadable_tenant_id_skips_dependency_publishing(
     assert "not-a-uuid" in caplog.text
     assert matched is not None and matched.tenant_id == TENANT
     assert TASK_ID in store.rows
-    assert heard == []
+    assert heard == [matched]
     assert await pending.get(correlation_id) is None
 
 
-async def test_a_tenant_id_mismatch_skips_dependency_publishing(
+async def test_a_tenant_id_mismatch_is_a_warning_not_lost_dependencies(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Inbox echoing back a different tenant_id than Mind requested should
-    never happen, but if it does, publishing under Mind's own (possibly
-    wrong) tenant_id is skipped -- without changing which tenant the match
-    itself is recorded under."""
+    never happen, but if it does, it's logged as a signal something else is
+    wrong -- `on_matched` still fires under Mind's own (never Inbox's
+    mismatched) tenant_id, so dependency publishing is not lost over this."""
 
     heard: list[MatchedReply] = []
 
@@ -366,7 +347,7 @@ async def test_a_tenant_id_mismatch_skips_dependency_publishing(
     assert str(other_tenant) in caplog.text
     assert matched is not None and matched.tenant_id == TENANT
     assert TASK_ID in store.rows
-    assert heard == []
+    assert heard == [matched]
     assert await pending.get(correlation_id) is None
 
 

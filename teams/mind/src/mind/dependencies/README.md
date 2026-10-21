@@ -7,8 +7,24 @@ Resolving a task's dependency mentions into real targets and publishing
 |---|---|
 | `event.py` | builds the `DependencyProposed` payload from resolved targets |
 | `kafka_sink.py` | `DependencyProposed` -> `DependencyProposedEvent`, published to `task.dependencies.proposed` |
-| `publisher.py` | `DependencyPublisher`: resolves mentions (#245), tracks what's already sent, publishes only new edges |
-| `adapter.py` | `DependencyAdapter`: the `on_matched` glue for `TaskCreationFlow`, plus retrying a target that isn't a task yet |
+| `publisher.py` | `DependencyPublisher`: resolves mentions (#245) once, publishes an edge for each that resolves |
+| `adapter.py` | `DependencyAdapter`: the `on_matched` glue for `TaskCreationFlow` |
+
+## Scope: one shot, no retry
+
+`publish_dependencies` resolves a task's `dependency_mentions` once, the
+moment `task.created` confirms the task exists, and publishes an edge for
+whatever resolves right then. A mention that doesn't resolve yet (its
+target isn't a task yet) is logged and not retried -- nothing in this
+package holds state between calls to pick it up later. That's a real,
+known limitation (a target created after this one call, or created
+directly in Inbox rather than via Mind, never gets its edge), not an
+oversight: an in-memory retry store can't survive a restart or reliably
+reach a target created outside Mind's own traffic either way, so a correct
+version needs its own durable design (e.g. a Postgres-backed store,
+retried from wherever a task gets indexed) -- tracked as a follow-up, not
+attempted here. #355 itself only promises "publish what's known when
+task.created arrives".
 
 ## The hand-off interface
 
@@ -24,8 +40,11 @@ from the request Mind itself sent (`flow.send()`'s own `request.tenant_id` and
 event. `dependency_mentions` has no equivalent on the canonical task at all --
 it's Mind's own pre-creation extraction output -- so `PendingRequest` is the
 only place to recover it when `task.created` arrives. `tenant_id` is also on
-that event, but reading it from `PendingRequest` instead means a malformed
-`event.tenant_id` can never cost a task its dependency publishing.
+that event, but reading it from `PendingRequest` instead means a malformed or
+mismatched `event.tenant_id` can never cost a task its dependency publishing
+-- `reply.py` still compares the two and logs a warning on a mismatch (a
+signal something is wrong elsewhere), but that comparison never gates
+`on_matched`.
 
 ## Wiring it in
 
@@ -38,25 +57,29 @@ flow = TaskCreationFlow(..., on_matched=DependencyAdapter(publisher).on_task_cre
 
 It reads `matched.tenant_id` and `matched.request.dependency_mentions` --
 both on `PendingRequest` since #353, carried from Mind's own request rather
-than parsed off `task.created` -- and calls `publish_dependencies`. See its
-module docstring for the retry tracking described below.
+than parsed off `task.created` -- and calls `publish_dependencies` once.
 
-## An unresolved target isn't dropped
+## No local tracking, relying on Chain -- with real caveats
 
-If a mention's target has no task_id yet (the issue's step 4),
-`publish_dependencies` publishes whatever else resolved, returns `False`,
-and holds the rest -- neither dropped nor force-published.
-`DependencyAdapter` acts on that return value: it remembers the task and
-retries it on every subsequent `on_task_created`, since any newly created
-task might be exactly what was missing, and drops it once
-`publish_dependencies` reports nothing outstanding (`True`). The per-task
-published-edge tracking dedups an edge only for as long as its record
-survives -- within `_MAX_PUBLISHED_AGE`, and as long as it isn't evicted by
-the `_MAX_PUBLISHED` cap -- not forever. It's in-memory only besides, so it
-doesn't survive a restart either. After expiry, eviction, or a restart, the
-same mentions publish the same edges again, relying on Chain treating a
-re-proposed edge (same `depends_on_task_id`, same `task_id`) as a no-op
-rather than a hard duplicate.
+One event per resolved mention, `event_id = uuid5(task_id:target)` (#353's
+pattern: a stable id derived from the edge itself). A redelivered
+`task.created` (Kafka's at-least-once delivery) that reprocesses from
+scratch -- i.e. before `pending.discard` ran for it, so `reply.py` still
+finds it and calls `on_matched` again -- re-resolves the same mentions and
+republishes the same event for any edge already sent, relying on Chain's
+own dedup (`teams/Chain/README.md`, "Idempotency": `task.dependencies.proposed`
+deduped by `event_id`). Two caveats, not glossed over:
+- If the redelivery happens *after* `pending.discard` already ran (a crash
+  between a successful `on_matched` and the `task.created` offset commit),
+  `reply.py` finds no pending request and skips `on_matched` entirely on
+  that redelivery -- a mention that failed to resolve the first time is
+  **not** retried in that case, only in the "reprocessed from scratch" case
+  above.
+- Chain's own dedup is `InMemoryProcessedEventStore`-backed today --
+  single-instance, lost on restart (Chain's own README says so plainly).
+  A duplicate send landing after a Chain restart, or against a second
+  instance, is not actually deduped. This design accepts that; it isn't
+  idempotent against every failure mode, only against the common one.
 
 ## Running the tests
 
