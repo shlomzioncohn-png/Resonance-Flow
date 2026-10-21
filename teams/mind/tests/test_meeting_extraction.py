@@ -72,6 +72,8 @@ def test_a_meeting_becomes_one_linked_proposal_per_action_item() -> None:
     assert [("invented_source_ref" in r) for r in reasons] == [False, False, True, False]
     assert pricing.fields.dependency_mentions == []
 
-    proposals = to_task_creation_requested(outcome, tenant_id=uuid4())
+    proposals = to_task_creation_requested(
+        outcome, tenant_id=uuid4(), bridge_source_ref=None, bridge_correlation_id=uuid4()
+    )
     assert [p.title for p in proposals] == [t.fields.title for t in outcome.tasks]
     assert all("dependency_mentions" not in p.model_dump() for p in proposals)

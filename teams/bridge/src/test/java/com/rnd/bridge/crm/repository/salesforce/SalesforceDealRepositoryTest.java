@@ -11,6 +11,7 @@ import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
@@ -21,6 +22,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the single-Opportunity query first and only queries stage metadata if that lookup found a
  * record - mirroring {@code HubSpotDealRepositoryTest}'s "a miss costs one request, not two" rule.
  */
+@Timeout(value = 30, unit = TimeUnit.SECONDS)
 class SalesforceDealRepositoryTest {
 
     private static final Instant FIXED_NOW = Instant.parse("2026-08-30T12:00:00Z");
@@ -190,6 +193,11 @@ class SalesforceDealRepositoryTest {
     }
 
     @Test
+    void sourceIsSalesforce() {
+        assertEquals("salesforce", newRepository().source());
+    }
+
+    @Test
     void closedAndWonAndClosedAndLostResolveCorrectly() {
         enqueueJson(tokenResponse());
         enqueueDefaultStages();
@@ -233,6 +241,88 @@ class SalesforceDealRepositoryTest {
                 .findLatestByDealId("006F").orElseThrow();
 
         assertEquals(Instant.parse("2026-08-25T11:00:00Z"), deal.stageChangedAt());
+    }
+
+    @Test
+    void nullConfiguredFieldFallsBackToCreatedDateAndIsNotSkipped() {
+        enqueueJson(tokenResponse());
+        enqueueDefaultStages();
+        String opportunity = opportunityRow("006S", "Never changed stage", null, "Qualification", "1000", null,
+                "2026-05-01T08:00:00.000+0000", "LastStageChangeDate", null, null, null);
+        enqueueJson(queryPage(opportunity));
+
+        DealSnapshot snapshot = newRepository().snapshot();
+        Deal deal = snapshot.findLatestByDealId("006S").orElseThrow();
+
+        assertEquals(Instant.parse("2026-05-01T08:00:00Z"), deal.stageChangedAt());
+        assertEquals(deal.createdAt(), deal.stageChangedAt());
+        assertEquals(0, snapshot.skippedAtRead());
+    }
+
+    @Test
+    void nonNullConfiguredFieldStillWinsOverCreatedDate() {
+        enqueueJson(tokenResponse());
+        enqueueDefaultStages();
+        String opportunity = opportunityRow("006T", "Changed stage", null, "Qualification", "1000", null,
+                "2026-05-01T08:00:00.000+0000", "LastStageChangeDate", "2026-08-20T10:00:00.000+0000", null, null);
+        enqueueJson(queryPage(opportunity));
+
+        Deal deal = newRepository().snapshot().findLatestByDealId("006T").orElseThrow();
+
+        assertEquals(Instant.parse("2026-08-20T10:00:00Z"), deal.stageChangedAt());
+        assertEquals(Instant.parse("2026-05-01T08:00:00Z"), deal.createdAt());
+    }
+
+    @Test
+    void bothConfiguredFieldAndCreatedDateNullIsSkippedButOtherRowsStillPublish() {
+        enqueueJson(tokenResponse());
+        enqueueDefaultStages();
+        String badOpportunity = opportunityRow("006U", "No dates at all", null, "Qualification", "1000", null,
+                null, "LastStageChangeDate", null, null, null);
+        String goodOpportunity = opportunityRow("006V", "Fine deal", null, "Qualification", "2000", null,
+                "2026-05-02T08:00:00.000+0000", "LastStageChangeDate", "2026-08-21T10:00:00.000+0000", null, null);
+        enqueueJson(queryPage(badOpportunity, goodOpportunity));
+
+        DealSnapshot snapshot = assertDoesNotThrow(() -> newRepository().snapshot());
+
+        assertEquals(List.of("006V"), snapshot.dealIds());
+        assertEquals(1, snapshot.skippedAtRead());
+    }
+
+    @Test
+    void fetchDealWithNullConfiguredFieldReturnsTheDealWithCreatedDate() {
+        String opportunity = opportunityRow("006W", "Fetched, never changed stage", null, "Qualification", "1000",
+                null, "2026-07-01T08:00:00.000+0000", "LastStageChangeDate", null, null, null);
+        enqueueJson(tokenResponse());
+        enqueueJson(queryPage(opportunity));
+        enqueueDefaultStages();
+
+        Optional<Deal> fetched = newRepository().fetchDeal("006W");
+
+        assertTrue(fetched.isPresent());
+        assertEquals(Instant.parse("2026-07-01T08:00:00Z"), fetched.get().stageChangedAt());
+    }
+
+    @Test
+    void snapshotOrderingStaysAscendingWhenSomeDealsUseTheCreatedDateFallback() {
+        enqueueJson(tokenResponse());
+        enqueueDefaultStages();
+        // "006X" falls back to its CreatedDate (2026-06-01) for stageChangedAt; "006Y" has an
+        // explicit, later LastStageChangeDate (2026-08-20); "006Z" falls back to an even later
+        // CreatedDate (2026-09-01) - the sort must interleave real and fallback values correctly.
+        String fallsBackEarly = opportunityRow("006X", "Falls back, early", null, "Qualification", "1000", null,
+                "2026-06-01T08:00:00.000+0000", "LastStageChangeDate", null, null, null);
+        String explicitMiddle = opportunityRow("006Y", "Explicit, middle", null, "Qualification", "1000", null,
+                "2026-05-01T08:00:00.000+0000", "LastStageChangeDate", "2026-08-20T10:00:00.000+0000", null, null);
+        String fallsBackLate = opportunityRow("006Z", "Falls back, late", null, "Qualification", "1000", null,
+                "2026-09-01T08:00:00.000+0000", "LastStageChangeDate", null, null, null);
+        enqueueJson(queryPage(fallsBackEarly, explicitMiddle, fallsBackLate));
+
+        List<Deal> deals = newRepository().snapshot().allDeals();
+
+        assertEquals(List.of("006X", "006Y", "006Z"), deals.stream().map(Deal::dealId).toList());
+        assertTrue(deals.get(0).stageChangedAt().isBefore(deals.get(1).stageChangedAt()));
+        assertTrue(deals.get(1).stageChangedAt().isBefore(deals.get(2).stageChangedAt()));
     }
 
     @Test

@@ -45,10 +45,8 @@ public class CorsConfig {
         configuration.setMaxAge(3600L);
         
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        // Apply CORS to all API routes
-        source.registerCorsConfiguration("/api/**", configuration);
-        source.registerCorsConfiguration("/health", configuration);
-        source.registerCorsConfiguration("/health/ready", configuration);
+        // Apply CORS to all routes (auth, api, health, swagger)
+        source.registerCorsConfiguration("/**", configuration);
         
         return source;
     }

@@ -122,16 +122,28 @@ def test_every_task_becomes_its_own_proposal() -> None:
     assert isinstance(outcome, ExtractionSuccess)
     tenant_id = uuid4()
 
-    proposals = to_task_creation_requested(outcome, tenant_id=tenant_id)
+    proposals = to_task_creation_requested(
+        outcome,
+        tenant_id=tenant_id,
+        bridge_source_ref="C024BE91L:1728900000.000100",
+        bridge_correlation_id=uuid4(),
+    )
 
     assert [p.title for p in proposals] == [MINUTES["title"], LAB["title"]]
     assert [p.confidence for p in proposals] == [t.confidence.value for t in outcome.tasks]
     assert proposals[0].confidence > proposals[1].confidence
-    assert {(p.tenant_id, p.source_type) for p in proposals} == {(tenant_id, SourceType.MEETING)}
+    # One item, so one source_ref: it says where the tasks came from, not which.
+    assert {(p.tenant_id, p.source_type, p.source_ref) for p in proposals} == {
+        (tenant_id, SourceType.MEETING, "C024BE91L:1728900000.000100")
+    }
 
 
 def test_no_task_means_no_proposal() -> None:
     outcome, _ = extract(answer())
     assert isinstance(outcome, ExtractionSuccess)
 
-    assert to_task_creation_requested(outcome, tenant_id=uuid4()) == []
+    proposals = to_task_creation_requested(
+        outcome, tenant_id=uuid4(), bridge_source_ref=None, bridge_correlation_id=uuid4()
+    )
+
+    assert proposals == []

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, PostgresDsn, Secret
+from pydantic import BaseModel, ConfigDict, Field, PostgresDsn, Secret, SecretStr
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
@@ -18,6 +18,8 @@ _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 _DEFAULT_CONFIG_FILE = "/etc/resonance-flow/config/config.yaml"
 _DEFAULT_SECRETS_FILE = "/etc/resonance-flow/secret/secrets.yaml"
+# The chart mounts the MinIO credentials as one file each (dependencySecretVolumes).
+_DEFAULT_OBJECT_STORAGE_SECRETS_DIR = "/etc/resonance-flow/secrets/object-storage"
 
 
 def _read_yaml(path: str) -> dict[str, Any]:
@@ -55,6 +57,134 @@ class ASRSettings(BaseSettings):
     @property
     def download_dir(self) -> Path:
         return Path(self.model_cache_dir) / "whisper" / self.whisper_model
+
+
+class _ChartObjectStorageSource(PydanticBaseSettingsSource):
+    """MinIO from Relay's chart-mounted files: endpoint and bucket from
+    config.yaml's `object_storage`, each credential from its own mounted file.
+    Missing files give nothing, so a local run falls through to the defaults."""
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        raise NotImplementedError  # unused: __call__ is overridden directly
+
+    def __call__(self) -> dict[str, Any]:
+        config = _read_yaml(os.environ.get("CONFIG_FILE_PATH", _DEFAULT_CONFIG_FILE))
+        object_storage = (config or {}).get("object_storage") or {}
+        values = {k: object_storage[k] for k in ("endpoint", "bucket") if object_storage.get(k)}
+
+        secrets_dir = Path(
+            os.environ.get("OBJECT_STORAGE_SECRETS_DIR", _DEFAULT_OBJECT_STORAGE_SECRETS_DIR)
+        )
+        for field_name, filename in (
+            ("access_key", "object-storage.access-key"),
+            ("secret_key", "object-storage.secret-key"),
+        ):
+            path = secrets_dir / filename
+            if path.is_file():
+                values[field_name] = path.read_text().strip()  # mounted files end in a newline
+        return values
+
+
+class ObjectStorageSettings(BaseSettings):
+    """Standalone -- the bridge.raw.landed consumer (#349) reads Bridge's objects.
+
+    Sources, first wins: environment variables, .env, then the cluster's
+    mounted files (_ChartObjectStorageSource), then the defaults. The defaults
+    match Bridge's own local ones (teams/bridge application.yml); the
+    credentials have none, so a missing one fails at start-up.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="MIND_OBJECT_STORAGE__", env_file=_ENV_FILE, extra="ignore"
+    )
+
+    endpoint: str = "http://localhost:9000"
+    bucket: str = "bridge-raw"
+    access_key: str
+    secret_key: SecretStr  # never printed: repr, logs, tracebacks show '**********'
+    # Larger objects are skipped, not read: the process's memory is the limit.
+    max_object_bytes: int = Field(default=100 * 1024 * 1024, gt=0)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Earlier sources win; the chart's files only fill what env leaves unset.
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            _ChartObjectStorageSource(settings_cls),
+            file_secret_settings,
+        )
+
+
+class LandedConsumerSettings(BaseSettings):
+    """Standalone -- the bridge.raw.landed runner (#349) needs no database, so it
+    does not read `Settings`, which requires the vector-store DSN.
+
+    Read from the environment and .env like every other MIND_* setting, so an
+    override set next to the MinIO keys in .env is not silently ignored.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="MIND_LANDED_CONSUMER__", env_file=_ENV_FILE, extra="ignore"
+    )
+
+    # Its own group, not the one in ProtobufConsumer's docstring example. Until
+    # extraction is wired, a run marks items processed and commits their
+    # offsets with nothing extracted: a test run against the shared topic sets
+    # MIND_LANDED_CONSUMER__GROUP_ID to a group of its own.
+    group_id: str = "mind-landed-consumer"
+    # The same variable `Settings.log_level` reads.
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO", validation_alias="MIND_LOG_LEVEL"
+    )
+
+
+class MonitoringSettings(BaseSettings):
+    """Standalone -- recording a model call needs no DSN.
+
+    When a model call counts as "far slower / more expensive than expected" in
+    the model-call summary (observability/tracking.py), and how often that
+    summary is logged. None turns a check off. The defaults are starting
+    points from the numbers measured so far, not validated targets:
+
+    * OCR 30 s: ~2 s a page (multimodal/ocr.py, MAX_PAGES), so ~20 s for the
+      longest document OCR reads by default.
+    * ASR 120 s: base.en runs at ~10x real time, so ~60 s for the longest
+      recording ASR decodes (MAX_DURATION_S = 600 s).
+    * LLM 10 s: R2 measured ~1.4 s a call on average and 2.2 s at the slowest
+      with the paid key (the provider deadline is 60 s), so ~5x the slowest.
+    * LLM $0.02: per R2, a typical item costs ~$0.0024 and the heaviest (full
+      content, full output) ~$0.008 today. gemini-3.6-flash's price doubles
+      on 1.1.2027 (heaviest then ~$0.016), so $0.02 stays above a legitimate
+      call after that too -- while still ~8x a typical item today.
+
+    Only LLM calls have a cost limit: they are the only calls priced in
+    dollars. OCR/ASR cost CPU seconds, and a CPU-seconds limit waits for a
+    measured baseline (#479).
+    """
+
+    # "none" in the env turns a check off (an empty value would not parse).
+    model_config = SettingsConfigDict(
+        env_prefix="MIND_MONITORING__",
+        env_file=_ENV_FILE,
+        extra="ignore",
+        env_parse_none_str="none",
+    )
+
+    ocr_max_duration_ms: float | None = Field(default=30_000, gt=0)
+    asr_max_duration_ms: float | None = Field(default=120_000, gt=0)
+    llm_max_duration_ms: float | None = Field(default=10_000, gt=0)
+    llm_max_cost_usd: float | None = Field(default=0.02, ge=0)
+    # Log the summary every this many model calls; 0 or none turns it off.
+    summary_every_n_calls: int | None = Field(default=100, ge=0)
 
 
 class VectorStoreSettings(BaseModel):

@@ -106,11 +106,13 @@ class Task(BaseModel):
         description=(
             "The task_id of this task's parent in the cross-tier organizational "
             "hierarchy (a developer task under a manager task, etc.), matching the "
-            "canonical Task.parent_task_id. Points outside this scenario, so it is "
-            "not cross-referenced here. Reserved for the week-7 hierarchical "
-            "value-propagation evaluation; null in every scenario until then. This "
-            "is NOT the old same-tier `dependencies` array — that was removed "
-            "deliberately and is not coming back."
+            "canonical Task.parent_task_id. Points outside this scenario, at a node "
+            "in eval/hierarchy/nodes.json (checked by "
+            "mind.evaluation.hierarchy.validate_hierarchy_links, not here); the "
+            "parent is never one of the scenario's candidate tasks. null = an "
+            "orphan, on purpose. Read by the week-7 hierarchical value-propagation "
+            "model. This is NOT the old same-tier `dependencies` array — that was "
+            "removed deliberately and is not coming back."
         ),
     )
 

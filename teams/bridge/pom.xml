@@ -110,6 +110,14 @@
             <version>${minio.version}</version>
         </dependency>
 
+        <!-- Renders scanned-doc PDF pages to images for media classification (pure Java,
+             no external tools). -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.5</version>
+        </dependency>
+
         <!-- control-plane state (GroupStateStore/CursorStore/CalendarEventStateStore) -
              small, frequently read/written key->blob records, moved off MinIO onto Postgres. -->
         <dependency>
@@ -257,11 +265,11 @@
                                 <include>task-created-event.proto</include>
                                 <include>task-creation-requested-event.proto</include>
                                 <include>raw-object-event.proto</include>
+                                <include>structured-task-event.proto</include>
                             </includes>
                         </configuration>
                     </execution>
-                    <!-- Bridge-only: structured-task-event.proto (temporary local copy, see
-                         StructuredTaskProtoDriftTest) and Hadas's github-task.proto. -->
+                    <!-- Bridge-only: Hadas's github-task.proto (not yet moved to shared/proto, #566). -->
                     <execution>
                         <id>compile-local-proto</id>
                         <goals>
@@ -269,10 +277,6 @@
                         </goals>
                         <configuration>
                             <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
-                            <!-- structured-task-event.proto imports the two shared ones above -->
-                            <additionalProtoPathElements>
-                                <additionalProtoPathElement>${proto.root}</additionalProtoPathElement>
-                            </additionalProtoPathElements>
                         </configuration>
                     </execution>
                 </executions>

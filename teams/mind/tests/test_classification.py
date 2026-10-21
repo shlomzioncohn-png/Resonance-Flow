@@ -127,7 +127,9 @@ def _proposal(answer: str, classify: bool) -> TaskCreationRequested:
         SOURCE_TEXT, SourceType.EMAIL
     )
     assert isinstance(outcome, ExtractionSuccess)
-    [proposal] = to_task_creation_requested(outcome, tenant_id=uuid4())
+    [proposal] = to_task_creation_requested(
+        outcome, tenant_id=uuid4(), bridge_source_ref=None, bridge_correlation_id=uuid4()
+    )
     return proposal
 
 

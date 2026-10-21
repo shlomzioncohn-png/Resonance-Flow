@@ -98,7 +98,7 @@ class SqlLoggingConfigTest {
             SqlLoggingProperties properties = context.getBean(SqlLoggingProperties.class);
 
             assertThat(properties.isEnabled()).isTrue();
-            assertThat(properties.isIncludeParameters()).isTrue();
+            assertThat(properties.isIncludeParameters()).isFalse();
             assertThat(properties.getSlowQueryThresholdMs()).isEqualTo(200);
         });
     }
@@ -106,11 +106,11 @@ class SqlLoggingConfigTest {
     @Test
     void properties_whenConfigured_areBoundFromTheKebabCaseKeys() {
         contextRunner.withPropertyValues(
-                "inbox.sql-logging.include-parameters=false",
+                "inbox.sql-logging.include-parameters=true",
                 "inbox.sql-logging.slow-query-threshold-ms=42").run(context -> {
             SqlLoggingProperties properties = context.getBean(SqlLoggingProperties.class);
 
-            assertThat(properties.isIncludeParameters()).isFalse();
+            assertThat(properties.isIncludeParameters()).isTrue();
             assertThat(properties.getSlowQueryThresholdMs()).isEqualTo(42);
         });
     }
@@ -118,8 +118,8 @@ class SqlLoggingConfigTest {
     // ---- a statement run through the wrapped DataSource reaches the log ----
 
     @Test
-    void preparedStatement_runThroughWrappedDataSource_isLoggedWithInlinedParameter() {
-        contextRunner.run(context -> {
+    void preparedStatement_whenIncludeParametersTrue_isLoggedWithInlinedParameter() {
+        contextRunner.withPropertyValues("inbox.sql-logging.include-parameters=true").run(context -> {
             DataSource dataSource = context.getBean(DataSource.class);
 
             try (Connection connection = dataSource.getConnection();
@@ -133,8 +133,8 @@ class SqlLoggingConfigTest {
     }
 
     @Test
-    void preparedStatement_whenIncludeParametersFalse_isLoggedWithPlaceholder() {
-        contextRunner.withPropertyValues("inbox.sql-logging.include-parameters=false").run(context -> {
+    void preparedStatement_whenIncludeParametersNotConfigured_isLoggedWithPlaceholder() {
+        contextRunner.run(context -> {
             DataSource dataSource = context.getBean(DataSource.class);
 
             try (Connection connection = dataSource.getConnection();
@@ -162,7 +162,7 @@ class SqlLoggingConfigTest {
     }
 
     @Test
-    void failingStatement_isLoggedAsFailedAndTheExceptionStillPropagates() {
+    void failingStatement_isLoggedAsFailedWithoutItsParametersAndTheExceptionStillPropagates() {
         contextRunner.run(context -> {
             FakeDataSourceConfig fake = context.getBean(FakeDataSourceConfig.class);
             when(fake.preparedStatement.executeQuery()).thenThrow(new SQLException("boom"));
@@ -177,7 +177,7 @@ class SqlLoggingConfigTest {
 
             assertThat(capture.events()).singleElement().satisfies(event -> {
                 assertThat(SqlLogCapture.eventOf(event)).isEqualTo(SqlLogEvent.QUERY_FAILED);
-                assertThat(event.getFormattedMessage()).isEqualTo("select * from tasks where status = 'OPEN'");
+                assertThat(event.getFormattedMessage()).isEqualTo(PARAMETERIZED_SQL);
             });
         });
     }

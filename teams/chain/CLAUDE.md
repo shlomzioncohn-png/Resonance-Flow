@@ -106,7 +106,7 @@ already has (edgeExists() / the task's own stored previousStatus).
     null on either side is rejected, same as a mismatch. Confirmed with the user that existing/
     test data without a tenant isn't meaningful enough to justify the weaker "skip when unknown"
     alternative the issue offered. Follow-up: make `task.tenant_id` `NOT NULL` once every row is
-    backfilled through `TaskCreatedEventHandler`/`TaskUpdatedEventHandler`.
+    backfilled through `TaskUpdatedEventHandler`.
   - **`task.updated` claiming a different tenant than stored is rejected** (`TenantReassignmentException`
     -> `NonRetryableEventException`), not applied - confirmed directly with the Inbox team
     (Shlomzion Cohn, Slack) that `tenant_id` never legitimately changes after task creation, so
@@ -240,8 +240,10 @@ already has (edgeExists() / the task's own stored previousStatus).
   `Task`/`TaskDependency`/`DependencyHistoryEntry` stay plain DTOs -
   entities (`TaskEntity`/`TaskDependencyEntity`/`DependencyHistoryEntity`)
   are mapped to/from them entirely inside the adapters. The H2 placeholder
-  is gone; `MockDataConfig`'s in-memory beans remain only as the
-  `@ConditionalOnMissingBean` fallback when no real `DataSource` is wired.
+  is gone, and so are all `InMemory*` repositories, `MockDataConfig` and `InMemoryProcessedEventStore`
+  (2026-10-15): Postgres is the only persistence, including `PostgresProcessedEventStore` (V10) for
+  event dedup. The tests that used the in-memory fakes now run against Postgres (`PgRepos`).
+
 - `TaskRepository#update()`'s atomicity is now real: `PostgresTaskRepository`
   uses a pessimistic row lock (`SELECT ... FOR UPDATE`) as the sole
   correctness mechanism for `blockingCount`/`openConstraintCount` under

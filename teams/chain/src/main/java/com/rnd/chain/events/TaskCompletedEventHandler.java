@@ -73,7 +73,7 @@ public class TaskCompletedEventHandler {
         try {
             taskEligibilityService.onTaskCompleted(taskId, recordTime);
         } catch (TaskNotFoundException e) {
-            throw new ReferencedTaskNotFoundException(
+            throw new ChainTransientProcessingException(
                     "task.completed referenced a task Chain hasn't seen yet: " + taskId, e);
         } catch (RuntimeException e) {
             throw new ChainTransientProcessingException(

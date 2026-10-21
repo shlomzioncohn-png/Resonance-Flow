@@ -17,6 +17,7 @@ a task record and issues a real `task_id`.
 |---|---|
 | `title`, `description`, `source_ref`, `has_dependencies` | the LLM, validated against `ExtractedFields` |
 | `source_type` | carried forward from the intake event — never asked of the LLM |
+| `source_ref` **sent to Inbox** | Bridge's, never the LLM's — see below and `task_creation/README.md` (#353) |
 | `confidence` | computed locally by `confidence.py` — never asked of the LLM |
 
 English only: the pipeline assumes English content (confirmed by Kayvan), and
@@ -262,15 +263,21 @@ first character would otherwise read as an empty completion, which is retryable.
 
 `record_call` sat after the `try`, so a provider that raised was never
 recorded — and the failures are the slowest calls we make, since a timeout
-waits out the whole deadline. They are recorded now, under the provider's name
-(no answer to read a model id from) and at cost 0.0 (no usage reported).
+waits out the whole deadline. They are recorded now, under the model id the
+provider sends -- the same key as a success, so a model's failures and successes
+share one row of the summary (#479) -- with `status=error` and a cost of `None`:
+no usage was reported, so the cost is unknown, not zero. A success is recorded
+under that same id but priced by the id the answer reports, the model billed.
 
 `except LLMError` rather than `finally`, so that a bug in a client or a
 `KeyboardInterrupt` propagates without being counted as a model call.
 
-Known gap, unchanged: `estimate_cost` returns None for an unpriced model, but
-`record_call` only takes a float, so unpriced and free both land as 0.0. Fixing
-that means widening `ModelCallRecord`, which is shared surface.
+The gap this section used to list is closed (#479): `record_call` now takes
+`cost=None`, so an unpriced model, a provider that reported no usage and a failed
+call are all recorded as unpriced rather than as 0.0. Every call is also
+recorded with `kind=llm` and its token counts, so the model-call summary
+(`GET /debug/model-calls`, see `observability/README.md`) totals tokens and US
+dollars per model and holds LLM calls to their duration and cost limits.
 
 ### A failed item can be found
 
@@ -312,10 +319,13 @@ written by whoever sent it, so a sender can put a link in their own message and
 tell the model to use it; the value genuinely is in the content and passes
 every check here. `test_a_link_the_content_itself_carries_is_still_kept` pins
 that limit so nobody mistakes the check for more than it is. The real answer is
-for `source_ref` to arrive from Bridge as event metadata. #31 added it as
-`RawObjectEvent.source_ref`, but extraction does not receive the event yet.
-Until the consumer passes it through, this field says what the content
-claimed, not what is true.
+for `source_ref` to arrive from Bridge as event metadata — #31 added it as
+`RawObjectEvent.source_ref`. Since #353 the `source_ref` Inbox receives is
+Bridge's (or `bridge:<item id>`), passed to assembly by whoever holds the
+event — the #349 consumer, once it exists — never this extracted value: a
+pointer the content mentions is not the item's own id, and Inbox's UI builds a
+link from it. The extracted field still feeds the confidence penalties above;
+whether to stop asking the model for it at all is open.
 
 ## Classification at extraction time (#351)
 

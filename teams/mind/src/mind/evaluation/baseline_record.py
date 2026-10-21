@@ -26,7 +26,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from mind.evaluation.harness import Report, ScenarioResult
 from mind.evaluation.interfaces import PersonaEvaluationScenario
+from mind.evaluation.personas import PERSONAS_DIR
 from mind.evaluation.personas_checksum import compute_personas_checksum
+
+# teams/mind: the directory every path stored in a record is made relative to.
+_TEAM_DIR = PERSONAS_DIR.parent.parent
 
 METRIC = "top-1 accuracy"
 
@@ -123,7 +127,10 @@ class PersonaSetInfo(BaseModel):
     """Which persona set was scored, and how many of its scenarios the team lead had approved.
 
     `checksum` is what identifies the set: `compute_personas_checksum` over the
-    scenario files themselves, filled in by `build_baseline_record`. Nobody types
+    scenario files themselves and, when one was scored with them, the hierarchy
+    fixture (`hierarchy_path`; scenario tasks point into it through
+    `parent_task_id`, so a changed node is a changed set). Filled in by
+    `build_baseline_record`. Nobody types
     it, so it cannot be wrong, and it describes exactly what was scored,
     including uncommitted edits. `commit` is an extra, human-readable label.
     """
@@ -131,6 +138,7 @@ class PersonaSetInfo(BaseModel):
     model_config = _RECORD_CONFIG
 
     path: str
+    hierarchy_path: str | None = None
     checksum: str = Field(pattern=_CHECKSUM_PATTERN)
     commit: str = Field(pattern=_COMMIT_SHA_PATTERN)
     scenarios: int = Field(ge=0)
@@ -208,11 +216,28 @@ class BaselineRecord(BaseModel):
         )
 
 
+def _team_relative(path: Path) -> str:
+    """`path` as stored in a record: relative to teams/mind when it is inside it.
+
+    A record is committed to the repo, so it must not carry the recorder's own
+    directory layout (`/Users/<name>/...`, `C:/Users/...`): the same set recorded
+    on two machines has to read the same. Paths are resolved first, so an
+    absolute `--hierarchy` default and a relative `--personas eval/personas`
+    both come out as `eval/...`. A path outside teams/mind (a temporary copy in a
+    test) has no team-relative form and is stored as given.
+    """
+    try:
+        return path.resolve().relative_to(_TEAM_DIR.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 def build_baseline_record(
     *,
     recorded_on: date,
     provenance: Provenance,
     personas_path: Path,
+    hierarchy_dir: Path | None,
     scenarios: list[PersonaEvaluationScenario],
     combined: Report,
     groups: dict[str, Report],
@@ -221,9 +246,12 @@ def build_baseline_record(
     """Build the record from a finished run. The record's consistency checks run
     here too, so an inconsistent record is refused before it is ever written.
 
-    The persona set's checksum is computed here from `personas_path`, not passed in."""
+    The persona set's checksum is computed here from `personas_path` and
+    `hierarchy_dir`, not passed in. `hierarchy_dir` has no default: the caller
+    says which hierarchy was scored, or `None` for none. Both paths are stored
+    relative to teams/mind (`_team_relative`)."""
     try:
-        checksum = compute_personas_checksum(personas_path)
+        checksum = compute_personas_checksum(personas_path, hierarchy_dir=hierarchy_dir)
     except FileNotFoundError as e:
         raise BaselineRecordError(f"cannot checksum the persona set: {e}") from e
     return BaselineRecord(
@@ -232,7 +260,8 @@ def build_baseline_record(
         model_commit=provenance.model_commit,
         metric=METRIC,
         persona_set=PersonaSetInfo(
-            path=personas_path.as_posix(),
+            path=_team_relative(personas_path),
+            hierarchy_path=_team_relative(hierarchy_dir) if hierarchy_dir is not None else None,
             checksum=checksum,
             commit=provenance.persona_set_commit,
             scenarios=len(scenarios),
@@ -270,16 +299,20 @@ def _format_version_of(text: str) -> object | None:
     return data.get("format_version") if isinstance(data, dict) else None
 
 
-def load_baseline_record(path: Path, *, personas_path: Path) -> Report:
+def load_baseline_record(
+    path: Path, *, personas_path: Path, hierarchy_dir: Path | None
+) -> Report:
     """Read a recorded baseline back into the combined `Report` it was written from,
-    but only if `personas_path` still holds the persona set it was scored on.
+    but only if `personas_path` (with `hierarchy_dir`) still holds the persona set
+    it was scored on.
 
     This is what the week-7 comparison (#487) diffs the stretch run against:
     the frozen, committed number, not a fresh re-run of the baseline model. It is
     only a meaningful comparison against the *same* fixed set, so the recorded
     checksum is compared to the current set's checksum and a mismatch is
-    refused. `personas_path` is required for that reason: there is no way to
-    load a baseline without saying which set it is about to be compared on.
+    refused. `personas_path` and `hierarchy_dir` are required for that reason:
+    there is no way to load a baseline without saying which set it is about to
+    be compared on.
 
     Validated through `BaselineRecord`, so a hand-edited, truncated or
     malformed file is refused with an error naming the field at fault.
@@ -299,7 +332,7 @@ def load_baseline_record(path: Path, *, personas_path: Path) -> Report:
             ) from e
         raise BaselineRecordError(f"{path} is not a valid baseline record:\n{e}") from e
     try:
-        current = compute_personas_checksum(personas_path)
+        current = compute_personas_checksum(personas_path, hierarchy_dir=hierarchy_dir)
     except FileNotFoundError as e:
         raise BaselineRecordError(f"cannot checksum the persona set: {e}") from e
     recorded = record.persona_set.checksum
@@ -308,6 +341,6 @@ def load_baseline_record(path: Path, *, personas_path: Path) -> Report:
             f"{path} was scored on a persona set with checksum {recorded[:12]}..., but "
             f"{personas_path} now has checksum {current[:12]}.... A baseline can only be "
             "compared against the same fixed set. If the set was changed on purpose, "
-            "record a new baseline; if not, restore the scenario files."
+            "record a new baseline; if not, restore the scenario and hierarchy files."
         )
     return record.to_report()

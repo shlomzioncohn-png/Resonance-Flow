@@ -328,10 +328,26 @@ other entity's authorization is built on. **Never invent a second role enum for 
   for this one lookup even if the entity itself has its own repository).
 - `create`, `update`, **and any status-change / sub-resource-action endpoint** (not just
   create/update — `User.updateStatus` writes an audit entry too, this was a real gap fixed after
-  the fact) call
-  `auditService.createAuditLog("{ENTITY}_CREATED" / "{ENTITY}_UPDATED" / "{ENTITY}_{ACTION}",
-  "{Entity}", entityId, tenant, actor, snapshotMap, null)` — `correlationId` is always `null` for
-  this manually-triggered (non-event-driven) path.
+  the fact) write an audit entry, through one of two `AuditService` methods — `correlationId` is
+  always `null` for this manually-triggered (non-event-driven) path:
+  - **create** calls `auditService.createAuditLog("{ENTITY}_CREATED", "{Entity}", entityId, tenant,
+    actor, auditSnapshot(saved), null)` — there is no previous state, so `old_values` stays empty.
+  - **update and every status-change / action endpoint** call
+    `auditService.createUpdateAuditLog("{ENTITY}_UPDATED" / "{ENTITY}_{ACTION}", "{Entity}",
+    entityId, tenant, actor, before, auditSnapshot(saved), null)`, where
+    `Map<String, Object> before = auditSnapshot(entity)` is taken **before** the mapper's
+    `applyUpdate` / `applyStatusChange` runs. The mapper changes that same entity object in place,
+    so a snapshot taken after it holds the new values on both sides and nothing gets recorded.
+    `AuditService` writes only the changed fields to `old_values`, the full `after` snapshot to
+    `new_values`, and **no row at all** when the two snapshots are equal.
+  - `auditSnapshot({Entity})` is a private method on the Service returning a `LinkedHashMap` built
+    field by field (never the whole entity). It must list **every field an update can change** —
+    a field missing from it makes an update of only that field go unaudited. Enums go in by
+    `.name()`, related entities by id only.
+  - In `{Entity}ServiceTest` the Mapper is a mock and changes nothing, so an update test that
+    asserts on `before`/`after` needs `doAnswer(...)` on the mapper call to mutate the entity
+    (see `UserServiceTest.updateUser_auditsTheValuesFromBeforeAndAfterTheChange`). Failure-path
+    tests assert `verifyNoInteractions(auditService)`, not `never()` on one specific method.
 
 **Coarse (`@RequireRole`) vs. fine (`{Entity}Authorization`) — two independent layers, not a choice
 between them**
