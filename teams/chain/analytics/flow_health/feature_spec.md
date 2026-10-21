@@ -22,7 +22,7 @@ open; open items are never dropped. Days are 24-hour days.
 | `n_dependents_max` | the most dependents this task ever had at the same moment | count | - |
 | `dependents_per_30d` | `n_dependents_max / max(age_days, 1) * 30` (a task younger than a day counts as one day old) | dependents per 30 days | age is measured up to `as_of` |
 | `age_ratio_to_tier` | `age_days` divided by the median `age_days` of all tasks of the same tier, open ones included (cut at `as_of`); `UNKNOWN` is a tier of its own | ratio | uses the cut age |
-| `blocked_ratio_to_tier` | `days_blocked_total` divided by the median `days_blocked_total` of the same tier; a tier whose median is 0 uses the median of all tasks that were blocked at least once; a never-blocked task gets 0 | ratio | uses the cut block time |
+| `blocked_ratio_to_tier` | `days_blocked_total` divided by the median `days_blocked_total` of the tasks of the same tier that were blocked at least once (never-blocked tasks are left out of the median, because on dev more than half of every tier is never blocked and the median over all tasks is 0); a never-blocked task gets 0; a tier with no block at all uses the median of every blocked task | ratio | uses the cut block time |
 
 Not-happened versus unknown: `blocked_p50`, `blocked_p90` and `blocked_max` are empty (not 0) when a task was never
 blocked; they become 0 only when the clustering matrix is built.

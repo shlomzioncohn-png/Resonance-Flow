@@ -44,7 +44,9 @@ def test_durations_counts_and_flags_on_the_hand_written_history(three):
 def test_ratios_divide_by_the_median_of_the_whole_tier_open_tasks_included(three):
     f = _features(three)
     assert f["age_ratio_to_tier"].tolist() == pytest.approx([4 / 8, 9 / 8, 1.0])  # median age of [4, 9, 8]
-    assert f["blocked_ratio_to_tier"].tolist() == pytest.approx([0, 1, (8 - 1 / 24) / (4 - 1 / 24)])
+    block_b, block_c = 4 - 1 / 24, 8 - 1 / 24
+    median_of_blocked = (block_b + block_c) / 2  # A was never blocked, so it is not in the median
+    assert f["blocked_ratio_to_tier"].tolist() == pytest.approx([0, block_b / median_of_blocked, block_c / median_of_blocked])
 
 
 def test_a_missing_tier_is_its_own_group_with_its_own_median():
@@ -55,12 +57,18 @@ def test_a_missing_tier_is_its_own_group_with_its_own_median():
     assert f["age_ratio_to_tier"].tolist() == pytest.approx([1.0, 8 / 7.5, 7 / 7.5])  # ages 8 and 7: their median is 7.5
 
 
-def test_a_tier_whose_median_block_is_zero_falls_back_to_the_median_of_blocked_tasks():
+def test_the_block_median_of_a_tier_ignores_tasks_that_were_never_blocked():
     ds = _dataset(
-        tasks=[("A", ts(1)), ("B", ts(1)), ("C", ts(1))],
-        states=[("C", "BLOCKED", None, None, ts(2)), ("C", "UNBLOCKED", None, None, ts(4))], deps=[])
+        tasks=[("A", ts(1)), ("B", ts(1)), ("C", ts(1)), ("D", ts(1))],
+        states=[("C", "BLOCKED", None, None, ts(2)), ("C", "UNBLOCKED", None, None, ts(4)),
+                ("D", "BLOCKED", None, None, ts(2)), ("D", "UNBLOCKED", None, None, ts(8))], deps=[])
     f = _features(ds)
-    assert f["blocked_ratio_to_tier"].tolist() == pytest.approx([0, 0, 1.0])  # 2 days / median of blocked tasks (2)
+    assert f["blocked_ratio_to_tier"].tolist() == pytest.approx([0, 0, 0.5, 1.5])  # blocked 2 and 6 days: median 4
+
+
+def test_a_tier_with_no_block_at_all_gets_zero_not_a_division_by_zero():
+    ds = _dataset(tasks=[("A", ts(1)), ("B", ts(1))], states=[], deps=[])
+    assert _features(ds)["blocked_ratio_to_tier"].tolist() == [0, 0]
 
 
 def test_dependents_count_is_now_versus_the_most_there_ever_were_at_once():

@@ -39,10 +39,14 @@ def _max_concurrent(edges: pd.DataFrame) -> pd.Series:
     return pd.Series(peak, dtype="int64")
 
 
-def _ratio_to_tier(values: pd.Series, tier: pd.Series, fallback: float) -> pd.Series:
-    """value / median of its tier. A tier whose median is 0 falls back to `fallback`; a value of 0 stays 0."""
-    median = values.groupby(tier).transform("median")
-    return values / median.where(median > 0, fallback)
+def _ratio_to_tier(values: pd.Series, tier: pd.Series, fallback: float, only_positive: bool = False) -> pd.Series:
+    """value / median of its tier. A tier whose median is 0 falls back to `fallback`; a value of 0 stays 0.
+
+    only_positive: the median is taken over the tier's non-zero values (for block time, where most tasks have 0).
+    """
+    basis = values.where(values > 0) if only_positive else values
+    median = basis.groupby(tier).transform("median")
+    return (values / median.where(median > 0, fallback)).where(values > 0, 0.0)
 
 
 def task_features(ds: Dataset, tl: Timeline) -> pd.DataFrame:
@@ -78,5 +82,6 @@ def task_features(ds: Dataset, tl: Timeline) -> pd.DataFrame:
     tasks["age_ratio_to_tier"] = _ratio_to_tier(tasks["age_days"], tasks["tier"], fallback=tasks["age_days"].median())
     positive = tasks.loc[tasks["days_blocked_total"] > 0, "days_blocked_total"]
     tasks["blocked_ratio_to_tier"] = _ratio_to_tier(
-        tasks["days_blocked_total"], tasks["tier"], fallback=positive.median() if len(positive) else np.nan)
+        tasks["days_blocked_total"], tasks["tier"], fallback=positive.median() if len(positive) else np.nan,
+        only_positive=True)
     return tasks.reset_index()[TASK_COLUMNS].sort_values("task_id", kind="stable").reset_index(drop=True)
