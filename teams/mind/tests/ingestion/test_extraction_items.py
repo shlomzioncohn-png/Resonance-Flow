@@ -7,6 +7,7 @@ import pytest
 
 from mind.contracts import RawObjectEvent
 from mind.contracts.base_enums import SourceType
+from mind.contracts.raw_object_event import RawObjectRef
 from mind.contracts.raw_object_event_enums import RawSourceType
 from mind.extraction.extractor import ExtractionItem
 from mind.ingestion.event_objects import (
@@ -14,7 +15,7 @@ from mind.ingestion.event_objects import (
     ObjectNotFound,
     ObjectTooLarge,
 )
-from mind.ingestion.extraction_items import extraction_items, task_source_type
+from mind.ingestion.extraction_items import extraction_items, item_text, task_source_type
 from mind.multimodal.asr import ASRResult
 from mind.multimodal.ocr import OCRResult
 
@@ -49,6 +50,7 @@ def test_every_bridge_source_type_has_a_task_source_type() -> None:
 # --- one pass, one file at a time ---------------------------------------------
 
 TENANT = "550e8400-e29b-41d4-a716-446655440000"
+ARRIVAL = "6f1c1f9e-0000-4000-8000-000000000001"  # the events' correlation_id
 RECORDING_KEY = f"ZOOM/{TENANT}/2026-10-20/meeting.m4a"
 TRANSCRIPT_KEY = f"ZOOM/{TENANT}/2026-10-20/meeting.vtt"
 SCAN_KEY = f"ZOOM/{TENANT}/2026-10-20/quote.pdf"
@@ -122,12 +124,30 @@ def _items(event: RawObjectEvent, trace: _Trace) -> list[ExtractionItem]:
     return extraction_items(event, trace.read, ocr=trace.ocr, asr=trace.asr)
 
 
-def test_each_file_becomes_an_item_with_the_task_source_type_and_its_key() -> None:
+def test_an_item_becomes_one_extraction_item_keyed_by_its_arrival() -> None:
+    # item_key is Bridge's correlation_id: the whole arrival, not one of its files.
     (item,) = _items(_landed(_ref("ATTACHMENT", SCAN_KEY)), _Trace(STORE))
 
     assert item == ExtractionItem(
-        text="text of quote.pdf", source_type=SourceType.MEETING, item_key=SCAN_KEY
+        text="text of quote.pdf", source_type=SourceType.MEETING, item_key=ARRIVAL
     )
+
+
+def test_the_files_of_an_item_become_one_text_in_the_events_order() -> None:
+    # The transcript is read first (it decides the recording), but the text keeps
+    # Bridge's order: the scanned attachment first here.
+    (item,) = _items(
+        _landed(_ref("ATTACHMENT", SCAN_KEY), _ref("TRANSCRIPT", TRANSCRIPT_KEY)), _Trace(STORE)
+    )
+
+    assert item.text == (
+        "[Attachment: quote.pdf, scanned]\ntext of quote.pdf\n\n"
+        f"[Transcript]\n{STORE[TRANSCRIPT_KEY].decode()}"
+    )
+
+
+def test_an_item_with_no_readable_file_gives_nothing() -> None:
+    assert _items(_landed(_ref("ATTACHMENT", SCAN_KEY)), _Trace({})) == []
 
 
 def test_one_file_is_read_and_converted_before_the_next_is_read() -> None:
@@ -151,7 +171,7 @@ def test_a_readable_transcript_means_the_recording_is_never_read() -> None:
         _landed(_ref("RECORDING", RECORDING_KEY), _ref("TRANSCRIPT", TRANSCRIPT_KEY)), trace
     )
 
-    assert [i.text for i in items] == [STORE[TRANSCRIPT_KEY].decode()]
+    assert [i.text for i in items] == [f"[Transcript]\n{STORE[TRANSCRIPT_KEY].decode()}"]
     assert ("read", "meeting.m4a") not in trace.calls
 
 
@@ -162,7 +182,7 @@ def test_a_missing_transcript_leaves_the_recording_to_be_transcribed() -> None:
         _landed(_ref("RECORDING", RECORDING_KEY), _ref("TRANSCRIPT", TRANSCRIPT_KEY)), trace
     )
 
-    assert [i.text for i in items] == ["speech of meeting.m4a"]
+    assert [i.text for i in items] == ["[Recording, transcribed]\nspeech of meeting.m4a"]
 
 
 def test_an_excluded_item_reads_nothing() -> None:
@@ -177,7 +197,7 @@ def test_a_file_that_does_not_match_its_hash_is_skipped_and_the_rest_kept() -> N
 
     items = _items(_landed(_ref("ATTACHMENT", SCAN_KEY), _ref("ATTACHMENT", SCAN_2_KEY)), trace)
 
-    assert [i.item_key for i in items] == [SCAN_2_KEY]
+    assert [i.text for i in items] == ["[Attachment: form.jpg, scanned]\ntext of form.jpg"]
 
 
 def test_a_tenant_id_that_is_not_a_uuid_is_invalid() -> None:
@@ -195,7 +215,7 @@ def test_a_transcript_with_no_speech_in_it_leaves_the_recording_to_be_transcribe
 
     items = _items(_landed(_ref("RECORDING", RECORDING_KEY), transcript), _Trace(store))
 
-    assert [i.text for i in items] == ["speech of meeting.m4a"]
+    assert [i.text for i in items] == ["[Recording, transcribed]\nspeech of meeting.m4a"]
 
 
 def test_source_metadata_describes_the_item_and_is_not_read() -> None:
@@ -203,7 +223,7 @@ def test_source_metadata_describes_the_item_and_is_not_read() -> None:
 
     items = _items(_landed(_ref("SOURCE_METADATA", META_KEY), _ref("ATTACHMENT", SCAN_KEY)), trace)
 
-    assert [i.item_key for i in items] == [SCAN_KEY]
+    assert [i.text for i in items] == ["text of quote.pdf"]
     assert ("read", "meeting.json") not in trace.calls
 
 
@@ -220,7 +240,7 @@ def test_a_missing_file_is_skipped_and_the_rest_kept(caplog: pytest.LogCaptureFi
 
     items = _items(_landed(_ref("ATTACHMENT", SCAN_KEY), _ref("ATTACHMENT", SCAN_2_KEY)), trace)
 
-    assert [i.item_key for i in items] == [SCAN_2_KEY]
+    assert [i.text for i in items] == ["[Attachment: form.jpg, scanned]\ntext of form.jpg"]
     assert SCAN_KEY in caplog.text
 
 
@@ -239,7 +259,7 @@ def test_a_file_too_large_to_read_is_skipped_loudly(caplog: pytest.LogCaptureFix
         asr=trace.asr,
     )
 
-    assert [i.item_key for i in items] == [SCAN_2_KEY]
+    assert [i.text for i in items] == ["[Attachment: form.jpg, scanned]\ntext of form.jpg"]
     assert any(r.levelno == logging.ERROR and SCAN_KEY in r.getMessage() for r in caplog.records)
 
 
@@ -263,13 +283,17 @@ def test_a_transcript_replaces_only_the_recording_not_other_audio() -> None:
         trace,
     )
 
-    assert [i.item_key for i in items] == [TRANSCRIPT_KEY, VOICE_NOTE_KEY]
+    (item,) = items
+    assert item.text == (
+        f"[Transcript]\n{STORE[TRANSCRIPT_KEY].decode()}\n\n"
+        "[Attachment: note.ogg, transcribed]\nspeech of note.ogg"
+    )
 
 
 def test_a_file_with_no_text_in_it_is_skipped() -> None:
     items = _items(_landed(_ref("BODY", BODY_KEY), _ref("ATTACHMENT", SCAN_KEY)), _Trace(STORE))
 
-    assert [i.item_key for i in items] == [SCAN_KEY]
+    assert [i.text for i in items] == ["[Attachment: quote.pdf, scanned]\ntext of quote.pdf"]
 
 
 def _transcript_of(content: bytes, key: str = TRANSCRIPT_KEY) -> dict[str, Any]:
@@ -301,4 +325,75 @@ def test_a_webvtt_with_named_cues_and_no_speech_leaves_the_recording_to_be_trans
         _landed(_ref("RECORDING", RECORDING_KEY), _transcript_of(named_cues)), _Trace(store)
     )
 
-    assert [i.text for i in items] == ["speech of meeting.m4a"]
+    assert [i.text for i in items] == ["[Recording, transcribed]\nspeech of meeting.m4a"]
+
+
+# --- one text per item: each part under a heading ------------------------------
+
+
+def _part(role: str, modality: str, name: str) -> RawObjectRef:
+    return RawObjectRef.model_validate(
+        {
+            "role": role,
+            "object_key": f"EMAIL/{TENANT}/2026-10-22/{name}",
+            "content_hash": "sha256:" + "a" * 64,
+            "modality": modality,
+        }
+    )
+
+
+def test_an_item_of_one_file_goes_as_it_is() -> None:
+    parts = [(_part("BODY", "TEXT", "body.txt"), "Send the quote.")]
+
+    assert item_text(parts, headed=False) == "Send the quote."
+
+
+def test_the_parts_follow_each_other_in_order_each_under_its_heading() -> None:
+    text = item_text(
+        [
+            (_part("BODY", "TEXT", "body.txt"), "Please return the signed form by Friday."),
+            (_part("ATTACHMENT", "SCANNED_DOC", "supplier_form.jpg"), "Supplier Registration Form"),
+        ],
+        headed=True,
+    )
+
+    assert text == (
+        "[Body]\nPlease return the signed form by Friday.\n\n"
+        "[Attachment: supplier_form.jpg, scanned]\nSupplier Registration Form"
+    )
+
+
+@pytest.mark.parametrize(
+    ("role", "modality", "name", "heading"),
+    [
+        ("BODY", "TEXT", "body.txt", "[Body]"),
+        ("TRANSCRIPT", "TEXT", "meeting.vtt", "[Transcript]"),
+        ("RECORDING", "AUDIO", "meeting.m4a", "[Recording, transcribed]"),
+        ("ATTACHMENT", "TEXT", "notes.txt", "[Attachment: notes.txt]"),
+        ("ATTACHMENT", "SCANNED_DOC", "form.jpg", "[Attachment: form.jpg, scanned]"),
+        ("ATTACHMENT", "AUDIO", "note.ogg", "[Attachment: note.ogg, transcribed]"),
+    ],
+)
+def test_the_heading_says_what_the_part_is_and_how_it_became_text(
+    role: str, modality: str, name: str, heading: str
+) -> None:
+    other = (_part("BODY", "TEXT", "other.txt"), "x")
+
+    text = item_text([(_part(role, modality, name), "the text"), other], headed=True)
+
+    assert text.startswith(f"{heading}\nthe text\n\n")
+
+
+def test_a_lone_survivor_of_several_files_keeps_its_heading() -> None:
+    # Three files landed, one is left: still an attachment, still scanned. Only
+    # an item that had one file to begin with goes without a heading.
+    trace = _Trace({k: v for k, v in STORE.items() if k != SCAN_KEY})
+
+    items = _items(
+        _landed(
+            _ref("BODY", BODY_KEY), _ref("ATTACHMENT", SCAN_KEY), _ref("ATTACHMENT", SCAN_2_KEY)
+        ),
+        trace,
+    )
+
+    assert [i.text for i in items] == ["[Attachment: form.jpg, scanned]\ntext of form.jpg"]

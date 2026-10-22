@@ -4,17 +4,19 @@ Mind's entry point (#349): reads what Bridge lands and turns it into text for
 extraction. Also loads AMI's human transcripts for the extraction eval (see
 "AMI transcripts" at the end). Bridge stores each item's files in MinIO and publishes one
 `RawObjectEvent` on `bridge.raw.landed` carrying pointers, not content. This
-package fetches the files one at a time, checks them, and turns each into an
-`ExtractionItem` (text, task source type, object key). It does not interpret
-content — that is `extraction/` and `multimodal/`.
+package fetches the files one at a time, checks them, turns each into text,
+and joins the texts into one `ExtractionItem` per item (text, task source type,
+`correlation_id`). It does not interpret content — that is `extraction/` and
+`multimodal/`.
 
 ```
 bridge.raw.landed ─► to_raw_object_event ─► classify_arrival ─► extraction_items ─────────► on_items
   (protobuf)          (pydantic contract)    (processed yet?)     │ per file, one at a time:   (extraction)
                                                                   │ read MinIO, check hash,       │
                                                                   │ text (OCR/ASR), let go        ▼
-                                                                  ▼                         mark_processed
-                                                          list[ExtractionItem]
+                                                                  │ then join the texts      mark_processed
+                                                                  ▼
+                                                     one ExtractionItem per item
 ```
 
 | file | what it does |
@@ -23,7 +25,7 @@ bridge.raw.landed ─► to_raw_object_event ─► classify_arrival ─► extr
 | `landed_consumer.py` | `LandedHandler`: one message through every step below |
 | `raw_object_event_proto.py` | the protobuf message → the `RawObjectEvent` contract |
 | `seen_revisions.py` | whether an item was already processed, and at which revision |
-| `extraction_items.py` | the event → one `ExtractionItem` per file, one file at a time |
+| `extraction_items.py` | the event → one `ExtractionItem` for the item, read one file at a time |
 | `event_objects.py` | the reader contract and per-file checks (tenant, `content_hash`) |
 | `minio_reader.py` | reads one file from MinIO |
 | `to_text.py` | one file's bytes → text, via R4's OCR and ASR |
@@ -51,14 +53,31 @@ bridge.raw.landed ─► to_raw_object_event ─► classify_arrival ─► extr
    never read, only when a transcript gave speech; a missing, broken or empty
    one (a WEBVTT with timings and no words) leaves the recording to be
    transcribed. Other audio (an attached voice note) is always transcribed. A
-   file with no text in it is skipped. Each item carries the task's source
-   type (ZOOM / BIGBLUEBUTTON → MEETING until Inbox's values reach
-   shared/proto) and the file's object key.
-4. **Hand-off** (`on_items(event, items)`), then the item is marked processed.
-   The event travels next to the items: it carries the tenant, `source_ref`
-   and `correlation_id` extraction needs. Marked only after the hand-off: a
-   crash in between processes the item again, and Inbox de-duplicates task
-   requests on `correlation_id`.
+   file with no text in it is skipped.
+
+   The texts left are joined into **one** `ExtractionItem` for the item, in
+   the event's order (the transcript is read first, but keeps its place), keyed
+   by `correlation_id` and carrying the task's source type (ZOOM /
+   BIGBLUEBUTTON → MEETING until Inbox's values reach shared/proto). When the
+   event landed more than one content file, each part goes under a heading of
+   what it is and how it became text — `[Body]`, `[Transcript]`,
+   `[Attachment: form.jpg, scanned]`, `[Recording, transcribed]` — even if only
+   one part is left; an item of one file goes as it is. No readable file, no
+   item.
+
+   One item, not one per file, because the item is the unit of work: an email
+   and its scanned form are one request, a deadline in one and the work in the
+   other make one task, not two half-tasks. Per file, the same request in a
+   body and its attachment would also become two tasks, and R3's
+   `find_duplicate` cannot catch that: it compares against tasks already in the
+   index, and these two are created together. Until #690 raises
+   `MAX_CONTENT_CHARS` (8000, `extraction/prompts.py`), extraction truncates a
+   long joined item there.
+4. **Hand-off** (`on_items(event, items)`, the list empty or of one), then the
+   item is marked processed. The event travels next to the item: it carries
+   the tenant, `source_ref` and `correlation_id` extraction needs. Marked only
+   after the hand-off: a crash in between processes the item again, and Inbox
+   de-duplicates task requests on `correlation_id`.
 
 ## Skip or retry
 
@@ -125,8 +144,8 @@ settings above are unchanged by #481. No
 database is needed: the runner reads `LandedConsumerSettings` (group id,
 `MIND_LOG_LEVEL`), not `Settings`, which requires the vector-store DSN.
 
-Until extraction is wired in, `on_items` logs each item by its event, file and
-length, never its content (Bridge may have classified it HIGH sensitivity),
+Until extraction is wired in, `on_items` logs each item by its `correlation_id`
+and length, never its content (Bridge may have classified it HIGH sensitivity),
 which also shows the stage in a demo run.
 
 **A run commits offsets.** The consumer group is `mind-landed-consumer`. Until
@@ -149,6 +168,9 @@ MIND_LANDED_CONSUMER__GROUP_ID=mind-landed-joint-test make run-landed-consumer
 - **Per-file retry.** An item with one bad file is still marked processed, so
   that file is never retried. Suggested: track files, not items, so only the
   failed one is tried again.
+- **Which file failed extraction.** The item is extracted as one text, so a
+  failed extraction names the item (`correlation_id`), not the file in it
+  that caused the failure.
 - **A persistent, shared revision store.** `InMemoryRevisionStore` forgets
   everything on restart, keeps only the 100,000 most recently processed items
   (flat memory for a consumer that runs for weeks), and belongs to one process.

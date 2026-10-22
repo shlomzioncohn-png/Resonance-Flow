@@ -1,9 +1,14 @@
-"""A landed Bridge item -> the ExtractionItems extraction reads (#349).
+"""A landed Bridge item -> the one ExtractionItem extraction reads (#349).
+
+The item is extracted as a whole: an email body and its scanned attachment
+read together, so a deadline in one and the work in the other make one task,
+not two half-tasks. Its files are joined into one text (item_text), each under
+a heading when the event landed several, keyed by the arrival's correlation_id.
 
 One file at a time: read it, check it, turn it into text, and let its bytes go
-before the next is read, so memory holds one file, not the whole event. What
-the extraction needs besides the text (tenant, source_ref, correlation_id) is
-on the event itself, which travels next to the items.
+before the next is read, so memory holds one file plus the texts, not the whole
+event. What the extraction needs besides the text (tenant, source_ref,
+correlation_id) is on the event itself, which travels next to the item.
 
 Transcripts are handled first: a RECORDING is skipped only when a transcript of
 the event actually gave text, so a missing or broken transcript still leaves
@@ -12,12 +17,15 @@ never even read.
 """
 
 import logging
+from pathlib import PurePosixPath
+from typing import assert_never
 
 from mind.contracts import RawObjectEvent
 from mind.contracts.base_enums import SourceType
 from mind.contracts.raw_object_event import RawObjectRef
 from mind.contracts.raw_object_event_enums import (
     ChangeType,
+    Modality,
     ObjectRole,
     RawSourceType,
     ScopeDecision,
@@ -72,6 +80,51 @@ def _has_words(transcript: str) -> bool:
     return False
 
 
+def _heading(obj: RawObjectRef) -> str:
+    """What the part is (its role), and how it became text (its modality).
+    The source type is not repeated: the extraction prompt already states it."""
+
+    match obj.role:
+        case ObjectRole.BODY:
+            what = "Body"
+        case ObjectRole.TRANSCRIPT:
+            what = "Transcript"
+        case ObjectRole.RECORDING:
+            what = "Recording"
+        case ObjectRole.ATTACHMENT:
+            what = f"Attachment: {PurePosixPath(obj.object_key).name}"
+        case ObjectRole.SOURCE_METADATA:
+            # Never read, so never here; listed because assert_never below
+            # makes mypy fail until every role has a branch.
+            what = "Source metadata"
+        case _:
+            assert_never(obj.role)
+    match obj.modality:
+        case Modality.TEXT:
+            how = ""
+        case Modality.SCANNED_DOC:
+            how = ", scanned"
+        case Modality.AUDIO:
+            how = ", transcribed"
+        case _:
+            assert_never(obj.modality)
+    return f"[{what}{how}]"
+
+
+def item_text(parts: list[tuple[RawObjectRef, str]], *, headed: bool) -> str:
+    """One text for the whole item, the parts in the event's order.
+
+    `headed` says whether the event landed more than one content file. If it
+    did, every part goes under its heading, even when only one is left (the
+    others missing or unreadable): it is still an attachment, still scanned.
+    An item that had one file to begin with goes as it is, so it reads to
+    extraction exactly as that file does."""
+
+    if not headed:
+        return "\n\n".join(text for _, text in parts)
+    return "\n\n".join(f"{_heading(obj)}\n{text}" for obj, text in parts)
+
+
 def extraction_items(
     event: RawObjectEvent,
     read_object: ObjectReader,
@@ -79,7 +132,10 @@ def extraction_items(
     ocr: MediaPipeline = extract_text,
     asr: MediaPipeline = transcribe,
 ) -> list[ExtractionItem]:
-    """Raises InvalidEvent for a tenant_id that is not a UUID, MediaUnavailable
+    """The item's one ExtractionItem, or an empty list when nothing in it is
+    read or readable; a list because that is what extraction takes.
+
+    Raises InvalidEvent for a tenant_id that is not a UUID, MediaUnavailable
     when OCR/ASR cannot run here, and lets a storage outage propagate."""
 
     # Nothing is read for these: Bridge judged an EXCLUDED item not work, and
@@ -92,7 +148,7 @@ def extraction_items(
     tenant_uuid(event)
     source_type = task_source_type(event.source_type)
 
-    def item_of(obj: RawObjectRef) -> ExtractionItem | None:
+    def text_of_file(obj: RawObjectRef) -> str | None:
         content = read_event_object(obj, read_object, event.correlation_id)
         if content is None:
             return None
@@ -105,23 +161,31 @@ def extraction_items(
         if obj.role is ObjectRole.TRANSCRIPT and not _has_words(text):
             logger.info("extraction_items: %s is a transcript with no speech", obj.object_key)
             return None
-        return ExtractionItem(text=text, source_type=source_type, item_key=obj.object_key)
+        return text
+
+    # (position in the event, file, its text): read out of order, joined in order.
+    parts: list[tuple[int, RawObjectRef, str]] = []
 
     # First pass: transcripts only.
-    items: list[ExtractionItem] = []
-    for obj in event.objects:
-        if obj.role is ObjectRole.TRANSCRIPT and (item := item_of(obj)):
-            items.append(item)
-    has_transcript = bool(items)
+    for position, obj in enumerate(event.objects):
+        if obj.role is ObjectRole.TRANSCRIPT and (text := text_of_file(obj)):
+            parts.append((position, obj, text))
+    has_transcript = bool(parts)
 
     # Second pass: everything else, one file at a time.
-    for obj in event.objects:
+    for position, obj in enumerate(event.objects):
         # SOURCE_METADATA describes the item rather than being its content.
         if obj.role in (ObjectRole.TRANSCRIPT, ObjectRole.SOURCE_METADATA):
             continue
         if obj.role is ObjectRole.RECORDING and has_transcript:
             logger.info("extraction_items: %s not read, the event has a transcript", obj.object_key)
             continue
-        if item := item_of(obj):
-            items.append(item)
-    return items
+        if text := text_of_file(obj):
+            parts.append((position, obj, text))
+
+    if not parts:
+        return []
+    parts.sort(key=lambda part: part[0])
+    content_files = [o for o in event.objects if o.role is not ObjectRole.SOURCE_METADATA]
+    text = item_text([(obj, text) for _, obj, text in parts], headed=len(content_files) > 1)
+    return [ExtractionItem(text=text, source_type=source_type, item_key=str(event.correlation_id))]
