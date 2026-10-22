@@ -104,10 +104,12 @@ class BridgeTaskKafkaConfig {
 
     @Bean
     ProducerFactory<String, StructuredTaskEvent> bridgeTaskEventProducerFactory(
-            @Value("${spring.kafka.bootstrap-servers}") String bootstrapServers,
+            KafkaProperties kafkaProperties,
+            SslBundles sslBundles,
             @Value("${bridge.kafka.schema-registry.url}") String schemaRegistryUrl) {
-        Map<String, Object> props = new HashMap<>();
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        // Starts from Boot's producer props so spring.kafka.properties.* (SASL/security) apply,
+        // same as ChainProtobufKafkaConfig - overrides below must stay after it.
+        Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties(sslBundles));
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaProtobufSerializer.class);
         props.put(ProducerConfig.ACKS_CONFIG, "all");
