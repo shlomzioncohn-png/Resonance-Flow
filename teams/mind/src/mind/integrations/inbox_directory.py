@@ -16,7 +16,7 @@ Two choices worth stating out loud:
 
 This file holds the contract, the construction, the fetching of Inbox's lists,
 what happens when Inbox cannot be reached, and how long a fetched list is
-believed. Matching comes in the next step of #131. See README.md.
+believed. The matching of names itself is in name_matching.py. See README.md.
 """
 
 import json
@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from mind.config import InboxDirectorySettings
 from mind.contracts import AssigneeType
+from mind.integrations.name_matching import score_names
 
 logger = logging.getLogger("mind.integrations")
 
@@ -126,6 +127,18 @@ class DirectoryCandidate(BaseModel):
     score: float = Field(ge=0.0, le=1.0)
 
 
+def _user_names(user: _InboxUser) -> list[str | None]:
+    """Every name a user may be called by: display name, full name, username.
+
+    The full name is the first and last name together. A first name is never
+    offered on its own next to a last name: "Dana" would then be an exact match
+    for every Dana, and an exact match is what tells #132 it can stop looking.
+    """
+
+    full_name = " ".join(part for part in (user.first_name, user.last_name) if part)
+    return [user.display_name, full_name or None, user.username]
+
+
 def _keep_active[Row: (_InboxUser, _InboxTeam)](
     rows: list[Row], tenant_id: UUID, what: str
 ) -> tuple[Row, ...]:
@@ -212,10 +225,20 @@ class InboxDirectory:
         loaded = self._load(tenant_id)
         if loaded is None:
             return []
+        users, teams = loaded
 
-        # Not built yet: matching is the next step of #131.
-        _users, _teams = loaded
-        return []
+        scored = [
+            *((AssigneeType.USER, u.id, score_names(name, _user_names(u))) for u in users),
+            *((AssigneeType.TEAM, t.id, score_names(name, [t.name])) for t in teams),
+        ]
+        candidates = [
+            DirectoryCandidate(assignee_type=kind, id=id_, score=score)
+            for kind, id_, score in scored
+            if score >= self._settings.min_score
+        ]
+        # Best first; the id breaks a tie so the order is the same on every run.
+        candidates.sort(key=lambda c: (-c.score, str(c.id)))
+        return candidates
 
     def _load(self, tenant_id: UUID) -> _Lists | None:
         """Both of Inbox's lists for `tenant_id`, or None if Inbox cannot give them.

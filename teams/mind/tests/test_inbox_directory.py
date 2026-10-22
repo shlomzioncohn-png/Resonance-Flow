@@ -653,3 +653,108 @@ def test_what_a_lookup_is_handed_cannot_be_used_to_change_the_remembered_lists()
     with pytest.raises(AttributeError):
         users.pop()
     assert len(directory._load(tenant)[0]) == 2
+
+
+# --- Finding candidates, end to end (matching) --------------------------------------
+# Inbox's lists go in, DirectoryCandidates come out. How a name is scored is in
+# test_name_matching.py; here it is what find_candidates does with the scores.
+
+
+def _inbox(users=(), teams=(), **settings):
+    """A directory whose Inbox holds exactly these users and teams."""
+
+    def handler(request):
+        rows = users if request.url.path == "/api/v1/users" else teams
+        return httpx.Response(200, json=_page(list(rows)))
+
+    return _directory(handler, **settings)
+
+
+def _found(candidates):
+    return [(c.assignee_type, str(c.id), round(c.score, 2)) for c in candidates]
+
+
+def test_users_and_teams_come_back_best_first_and_ties_in_a_fixed_order():
+    tenant = uuid4()
+    cohen = _user(tenant, display_name="Dana Cohen")
+    levi = _user(tenant, display_name="Dana Levi")
+    yossi = _user(tenant, display_name="Yossi Katz")
+    team = _team(tenant, name="Dana")
+
+    found = _inbox([cohen, levi, yossi], [team]).find_candidates(tenant, "Dana")
+
+    tied = sorted([cohen["id"], levi["id"]])
+    assert _found(found) == [
+        (AssigneeType.TEAM, team["id"], 1.0),
+        (AssigneeType.USER, tied[0], 0.7),
+        (AssigneeType.USER, tied[1], 0.7),
+    ]
+
+
+def test_only_active_people_and_teams_of_the_given_tenant_come_back():
+    tenant, other = uuid4(), uuid4()
+    wanted = _user(tenant, display_name="Dana Cohen")
+    users = [
+        wanted,
+        _user(tenant, display_name="Dana Cohen", status="SUSPENDED"),
+        _user(other, display_name="Dana Cohen"),
+    ]
+    teams = [_team(tenant, name="Dana Cohen", status="ARCHIVED"), _team(other, name="Dana Cohen")]
+
+    found = _inbox(users, teams).find_candidates(tenant, "Dana Cohen")
+
+    assert _found(found) == [(AssigneeType.USER, wanted["id"], 1.0)]
+
+
+def test_a_user_known_only_by_first_and_last_name_is_found_by_the_full_name():
+    tenant = uuid4()
+    user = _user(tenant, display_name=None, first_name="Dana", last_name="Cohen")
+
+    found = _inbox([user]).find_candidates(tenant, "Dana Cohen")
+
+    assert _found(found) == [(AssigneeType.USER, user["id"], 1.0)]
+
+
+def test_a_first_name_alone_is_a_partial_match_for_someone_with_a_last_name():
+    tenant = uuid4()
+    user = _user(tenant, display_name=None, first_name="Dana", last_name="Cohen")
+
+    found = _inbox([user]).find_candidates(tenant, "Dana")
+
+    assert _found(found) == [(AssigneeType.USER, user["id"], 0.7)]
+
+
+def test_a_user_is_found_by_username():
+    tenant = uuid4()
+    user = _user(tenant, display_name="DC", username="dana.cohen")
+
+    found = _inbox([user]).find_candidates(tenant, "dana.cohen")
+
+    assert _found(found) == [(AssigneeType.USER, user["id"], 1.0)]
+
+
+def test_nobody_by_that_name_gives_an_empty_list():
+    tenant = uuid4()
+
+    found = _inbox([_user(tenant)], [_team(tenant)]).find_candidates(tenant, "Yossi")
+
+    assert found == []
+
+
+def test_a_mention_with_no_words_gives_an_empty_list():
+    tenant = uuid4()
+
+    assert _inbox([_user(tenant)]).find_candidates(tenant, "") == []
+    assert _inbox([_user(tenant)]).find_candidates(tenant, " . ") == []
+
+
+def test_min_score_drops_a_weak_match_and_the_default_keeps_it():
+    tenant = uuid4()
+    user = _user(tenant, display_name="Dana Cohen")  # "Dena" is a typo in a lone first name
+
+    kept = _inbox([user]).find_candidates(tenant, "Dena")
+    dropped = _inbox([user], min_score=0.6).find_candidates(tenant, "Dena")
+
+    assert len(kept) == 1
+    assert 0.5 < kept[0].score < 0.6
+    assert dropped == []

@@ -225,9 +225,13 @@ class InboxDirectorySettings(BaseSettings):
     max_fetch_seconds: float = Field(default=15.0, gt=0)
     # 0 turns the cache off.
     cache_ttl_seconds: float = Field(default=300.0, ge=0)
-    # Candidates scoring below this are dropped. A starting point, not a
-    # calibrated value -- see the matching step of #131.
-    min_score: float = Field(default=0.6, ge=0.0, le=1.0)
+    # Candidates scoring below this are dropped. A name that fails the word
+    # rule in integrations/name_matching.py scores 0 and a name that passes it
+    # scores at least WORD_MATCH_MIN * PARTIAL_SCORE (about 0.5), so this is a
+    # floor under the rule, not the rule: 0.4 drops nothing the rule lets through.
+    # Raise it only to drop weak matches such as a nickname or a typo in a lone
+    # first name; it must stay below PARTIAL_SCORE (0.7).
+    min_score: float = Field(default=0.4, ge=0.0, le=1.0)
 
     @field_validator("base_url", "actor_id", mode="before")
     @classmethod
