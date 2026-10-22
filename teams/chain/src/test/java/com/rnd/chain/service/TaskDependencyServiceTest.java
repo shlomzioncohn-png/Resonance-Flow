@@ -102,8 +102,8 @@ class TaskDependencyServiceTest {
                                 taskRepository,
                                 taskDependencyRepository,
                                 taskReadinessRepository,
-                                new SchedulingUpdateService(event -> {}),
-                                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))),
+                                new SchedulingUpdateService(event -> {},taskReadinessRepository),
+                                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {},taskReadinessRepository))),
                 TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
 
         service = new TaskDependencyService(taskRepository, taskDependencyRepository,
@@ -123,8 +123,8 @@ class TaskDependencyServiceTest {
                                 dummyTaskRepository,
                                 taskDependencyRepository,
                                 taskReadinessRepository,
-                                new SchedulingUpdateService(event -> {}),
-                                new SchedulingPublishListener(dummyTaskRepository, new SchedulingUpdateService(event -> {}))),
+                                new SchedulingUpdateService(event -> {},taskReadinessRepository),
+                                new SchedulingPublishListener(dummyTaskRepository, new SchedulingUpdateService(event -> {},taskReadinessRepository))),
                 TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
 
         assertThatThrownBy(() -> new TaskDependencyService(null, taskDependencyRepository,
@@ -145,8 +145,8 @@ class TaskDependencyServiceTest {
                                 taskRepository,
                                 dummyDependencyRepository,
                                 taskReadinessRepository,
-                                new SchedulingUpdateService(event -> {}),
-                                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))),
+                                new SchedulingUpdateService(event -> {},taskReadinessRepository),
+                                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {},taskReadinessRepository))),
                 TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
 
         assertThatThrownBy(() -> new TaskDependencyService(taskRepository, null,
@@ -319,7 +319,6 @@ class TaskDependencyServiceTest {
         // visible in history, not just vanish along with the speculative ADDED entry.
         taskRepository.save(Task.builder()
                 .id(taskB).tenantId(TaskFixtures.OTHER_TENANT_ID).status(TaskStatus.ACTIVE)
-                .isReady(true).blockingCount(0).openConstraintCount(0)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
 
         assertThatThrownBy(() -> service.addDependency(taskA, taskB))
@@ -364,8 +363,8 @@ class TaskDependencyServiceTest {
                                 taskRepository,
                                 taskDependencyRepository,
                                 taskReadinessRepository,
-                                new SchedulingUpdateService(event -> {}),
-                                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))),
+                                new SchedulingUpdateService(event -> {},taskReadinessRepository),
+                                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {},taskReadinessRepository))),
                 TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
@@ -390,8 +389,8 @@ class TaskDependencyServiceTest {
                                 taskRepository,
                                 taskDependencyRepository,
                                 taskReadinessRepository,
-                                new SchedulingUpdateService(event -> {}),
-                                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))),
+                                new SchedulingUpdateService(event -> {},taskReadinessRepository),
+                                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {},taskReadinessRepository))),
                 TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
@@ -603,7 +602,8 @@ void addDependency_whenSameMindEventIsRetried_shouldNotApplyDependencyTwice() {
 
     SchedulingUpdateService schedulingUpdateService =
             new SchedulingUpdateService(
-                    publishedEvents::add);
+                    publishedEvents::add,
+                    taskReadinessRepository);
 
     DependencyEdgeService edgeService =
         new DependencyEdgeService(
@@ -649,12 +649,8 @@ void addDependency_whenSameMindEventIsRetried_shouldNotApplyDependencyTwice() {
             .containsExactly(taskB);
 
     // blockingCount increased only once
-    Task updatedTask =
-            taskRepository.findById(taskA)
-                    .orElseThrow();
-
     assertThat(
-            updatedTask.getBlockingCount())
+            taskReadinessRepository.findByIds(List.of(taskA)).get(taskA).blockingCount())
             .isEqualTo(1);
 
     // Only one history entry was created

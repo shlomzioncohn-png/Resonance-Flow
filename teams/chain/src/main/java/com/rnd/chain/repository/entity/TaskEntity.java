@@ -40,15 +40,6 @@ public class TaskEntity {
     @Column(nullable = false)
     private TaskStatus status;
 
-    @Column(name = "is_ready", nullable = false)
-    private boolean isReady;
-
-    @Column(name = "blocking_count", nullable = false)
-    private int blockingCount;
-
-    @Column(name = "open_constraint_count", nullable = false)
-    private int openConstraintCount;
-
     @Column(name = "estimated_duration_min")
     private Integer estimatedDurationMin;
 

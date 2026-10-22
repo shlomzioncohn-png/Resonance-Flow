@@ -13,7 +13,8 @@ openConstraintCount, mirroring the idempotency every other counter-mutating path
 already has (edgeExists() / the task's own stored previousStatus).
 
 ## Key decisions
-- isReady = blockingCount==0 AND openConstraintCount==0
+- isReady = blockingCount==0 AND openConstraintCount==0, computed only by the `task_readiness` view
+  (not stored on Task/TaskEntity since #917 PR 2)
 - Tasks CAN reopen from DONE (confirmed by team lead) - blockingCount
   must be restored on dependents when this happens
 - Constraints CAN also reopen (PENDING -> DONE/WAIVED -> PENDING again)
@@ -149,7 +150,7 @@ the code with Lombok.
     also fails independently (`reason` round-trips as `{}` instead of `null`) - also pre-existing,
     also unrelated.
 - #649: TaskEligibilityService was split by domain - edges in `DependencyEdgeService`, constraints in
-  `ConstraintEligibilityService`, stored-counter maintenance (`updateCounters`, `adjustBlockingCount`) in `DependencyEdgeService` (`TaskCounterUpdater` was removed, #917 PR 1), priority-score recompute/publish
+  `ConstraintEligibilityService`, priority recompute-after-edge/constraint-change (`recomputePriority`) in `DependencyEdgeService` (`TaskCounterUpdater` was removed in #917 PR 1; the stored counters and `TaskStateReconciliationService` in PR 2), priority-score recompute/publish
   in `PriorityScoreService` (`recomputePriorityScoreAndPublish`, `onScoreProposed`), the publish-after-commit
   queue in `SchedulingUpdateService` (`requestPublishAfterCommit`), and placeholder-task inserts in
   `DependencyEdgeService` (`insertPlaceholdersIfAbsent`) (issue #917, PR 1). The graph lock is the
@@ -253,8 +254,7 @@ the code with Lombok.
 
 - `TaskRepository#update()`'s atomicity is now real: `PostgresTaskRepository`
   uses a pessimistic row lock (`SELECT ... FOR UPDATE`) as the sole
-  correctness mechanism for `blockingCount`/`openConstraintCount` under
-  concurrent writes - `@Version` on `TaskEntity` is defense-in-depth for a
+  correctness mechanism for concurrent writes to a task row - `@Version` on `TaskEntity` is defense-in-depth for a
   different, not-yet-existing write path, not part of this guarantee.
   The graph lock (see "Graph lock" above) is still required on top of it: it
   serializes the multi-row cycle-detection DFS and the read-with-edge-write

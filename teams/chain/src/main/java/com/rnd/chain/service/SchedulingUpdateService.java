@@ -1,9 +1,11 @@
 package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Task;
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.events.SchedulingUpdatePublisher;
 import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
+import com.rnd.chain.repository.TaskReadinessRepository;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,8 +13,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.util.LinkedHashSet;
-import java.util.Set;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -23,21 +26,28 @@ public class SchedulingUpdateService {
 
     /**
      * TransactionSynchronizationManager resource key for the per-transaction
-     * set of taskIds queued to publish at commit.
+     * map of taskId to the is_available value (from task_readiness) captured when the publish was
+     * last requested.
      */
     private static final String PENDING_PUBLISH_RESOURCE_KEY =
             SchedulingUpdateService.class.getName()
                     + ".pendingSchedulingPublishes";
 
     private final SchedulingUpdatePublisher schedulingUpdatePublisher;
+    private final TaskReadinessRepository taskReadinessRepository;
 
     public SchedulingUpdateService(
-            SchedulingUpdatePublisher schedulingUpdatePublisher) {
+            SchedulingUpdatePublisher schedulingUpdatePublisher,
+            TaskReadinessRepository taskReadinessRepository) {
 
         this.schedulingUpdatePublisher = schedulingUpdatePublisher;
+        this.taskReadinessRepository = taskReadinessRepository;
     }
 
-    public void publishSchedulingUpdate(Task task) {
+    /**
+     * @param isAvailable the task_readiness value captured inside the originating transaction
+     */
+    public void publishSchedulingUpdate(Task task, boolean isAvailable) {
 
         // Issue #445: priorityScore is Chain's feasibility-adjusted value (PriorityScoreService),
         // not Mind's raw score - task.getScore() was a stand-in used before priorityScore existed.
@@ -45,7 +55,7 @@ public class SchedulingUpdateService {
                 new TaskSchedulingUpdatedEvent(
                         UUID.randomUUID(),
                         task.getId(),
-                        task.isReady(),
+                        isAvailable,
                         task.getPriorityScore()
                 );
 
@@ -53,7 +63,9 @@ public class SchedulingUpdateService {
     }
 
     /**
-     * Queues one scheduling update per taskId per transaction.
+     * Queues one scheduling update per taskId per transaction. Reads is_available from
+     * task_readiness now, inside the transaction, and hands it to the after-commit callback; a
+     * repeat request for the same taskId refreshes that value. Throws if the view has no row.
      *
      * Publishing occurs only after a successful commit, through the supplied
      * listener (passed in rather than injected because the listener itself
@@ -74,9 +86,12 @@ public class SchedulingUpdateService {
             return;
         }
 
+        boolean isAvailable =
+                requireReadinessSnapshot(taskId).isReady();
+
         @SuppressWarnings("unchecked")
-        Set<UUID> pending =
-                (Set<UUID>)
+        Map<UUID, Boolean> pending =
+                (Map<UUID, Boolean>)
                         TransactionSynchronizationManager
                                 .getResource(
                                         PENDING_PUBLISH_RESOURCE_KEY);
@@ -84,7 +99,7 @@ public class SchedulingUpdateService {
         if (pending == null) {
 
             pending =
-                    new LinkedHashSet<>();
+                    new LinkedHashMap<>();
 
             TransactionSynchronizationManager
                     .bindResource(
@@ -92,7 +107,10 @@ public class SchedulingUpdateService {
                             pending);
         }
 
-        if (!pending.add(taskId)) {
+        boolean alreadyQueued =
+                pending.put(taskId, isAvailable) != null;
+
+        if (alreadyQueued) {
             return;
         }
 
@@ -106,18 +124,14 @@ public class SchedulingUpdateService {
                                 public void afterCommit() {
 
                                     @SuppressWarnings("unchecked")
-                                    Set<UUID> idsToPublish =
-                                            (Set<UUID>)
+                                    Map<UUID, Boolean> toPublish =
+                                            (Map<UUID, Boolean>)
                                                     TransactionSynchronizationManager
                                                             .getResource(
                                                                     PENDING_PUBLISH_RESOURCE_KEY);
 
-                                    for (UUID id :
-                                            idsToPublish) {
-
-                                        schedulingPublishListener
-                                                .onCommit(id);
-                                    }
+                                    toPublish.forEach(
+                                            schedulingPublishListener::onCommit);
                                 }
 
                                 @Override
@@ -130,5 +144,23 @@ public class SchedulingUpdateService {
                                 }
                             });
         }
+    }
+
+    private TaskReadinessSnapshot requireReadinessSnapshot(
+            UUID taskId) {
+
+        TaskReadinessSnapshot snapshot =
+                taskReadinessRepository
+                        .findByIds(List.of(taskId))
+                        .get(taskId);
+
+        if (snapshot == null) {
+
+            throw new IllegalStateException(
+                    "No task_readiness row found for task "
+                            + taskId);
+        }
+
+        return snapshot;
     }
 }

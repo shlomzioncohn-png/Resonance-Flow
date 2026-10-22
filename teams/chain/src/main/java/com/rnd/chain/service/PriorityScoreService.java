@@ -148,7 +148,7 @@ public class PriorityScoreService {
      * source for openConstraintCount.
      *
      * Publishing is based on the View readiness transition, never on
-     * Task.isReady().
+     * any stored task field.
      */
     @Transactional
     public Task recomputePriorityScoreAndPublish(
@@ -224,7 +224,7 @@ public class PriorityScoreService {
      *
      * It is safe only for mutations that do not themselves change the
      * task_readiness View. Readiness and openConstraintCount still come from
-     * the View rather than the stored Task columns.
+     * the View.
      */
     @Transactional
     public Task recomputePriorityScoreAndPublish(
@@ -247,7 +247,7 @@ public class PriorityScoreService {
      * Applies a Mind score/confidence update.
      *
      * Priority recomputation uses openConstraintCount from task_readiness,
-     * not from the stored Task columns.
+     * not from the Task.
      */
     @Transactional
     public void onScoreProposed(

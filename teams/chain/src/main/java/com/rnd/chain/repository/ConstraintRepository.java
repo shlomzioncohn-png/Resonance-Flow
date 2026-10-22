@@ -19,7 +19,7 @@ import java.util.UUID;
  * (whether the row was new, and what its status was immediately before this call) rather than
  * just "did this operation succeed" - both operations are idempotent upserts/updates that
  * "succeed" identically whether or not anything actually changed, so success alone can't tell a
- * caller whether a redelivered event needs to affect {@code Task.openConstraintCount}. This lets
+ * caller whether a redelivered event needs to change the task's readiness. This lets
  * the caller derive that decision from real persisted state instead of a separate in-memory
  * idempotency ledger (see teams/chain/CLAUDE.md "Key decisions", 2026-09-22).
  */

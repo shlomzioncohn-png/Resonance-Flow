@@ -20,11 +20,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.UnaryOperator;
 
 /**
  * Task status transitions and the readiness they imply; see {@link GraphLock} for the
@@ -61,10 +61,8 @@ public class TaskEligibilityService {
                                 List.of(taskId)),
                         taskId);
 
-        dependencyEdgeService.updateCounters(
+        dependencyEdgeService.recomputePriority(
                 taskId,
-                task -> task.withCounters(task.getBlockingCount(),
-                        task.getOpenConstraintCount()),
                 readiness,
                 readiness);
     }
@@ -138,18 +136,16 @@ public class TaskEligibilityService {
             if (previousStatus != TaskStatus.DONE
                     && newStatus == TaskStatus.DONE) {
 
-                adjustDependentsBlockingCount(
+                recomputeDependents(
                         taskId,
-                        -1,
                         dependentIds,
                         beforeReadiness);
 
             } else if (previousStatus == TaskStatus.DONE
                     && newStatus != TaskStatus.DONE) {
 
-                adjustDependentsBlockingCount(
+                recomputeDependents(
                         taskId,
-                        1,
                         dependentIds,
                         beforeReadiness);
             }
@@ -296,18 +292,16 @@ public class TaskEligibilityService {
             if (previousStatus != TaskStatus.DONE
                     && newStatus == TaskStatus.DONE) {
 
-                adjustDependentsBlockingCount(
+                recomputeDependents(
                         taskId,
-                        -1,
                         dependentIds,
                         beforeReadiness);
 
             } else if (previousStatus == TaskStatus.DONE
                     && newStatus != TaskStatus.DONE) {
 
-                adjustDependentsBlockingCount(
+                recomputeDependents(
                         taskId,
-                        1,
                         dependentIds,
                         beforeReadiness);
             }
@@ -388,9 +382,6 @@ public class TaskEligibilityService {
                 .parentTaskId(null)
                 .tenantId(tenantId)
                 .status(status)
-                .isReady(true)
-                .blockingCount(0)
-                .openConstraintCount(0)
                 .estimatedDurationMin(null)
                 .score(null)
                 .createdAt(LocalDateTime.now())
@@ -472,21 +463,19 @@ public class TaskEligibilityService {
                     current.getStatus(),
                     TaskStatus.DONE);
 
-            adjustDependentsBlockingCount(
+            recomputeDependents(
                     taskId,
-                    -1,
                     dependentIds,
                     beforeReadiness);
         });
     }
 
     /**
-     * Stored counters are still maintained for backwards compatibility,
-     * but readiness/history decisions are based on task_readiness.
+     * Readiness/history decisions are based on task_readiness; the dependents are
+     * locked and re-read so their priority can be recomputed.
      */
-    private void adjustDependentsBlockingCount(
+    private void recomputeDependents(
             UUID taskId,
-            int delta,
             List<UUID> dependentIds,
             Map<UUID, TaskReadinessSnapshot> beforeReadiness) {
 
@@ -494,24 +483,10 @@ public class TaskEligibilityService {
             return;
         }
 
-        Map<UUID, Task> previousById =
-                new HashMap<>();
-
-        List<Task> updated =
+        List<Task> locked =
                 taskRepository.updateAll(
                         dependentIds,
-                        task -> {
-
-                            previousById.put(
-                                    task.getId(),
-                                    task);
-
-                            return task.withCounters(Math.max(
-                                            0,
-                                            task.getBlockingCount()
-                                                    + delta),
-                                    task.getOpenConstraintCount());
-                        });
+                        UnaryOperator.identity());
 
         /*
          * Read again from the View AFTER the blocker/status change.
@@ -521,7 +496,7 @@ public class TaskEligibilityService {
                 taskReadinessRepository.findByIds(
                         dependentIds);
 
-        for (Task task : updated) {
+        for (Task task : locked) {
 
             TaskReadinessSnapshot before =
                     requireReadinessSnapshot(
@@ -535,7 +510,7 @@ public class TaskEligibilityService {
 
             /*
              * History receives values calculated by the View,
-             * not the stored task.blocking_count.
+             * not the task table.
              */
             historyRecorder.recordBlockingTransition(
                     task.getId(),
@@ -546,7 +521,7 @@ public class TaskEligibilityService {
 
             priorityScoreService.recomputePriorityScoreAndPublish(
                     task.getId(),
-                    previousById.get(task.getId()),
+                    task,
                     task,
                     before,
                     after);

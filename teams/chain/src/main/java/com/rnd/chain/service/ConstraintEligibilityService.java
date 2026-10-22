@@ -53,7 +53,7 @@ public class ConstraintEligibilityService {
 
     /**
      * Persists {@code constraint} and, if it's genuinely new,
-     * maintains the stored openConstraintCount.
+     * recomputes the task's priority and records the readiness transition.
      *
      * The authoritative readiness before/after comes from task_readiness.
      *
@@ -115,13 +115,10 @@ public class ConstraintEligibilityService {
                 requireReadinessSnapshot(taskId);
 
         /*
-         * Stored counter is still maintained during this migration stage.
-         * Readiness/publish itself is based on before/after View snapshots.
+         * Readiness/publish is based on before/after View snapshots.
          */
-        dependencyEdgeService.updateCounters(
+        dependencyEdgeService.recomputePriority(
                 taskId,
-                task -> task.withCounters(task.getBlockingCount(),
-                        task.getOpenConstraintCount() + 1),
                 beforeReadiness,
                 afterReadiness);
 
@@ -135,8 +132,7 @@ public class ConstraintEligibilityService {
      * Transitions {@code constraintId}'s status.
      *
      * If the transition crosses the PENDING/non-PENDING boundary,
-     * the stored openConstraintCount is maintained, while readiness,
-     * history and publishing rely on task_readiness.
+     * readiness, history and publishing rely on task_readiness.
      *
      * @throws NullPointerException if any argument is null
      * @throws IllegalStateException if no constraint with this id
@@ -219,15 +215,8 @@ public class ConstraintEligibilityService {
         TaskReadinessSnapshot afterReadiness =
                 requireReadinessSnapshot(taskId);
 
-        int delta =
-                isOpenNow ? 1 : -1;
-
-        dependencyEdgeService.updateCounters(
+        dependencyEdgeService.recomputePriority(
                 taskId,
-                task -> task.withCounters(task.getBlockingCount(),
-                        Math.max(
-                                0,
-                                task.getOpenConstraintCount() + delta)),
                 beforeReadiness,
                 afterReadiness);
 

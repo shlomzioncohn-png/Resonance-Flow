@@ -1,5 +1,6 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
 import com.rnd.chain.testsupport.PgRepos;
 import org.junit.jupiter.api.Tag;
@@ -45,6 +46,22 @@ class TaskCompletedEventHandlerTest {
     @Autowired
     private TaskReadinessRepository taskReadinessRepository;
 
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
+
     private static ConsumerRecord<String, TaskCompletedEvent> record(
             String taskId,
             boolean isCompleted,
@@ -79,9 +96,6 @@ class TaskCompletedEventHandlerTest {
                 .id(id)
                 .status(status)
                 .tenantId(com.rnd.chain.testsupport.TaskFixtures.DEFAULT_TENANT_ID)
-                .isReady(blockingCount == 0)
-                .blockingCount(blockingCount)
-                .openConstraintCount(0)
                 .createdAt(BASE_TIME)
                 .updatedAt(updatedAt)
                 .build();
@@ -167,8 +181,8 @@ class TaskCompletedEventHandlerTest {
 
         assertEquals(TaskStatus.DONE, fixture.taskRepo().findById(blocker).orElseThrow().getStatus());
         Task dependentAfter = fixture.taskRepo().findById(dependent).orElseThrow();
-        assertEquals(0, dependentAfter.getBlockingCount());
-        assertTrue(dependentAfter.isReady());
+        assertEquals(0, blockingCount(dependentAfter));
+        assertTrue(isReady(dependentAfter));
     }
 
     @Test
@@ -185,7 +199,7 @@ class TaskCompletedEventHandlerTest {
         fixture.handler().onMessage(record(blocker.toString(), true, doneEventTime));
 
         assertEquals(TaskStatus.DONE, fixture.taskRepo().findById(blocker).orElseThrow().getStatus());
-        assertEquals(0, fixture.taskRepo().findById(dependent).orElseThrow().getBlockingCount());
+        assertEquals(0, blockingCount(fixture.taskRepo().findById(dependent).orElseThrow()));
     }
 
     @Test
@@ -216,8 +230,8 @@ class TaskCompletedEventHandlerTest {
         fixture.handler().onMessage(record(blocker.toString(), true, BASE_TIME.plusMinutes(6)));
 
         Task dependentAfter = fixture.taskRepo().findById(dependent).orElseThrow();
-        assertEquals(1, dependentAfter.getBlockingCount());
-        assertFalse(dependentAfter.isReady());
+        assertEquals(1, blockingCount(dependentAfter));
+        assertFalse(isReady(dependentAfter));
     }
 
     @Test
@@ -233,7 +247,7 @@ class TaskCompletedEventHandlerTest {
         fixture.handler().onMessage(record(blocker.toString(), true, BASE_TIME.plusMinutes(5)));
 
         assertEquals(TaskStatus.ACTIVE, fixture.taskRepo().findById(blocker).orElseThrow().getStatus());
-        assertEquals(1, fixture.taskRepo().findById(dependent).orElseThrow().getBlockingCount());
+        assertEquals(1, blockingCount(fixture.taskRepo().findById(dependent).orElseThrow()));
     }
 
     @Test
@@ -245,7 +259,7 @@ class TaskCompletedEventHandlerTest {
         fixture.handler().onMessage(record(blocker.toString(), false, BASE_TIME.plusMinutes(5)));
 
         assertEquals(TaskStatus.ACTIVE, fixture.taskRepo().findById(blocker).orElseThrow().getStatus());
-        assertEquals(1, fixture.taskRepo().findById(dependent).orElseThrow().getBlockingCount());
+        assertEquals(1, blockingCount(fixture.taskRepo().findById(dependent).orElseThrow()));
     }
 
     @Test

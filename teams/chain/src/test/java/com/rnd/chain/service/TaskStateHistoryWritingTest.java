@@ -57,10 +57,10 @@ class TaskStateHistoryWritingTest {
                         taskRepository,
                         dependencyRepository,
                         taskReadinessRepository,
-                        new SchedulingUpdateService(event -> { }),
+                        new SchedulingUpdateService(event -> { },taskReadinessRepository),
                         new SchedulingPublishListener(
                         taskRepository,
-                        new SchedulingUpdateService(event -> { })));
+                        new SchedulingUpdateService(event -> { },taskReadinessRepository)));
 
         TaskStateHistoryRecorder recorder =
                 new TaskStateHistoryRecorder(history, Clock.systemUTC());
@@ -243,7 +243,6 @@ class TaskStateHistoryWritingTest {
                 .score(7.0)
                 .confidence(0.5)
                 .priorityScore(4.0)
-                .isReady(true)
                 .build();
         taskRepository.save(original);
         LocalDateTime eventTime = stored.plusSeconds(10);
@@ -253,8 +252,6 @@ class TaskStateHistoryWritingTest {
         Task after = taskRepository.findById(id).orElseThrow();
         assertThat(after.getStatus()).isEqualTo(TaskStatus.PENDING);
         assertThat(after.getUpdatedAt()).isEqualTo(eventTime);
-        assertThat(after.isReady()).isEqualTo(original.isReady());
-        assertThat(after.getBlockingCount()).isEqualTo(original.getBlockingCount());
         assertThat(after.getPriorityScore()).isEqualTo(original.getPriorityScore());
         assertThat(after.getScore()).isEqualTo(original.getScore());
     }

@@ -3,7 +3,6 @@ package com.rnd.chain.service;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskReadinessSnapshot;
-import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.exception.CrossTenantDependencyException;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
@@ -30,7 +29,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.UnaryOperator;
 
 @Service
@@ -92,20 +90,15 @@ public class DependencyEdgeService {
     }
 
     /**
-     * Maintains the stored blocking counter for backwards compatibility,
-     * but history/readiness/publish decisions are based on task_readiness.
+     * History/readiness/publish decisions are based on task_readiness.
      */
-    private void adjustBlockingCountAndRecord(
+    private void recomputeAndRecord(
             UUID taskId,
-            boolean dependsOnIsDone,
-            int delta,
             TaskReadinessSnapshot beforeReadiness,
             TaskReadinessSnapshot afterReadiness) {
 
-        adjustBlockingCount(
+        recomputePriority(
                 taskId,
-                dependsOnIsDone,
-                delta,
                 beforeReadiness,
                 afterReadiness);
 
@@ -271,13 +264,8 @@ public class DependencyEdgeService {
             TaskReadinessSnapshot afterReadiness =
                     requireReadinessSnapshot(taskId);
 
-            boolean dependencyAlreadyDone =
-                    dependencyTask.getStatus() == TaskStatus.DONE;
-
-            adjustBlockingCountAndRecord(
+            recomputeAndRecord(
                     task.getId(),
-                    dependencyAlreadyDone,
-                    1,
                     beforeReadiness,
                     afterReadiness);
 
@@ -301,9 +289,8 @@ public class DependencyEdgeService {
         TaskReadinessSnapshot readiness =
                 requireReadinessSnapshot(dependsOnTaskId);
 
-        updateCounters(
+        recomputePriority(
                 dependsOnTaskId,
-                UnaryOperator.identity(),
                 readiness,
                 readiness);
     }
@@ -311,8 +298,7 @@ public class DependencyEdgeService {
     private record PendingEdge(
             UUID dependsOnTaskId,
             Double confidence,
-            boolean isNewEdge,
-            boolean dependsOnAlreadyDone) {
+            boolean isNewEdge) {
     }
 
     /**
@@ -330,7 +316,6 @@ public class DependencyEdgeService {
             return new PendingEdge(
                     dependsOnTaskId,
                     confidence,
-                    false,
                     false);
         }
 
@@ -359,14 +344,10 @@ public class DependencyEdgeService {
                 task,
                 dependsOnTask);
 
-        boolean dependsOnAlreadyDone =
-                dependsOnTask.getStatus() == TaskStatus.DONE;
-
         return new PendingEdge(
                 dependsOnTaskId,
                 confidence,
-                true,
-                dependsOnAlreadyDone);
+                true);
     }
 
     private static void requireTenant(
@@ -445,7 +426,7 @@ public class DependencyEdgeService {
 
             log.info(
                     "Dependency {} -> {} already existed, "
-                            + "blockingCount left unchanged, confidence updated to {}",
+                            + "confidence updated to {}",
                     taskId,
                     edge.dependsOnTaskId(),
                     edge.confidence());
@@ -454,9 +435,8 @@ public class DependencyEdgeService {
              * Redelivery does not change readiness,
              * but confidence may change priorityScore.
              */
-            updateCounters(
+            recomputePriority(
                     taskId,
-                    UnaryOperator.identity(),
                     beforeReadiness,
                     afterReadiness);
 
@@ -466,10 +446,8 @@ public class DependencyEdgeService {
             return;
         }
 
-        adjustBlockingCountAndRecord(
+        recomputeAndRecord(
                 taskId,
-                edge.dependsOnAlreadyDone(),
-                1,
                 beforeReadiness,
                 afterReadiness);
 
@@ -593,8 +571,7 @@ public class DependencyEdgeService {
                     .orElseThrow(
                             () -> new TaskNotFoundException(taskId));
 
-            Task dependencyTask =
-                    taskRepository.findById(dependsOnTaskId)
+            taskRepository.findById(dependsOnTaskId)
                     .orElseThrow(
                             () -> new TaskNotFoundException(dependsOnTaskId));
 
@@ -624,13 +601,8 @@ public class DependencyEdgeService {
             TaskReadinessSnapshot afterReadiness =
                     requireReadinessSnapshot(taskId);
 
-            boolean dependencyCurrentlyDone =
-                    dependencyTask.getStatus() == TaskStatus.DONE;
-
-            adjustBlockingCountAndRecord(
+            recomputeAndRecord(
                     taskId,
-                    dependencyCurrentlyDone,
-                    -1,
                     beforeReadiness,
                     afterReadiness);
 
@@ -700,13 +672,13 @@ public class DependencyEdgeService {
     }
 
     /**
-     * Updates the stored compatibility counters while using authoritative
-     * before/after View snapshots for all readiness and publish decisions.
+     * Recomputes the task's priority score and queues a scheduling publish when the
+     * authoritative before/after View snapshots (or the score) changed. The task row is
+     * locked for the duration, as the old counter update did.
      */
     @Transactional
-    public Task updateCounters(
+    public Task recomputePriority(
             UUID taskId,
-            UnaryOperator<Task> countersMutator,
             TaskReadinessSnapshot beforeReadiness,
             TaskReadinessSnapshot afterReadiness) {
 
@@ -718,71 +690,17 @@ public class DependencyEdgeService {
                 afterReadiness,
                 "afterReadiness must not be null");
 
-        AtomicReference<Task> previous =
-                new AtomicReference<>();
-
-        Task updated =
+        Task locked =
                 taskRepository.update(
                                 taskId,
-                                task -> {
-
-                                    previous.set(task);
-
-                                    return countersMutator.apply(
-                                            task);
-                                })
+                                UnaryOperator.identity())
                         .orElseThrow(
                                 () -> new TaskNotFoundException(taskId));
 
-        Task oldTask =
-                previous.get();
-
-        if (updated != oldTask) {
-
-            log.info(
-                    "Task {} eligibility updated: "
-                            + "blockingCount={}, "
-                            + "openConstraintCount={}, "
-                            + "isReady={}",
-                    taskId,
-                    updated.getBlockingCount(),
-                    updated.getOpenConstraintCount(),
-                    updated.isReady());
-        }
-
         return priorityScoreService.recomputePriorityScoreAndPublish(
                 taskId,
-                oldTask,
-                updated,
-                beforeReadiness,
-                afterReadiness);
-    }
-
-    /**
-     * Maintains the stored blocking counter while readiness/publishing is
-     * decided exclusively from the supplied View snapshots.
-     */
-    @Transactional
-    public void adjustBlockingCount(
-            UUID taskId,
-            boolean dependsOnIsDone,
-            int delta,
-            TaskReadinessSnapshot beforeReadiness,
-            TaskReadinessSnapshot afterReadiness) {
-
-        int effectiveDelta =
-                dependsOnIsDone
-                        ? 0
-                        : delta;
-
-        updateCounters(
-                taskId,
-                task -> task.withCounters(
-                        Math.max(
-                                0,
-                                task.getBlockingCount()
-                                        + effectiveDelta),
-                        task.getOpenConstraintCount()),
+                locked,
+                locked,
                 beforeReadiness,
                 afterReadiness);
     }
