@@ -34,18 +34,6 @@ public final class Task {
 
     private final TaskStatus status;
 
-    /** Whether all of this task's dependencies and constraints are satisfied, so it can be worked on.
-     * Invariant: must equal {@code blockingCount == 0 && openConstraintCount == 0}. Not enforced by
-     * this class (a stored field, not derived) - {@code withCounters} is the
-     * single place responsible for keeping it in sync whenever either counter changes. */
-    private final boolean isReady;
-
-    /** Number of not-yet-completed tasks that this task depends on (i.e. tasks blocking it). */
-    private final int blockingCount;
-
-    /** Number of unresolved constraints (e.g. scheduling/resource constraints) still open on this task. */
-    private final int openConstraintCount;
-
     private final Integer estimatedDurationMin;
     private final Double score;
 
@@ -75,9 +63,6 @@ public final class Task {
                  UUID parentTaskId,
                  UUID tenantId,
                  TaskStatus status,
-                 boolean isReady,
-                 int blockingCount,
-                 int openConstraintCount,
                  Integer estimatedDurationMin,
                  Double score,
                  Double confidence,
@@ -90,12 +75,6 @@ public final class Task {
         if (id == null) {
             throw new IllegalArgumentException("id must not be null");
         }
-        if (blockingCount < 0) {
-            throw new IllegalArgumentException("blockingCount must not be negative");
-        }
-        if (openConstraintCount < 0) {
-            throw new IllegalArgumentException("openConstraintCount must not be negative");
-        }
         if (status == null) {
             throw new IllegalArgumentException("status must not be null");
         }
@@ -103,9 +82,6 @@ public final class Task {
         this.parentTaskId = parentTaskId;
         this.tenantId = tenantId;
         this.status = status;
-        this.isReady = isReady;
-        this.blockingCount = blockingCount;
-        this.openConstraintCount = openConstraintCount;
         this.estimatedDurationMin = estimatedDurationMin;
         this.score = score;
         this.confidence = confidence;
@@ -118,29 +94,6 @@ public final class Task {
     }
 
     /**
-     * Returns this task with the stored counters set to the given values and {@code isReady}
-     * derived from them, or this same instance when nothing would change.
-     *
-     * Stored counters are still maintained during this migration stage. Readiness decisions must
-     * not rely on the isReady value produced here; task_readiness is the authoritative source.
-     */
-    public Task withCounters(int blockingCount, int openConstraintCount) {
-        boolean ready = blockingCount == 0 && openConstraintCount == 0;
-
-        if (this.blockingCount == blockingCount
-                && this.openConstraintCount == openConstraintCount
-                && this.isReady == ready) {
-            return this;
-        }
-
-        return toBuilder()
-                .blockingCount(blockingCount)
-                .openConstraintCount(openConstraintCount)
-                .isReady(ready)
-                .build();
-    }
-
-    /**
      * A PENDING stand-in for a task Chain has not received yet, with an epoch {@code updatedAt} so
      * the first real update always wins.
      */
@@ -149,7 +102,6 @@ public final class Task {
                 .id(id)
                 .tenantId(tenantId)
                 .status(TaskStatus.PENDING)
-                .isReady(true)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.ofEpochSecond(0, 0, java.time.ZoneOffset.UTC))
                 .build();
@@ -159,9 +111,6 @@ public final class Task {
     public String toString() {
         return "Task{id=" + id
                 + ", status=" + status
-                + ", isReady=" + isReady
-                + ", blockingCount=" + blockingCount
-                + ", openConstraintCount=" + openConstraintCount
                 + ", priorityScore=" + priorityScore
                 + ", deletedAt=" + deletedAt
                 + "}";

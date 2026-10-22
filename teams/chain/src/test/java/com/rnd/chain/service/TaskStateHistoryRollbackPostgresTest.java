@@ -1,5 +1,6 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.dto.PageResponse;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStateHistoryEntry;
@@ -38,6 +39,25 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Tag("postgres")
 @SpringBootTest
 class TaskStateHistoryRollbackPostgresTest {
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.rnd.chain.repository.TaskReadinessRepository taskReadinessRepository;
+
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
 
     private static final LocalDateTime STORED_AT = LocalDateTime.of(2026, 1, 1, 12, 0);
 
@@ -146,7 +166,7 @@ class TaskStateHistoryRollbackPostgresTest {
                 .isInstanceOf(IllegalStateException.class);
 
         assertThat(dependencyRepository.findByTaskId(dependent)).isEmpty();
-        assertThat(taskRepository.findById(dependent).orElseThrow().getBlockingCount()).isZero();
+        assertThat(blockingCount(taskRepository.findById(dependent).orElseThrow())).isZero();
         assertThat(historyRowCount(dependent)).isZero();
     }
 
@@ -158,7 +178,7 @@ class TaskStateHistoryRollbackPostgresTest {
         edgeService.addDependency(dependent, blocker);
 
         assertThat(dependencyRepository.findByTaskId(dependent)).hasSize(1);
-        assertThat(taskRepository.findById(dependent).orElseThrow().getBlockingCount()).isEqualTo(1);
+        assertThat(blockingCount(taskRepository.findById(dependent).orElseThrow())).isEqualTo(1);
         assertThat(historyRowCount(dependent)).isEqualTo(1);
     }
 }

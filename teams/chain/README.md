@@ -216,8 +216,7 @@ Inbox adds `completed_at` to the event. A task finishes, and its dependents are 
 If the task is unknown, that `DONE` event creates it as `PENDING` with `updated_at` one second before the
 event's (`TaskEligibilityService.DONE_EVENT_UPDATED_AT_SKEW`): the following `task.completed` still applies,
 while an older `task.updated` is still rejected. Reopening (`DONE` back to `PENDING`/`ACTIVE`) still
-arrives on `task.updated` and blocks the dependents again. `TaskStateReconciliationService` likewise never writes
-`updated_at` when it corrects counters, so it can't make a genuine `task.updated` look stale. Claims are stored in
+arrives on `task.updated` and blocks the dependents again. Claims are stored in
 the `processed_events` table by `PostgresProcessedEventStore` (an atomic `INSERT ... ON CONFLICT DO
 NOTHING`), so they survive restarts and are shared by every instance. See `ProcessedEventStore`'s
 Javadoc for what a claim does and doesn't guarantee.
@@ -283,6 +282,12 @@ Computed by `PriorityScoreService.compute` (a pure function, no repository acces
 `PriorityScoreService.recomputePriorityScoreAndPublish` gathers its inputs from the dependency graph and
 `task_readiness`, persists the result and queues a publish whenever either `priority_score` or
 `is_available` changes; `DependencyEdgeService` and `TaskEligibilityService` call it.
+
+Readiness (`blocking_count`, `open_constraint_count`, `is_ready`) is no longer stored on `Task`/`TaskEntity`
+(#917 PR 2); the `task_readiness` view is the only source. `SchedulingUpdateService.requestPublishAfterCommit`
+reads `is_available` from the view inside the transaction and hands it to the after-commit publish; a task
+with no view row throws `IllegalStateException`. The old `task` columns remain in the schema until the
+follow-up migration drops them. API responses read the same view.
 
 ### Formula
 
@@ -898,13 +903,12 @@ action in `TaskDependencyService` was **not** removed - see "Dependency graph pe
 Append-only table `task_state_history` (V9) for status changes and blocking transitions. This
 schema, `TaskStateHistoryEntry`/`TaskStateEventType` and `TaskStateHistoryRepository`
 (Postgres) landed in #773. Rows are written (#774) in the same transaction as the
-change, via `TaskStateHistoryRecorder` (independent of the stored-counter code in
-`DependencyEdgeService`, which is slated for removal): `TaskEligibilityService` records status changes (`onTaskStatusChangedIfNewer`,
+change, via `TaskStateHistoryRecorder` (its blocking values come from the `task_readiness`
+view, not from stored task columns): `TaskEligibilityService` records status changes (`onTaskStatusChangedIfNewer`,
 `onTaskStatusChanged`, `onTaskCompleted`) and the blocking transitions of dependents it releases
 or re-blocks; `DependencyEdgeService` records the blocking transition of an edge add/remove.
 A stale/duplicate event, or one that leaves the status or the
-0/positive state of `blocking_count` unchanged, writes nothing. `TaskStateReconciliationService`
-corrections are not recorded yet. Read access is the endpoint below (#775).
+0/positive state of `blocking_count` unchanged, writes nothing. Read access is the endpoint below (#775).
 
 ### Schema
 
@@ -1115,7 +1119,7 @@ not a mismatch.
 
 **Placeholders on `task.dependencies.proposed`.** The event always carries `tenant_id`; one without it is
 malformed and goes straight to `.errors`. A missing source or target task is created as a `PENDING`
-placeholder in that tenant (`updatedAt` = epoch, counters 0) inside the graph lock, and the edge is
+placeholder in that tenant (`updatedAt` = epoch) inside the graph lock, and the edge is
 recorded right away. An existing task is never overwritten, and one in a different tenant rejects the
 whole event (no retry, nothing created). A later `task.updated` replaces the placeholder's state.
 

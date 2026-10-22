@@ -41,7 +41,6 @@ class DependencyEdgeServicePlaceholderTest {
         assertThat(inserted).allSatisfy(task -> {
             assertThat(task.getTenantId()).isEqualTo(tenantId);
             assertThat(task.getStatus()).isEqualTo(TaskStatus.PENDING);
-            assertThat(task.isReady()).isTrue();
             assertThat(task.getUpdatedAt()).isEqualTo(LocalDateTime.ofEpochSecond(0, 0, ZoneOffset.UTC));
             assertThat(task.getCreatedAt()).isNotNull();
         });

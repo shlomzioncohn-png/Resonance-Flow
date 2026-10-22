@@ -182,7 +182,7 @@ class PriorityScoreServiceRecomputeTest {
 
     @Test
     void recompute_usesAfterReadinessOpenConstraintCountNotTheStoredColumn() {
-        Task current = task(taskId).score(0.8).confidence(1.0).openConstraintCount(0).build();
+        Task current = task(taskId).score(0.8).confidence(1.0).build();
         storedTaskIs(current);
         noEdges();
         TaskReadinessSnapshot twoOpen = new TaskReadinessSnapshot(taskId, 0, 2);

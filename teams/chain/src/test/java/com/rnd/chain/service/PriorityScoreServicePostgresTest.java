@@ -52,7 +52,7 @@ class PriorityScoreServicePostgresTest {
     private Fixture newFixture(List<Task> tasks) {
         TaskRepository taskRepo = PgRepos.tasks(tasks);
         RecordingSchedulingUpdatePublisher publisher = new RecordingSchedulingUpdatePublisher();
-        SchedulingUpdateService scheduling = new SchedulingUpdateService(publisher);
+        SchedulingUpdateService scheduling = new SchedulingUpdateService(publisher,taskReadinessRepository);
         PriorityScoreService priorityScoreService = new PriorityScoreService(
                 taskRepo,
                 PgRepos.dependencies(List.of()),
@@ -65,9 +65,6 @@ class PriorityScoreServicePostgresTest {
     private static Task buildTask(UUID id) {
         return TaskTestFixtures.defaultTask(id)
                 .status(TaskStatus.ACTIVE)
-                .isReady(true)
-                .blockingCount(0)
-                .openConstraintCount(0)
                 .build();
     }
 

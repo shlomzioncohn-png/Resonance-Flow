@@ -1,5 +1,6 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
 
 import com.rnd.chain.testsupport.PgRepos;
@@ -55,6 +56,22 @@ class TaskEligibilityServiceTest {
     @Autowired
     private TaskReadinessRepository taskReadinessRepository;
 
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
+
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
@@ -66,7 +83,7 @@ class TaskEligibilityServiceTest {
         publisher = new RecordingSchedulingUpdatePublisher();
 
         SchedulingUpdateService schedulingUpdateService =
-            new SchedulingUpdateService(publisher);
+            new SchedulingUpdateService(publisher,taskReadinessRepository);
 
         GraphLock lock =
             PgRepos.graphLock();
@@ -143,10 +160,10 @@ class TaskEligibilityServiceTest {
 
         assertEquals(
                 0,
-                updated.getBlockingCount());
+                blockingCount(updated));
 
         assertTrue(
-                updated.isReady());
+                isReady(updated));
 
         assertEquals(
                 1,
@@ -191,10 +208,10 @@ class TaskEligibilityServiceTest {
 
         assertEquals(
                 1,
-                updated.getBlockingCount());
+                blockingCount(updated));
 
         assertFalse(
-                updated.isReady());
+                isReady(updated));
 
         assertEquals(
                 1,
@@ -234,11 +251,11 @@ class TaskEligibilityServiceTest {
                         .orElseThrow();
 
         assertFalse(
-                updated.isReady());
+                isReady(updated));
 
         assertEquals(
                 1,
-                updated.getBlockingCount());
+                blockingCount(updated));
 
         assertEquals(
                 1,
@@ -252,7 +269,7 @@ class TaskEligibilityServiceTest {
 
         fixture.service().recalculateTaskEligibility(taskId);
 
-        assertTrue(fixture.taskRepo().findById(taskId).orElseThrow().isReady());
+        assertTrue(isReady(fixture.taskRepo().findById(taskId).orElseThrow()));
     }
 
     @Test
@@ -263,7 +280,7 @@ class TaskEligibilityServiceTest {
 
         fixture.service().recalculateTaskEligibility(taskId);
 
-        assertFalse(fixture.taskRepo().findById(taskId).orElseThrow().isReady());
+        assertFalse(isReady(fixture.taskRepo().findById(taskId).orElseThrow()));
     }
 
     @Test
@@ -273,7 +290,7 @@ class TaskEligibilityServiceTest {
 
         fixture.service().recalculateTaskEligibility(taskId);
 
-        assertFalse(fixture.taskRepo().findById(taskId).orElseThrow().isReady());
+        assertFalse(isReady(fixture.taskRepo().findById(taskId).orElseThrow()));
     }
 
     @Test
@@ -283,7 +300,7 @@ class TaskEligibilityServiceTest {
 
         fixture.service().recalculateTaskEligibility(taskId);
 
-        assertTrue(fixture.taskRepo().findById(taskId).orElseThrow().isReady());
+        assertTrue(isReady(fixture.taskRepo().findById(taskId).orElseThrow()));
     }
 
 
@@ -328,8 +345,8 @@ class TaskEligibilityServiceTest {
 
         assertEquals(TaskStatus.DONE, fixture.taskRepo().findById(taskB).orElseThrow().getStatus());
         Task a = fixture.taskRepo().findById(taskA).orElseThrow();
-        assertEquals(0, a.getBlockingCount());
-        assertTrue(a.isReady());
+        assertEquals(0, blockingCount(a));
+        assertTrue(isReady(a));
     }
 
     @Test
@@ -343,8 +360,8 @@ class TaskEligibilityServiceTest {
 
         fixture.service().onTaskStatusChanged(taskB, TaskStatus.DONE);
 
-        assertTrue(fixture.taskRepo().findById(taskA).orElseThrow().isReady());
-        assertTrue(fixture.taskRepo().findById(taskC).orElseThrow().isReady());
+        assertTrue(isReady(fixture.taskRepo().findById(taskA).orElseThrow()));
+        assertTrue(isReady(fixture.taskRepo().findById(taskC).orElseThrow()));
     }
 
     @Test
@@ -362,11 +379,11 @@ class TaskEligibilityServiceTest {
 
         fixture.service().onTaskStatusChanged(taskC, TaskStatus.DONE);
 
-        assertTrue(fixture.taskRepo().findById(taskB).orElseThrow().isReady());
+        assertTrue(isReady(fixture.taskRepo().findById(taskB).orElseThrow()));
         // A depends on B, not C - B becoming ready (not DONE) must not touch A's own counters:
         // the fan-out only reaches direct dependents of C, never transitively past them.
-        assertEquals(1, fixture.taskRepo().findById(taskA).orElseThrow().getBlockingCount());
-        assertFalse(fixture.taskRepo().findById(taskA).orElseThrow().isReady());
+        assertEquals(1, blockingCount(fixture.taskRepo().findById(taskA).orElseThrow()));
+        assertFalse(isReady(fixture.taskRepo().findById(taskA).orElseThrow()));
     }
 
     @Test
@@ -382,8 +399,8 @@ class TaskEligibilityServiceTest {
 
         assertEquals(TaskStatus.PENDING, fixture.taskRepo().findById(taskB).orElseThrow().getStatus());
         Task a = fixture.taskRepo().findById(taskA).orElseThrow();
-        assertEquals(1, a.getBlockingCount());
-        assertFalse(a.isReady());
+        assertEquals(1, blockingCount(a));
+        assertFalse(isReady(a));
     }
 
     @Test
@@ -397,7 +414,7 @@ class TaskEligibilityServiceTest {
 
         fixture.service().onTaskStatusChanged(taskId, TaskStatus.ACTIVE);
 
-        assertTrue(fixture.taskRepo().findById(taskId).orElseThrow().isReady());
+        assertTrue(isReady(fixture.taskRepo().findById(taskId).orElseThrow()));
     }
 
     @Test
@@ -413,7 +430,7 @@ class TaskEligibilityServiceTest {
         fixture.service().onTaskStatusChanged(taskB, TaskStatus.PENDING);
 
         assertEquals(TaskStatus.PENDING, fixture.taskRepo().findById(taskB).orElseThrow().getStatus());
-        assertEquals(5, fixture.taskRepo().findById(taskA).orElseThrow().getBlockingCount());
+        assertEquals(5, blockingCount(fixture.taskRepo().findById(taskA).orElseThrow()));
     }
 
     @Test
@@ -431,7 +448,7 @@ class TaskEligibilityServiceTest {
         UUID taskId = UUID.randomUUID();
         UUID tenantId = UUID.randomUUID();
         Fixture fixture = newFixture(
-                List.of(TaskTestFixtures.defaultTask(taskId).isReady(true).tenantId(null).build()), List.of());
+                List.of(TaskTestFixtures.defaultTask(taskId).tenantId(null).build()), List.of());
 
         fixture.service().onTaskStatusChangedIfNewer(taskId, TaskStatus.ACTIVE,
                 LocalDateTime.now().plusMinutes(1), tenantId, null);
@@ -489,9 +506,6 @@ class TaskEligibilityServiceTest {
                 .parentTaskId(null)
                 .tenantId(TaskTestFixtures.DEFAULT_TENANT_ID)
                 .status(status)
-                .isReady(ready)
-                .blockingCount(blockingCount)
-                .openConstraintCount(openConstraintCount)
                 .estimatedDurationMin(null)
                 .score(null)
                 .createdAt(now)
@@ -548,7 +562,7 @@ class TaskEligibilityServiceTest {
             new RecordingSchedulingUpdatePublisher();
 
         SchedulingUpdateService scheduling =
-            new SchedulingUpdateService(fixturePublisher);
+            new SchedulingUpdateService(fixturePublisher,taskReadinessRepository);
 
         GraphLock lock =
             PgRepos.graphLock();
@@ -603,9 +617,6 @@ class TaskEligibilityServiceTest {
                                    TaskStatus status) {
         return TaskTestFixtures.defaultTask(id)
                 .status(status)
-                .isReady(isReady)
-                .blockingCount(blockingCount)
-                .openConstraintCount(openConstraintCount)
                 .build();
     }
 
@@ -700,7 +711,7 @@ class TaskEligibilityServiceTest {
         TestTransactions.runCommitted(() -> fixture.service().onTaskStatusChanged(blockerId, TaskStatus.DONE));
 
         Task task = fixture.taskRepo().findById(taskId).orElseThrow();
-        assertTrue(task.isReady());
+        assertTrue(isReady(task));
         assertEquals(PURE_SCORER.compute(0.8, 1.0, 0, 0, 0), task.getPriorityScore());
         assertEquals(1, fixture.publisher().getEvents().size());
     }
