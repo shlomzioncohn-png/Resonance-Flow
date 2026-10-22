@@ -30,8 +30,9 @@ import org.springframework.stereotype.Component;
 
 /**
  * Converts a verified Slack Events API "event_callback" payload's inner {@code event} object
- * into a {@link ChatMessage}, for the two shapes this real-time path supports: a plain,
- * newly-posted "message" event with no subtype, and a "message_changed" edit. Deliberately
+ * into a {@link ChatMessage}, for the shapes this real-time path supports: a plain, newly-posted
+ * "message" event with no subtype or with subtype "file_share" (a message posted with an
+ * attached file), and a "message_changed" edit. Deliberately
  * parses into the Slack SDK's own {@link Message} model (the same type
  * {@code RealSlackSourceReader} gets back from conversations.history) rather than hand-rolled
  * JSON field access — the Events API's message event (and the nested "message" object inside a
@@ -82,14 +83,24 @@ class SlackEventMessageParser {
         if (!event.hasNonNull("subtype")) {
             return parseMessageNode(event, event);
         }
-        if ("message_changed".equals(event.get("subtype").asText()) && event.hasNonNull("message")) {
+        String subtype = event.get("subtype").asText();
+        // A message posted with an attached file arrives as a top-level "message" event with
+        // subtype "file_share" instead of no subtype at all - same shape otherwise (text,
+        // thread_ts, files), so it's routed through the identical parseMessageNode path as a
+        // plain message rather than being dropped.
+        if ("file_share".equals(subtype)) {
+            return parseMessageNode(event, event);
+        }
+        if ("message_changed".equals(subtype) && event.hasNonNull("message")) {
             JsonNode nested = event.get("message");
             // A root-with-replies deletion arrives as message_changed with a nested
             // "tombstone" subtype, not message_deleted at all - handled by parseDeletion
             // instead of being misread as an ordinary text edit (see SlackMessageDeletion's
             // javadoc). A link-unfurl's nested message is Slack's own "bot_message" subtype,
             // typically missing "user" - ignored outright (neither edit nor new message),
-            // same as the existing top-level bot_message rejection below.
+            // same as the existing top-level bot_message rejection below. A nested "file_share"
+            // subtype (an edit of a message that has a file) isn't special-cased at all - it
+            // falls straight through to parseMessageNode below, same as an edit with no subtype.
             if (nested.hasNonNull("subtype")) {
                 String nestedSubtype = nested.get("subtype").asText();
                 if ("tombstone".equals(nestedSubtype) || "bot_message".equals(nestedSubtype)) {
@@ -100,6 +111,7 @@ class SlackEventMessageParser {
         }
         // message_deleted, bot messages, channel-join notices, malformed message_changed
         // payloads (no nested "message"), etc. - not this step's scope.
+        log.info("Dropping unsupported Slack event type=message subtype={}", subtype);
         return Optional.empty();
     }
 

@@ -1,6 +1,7 @@
 package com.rnd.bridge.intake.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -182,6 +183,87 @@ class SlackEventMessageParserTest {
                         + "\"message\":{\"type\":\"message\",\"user\":\"U1\",\"ts\":\"1000.0\",\"text\":\"edited\"}}");
 
         assertThat(parser.parseDeletion(event)).isEmpty();
+    }
+
+    @Test
+    void topLevelFileShareWithNoFilesIsRoutedAsAPlainMessage() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"file_share\",\"channel\":\"C123\",\"user\":\"U1\","
+                        + "\"ts\":\"1000.100000\",\"text\":\"check this out\"}");
+
+        Optional<ChatMessage> result = parser.parse(event);
+
+        assertThat(result).isPresent();
+        ChatMessage message = result.orElseThrow();
+        assertThat(message.chatId()).isEqualTo("C123");
+        assertThat(message.sender()).isEqualTo("U1");
+        assertThat(message.text()).isEqualTo("check this out");
+        assertThat(message.id()).isEqualTo("1000.100000");
+        assertThat(message.threadId()).isNull();
+        assertThat(message.attachments()).isEmpty();
+    }
+
+    @Test
+    void topLevelFileShareThreadReplyIsRoutedWithItsThreadId() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"file_share\",\"channel\":\"C123\",\"user\":\"U1\","
+                        + "\"ts\":\"1000.2\",\"thread_ts\":\"1000.0\",\"text\":\"here's the file\"}");
+
+        Optional<ChatMessage> result = parser.parse(event);
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().threadId()).isEqualTo("1000.0");
+    }
+
+    @Test
+    void topLevelFileShareWithEmptyTextIsRouted() throws Exception {
+        // Slack sends an empty "text" (not a missing field) when a file is shared with no
+        // accompanying comment.
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"file_share\",\"channel\":\"C123\",\"user\":\"U1\","
+                        + "\"ts\":\"1000.3\",\"text\":\"\"}");
+
+        Optional<ChatMessage> result = parser.parse(event);
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().text()).isEmpty();
+    }
+
+    @Test
+    void topLevelFileShareWithFilesArrayIsRoutedThroughAttachmentResolution() throws Exception {
+        // Verifies routing up to (but not through) the actual download: this parser has no
+        // injectable download seam (see this class's header javadoc), so a real "files" entry
+        // unavoidably reaches downloadFile's live HTTP call. Pointing url_private_download at
+        // 127.0.0.1:1 (a port nothing listens on) fails fast with "connection refused" - no DNS
+        // lookup, no real network dependency, no live Slack token - while still proving the
+        // event was accepted, parsed into a Message, and its file list reached resolveAttachments.
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"file_share\",\"channel\":\"C123\",\"user\":\"U1\","
+                        + "\"ts\":\"1000.4\",\"text\":\"check this out\",\"files\":[{\"id\":\"F1\","
+                        + "\"name\":\"doc.pdf\",\"mimetype\":\"application/pdf\","
+                        + "\"url_private_download\":\"http://127.0.0.1:1/doc.pdf\"}]}");
+
+        assertThatThrownBy(() -> parser.parse(event))
+                .isInstanceOf(java.io.UncheckedIOException.class);
+    }
+
+    @Test
+    void messageChangedWithNestedFileShareSubtypeIsParsedAsAnOrdinaryEdit() throws Exception {
+        // A nested "file_share" subtype (editing a message that has a file attached) isn't
+        // special-cased - only "tombstone" and "bot_message" are filtered above - so this falls
+        // straight through to parseMessageNode, same as an edit with no nested subtype at all.
+        // No code change was needed for this case; this test documents that it already worked.
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_changed\",\"channel\":\"C123\",\"ts\":\"1000.9\","
+                        + "\"message\":{\"type\":\"message\",\"subtype\":\"file_share\",\"user\":\"U1\","
+                        + "\"ts\":\"1000.0\",\"text\":\"edited caption\"}}");
+
+        Optional<ChatMessage> result = parser.parse(event);
+
+        assertThat(result).isPresent();
+        ChatMessage message = result.orElseThrow();
+        assertThat(message.id()).isEqualTo("1000.0");
+        assertThat(message.text()).isEqualTo("edited caption");
     }
 
     @Test
