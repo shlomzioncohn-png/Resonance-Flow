@@ -245,7 +245,7 @@ created from `task.updated` and when it already exists. A tier-only change write
 reads as "leave the stored value unchanged". `KafkaEventPublisher` (flat JSON, no envelope) was removed under #543 - it had no production caller.
 
 **Schemas**: the `.proto` sources come from the repo's [`shared/proto/`](../../shared/proto)
-(`chain-task-updated-event` - a self-contained copy of `task-updated-event` - and
+(`task-updated-event`, with the enums it imports from `task-created-event`, and
 `task-dependencies-proposed-event`,
 `scheduling-updated-event`). Messages are
 validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock registry
