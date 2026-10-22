@@ -19,6 +19,13 @@ A topic that was only discussed is not a task, nor is work already done, nor a
 decision that leaves nobody anything to do. When the same task comes up more
 than once, list it once.
 
+Content can come in parts, each under a heading in square brackets such as
+`[Body]` or `[Attachment: form.jpg, scanned]`. The parts arrived together as
+one item: a task may take its details from more than one part,
+and a task that two parts raise is one task. A heading only says what the
+part is and how it became text;
+never take a task, a title or a `source_ref` from the heading.
+
 Return a single JSON object and nothing else: no prose before or after it, no
 markdown code fence, no explanation, no trailing commentary.
 

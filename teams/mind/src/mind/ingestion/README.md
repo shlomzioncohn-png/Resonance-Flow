@@ -70,9 +70,9 @@ bridge.raw.landed ─► to_raw_object_event ─► classify_arrival ─► extr
    other make one task, not two half-tasks. Per file, the same request in a
    body and its attachment would also become two tasks, and R3's
    `find_duplicate` cannot catch that: it compares against tasks already in the
-   index, and these two are created together. Until #690 raises
-   `MAX_CONTENT_CHARS` (8000, `extraction/prompts.py`), extraction truncates a
-   long joined item there.
+   index, and these two are created together. Extraction cuts only an item
+   past `MAX_CONTENT_CHARS` (100,000, `extraction/prompts.py`), one cap for
+   every source, so a long body does not cost the attachment after it.
 4. **Hand-off** (`on_items(event, items)`, the list empty or of one), then the
    item is marked processed. The event travels next to the item: it carries
    the tenant, `source_ref` and `correlation_id` extraction needs. Marked only
@@ -168,6 +168,16 @@ MIND_LANDED_CONSUMER__GROUP_ID=mind-landed-joint-test make run-landed-consumer
 - **Per-file retry.** An item with one bad file is still marked processed, so
   that file is never retried. Suggested: track files, not items, so only the
   failed one is tried again.
+- **A long item with tasks in more than one part.** Measured live
+  (`gemini-3.6-flash`) on two AMI meetings joined into one item of 61k
+  characters: alone they find 4/4 and 4/8 of the gold action items; joined,
+  IS1008b first, 3/12 and 5/12. The loss is the first part's items that are
+  only mentioned briefly (IS1008b's closing "individual actions" slide): with
+  IB4003 first they are found again, 7/12 and 8/12. Not the parts paragraph
+  in `system.md` (without it, 4/12 twice), and a "read every part to its end"
+  line with numbered headings did not help (2/12, 5/12). A real item is
+  rarely two task-dense parts, so it is left as is. If it shows up: extract
+  each part on its own, with the rest of the item as context.
 - **Which file failed extraction.** The item is extracted as one text, so a
   failed extraction names the item (`correlation_id`), not the file in it
   that caused the failure.
