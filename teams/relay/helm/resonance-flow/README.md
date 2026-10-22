@@ -171,13 +171,15 @@ components:
       enabled: true
       path: /prometheus        # default /actuator/prometheus
       interval: 30s            # default
-      team: bridge             # default: the component name
+      team: bridge             # default: components.bridge.team, else the component name
 ```
 
 `templates/servicemonitor.yaml` then renders a ServiceMonitor for the component's
 Service, on its `http` port. Every series gets two labels: `component` (the
-`components.<name>` key) and `team` (`metrics.team`), for per-team dashboards and
-alert routing.
+`components.<name>` key) and `team` (`components.<name>.team`, else
+`metrics.team`, else the component name), for per-team dashboards and alert
+routing. Set `components.<name>.team` on a component that isn't scraped but whose
+alerts should still reach its team (e.g. `lens-frontend`) - see "Alerting".
 
 - **The app must expose the endpoint first.** For Spring Boot that's
   `io.micrometer:micrometer-registry-prometheus` plus `prometheus` in
@@ -201,6 +203,75 @@ alert routing.
   `templates/kafka-exporter-sasl-secret.yaml` - never set its `sasl.scram`
   username/password directly. Same as above: its own ServiceMonitor stays off,
   `infra-servicemonitors.yaml` scrapes it.
+
+## Alerting
+
+`templates/prometheusrules.yaml` renders one PrometheusRule,
+`resonance-flow-alerts`, with the same CRD check as the ServiceMonitors (so not in
+teams' kind CI; `helm template` needs
+`--api-versions monitoring.coreos.com/v1/PrometheusRule`). Every alert carries
+`severity` (`critical` / `warning`) and `team`, which Alertmanager routes on.
+
+| Alert | Severity | Team | Fires when |
+|---|---|---|---|
+| `PodCrashLooping` | critical | owning team | a container in the namespace has been in CrashLoopBackOff for 5m |
+| `PodOOMKilled` | warning | owning team | a container restarted in the last 10m after an OOMKill |
+| `BridgeTasksConsumerLagHigh` | warning | `alerts.bridgeTasksLag.team` (inbox) | a consumer group's total lag on `bridge.structured.tasks` is above `alerts.bridgeTasksLag.threshold` for 5m |
+| `KafkaBrokerDown` | critical | relay | the broker's JMX target has been missing or down for 2m |
+| `KafkaOfflinePartitions` | critical | relay | any partition has had no leader for 1m |
+| `KafkaUnderReplicatedPartitions` | warning | relay | any partition has been under-replicated for 5m |
+| `PersistentVolumeFillingUp` | warning | relay | a Postgres or MinIO PVC has been over 85% full for 5m |
+
+- **Pod alerts and `team`.** kube-state-metrics exports no pod labels, but each
+  component's container is named after the component, so the template renders
+  one rule per team matching `container=~"<its components>"`, with `team` set
+  from `components.<name>.team` / `metrics.team` / the name (as for metrics).
+  relay gets everything else in the namespace: its own components, the
+  Kafka/Postgres/MinIO pods and sidecars, hook Jobs.
+- **Kafka rules** need the exporters, which are on only in
+  `environments/shared.yaml`: the lag rule `kafka-exporter`, the broker and
+  partition rules `kafka.metrics.jmx`.
+- **`KafkaUnderReplicatedPartitions` can't fire today.** Kafka runs a single
+  broker with replication factor 1, so no partition can be under-replicated.
+  The rule is there for when brokers are added.
+- **`PersistentVolumeFillingUp` is inactive today.** `postgresql.primary.persistence`
+  and `minio.persistence` are off, so there's no PVC and no
+  `kubelet_volume_stats_*` series to match. It starts working once either is
+  turned on - no rule change needed.
+- **Default rules.** kube-prometheus-stack's own rules for components that
+  aren't scraped here (etcd, controller-manager, scheduler, kube-proxy, Windows)
+  are turned off in `teams/relay/argocd/apps/kube-prometheus-stack.yaml`. Its
+  other defaults (e.g. `KubePodCrashLooping`) stay on cluster-wide, with no
+  `team` label.
+
+### Testing a rule by hand
+
+On the shared cluster, after the rule is merged to `main`. Watch it go
+pending → firing at `http://localhost:9090/alerts` (port-forward in
+`teams/relay/argocd/README.md` "Monitoring"). For anything that changes a
+resource ArgoCD manages (scaling inbox or Kafka), turn off auto-sync first -
+on `root` too, or it restores `resonance-flow`'s sync policy:
+
+```bash
+kubectl -n argocd patch application root --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'
+kubectl -n argocd patch application resonance-flow --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'
+```
+
+and turn it back on afterwards (patching `root` back restores `resonance-flow`).
+
+- **`PodCrashLooping`** - `kubectl -n resonance-flow run crash-test --image=busybox --restart=Always -- sh -c 'exit 1'`
+  (team relay; name the pod after a component, e.g. `bridge`, to test that
+  team). Delete it afterwards.
+- **`PodOOMKilled`** - a pod with a `16Mi` memory limit running
+  `tail /dev/zero`.
+- **`BridgeTasksConsumerLagHigh`** - scale `resonance-flow-inbox` to 0 and let
+  bridge publish more than the threshold (or lower the threshold for the test).
+- **`KafkaBrokerDown`** / **`KafkaOfflinePartitions`** - scale the
+  `resonance-flow-kafka-controller` StatefulSet to 0. With one broker, only
+  `KafkaBrokerDown` fires: the controller exposing `OfflinePartitionsCount` goes
+  down with it.
+- **`KafkaUnderReplicatedPartitions`** / **`PersistentVolumeFillingUp`** - not
+  testable until there's a second broker / a PVC (see above).
 
 ## Component configuration (`config` / `secret`)
 

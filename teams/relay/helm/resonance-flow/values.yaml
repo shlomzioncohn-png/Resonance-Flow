@@ -59,6 +59,13 @@ ingress:
 # Components opt in with components.<name>.metrics - see README.md "Metrics scraping".
 monitoring:
   namespace: monitoring
+# PrometheusRules - see README.md "Alerting".
+alerts:
+  # Lag on bridge.structured.tasks, summed per consumer group. inbox is its only
+  # consumer today. The threshold is a first guess - tune it with inbox.
+  bridgeTasksLag:
+    threshold: 1000
+    team: inbox
 pipeConsumerGroupSweep:
   enabled: true
   schedule: "0 * * * *"
@@ -347,6 +354,8 @@ components:
         port: 5432
   lens-frontend:
     enabled: true
+    # Not scraped (no metrics block), but its pod alerts still route to lens.
+    team: lens
     replicaCount: 1
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-frontend"
@@ -535,6 +544,8 @@ components:
             mindTaskCreationRequested: task.creation.requested
   schema-registry:
     enabled: true
+    # Serves the Relay-owned shared/proto schemas.
+    team: relay
     replicaCount: 1
     image:
       # In-memory Apicurio registry - not durable, fine for dev/CI only.
