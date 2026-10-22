@@ -158,9 +158,10 @@ A Postgres store gets the same guarantees from single statements
 
 ## Running it
 
-The pipeline that calls `send` is #349's, and does not exist yet, so nothing
-here starts on its own. Whoever builds it composes one `TaskCreationFlow` and
-runs the listener and the timer beside it, **in the same process**:
+`ingestion/landed_consumer_runner.py` (#919) is the process that does this:
+the #349 pipeline calls `send`, and it composes one `TaskCreationFlow` and
+runs the listener and the timer beside it, **in the same process**. The
+composition, in short:
 
 ```python
 listener_loop = asyncio.new_event_loop()

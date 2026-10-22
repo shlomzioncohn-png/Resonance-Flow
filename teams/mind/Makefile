@@ -38,6 +38,8 @@ run-index-consumer: proto
 run-score-publisher: proto
 	python -m mind.scoring.score_publisher_runner
 
+# #919: the whole creation pipeline, task.created listener included -- needs
+# Kafka, MinIO, the vector store and an LLM provider (src/mind/ingestion/README.md).
 run-landed-consumer: proto
 	python -m mind.ingestion.landed_consumer_runner
 
