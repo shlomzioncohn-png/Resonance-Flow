@@ -188,7 +188,7 @@ issuer — gets a JSON `401 UNAUTHORIZED` and **never reaches the BFF**.
 > `APP_AUTH_ENABLED=true` to test with real tokens (as in the curl example below).
 
 > Still mocked (Auth stage 2): the userId forwarded to BFF as `X-User-Id` is
-> still `emp_001` (`/api/workspace/**`) or `mgr_001` (`/api/manager/users/**`),
+> still `emp_001` (`/api/workspace/**`) or `mgr_001` (`/api/manager/users/**`, `/api/manager/dashboard/**`),
 > not the token's `sub`, and roles aren't checked yet — any valid token reaches
 > every `/api/**` route.
 
@@ -236,7 +236,9 @@ The Gateway currently handles these endpoints (manual routing via explicit contr
 | `/api/workspace/recommend` | POST | Get task recommendation for available time |
 | `/api/workspace/tasks/{taskId}` | GET | Get full task details by ID |
 | `/api/workspace/tasks/{taskId}/status` | PATCH | Update task status |
+| `/api/manager/dashboard/kpis` | GET | Manager Dashboard KPI tiles for the manager's tenant (`?period=`, `?project=` optional) |
 | `/api/manager/users` | GET | List users, MANAGER only — see below |
+| `/api/manager/users` | POST | Create a user (displayName + role MANAGER/EMPLOYEE), MANAGER only |
 | `/api/manager/users/{id}` | GET | Get one user's details, MANAGER only |
 | `/api/manager/users/{id}` | PATCH | Edit displayName/firstName/lastName/phone, MANAGER only |
 | `/api/manager/users/{id}/status` | PATCH | Change status (ACTIVE/SUSPENDED/DISABLED), MANAGER only |

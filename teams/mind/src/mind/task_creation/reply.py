@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from mind.embeddings.base import VectorStore
+from mind.embeddings.base import VectorIndex
 from mind.embeddings.index_consumer import handle_task_created
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.task_creation.pending import PendingRequest, PendingStore
@@ -60,7 +60,7 @@ def correlation_id_from(headers: Headers) -> UUID | None:
 
 
 async def handle_task_created_reply(
-    store: VectorStore,
+    index: VectorIndex,
     pending: PendingStore,
     event: TaskCreatedEvent,
     headers: Headers,
@@ -96,7 +96,7 @@ async def handle_task_created_reply(
         )
         return None
 
-    await handle_task_created(store, event)
+    await handle_task_created(index, event)
     matched = MatchedReply(
         correlation_id=correlation_id,
         task_id=event.id,

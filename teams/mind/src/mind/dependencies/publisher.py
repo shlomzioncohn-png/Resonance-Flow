@@ -23,7 +23,7 @@ from uuid import UUID, uuid5
 
 from mind.dependencies.event import build_dependency_event
 from mind.dependencies.kafka_sink import DependencySink
-from mind.embeddings.base import VectorStore
+from mind.embeddings.base import VectorIndex
 from mind.embeddings.dependency_resolution import resolve_dependency_targets
 
 logger = logging.getLogger(__name__)
@@ -34,8 +34,8 @@ _NAMESPACE = UUID("914f772d-7854-498c-a738-c5e7f9a23572")
 
 
 class DependencyPublisher:
-    def __init__(self, store: VectorStore, sink: DependencySink) -> None:
-        self._store = store
+    def __init__(self, index: VectorIndex, sink: DependencySink) -> None:
+        self._index = index
         self._sink = sink
 
     async def publish_dependencies(
@@ -64,9 +64,10 @@ class DependencyPublisher:
             return
 
         task_id_normalized = str(task_id)
+        store = self._index.for_tenant(tenant_id)
 
         resolved_lists = await resolve_dependency_targets(
-            self._store, mentions, k=1, exclude_task_id=task_id_normalized
+            store, mentions, k=1, exclude_task_id=task_id_normalized
         )
         # Two mentions can resolve to the same target: dedup by target first,
         # keeping the higher confidence, so they don't race two sends for one

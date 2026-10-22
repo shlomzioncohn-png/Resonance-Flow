@@ -1,0 +1,22 @@
+NORTHWIND TRADERS
+SUPPLIER REGISTRATION FORM
+Form NW-SR-14
+
+Section 1. Supplier details
+Supplier name: ______________________________
+Registered address: _________________________
+Contact person: _____________________________
+Contact email: ______________________________
+
+Section 2. Products and services
+Main products supplied: _____________________
+Can the supplier provide installation? Yes / No
+
+Section 3. Declaration
+I confirm that the information above is correct.
+Authorized signature: _______________________
+Name and title: _____________________________
+Date: _______________________________________
+
+Please return the completed and signed form to
+procurement@northwind.example

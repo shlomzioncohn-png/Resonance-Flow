@@ -8,7 +8,9 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfigurationSource;
 
 /**
@@ -41,14 +43,27 @@ public class SecurityConfig {
     private boolean authEnabled;
 
     private final CorsConfigurationSource corsConfigurationSource;
+    private final JwtDecoder jwtDecoder;
 
-    public SecurityConfig(CorsConfigurationSource corsConfigurationSource) {
+    public SecurityConfig(CorsConfigurationSource corsConfigurationSource, JwtDecoder jwtDecoder) {
         this.corsConfigurationSource = corsConfigurationSource;
+        this.jwtDecoder = jwtDecoder;
+    }
+
+    @Bean
+    public CookieJwtAuthenticationConverter cookieJwtAuthenticationConverter(JwtDecoder jwtDecoder) {
+        return new CookieJwtAuthenticationConverter(jwtDecoder);
+    }
+
+    @Bean
+    public JwtAuthenticationFilter jwtAuthenticationFilter(CookieJwtAuthenticationConverter converter) {
+        return new JwtAuthenticationFilter(converter);
     }
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http,
-                                           SecurityErrorHandler securityErrorHandler) throws Exception {
+                                           SecurityErrorHandler securityErrorHandler,
+                                           JwtAuthenticationFilter jwtAuthenticationFilter) throws Exception {
         http
             // Enable CORS with the origin whitelist from CorsConfig, so browser preflight
             // (OPTIONS, which never carries a token) isn't rejected as 401
@@ -60,12 +75,12 @@ public class SecurityConfig {
         if (authEnabled) {
             http
                 .authorizeHttpRequests(auth -> auth
+                    .requestMatchers("/auth/register", "/auth/login").permitAll()  // Public auth endpoints
+                    .requestMatchers("/auth/me", "/auth/logout").authenticated()  // JWT required
                     .requestMatchers("/api/**").authenticated()
                     .anyRequest().permitAll())
-                .oauth2ResourceServer(oauth2 -> oauth2
-                    .jwt(Customizer.withDefaults())
-                    .authenticationEntryPoint(securityErrorHandler)
-                    .accessDeniedHandler(securityErrorHandler));
+                // Add custom JWT filter BEFORE UsernamePasswordAuthenticationFilter
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         } else {
             // No resource server at all, so a stale or invalid token can't cause a 401 either
             http.authorizeHttpRequests(auth -> auth.anyRequest().permitAll());

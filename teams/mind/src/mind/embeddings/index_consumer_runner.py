@@ -18,7 +18,7 @@ from typing import TypeVar, cast
 from google.protobuf.message import Message
 
 from mind.config import get_settings
-from mind.embeddings.base import VectorStore
+from mind.embeddings.base import VectorIndex
 from mind.embeddings.index_consumer import (
     handle_task_completed,
     handle_task_created,
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 _GROUP_ID = "mind-index-consumer"
 
 _EventT = TypeVar("_EventT", bound=Message)
-_Handler = Callable[[VectorStore, _EventT], Awaitable[None]]
+_Handler = Callable[[VectorIndex, _EventT], Awaitable[None]]
 
 _TOPICS: list[tuple[str, type[Message], _Handler]] = [
     ("task.created", TaskCreatedEvent, handle_task_created),

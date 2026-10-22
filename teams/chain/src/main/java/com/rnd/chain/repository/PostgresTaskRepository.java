@@ -3,6 +3,7 @@ package com.rnd.chain.repository;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.repository.entity.TaskEntity;
 import com.rnd.chain.repository.jpa.SpringDataTaskJpaRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,14 +16,11 @@ import java.util.function.UnaryOperator;
 
 /** Postgres-backed {@link TaskRepository}. Maps {@link TaskEntity} <-> {@link Task} here only -
  * neither type crosses this class's boundary in the other direction. */
+@RequiredArgsConstructor
 @Repository
 public class PostgresTaskRepository implements TaskRepository {
 
     private final SpringDataTaskJpaRepository jpaRepository;
-
-    public PostgresTaskRepository(SpringDataTaskJpaRepository jpaRepository) {
-        this.jpaRepository = jpaRepository;
-    }
 
     @Override
     public Optional<Task> findById(UUID id) {
@@ -49,13 +47,23 @@ public class PostgresTaskRepository implements TaskRepository {
     }
 
     @Override
+    public List<Task> findByTenantId(UUID tenantId) {
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
+
+        return jpaRepository.findByTenantIdAndDeletedAtIsNull(tenantId).stream()
+            .map(PostgresTaskRepository::toDto)
+            .toList();
+   }
+
+    @Override
     @Transactional
     public Task save(Task task) {
         Objects.requireNonNull(task, "task must not be null");
         jpaRepository.upsert(task.getId(), task.getParentTaskId(), task.getTenantId(),
-                task.getStatus().name(), task.isReady(), task.getBlockingCount(),
-                task.getOpenConstraintCount(), task.getEstimatedDurationMin(), task.getScore(),
+                task.getStatus().name(),
+                task.getEstimatedDurationMin(), task.getScore(),
                 task.getConfidence(), task.getPriorityScore(),
+                task.getTier() != null ? task.getTier().name() : null, task.getScoredAt(),
                 task.getCreatedAt(), task.getUpdatedAt(), task.getDeletedAt());
         // Read-back after the row-count-only native upsert; unlike findByIdAndDeletedAtIsNull(),
         // findById() also returns soft-deleted rows.
@@ -71,12 +79,11 @@ public class PostgresTaskRepository implements TaskRepository {
         int insertedRows = jpaRepository.insertIfAbsent(
                 task.getId(),
                 task.getParentTaskId(),
+                task.getTenantId(),
                 task.getStatus().name(),
-                task.isReady(),
-                task.getBlockingCount(),
-                task.getOpenConstraintCount(),
                 task.getEstimatedDurationMin(),
                 task.getScore(),
+                task.getTier() != null ? task.getTier().name() : null,
                 task.getCreatedAt(),
                 task.getUpdatedAt(),
                 task.getDeletedAt()
@@ -100,7 +107,7 @@ public class PostgresTaskRepository implements TaskRepository {
         TaskEntity entity = locked.get();
         if (entity.getDeletedAt() != null) {
             // Mutator must not be invoked at all against a soft-deleted task - matches
-            // InMemoryTaskRepository/TaskRepositoryContractTest#update_leavesSoftDeletedTaskUntouched.
+            // TaskRepositoryContractTest#update_leavesSoftDeletedTaskUntouched.
             return Optional.empty();
         }
 
@@ -139,13 +146,12 @@ public class PostgresTaskRepository implements TaskRepository {
                 .parentTaskId(entity.getParentTaskId())
                 .tenantId(entity.getTenantId())
                 .status(entity.getStatus())
-                .isReady(entity.isReady())
-                .blockingCount(entity.getBlockingCount())
-                .openConstraintCount(entity.getOpenConstraintCount())
                 .estimatedDurationMin(entity.getEstimatedDurationMin())
                 .score(entity.getScore())
                 .confidence(entity.getConfidence())
                 .priorityScore(entity.getPriorityScore())
+                .tier(entity.getTier())
+                .scoredAt(entity.getScoredAt())
                 .createdAt(entity.getCreatedAt())
                 .updatedAt(entity.getUpdatedAt())
                 .deletedAt(entity.getDeletedAt())
@@ -158,13 +164,12 @@ public class PostgresTaskRepository implements TaskRepository {
         entity.setParentTaskId(updated.getParentTaskId());
         entity.setTenantId(updated.getTenantId());
         entity.setStatus(updated.getStatus());
-        entity.setReady(updated.isReady());
-        entity.setBlockingCount(updated.getBlockingCount());
-        entity.setOpenConstraintCount(updated.getOpenConstraintCount());
         entity.setEstimatedDurationMin(updated.getEstimatedDurationMin());
         entity.setScore(updated.getScore());
         entity.setConfidence(updated.getConfidence());
         entity.setPriorityScore(updated.getPriorityScore());
+        entity.setTier(updated.getTier());
+        entity.setScoredAt(updated.getScoredAt());
         entity.setCreatedAt(updated.getCreatedAt());
         entity.setUpdatedAt(updated.getUpdatedAt());
         entity.setDeletedAt(updated.getDeletedAt());

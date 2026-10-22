@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from mind.contracts.task_creation_requested import TaskCreationRequested
-from mind.embeddings.base import VectorStore
+from mind.embeddings.base import VectorIndex
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.task_creation.overdue import DEFAULT_MAX_WAIT, report_overdue
 from mind.task_creation.pending import PendingStore
@@ -27,7 +27,7 @@ class TaskCreationFlow:
         self,
         *,
         producer: Publisher,
-        index: VectorStore,
+        index: VectorIndex,
         pending: PendingStore,
         max_wait: timedelta = DEFAULT_MAX_WAIT,
         on_matched: OnMatched | None = None,

@@ -19,7 +19,7 @@
       "effort_estimate": 50,
       "tier": "strategic",
       "blocked": false,
-      "parent_task_id": null
+      "parent_task_id": "hm_vision_platform_vision"
     },
     {
       "task_id": "task_capacity",
@@ -29,7 +29,7 @@
       "effort_estimate": 40,
       "tier": "tactical",
       "blocked": false,
-      "parent_task_id": null
+      "parent_task_id": "hm_vision_q1_ml_capacity"
     },
     {
       "task_id": "task_travel_exceptions",

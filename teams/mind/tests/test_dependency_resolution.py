@@ -3,6 +3,7 @@ needed for real similarity scores, which a fake store can't produce."""
 
 import os
 from unittest.mock import AsyncMock, call, patch
+from uuid import UUID
 
 import pytest
 from benchmarks.vector_store_test_table import create_vector_store_test_table
@@ -14,10 +15,13 @@ from mind.embeddings.dependency_resolution import resolve_dependency_targets
 from mind.embeddings.embeddings import EMBEDDING_DIM
 from mind.embeddings.pgvector_store import PgVectorStore
 
+TENANT = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+OTHER_TENANT = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+
 
 @pytest.fixture(scope="module")
-async def store():
-    """Same pattern as test_vector_store.py's `store` fixture."""
+async def index():
+    """Same pattern as test_vector_store.py's `index` fixture."""
     settings = VectorStoreSettings(
         dsn=os.environ["MIND_VECTOR_STORE__DSN"],
         table="task_embeddings_test_deps",
@@ -29,9 +33,19 @@ async def store():
     await s.close()
 
 
+@pytest.fixture
+def store(index):
+    return index.for_tenant(TENANT)
+
+
+@pytest.fixture
+def other_store(index):
+    return index.for_tenant(OTHER_TENANT)
+
+
 @pytest.fixture(autouse=True)
-async def clean_store(store):
-    await store.clear()
+async def clean_store(index):
+    await index.clear()
     yield
 
 
@@ -307,3 +321,14 @@ async def test_a_tasks_own_row_is_excluded_even_as_the_only_match(store):
     )
 
     assert candidates == []
+
+
+async def test_never_resolves_to_another_tenants_task(store, other_store):
+    """#841: a near-identical task in another tenant is never a candidate."""
+    text = task_text("Upgrade the production database", "Move to the new major version")
+    await other_store.upsert("task-theirs", embed(text))
+    await store.upsert("task-mine", embed(text))
+
+    [candidates] = await resolve_dependency_targets(store, ["the DB upgrade"], threshold=0.0)
+
+    assert [c.task_id for c in candidates] == ["task-mine"]

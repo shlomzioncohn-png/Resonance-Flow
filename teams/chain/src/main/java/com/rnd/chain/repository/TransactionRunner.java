@@ -2,14 +2,12 @@ package com.rnd.chain.repository;
 
 import java.util.function.Supplier;
 
-/** DB-independent transaction boundary seam, so the in-memory impl can later be swapped for a real one. */
+/** DB-independent transaction boundary seam,. */
 public interface TransactionRunner {
 
     /** Runs {@code action} atomically. On a real transactional store this is row/constraint-level
      * isolation, not global exclusivity - two calls touching unrelated rows may run concurrently;
-     * two calls that touch the same row are still serialized by the store itself. (The in-memory
-     * implementation is stricter: one lock, no overlap at all, since it has no row-level isolation
-     * of its own to fall back on.) */
+     * two calls that touch the same row are still serialized by the store itself. */
     <T> T runInTransaction(Supplier<T> action);
 
     /** Runs a read-only {@code action}; on a real transactional store, isolated from concurrent

@@ -1,28 +1,61 @@
-"""Application-wide settings, read from env vars/`.env`, under the
-`MIND_` prefix (`__` for nesting). In-cluster, `vector_store.dsn` falls
-back to Relay's chart-mounted config/secret files instead.
+"""Application-wide settings.
+
+Connection settings come only from the files Relay's Helm chart mounts
+(`mind.config_file`): `vector_store.dsn` is built from config.yaml's
+`vector_store.url`/`.user`/`.db` and secrets.yaml's `vector_store.password`,
+and an env var cannot override it (#481). The other keys the chart renders
+and Mind uses -- `service.log_level`, `asr.whisper_model` -- also come from
+config.yaml, with their env var only as a fallback when the key is absent.
+Everything else -- tuning knobs such as the thresholds, `MIND_ENVIRONMENT` --
+is read from env vars/`.env`, under the `MIND_` prefix (`__` for nesting).
 """
 
 import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 
-import yaml
-from pydantic import BaseModel, ConfigDict, Field, PostgresDsn, Secret
+from pydantic import BaseModel, ConfigDict, Field, PostgresDsn, Secret, SecretStr
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+
+from mind import config_file
 
 # Absolute -- relative resolves against cwd, which breaks outside teams/mind/.
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
-_DEFAULT_CONFIG_FILE = "/etc/resonance-flow/config/config.yaml"
-_DEFAULT_SECRETS_FILE = "/etc/resonance-flow/secret/secrets.yaml"
+# The chart mounts the MinIO credentials as one file each (dependencySecretVolumes).
+_DEFAULT_OBJECT_STORAGE_SECRETS_DIR = "/etc/resonance-flow/secrets/object-storage"
 
 
-def _read_yaml(path: str) -> dict[str, Any]:
-    p = Path(path)
-    return yaml.safe_load(p.read_text()) if p.is_file() else {}
+class _ConfigFileKeys(PydanticBaseSettingsSource):
+    """Plain values from config.yaml, by `section.key` -- for chart keys whose
+    setting still has a sensible default when the key is absent.
+
+    Listed before env/.env in a settings class's sources, so the chart's value
+    wins and the env var only fills in when config.yaml doesn't set the key.
+    config.yaml itself is required: a missing or broken file still raises.
+    """
+
+    def __init__(self, settings_cls: type[BaseSettings], keys: dict[str, str]) -> None:
+        super().__init__(settings_cls)
+        # "asr.whisper_model" -> the name the settings class takes it under
+        # (its validation_alias, if it has one).
+        self._keys = keys
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        raise NotImplementedError  # unused: __call__ is overridden directly
+
+    def __call__(self) -> dict[str, Any]:
+        config = config_file.load_config()
+        values: dict[str, Any] = {}
+        for dotted, name in self._keys.items():
+            section_name, key = dotted.split(".")
+            value = config_file.section(config, section_name).get(key)
+            if value is not None and str(value).strip():
+                values[name] = value
+        return values
 
 
 class EmbeddingModelSettings(BaseSettings):
@@ -48,6 +81,7 @@ class ASRSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
 
     # The #135 decision; must match CHOSEN_WHISPER_SIZE in benchmarks/asr_benchmark.py.
+    # config.yaml's asr.whisper_model (the chart sets it) wins over WHISPER_MODEL.
     whisper_model: str = Field(default="base.en", validation_alias="WHISPER_MODEL")
     whisper_models_dir: str | None = Field(default=None, validation_alias="WHISPER_MODELS_DIR")
     model_cache_dir: str = Field(default="./models", validation_alias="MODEL_CACHE_DIR")
@@ -55,6 +89,112 @@ class ASRSettings(BaseSettings):
     @property
     def download_dir(self) -> Path:
         return Path(self.model_cache_dir) / "whisper" / self.whisper_model
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            init_settings,
+            _ConfigFileKeys(settings_cls, {"asr.whisper_model": "WHISPER_MODEL"}),
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+        )
+
+
+class _ChartObjectStorageSource(PydanticBaseSettingsSource):
+    """MinIO from Relay's chart-mounted files: endpoint and bucket from
+    config.yaml's `object_storage`, each credential from its own mounted file.
+    Missing files give nothing, so a local run falls through to the defaults."""
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        raise NotImplementedError  # unused: __call__ is overridden directly
+
+    def __call__(self) -> dict[str, Any]:
+        # Lenient on purpose, for now: #349's local-defaults behaviour is kept
+        # as it landed until aligning it with #481 is decided.
+        object_storage = config_file.section(config_file.load_config_lenient(), "object_storage")
+        values = {k: object_storage[k] for k in ("endpoint", "bucket") if object_storage.get(k)}
+
+        secrets_dir = Path(
+            os.environ.get("OBJECT_STORAGE_SECRETS_DIR", _DEFAULT_OBJECT_STORAGE_SECRETS_DIR)
+        )
+        for field_name, filename in (
+            ("access_key", "object-storage.access-key"),
+            ("secret_key", "object-storage.secret-key"),
+        ):
+            path = secrets_dir / filename
+            if path.is_file():
+                values[field_name] = path.read_text().strip()  # mounted files end in a newline
+        return values
+
+
+class ObjectStorageSettings(BaseSettings):
+    """Standalone -- the bridge.raw.landed consumer (#349) reads Bridge's objects.
+
+    Sources, first wins: environment variables, .env, then the cluster's
+    mounted files (_ChartObjectStorageSource), then the defaults. The defaults
+    match Bridge's own local ones (teams/bridge application.yml); the
+    credentials have none, so a missing one fails at start-up.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="MIND_OBJECT_STORAGE__", env_file=_ENV_FILE, extra="ignore"
+    )
+
+    endpoint: str = "http://localhost:9000"
+    bucket: str = "bridge-raw"
+    access_key: str
+    secret_key: SecretStr  # never printed: repr, logs, tracebacks show '**********'
+    # Larger objects are skipped, not read: the process's memory is the limit.
+    max_object_bytes: int = Field(default=100 * 1024 * 1024, gt=0)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Earlier sources win; the chart's files only fill what env leaves unset.
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            _ChartObjectStorageSource(settings_cls),
+            file_secret_settings,
+        )
+
+
+class LandedConsumerSettings(BaseSettings):
+    """Standalone -- the bridge.raw.landed runner (#349) needs no database, so it
+    does not read `Settings`, which requires the vector-store DSN.
+
+    Read from the environment and .env like every other MIND_* setting, so an
+    override set next to the MinIO keys in .env is not silently ignored.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="MIND_LANDED_CONSUMER__", env_file=_ENV_FILE, extra="ignore"
+    )
+
+    # Its own group, not the one in ProtobufConsumer's docstring example. Until
+    # extraction is wired, a run marks items processed and commits their
+    # offsets with nothing extracted: a test run against the shared topic sets
+    # MIND_LANDED_CONSUMER__GROUP_ID to a group of its own.
+    group_id: str = "mind-landed-consumer"
+    # The same variable `Settings.log_level` reads.
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO", validation_alias="MIND_LOG_LEVEL"
+    )
 
 
 class MonitoringSettings(BaseSettings):
@@ -107,26 +247,38 @@ class VectorStoreSettings(BaseModel):
     # (migrations/versions/0001_initial_vector_schema.py), not config.
 
 
+def _required(section: dict[str, Any], key: str, where: str) -> str:
+    value = section.get(key)
+    if value is None or not str(value).strip():
+        raise config_file.ConfigFileError(f"vector_store.{key} is missing from {where}")
+    return str(value).strip()
+
+
 class _ChartVectorStoreSource(PydanticBaseSettingsSource):
-    """Fallback vector_store.dsn from Relay's chart-mounted files."""
+    """vector_store.dsn from Relay's chart-mounted files -- its only source."""
 
     def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
         raise NotImplementedError  # unused: __call__ is overridden directly
 
     def __call__(self) -> dict[str, Any]:
-        config = _read_yaml(os.environ.get("CONFIG_FILE_PATH", _DEFAULT_CONFIG_FILE))
-        secrets = _read_yaml(os.environ.get("SECRETS_FILE_PATH", _DEFAULT_SECRETS_FILE))
-        vector_store = (config or {}).get("vector_store") or {}
-        vector_store_secret = (secrets or {}).get("vector_store") or {}
+        # Not load_merged(): the password is only taken from secrets.yaml,
+        # never from the ConfigMap anyone in the namespace can read.
+        vector_store = config_file.section(config_file.load_config(), "vector_store")
+        vector_store_secret = config_file.section(config_file.load_secrets(), "vector_store")
 
-        url = vector_store.get("url")
-        password = vector_store_secret.get("password")
-        if not url or not password:
-            return {}
+        in_config = f"config.yaml (${config_file.CONFIG_FILE_PATH_ENV})"
+        in_secrets = (
+            f"secrets.yaml (${config_file.SECRETS_FILE_PATH_ENV}); in the cluster it comes "
+            "from the resonance-flow-mind-secret Secret"
+        )
+        url = _required(vector_store, "url", in_config)
+        user = _required(vector_store, "user", in_config)
+        db = _required(vector_store, "db", in_config)
+        password = _required(vector_store_secret, "password", in_secrets)
 
-        user = vector_store.get("user", "mind")
-        db = vector_store.get("db", "mind")
-        return {"vector_store": {"dsn": f"postgresql://{user}:{password}@{url}/{db}"}}
+        # Quoted: a generated password may hold characters a URL gives meaning to.
+        dsn = f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}@{url}/{db}"
+        return {"vector_store": {"dsn": dsn}}
 
 
 class Settings(BaseSettings):
@@ -140,6 +292,7 @@ class Settings(BaseSettings):
 
     environment: Literal["local", "ci", "staging", "production"] = "local"
     api_port: int = Field(default=8000, ge=1, le=65535)
+    # config.yaml's service.log_level (the chart sets it) wins over MIND_LOG_LEVEL.
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     # Calibrated via benchmarks/threshold_calibration.py, not a guess -- see
     # embeddings/README.md "Threshold calibration" for the table and method.
@@ -158,18 +311,36 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        # Earlier sources win; chart source only fills gaps (in-cluster).
+        # Earlier sources win. The chart source comes before env/.env, so a
+        # MIND_VECTOR_STORE__DSN there is never used (#481); env can still set
+        # the non-connection vector_store knobs (table, search_effort).
         return (
             init_settings,
+            _ChartVectorStoreSource(settings_cls),
+            _ConfigFileKeys(settings_cls, {"service.log_level": "log_level"}),
             env_settings,
             dotenv_settings,
-            _ChartVectorStoreSource(settings_cls),
             file_secret_settings,
         )
 
 
 @lru_cache
+def get_asr_settings() -> ASRSettings:
+    """Construct (once, cached) and return the ASR settings.
+
+    transcribe() needs them on every recording, so config.yaml is read once per
+    process, not per call (#481 review). Raises ConfigFileError like
+    get_settings(); a failure isn't cached, so a fixed config is picked up.
+    """
+    return ASRSettings()
+
+
+@lru_cache
 def get_settings() -> Settings:
-    """Construct (once, cached) and return the Settings."""
+    """Construct (once, cached) and return the Settings.
+
+    Raises `mind.config_file.ConfigFileError` when the mounted config is
+    missing or incomplete -- callers let it propagate, so the process stops.
+    """
     # vector_store has no default -- mypy can't see pydantic-settings fills it in.
     return Settings()  # type: ignore[call-arg]

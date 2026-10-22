@@ -13,7 +13,8 @@ openConstraintCount, mirroring the idempotency every other counter-mutating path
 already has (edgeExists() / the task's own stored previousStatus).
 
 ## Key decisions
-- isReady = blockingCount==0 AND openConstraintCount==0
+- isReady = blockingCount==0 AND openConstraintCount==0, computed only by the `task_readiness` view
+  (not stored on Task/TaskEntity since #917 PR 2)
 - Tasks CAN reopen from DONE (confirmed by team lead) - blockingCount
   must be restored on dependents when this happens
 - Constraints CAN also reopen (PENDING -> DONE/WAIVED -> PENDING again)
@@ -45,6 +46,10 @@ already has (edgeExists() / the task's own stored previousStatus).
   The reverse order is worse: a caller that skips the repository call
   once it believes an event was "already handled" can permanently lose
   a Constraint row instead of just delaying a counter update.
+
+## Coding guideline
+Wherever Lombok can replace boilerplate (accessors, constructors, builders, equals/hashCode), write
+the code with Lombok.
 
 ## Real repository contracts (from chain/ruthHoltzman/dependency-repository-66)
 - TaskRepository: findById, findAllById, findByParentTaskId, save
@@ -106,7 +111,7 @@ already has (edgeExists() / the task's own stored previousStatus).
     null on either side is rejected, same as a mismatch. Confirmed with the user that existing/
     test data without a tenant isn't meaningful enough to justify the weaker "skip when unknown"
     alternative the issue offered. Follow-up: make `task.tenant_id` `NOT NULL` once every row is
-    backfilled through `TaskCreatedEventHandler`/`TaskUpdatedEventHandler`.
+    backfilled through `TaskUpdatedEventHandler`.
   - **`task.updated` claiming a different tenant than stored is rejected** (`TenantReassignmentException`
     -> `NonRetryableEventException`), not applied - confirmed directly with the Inbox team
     (Shlomzion Cohn, Slack) that `tenant_id` never legitimately changes after task creation, so
@@ -145,7 +150,10 @@ already has (edgeExists() / the task's own stored previousStatus).
     also fails independently (`reason` round-trips as `{}` instead of `null`) - also pre-existing,
     also unrelated.
 - #649: TaskEligibilityService was split by domain - edges in `DependencyEdgeService`, constraints in
-  `ConstraintEligibilityService`, counter helpers in `TaskCounterUpdater`. The graph lock is the
+  `ConstraintEligibilityService`, priority recompute-after-edge/constraint-change (`recomputePriority`) in `DependencyEdgeService` (`TaskCounterUpdater` was removed in #917 PR 1; the stored counters and `TaskStateReconciliationService` in PR 2), priority-score recompute/publish
+  in `PriorityScoreService` (`recomputePriorityScoreAndPublish`, `onScoreProposed`), the publish-after-commit
+  queue in `SchedulingUpdateService` (`requestPublishAfterCommit`), and placeholder-task inserts in
+  `DependencyEdgeService` (`insertPlaceholdersIfAbsent`) (issue #917, PR 1). The graph lock is the
   `GraphLock` bean (see "Graph lock" below) shared by `DependencyEdgeService` and
   `TaskEligibilityService`; older notes below that name `TaskEligibilityService` for moved methods predate this.
 - PR #468 review (2026-09-23, leaRevivo) findings addressed 2026-09-24:
@@ -240,12 +248,13 @@ already has (edgeExists() / the task's own stored previousStatus).
   `Task`/`TaskDependency`/`DependencyHistoryEntry` stay plain DTOs -
   entities (`TaskEntity`/`TaskDependencyEntity`/`DependencyHistoryEntity`)
   are mapped to/from them entirely inside the adapters. The H2 placeholder
-  is gone; `MockDataConfig`'s in-memory beans remain only as the
-  `@ConditionalOnMissingBean` fallback when no real `DataSource` is wired.
+  is gone, and so are all `InMemory*` repositories, `MockDataConfig` and `InMemoryProcessedEventStore`
+  (2026-10-15): Postgres is the only persistence, including `PostgresProcessedEventStore` (V10) for
+  event dedup. The tests that used the in-memory fakes now run against Postgres (`PgRepos`).
+
 - `TaskRepository#update()`'s atomicity is now real: `PostgresTaskRepository`
   uses a pessimistic row lock (`SELECT ... FOR UPDATE`) as the sole
-  correctness mechanism for `blockingCount`/`openConstraintCount` under
-  concurrent writes - `@Version` on `TaskEntity` is defense-in-depth for a
+  correctness mechanism for concurrent writes to a task row - `@Version` on `TaskEntity` is defense-in-depth for a
   different, not-yet-existing write path, not part of this guarantee.
   The graph lock (see "Graph lock" above) is still required on top of it: it
   serializes the multi-row cycle-detection DFS and the read-with-edge-write

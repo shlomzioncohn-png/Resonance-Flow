@@ -7,8 +7,12 @@ name: Relay / schema compatibility (PR)
 # dry-run checks the PR's versions against it.
 #
 # No `branches:` filter: the base branch is whatever the PR targets, read from
-# github.event.pull_request.base.sha, so this works for PRs into main or any
-# other branch.
+# github.base_ref, so this works for PRs into main or any other branch.
+#
+# schema-compat resolves that base at run time, not from the event's frozen
+# base.sha: a rerun or a quick reopen otherwise checks against a stale base and
+# misses a directive (e.g. "# reset:") that just landed there (#620). If the
+# live base can't be used (ref gone, or a conflict), it falls back to base.sha.
 #
 # The schema list and the compatibility level come from that base ref too (via
 # `git show`), not from the PR, so a PR can't weaken its own gate. The workflow
@@ -40,6 +44,7 @@ jobs:
       - uses: ./.github/actions/free-runner-disk
       - name: Did this PR touch relay schema / chart / ci files?
         id: filter
+        # The event's base.sha is fine here: HEAD is the event's merge commit, so the pair is consistent.
         run: |
           if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD \
              | grep -qE '^shared/proto/|^teams/relay/(ci|schema-sync-hook)/|^\.github/workflows/relay-schema-ci\.yaml$'; then
@@ -67,6 +72,28 @@ jobs:
           # the scripts read the base branch's schema files / list / level via `git show`
           fetch-depth: 0
 
+      # Files and policy from one snapshot: the live base is merged into the checkout, not just passed to the scripts.
+      # Base ref gone (renamed/deleted) or a conflict -> fall back to the event's base: that is not a schema verdict,
+      # and a conflicting PR can't merge until a new push, which re-runs this against the fresh base.
+      - name: Merge the live base tip into the checkout
+        id: base
+        env:
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          BASE_SHA="$EVENT_BASE_SHA"
+          if ! LIVE_SHA="$(git rev-parse --verify --quiet "refs/remotes/origin/${GITHUB_BASE_REF}^{commit}")"; then
+            echo "::warning::Base branch '${GITHUB_BASE_REF}' no longer exists - checking against the event's base ${EVENT_BASE_SHA}."
+          elif [ "$LIVE_SHA" = "$EVENT_BASE_SHA" ]; then
+            echo "Base ${GITHUB_BASE_REF} has not moved since the event (${LIVE_SHA})."
+          elif git -c user.name=schema-ci -c user.email=schema-ci@localhost merge --no-edit "$LIVE_SHA"; then
+            echo "Merged live base ${GITHUB_BASE_REF} at ${LIVE_SHA}."
+            BASE_SHA="$LIVE_SHA"
+          else
+            git merge --abort
+            echo "::warning::PR conflicts with the live tip of '${GITHUB_BASE_REF}' (${LIVE_SHA}) - checking against the event's base ${EVENT_BASE_SHA}. Resolve the conflict to re-check."
+          fi
+          echo "sha=${BASE_SHA}" >> "$GITHUB_OUTPUT"
+
       - name: Point at this job's Schema Registry port
         run: echo "SCHEMA_REGISTRY_URL=http://localhost:${{ job.services.schema-registry.ports['8080'] }}/apis/ccompat/v6" >> "$GITHUB_ENV"
 
@@ -84,10 +111,14 @@ jobs:
           exit 1
 
       - name: Seed registry with base-branch schema versions
-        run: bash teams/relay/ci/seed-registry.sh "${{ github.event.pull_request.base.sha }}"
+        run: bash teams/relay/ci/seed-registry.sh "${{ steps.base.outputs.sha }}"
 
       - name: Check PR schema versions for compatibility
-        run: bash teams/relay/ci/check-all-schemas.sh "${{ github.event.pull_request.base.sha }}"
+        run: bash teams/relay/ci/check-all-schemas.sh "${{ steps.base.outputs.sha }}"
+
+      # After the check, so it compares against the base's versions only.
+      - name: Register schema rows this PR adds
+        run: bash teams/relay/ci/register-added-schemas.sh "${{ steps.base.outputs.sha }}"
 
   chart-lint:
     needs: changes

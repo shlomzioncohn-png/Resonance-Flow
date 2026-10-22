@@ -1,0 +1,18 @@
+# MIND's config.yaml for running on your machine (#481) -- `make run-local`
+# points CONFIG_FILE_PATH here. In the cluster Relay's Helm chart mounts the
+# real one; under `docker compose up` it's config.compose.yml.
+#
+# Same keys as the chart renders (teams/relay/helm/resonance-flow/README.md,
+# "MIND (`components.mind`)"). Only the keys MIND reads today are here.
+# No credentials -- those go in the secrets file (secrets.example.yml).
+#
+# Needs a database: `docker compose up -d vector-store` publishes it here.
+
+vector_store:
+  url: localhost:5432
+  # Must match POSTGRES_USER / POSTGRES_DB in .env.
+  user: mind
+  db: mind
+
+service:
+  log_level: INFO

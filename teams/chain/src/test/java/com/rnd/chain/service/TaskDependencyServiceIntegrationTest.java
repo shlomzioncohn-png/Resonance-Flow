@@ -1,18 +1,22 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
+import com.rnd.chain.testsupport.PgRepos;
+import org.junit.jupiter.api.Tag;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.events.SchedulingUpdatePublisher;
 import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
-import com.rnd.chain.repository.InMemoryConstraintRepository;
-import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
-import com.rnd.chain.repository.InMemoryGraphLock;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
-import com.rnd.chain.repository.InMemoryTransactionRunner;
+import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskReadinessRepository;
+import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.testsupport.IncrementingClock;
 import com.rnd.chain.testsupport.TestTransactions;
 
@@ -26,6 +30,10 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Ported from the in-memory version; runs against the real Postgres repositories (rolled back per test). */
+@Tag("postgres")
+@SpringBootTest
+@Transactional
 class TaskDependencyServiceIntegrationTest {
 
     private static final UUID TENANT_ID = UUID.randomUUID();
@@ -33,12 +41,31 @@ class TaskDependencyServiceIntegrationTest {
     private UUID taskId;
     private UUID dependencyTaskId;
 
-    private InMemoryTaskRepository taskRepository;
-    private InMemoryTaskDependencyRepository dependencyRepository;
+    private TaskRepository taskRepository;
+    private TaskDependencyRepository dependencyRepository;
 
     private RecordingSchedulingUpdatePublisher schedulingPublisher;
 
     private TaskDependencyService taskDependencyService;
+
+    @Autowired
+    private TaskReadinessRepository taskReadinessRepository;
+
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
 
     @BeforeEach
     void setUp() {
@@ -57,11 +84,11 @@ class TaskDependencyServiceIntegrationTest {
                 true);
 
         taskRepository =
-                new InMemoryTaskRepository(
+                PgRepos.tasks(
                         List.of(task, dependencyTask));
 
         dependencyRepository =
-                new InMemoryTaskDependencyRepository(
+                PgRepos.dependencies(
                         List.of());
 
         schedulingPublisher =
@@ -69,24 +96,34 @@ class TaskDependencyServiceIntegrationTest {
 
         SchedulingUpdateService schedulingUpdateService =
                 new SchedulingUpdateService(
-                        schedulingPublisher);
+                        schedulingPublisher,
+                        taskReadinessRepository);
+
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
+                                taskRepository,
+                                dependencyRepository,
+                                taskReadinessRepository,
+                                schedulingUpdateService,
+                                new SchedulingPublishListener(
+                                taskRepository,
+                                schedulingUpdateService));
 
         DependencyEdgeService dependencyEdgeService =
                 new DependencyEdgeService(
+                        taskRepository,
                         dependencyRepository,
-                        new InMemoryGraphLock(),
-                        new TaskCounterUpdater(
-                                taskRepository,
-                                dependencyRepository,
-                                new PriorityScoreService(),
-                                new SchedulingPublishListener(taskRepository, schedulingUpdateService)), TaskStateHistoryFixtures.newRecorder());
+                        PgRepos.graphLock(),
+                        priorityScoreService,
+                        TaskStateHistoryFixtures.newRecorder(),
+                        taskReadinessRepository);
 
         taskDependencyService =
                 new TaskDependencyService(
                         taskRepository,
                         dependencyRepository,
-                        new InMemoryDependencyHistoryRepository(),
-                        new InMemoryTransactionRunner(),
+                        PgRepos.history(),
+                        PgRepos.transactionRunner(),
                         new IncrementingClock(),
                         dependencyEdgeService);
     }
@@ -119,10 +156,10 @@ class TaskDependencyServiceIntegrationTest {
 
         assertEquals(
                 1,
-                updatedTask.getBlockingCount());
+                blockingCount(updatedTask));
 
         assertFalse(
-                updatedTask.isReady());
+                isReady(updatedTask));
 
         assertEquals(
                 1,
@@ -156,10 +193,10 @@ class TaskDependencyServiceIntegrationTest {
 
         assertEquals(
                 1,
-                blockedTask.getBlockingCount());
+                blockingCount(blockedTask));
 
         assertFalse(
-                blockedTask.isReady());
+                isReady(blockedTask));
 
         schedulingPublisher.clear();
 
@@ -178,10 +215,10 @@ class TaskDependencyServiceIntegrationTest {
 
         assertEquals(
                 0,
-                updatedTask.getBlockingCount());
+                blockingCount(updatedTask));
 
         assertTrue(
-                updatedTask.isReady());
+                isReady(updatedTask));
 
         assertEquals(
                 1,
@@ -226,10 +263,10 @@ class TaskDependencyServiceIntegrationTest {
 
         assertEquals(
                 0,
-                updatedTask.getBlockingCount());
+                blockingCount(updatedTask));
 
         assertTrue(
-                updatedTask.isReady());
+                isReady(updatedTask));
 
         assertTrue(
                 schedulingPublisher
@@ -288,9 +325,6 @@ class TaskDependencyServiceIntegrationTest {
                 .parentTaskId(null)
                 .tenantId(TENANT_ID)
                 .status(status)
-                .isReady(ready)
-                .blockingCount(0)
-                .openConstraintCount(0)
                 .estimatedDurationMin(null)
                 .score(null)
                 .createdAt(now)
@@ -314,7 +348,7 @@ class TaskDependencyServiceIntegrationTest {
         }
 
         public List<TaskSchedulingUpdatedEvent>
-                getPublishedEvents() {
+        getPublishedEvents() {
 
             return publishedEvents;
         }

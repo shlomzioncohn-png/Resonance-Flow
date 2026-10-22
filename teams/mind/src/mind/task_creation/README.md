@@ -257,20 +257,18 @@ await flow.send(proposal, bridge_correlation_id=event.correlation_id, revision=e
   extracted one. Changing that moves #350's scores and calibration, so it is
   left for the same follow-up as whether to ask the model for it at all.
 
-## Open with Inbox
+## Settled with Inbox
 
-Raised in review, and theirs to settle:
+Raised in review, answered by Inbox (Esti Carmel, October 2026):
 
-- **One source_ref, several tasks.** Inbox de-duplicates on (tenant,
-  `source_type`, `source_ref`), so a second task from the same Bridge item is
-  dropped. Today an item yields one task; asked to key on `correlation_id`
-  instead, or to add the task index.
-- **A duplicate request gets no reply.** Inbox returns the existing task
-  without publishing `task.created`, so a re-sent request waits for ever (and
-  is reported overdue once). Asked to re-emit `task.created` for the existing
-  task, or to publish a distinct "already exists" event (the reviewer's
-  preference). Until then such an entry also stays in the in-memory store
-  until a restart; a re-emitted reply would clear it, so no expiry is built.
+- **One source_ref, several tasks.** Inbox now de-duplicates on
+  `correlation_id`, not on (tenant, `source_type`, `source_ref`), so several
+  tasks from one Bridge item each get created (#690).
+- **A duplicate request gets no reply.** Inbox agreed to re-emit `task.created`
+  for the existing task; not implemented on their side yet. Until it is, a
+  re-sent request waits for ever (and is reported overdue once), and its entry
+  stays in the in-memory store until a restart; the re-emitted reply will clear
+  it, so no expiry is built.
 
 ## Running the tests
 

@@ -19,6 +19,11 @@
 
     <properties>
         <java.version>21</java.version>
+        <!-- Explicit compiler level: IntelliJ's Maven importer doesn't always resolve
+             java.version through the Spring Boot parent and resets the module to 1.8
+             on every reload. Same convention as the root pom.xml. -->
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
         <minio.version>8.5.2</minio.version>
         <protobuf.version>3.25.3</protobuf.version>
         <google-api-client.version>2.7.0</google-api-client.version>
@@ -253,7 +258,9 @@
                          raw-object-event.proto (bridge.raw.landed-value) is registered under the
                          pre-production reset in teams/relay/ci/schema-subjects.tsv - its wire shape
                          (objects: repeated RawObjectRef) can still change without a FULL-compat
-                         fight until that line is removed. -->
+                         fight until that line is removed.
+                         structured-task-event.proto imports task-created-event.proto and
+                         task-creation-requested-event.proto from the same root. -->
                     <execution>
                         <id>compile-shared-proto</id>
                         <goals>
@@ -265,22 +272,8 @@
                                 <include>task-created-event.proto</include>
                                 <include>task-creation-requested-event.proto</include>
                                 <include>raw-object-event.proto</include>
+                                <include>structured-task-event.proto</include>
                             </includes>
-                        </configuration>
-                    </execution>
-                    <!-- Bridge-only: structured-task-event.proto (temporary local copy, see
-                         StructuredTaskProtoDriftTest) and Hadas's github-task.proto. -->
-                    <execution>
-                        <id>compile-local-proto</id>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                        <configuration>
-                            <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
-                            <!-- structured-task-event.proto imports the two shared ones above -->
-                            <additionalProtoPathElements>
-                                <additionalProtoPathElement>${proto.root}</additionalProtoPathElement>
-                            </additionalProtoPathElements>
                         </configuration>
                     </execution>
                 </executions>

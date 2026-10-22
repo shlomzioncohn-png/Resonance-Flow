@@ -121,7 +121,7 @@ class CrmSalesforceLaneIntegrationTest {
         SalesforceDealRepository repository = newRepository();
         CapturingPublisher publisher = new CapturingPublisher();
         CrmLane lane = new CrmLane(
-                new CrmSourceReader(repository),
+                new CrmSourceReader(List.of(repository)),
                 new DealToTaskMapper(VALID_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher(), 0),
                 new CrmTaskValidator(new TaskValidator()),
                 publisher);
@@ -155,5 +155,31 @@ class CrmSalesforceLaneIntegrationTest {
         assertEquals(TaskStatus.CANCELLED, lostTask.status());
         assertEquals(Instant.parse("2026-08-25T23:59:59Z"), lostTask.deadline());
         assertNull(lostTask.completedAt(), "a lost deal never completed");
+    }
+
+    @Test
+    void openStageDealWithNullLastStageChangeDateGetsStalledBumpFromCreatedDate() {
+        enqueueJson(tokenResponse());
+        enqueueJson(SalesforceDealRepositoryTest.DEFAULT_STAGES);
+        // LastStageChangeDate null -> falls back to CreatedDate, 30 days before asOf (FIXED_NOW).
+        String stalledNewDeal = SalesforceDealRepositoryTest.opportunityRow("SF5", "Never changed stage", null,
+                "Qualification", "5000", null, "2026-07-31T08:00:00.000+0000", "LastStageChangeDate", null,
+                null, null);
+        enqueueJson(SalesforceDealRepositoryTest.queryPage(stalledNewDeal));
+
+        SalesforceDealRepository repository = newRepository();
+        CapturingPublisher publisher = new CapturingPublisher();
+        CrmLane lane = new CrmLane(
+                new CrmSourceReader(List.of(repository)),
+                new DealToTaskMapper(VALID_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher(), 14),
+                new CrmTaskValidator(new TaskValidator()),
+                publisher);
+
+        lane.run(ReadCursor.full(), FIXED_NOW);
+
+        assertEquals(1, publisher.published.size());
+        Task task = publisher.published.get(0);
+        assertEquals(3, task.urgency(),
+                "QUALIFIED base urgency 2, +1 stalled bump since the CreatedDate fallback is 30 days before asOf");
     }
 }

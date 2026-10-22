@@ -63,7 +63,9 @@ The Gateway exposes six endpoints for the Frontend's workspace functionality. Al
 | GET | `/api/workspace/employee-task` | `http://bff-service:8080/workspace/employee-task` | BFF (Sari) | Get the employee's current task (My Workspace demo); mocked at the BFF, no downstream service owns this yet |
 | GET | `/api/manager/workload` | `http://bff-service:8080/manager/workload` | BFF (Sari) | Active-task count per employee (Manager Dashboard); mocked at the BFF |
 | GET | `/api/manager/projects` | `http://bff-service:8080/manager/projects` | BFF (Sari) | Project grid with health/KPI data (Manager Dashboard); mocked at the BFF. Distinct from `/api/admin/projects` (per-project drill-down) |
+| GET | `/api/manager/dashboard/kpis` | `http://bff-service:8080/manager/dashboard/kpis` | BFF (Sari) | Manager Dashboard KPI tiles: `{ inProgress, blocked, delayed, avgBlockedDays }` for the manager's tenant, counted from Inbox (`avgBlockedDays` is `null` until Chain provides it). Optional `?period=7d\|30d\|90d` (validated, not applied yet) and `?project=<Inbox project id>` |
 | GET | `/api/manager/users` | `http://bff-service:8080/manager/users` | BFF (Sari) | List users (meant for managers; role check pending Auth stage 2). Real call through to Inbox — not mocked. |
+| POST | `/api/manager/users` | `http://bff-service:8080/manager/users` | BFF (Sari) | Create a user in the manager's own tenant (displayName + role MANAGER/EMPLOYEE required), 201; 409 if email/username exists |
 | GET | `/api/manager/users/{id}` | `http://bff-service:8080/manager/users/{id}` | BFF (Sari) | One user's details, MANAGER-only |
 | PATCH | `/api/manager/users/{id}` | `http://bff-service:8080/manager/users/{id}` | BFF (Sari) | Edit displayName/firstName/lastName/phone only, MANAGER-only |
 | PATCH | `/api/manager/users/{id}/status` | `http://bff-service:8080/manager/users/{id}/status` | BFF (Sari) | Change status (ACTIVE/SUSPENDED/DISABLED), MANAGER-only, 409 on self-change |

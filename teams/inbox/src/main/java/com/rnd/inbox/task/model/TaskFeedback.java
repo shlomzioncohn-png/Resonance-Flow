@@ -33,10 +33,7 @@ public class TaskFeedback {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(name = "feedback_type", nullable = false)
-    private String feedbackType;
-
-    @Column(name = "feedback_text")
+    @Column(name = "feedback_text", nullable = false)
     private String feedbackText;
 
     @Column(name = "created_at", nullable = false)
@@ -67,14 +64,6 @@ public class TaskFeedback {
 
     public void setUser(User user) {
         this.user = user;
-    }
-
-    public String getFeedbackType() {
-        return feedbackType;
-    }
-
-    public void setFeedbackType(String feedbackType) {
-        this.feedbackType = feedbackType;
     }
 
     public String getFeedbackText() {

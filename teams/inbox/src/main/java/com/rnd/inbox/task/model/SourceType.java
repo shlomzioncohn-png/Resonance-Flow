@@ -12,5 +12,7 @@ public enum SourceType {
     CALENDAR,
     MANUAL,
     DRIVE,
-    JIRA_ISSUE
+    JIRA_ISSUE,
+    ZOOM,
+    BIGBLUEBUTTON
 }

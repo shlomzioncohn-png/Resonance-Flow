@@ -11,8 +11,13 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * bridge.media.classification.* - see application.yml for what each setting does.
  * <p>
  * enabled=false (the default) turns the whole stage off: every item goes out INCLUDED with no
- * classification, exactly as before this stage existed. enabled=true with no model.api-key runs
+ * classification, exactly as before this stage existed. enabled=true with no model API key runs
  * the deterministic rules only.
+ * <p>
+ * Which model is called, and with which key, is not set here: that's bridge.ai.* (the shared AI
+ * infrastructure), under the usages media-meeting and media-document.
+ *
+ * @param promptVersion bump on every prompt change in ModelMediaClassifier, so results stay comparable
  */
 @ConfigurationProperties(prefix = "bridge.media.classification")
 public record MediaClassificationProperties(
@@ -23,7 +28,7 @@ public record MediaClassificationProperties(
         @DefaultValue({"TEST", "SOCIAL"}) Set<MeetingCategory> excludedMeetingCategories,
         @DefaultValue({"BLANK", "ADVERTISEMENT"}) Set<DocumentCategory> excludedDocumentCategories,
         @DefaultValue Documents documents,
-        @DefaultValue Model model) {
+        @DefaultValue("v4") String promptVersion) {
 
     public MediaClassificationProperties {
         if (!(minConfidenceToExclude >= 0.0 && minConfidenceToExclude <= 1.0)) {
@@ -37,12 +42,21 @@ public record MediaClassificationProperties(
      *
      * @param maxPagesToScan the most pages rendered and checked for content, however long the document
      * @param pagesToSend    how many non-blank pages are sent to the model (the scan stops once found)
+     * @param maxFileSizeBytes a larger file is never opened - bounds what a parser has to chew on
+     * @param maxPagePixels  a page whose rendered/decoded size (width x height) would exceed this is
+     *                       never rendered - a huge page or a decompression bomb would otherwise
+     *                       allocate gigabytes and take the whole service down
      */
     public record Documents(
             @DefaultValue("5") int maxPagesToScan,
-            @DefaultValue("2") int pagesToSend) {
+            @DefaultValue("2") int pagesToSend,
+            @DefaultValue("26214400") long maxFileSizeBytes,
+            @DefaultValue("25000000") long maxPagePixels) {
 
         public Documents {
+            if (maxFileSizeBytes < 1 || maxPagePixels < 1) {
+                throw new IllegalArgumentException("documents.max-file-size-bytes and documents.max-page-pixels must be positive");
+            }
             if (pagesToSend < 1) {
                 throw new IllegalArgumentException("documents.pages-to-send must be at least 1, was " + pagesToSend);
             }
@@ -50,22 +64,6 @@ public record MediaClassificationProperties(
                 throw new IllegalArgumentException("documents.max-pages-to-scan (" + maxPagesToScan
                         + ") must be at least documents.pages-to-send (" + pagesToSend + ")");
             }
-        }
-    }
-
-    /**
-     * Any OpenAI-compatible chat-completions endpoint (Gemini, DeepSeek, Groq, ...) - switching
-     * provider is a change to these settings only.
-     */
-    public record Model(
-            @DefaultValue("https://generativelanguage.googleapis.com/v1beta/openai") String baseUrl,
-            @DefaultValue("gemini-3.8-flash") String name,
-            @DefaultValue("") String apiKey,
-            @DefaultValue("v2") String promptVersion,
-            @DefaultValue("60s") Duration timeout) {
-
-        public boolean configured() {
-            return apiKey != null && !apiKey.isBlank();
         }
     }
 }

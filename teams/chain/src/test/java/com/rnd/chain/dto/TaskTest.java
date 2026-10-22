@@ -2,6 +2,7 @@ package com.rnd.chain.dto;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,38 +29,26 @@ class TaskTest {
 
 
     @Test
-    void builder_throwsIllegalArgumentException_whenBlockingCountIsNegative() {
-        assertThatThrownBy(() -> TaskTestFixtures.defaultTask(UUID.randomUUID())
-                .blockingCount(-1)
-                .build())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("blockingCount");
-    }
+    void toBuilder_copiesEveryField() {
+        LocalDateTime created = LocalDateTime.of(2026, 1, 2, 3, 4);
+        LocalDateTime updated = LocalDateTime.of(2026, 5, 6, 7, 8);
+        LocalDateTime deleted = LocalDateTime.of(2026, 9, 10, 11, 12);
+        Task source = Task.builder()
+                .id(UUID.randomUUID())
+                .parentTaskId(UUID.randomUUID())
+                .tenantId(UUID.randomUUID())
+                .status(TaskStatus.ACTIVE)
+                .estimatedDurationMin(45)
+                .score(0.7)
+                .confidence(0.8)
+                .priorityScore(0.9)
+                .tier(TaskTier.TACTICAL)
+                .createdAt(created)
+                .updatedAt(updated)
+                .deletedAt(deleted)
+                .build();
 
-    @Test
-    void builder_throwsIllegalArgumentException_whenOpenConstraintCountIsNegative() {
-        assertThatThrownBy(() -> TaskTestFixtures.defaultTask(UUID.randomUUID())
-                .openConstraintCount(-1)
-                .build())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("openConstraintCount");
-    }
-
-    @Test
-    void copyOf_throwsNullPointerException_whenSourceIsNull() {
-        assertThatThrownBy(() -> Task.copyOf(null))
-                .isInstanceOf(NullPointerException.class);
-    }
-
-    @Test
-    void copyOf_producesEqualButDistinctInstance() {
-        Task source = TaskTestFixtures.defaultTask(UUID.randomUUID()).blockingCount(1).build();
-
-        Task copy = Task.copyOf(source);
-
-        assertThat(copy).isNotSameAs(source).isEqualTo(source);
-        assertThat(copy.getBlockingCount()).isEqualTo(source.getBlockingCount());
-        assertThat(copy.getStatus()).isEqualTo(source.getStatus());
+        assertThat(source.toBuilder().build()).usingRecursiveComparison().isEqualTo(source);
     }
 
     @Test
@@ -87,7 +76,7 @@ class TaskTest {
     void equals_andHashCode_dependOnlyOnId() {
         UUID id = UUID.randomUUID();
         Task a = TaskTestFixtures.defaultTask(id).status(TaskStatus.ACTIVE).build();
-        Task b = TaskTestFixtures.defaultTask(id).status(TaskStatus.DONE).blockingCount(3).build();
+        Task b = TaskTestFixtures.defaultTask(id).status(TaskStatus.DONE).build();
 
         assertThat(a).isEqualTo(b);
         assertThat(a.hashCode()).isEqualTo(b.hashCode());
@@ -102,14 +91,12 @@ class TaskTest {
     }
 
     @Test
-    void toString_containsIdStatusAndCounts() {
+    void toString_containsIdAndStatus() {
         UUID id = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(id).status(TaskStatus.ACTIVE).blockingCount(2).openConstraintCount(1).build();
+        Task task = TaskTestFixtures.defaultTask(id).status(TaskStatus.ACTIVE).build();
 
         assertThat(task.toString())
                 .contains(id.toString())
-                .contains("ACTIVE")
-                .contains("blockingCount=2")
-                .contains("openConstraintCount=1");
+                .contains("ACTIVE");
     }
 }

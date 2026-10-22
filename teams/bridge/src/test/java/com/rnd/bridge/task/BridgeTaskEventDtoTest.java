@@ -47,7 +47,7 @@ class BridgeTaskEventDtoTest {
 
     private static final Set<String> FORBIDDEN_KEYS = Set.of(
             "id", "correlation_id", "is_available", "priority_score", "owner_id", "created_by",
-            "extraction_provenance", "created_at", "updated_at", "completed_at", "snoozed_until",
+            "extraction_provenance", "created_at", "updated_at", "completed_at",
             "organization_id");
 
     private static Task fullyPopulatedTask() {
@@ -66,7 +66,6 @@ class BridgeTaskEventDtoTest {
                 "crm:D-1",
                 30,
                 Instant.parse("2026-08-24T09:00:00Z"),
-                Instant.parse("2026-08-25T09:00:00Z"),
                 Instant.parse("2026-08-23T09:00:00Z"));
     }
 

@@ -7,10 +7,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * One deal as returned by {@code GET /crm/v3/objects/deals}. {@code
- * properties} carries current-state values (only the ones requested);
- * {@code propertiesWithHistory} carries, per requested property, that
- * property's change history newest-first.
+ * One deal as returned by {@code GET /crm/v3/objects/deals}. {@code properties} is current state;
+ * {@code propertiesWithHistory} is that property's change history, newest-first.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 record HubSpotDealRecord(

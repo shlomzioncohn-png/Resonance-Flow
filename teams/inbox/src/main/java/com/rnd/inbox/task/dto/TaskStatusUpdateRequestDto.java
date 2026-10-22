@@ -16,6 +16,10 @@ public class TaskStatusUpdateRequestDto {
     // value rather than this field's shape alone.
     private Instant snoozedUntil;
 
+    // Optional, and accepted only when status is REJECTED - enforced in the Service
+    // for the same reason as snoozedUntil above.
+    private String feedbackText;
+
     public String getStatus() {
         return status;
     }
@@ -30,5 +34,13 @@ public class TaskStatusUpdateRequestDto {
 
     public void setSnoozedUntil(Instant snoozedUntil) {
         this.snoozedUntil = snoozedUntil;
+    }
+
+    public String getFeedbackText() {
+        return feedbackText;
+    }
+
+    public void setFeedbackText(String feedbackText) {
+        this.feedbackText = feedbackText;
     }
 }

@@ -34,9 +34,18 @@ def sink() -> ListSink:
     return ListSink()
 
 
+class _FakeIndex:
+    """for_tenant() returns itself -- the scoped store is never touched
+    directly in these tests, resolve_dependency_targets (the only thing
+    that would use it) is mocked below."""
+
+    def for_tenant(self, tenant_id: UUID) -> "_FakeIndex":
+        return self
+
+
 @pytest.fixture
 def publisher(sink: ListSink) -> DependencyPublisher:
-    return DependencyPublisher(store=object(), sink=sink)  # type: ignore[arg-type]
+    return DependencyPublisher(index=_FakeIndex(), sink=sink)  # type: ignore[arg-type]
 
 
 @pytest.fixture

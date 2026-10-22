@@ -7,7 +7,6 @@ public enum TaskStatus {
     IN_REVIEW,
     APPROVED,
     IN_PROGRESS,
-    SNOOZED,
     DONE,
     REJECTED,
     CANCELLED;

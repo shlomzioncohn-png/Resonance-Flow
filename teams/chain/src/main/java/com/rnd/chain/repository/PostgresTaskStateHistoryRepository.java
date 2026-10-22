@@ -14,6 +14,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /** Postgres-backed {@link TaskStateHistoryRepository} (V9 migration). */
 @Repository
@@ -44,7 +47,7 @@ public class PostgresTaskStateHistoryRepository implements TaskStateHistoryRepos
     public PageResponse<TaskStateHistoryEntry> findByTaskId(UUID taskId, Instant from, Instant to, int page,
                                                             int size) {
         Objects.requireNonNull(taskId, "taskId must not be null");
-        // Newest first; sequence is the same-millisecond tiebreaker (mirrors the in-memory repository).
+        // Newest first; sequence is the same-millisecond tiebreaker.
         Sort sort = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("sequence"));
         Page<TaskStateHistoryEntity> result = jpaRepository.findByTaskIdAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
                 taskId, from == null ? OPEN_FROM : from, to == null ? OPEN_TO : to,
@@ -57,4 +60,17 @@ public class PostgresTaskStateHistoryRepository implements TaskStateHistoryRepos
         return new TaskStateHistoryEntry(e.getId(), e.getTaskId(), e.getEventType(), e.getFromStatus(),
                 e.getToStatus(), e.getBlockingCountBefore(), e.getBlockingCountAfter(), e.getCreatedAt());
     }
+
+    @Override
+    public Map<UUID, Instant> findLatestBlockedSinceByTaskIds(List<UUID> taskIds) {
+        if (taskIds == null || taskIds.isEmpty()) {
+            return Map.of();
+        }
+
+        return jpaRepository.findLatestBlockedSinceByTaskIds(taskIds).stream()
+                .collect(Collectors.toMap(
+                        row -> (UUID) row[0],
+                        row -> ((java.sql.Timestamp) row[1]).toInstant()
+                ));
+}
 }

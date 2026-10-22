@@ -17,8 +17,9 @@ from __future__ import annotations
 from typing import Protocol, Self
 
 from confluent_kafka import KafkaException, Producer
-from confluent_kafka.schema_registry import SchemaRegistryClient
-from confluent_kafka.schema_registry.protobuf import ProtobufSerializer
+from confluent_kafka.schema_registry import SchemaRegistryClient, prefix_schema_id_serializer
+from confluent_kafka.schema_registry.common.protobuf import _create_index_array
+from confluent_kafka.schema_registry.common.serde import SchemaId
 from confluent_kafka.serialization import (
     MessageField,
     SerializationContext,
@@ -27,14 +28,6 @@ from confluent_kafka.serialization import (
 from google.protobuf.message import Message
 
 from mind.messaging.config import MessagingSettings, load_settings
-
-# Auto-register on first publish (the Confluent Java serializer default too).
-# `false` + `use.latest.version` can't read source-format schemas back with this
-# confluent-kafka version.
-_SERIALIZER_CONF = {
-    "auto.register.schemas": True,
-    "use.deprecated.format": False,
-}
 
 
 class Publisher(Protocol):
@@ -46,22 +39,26 @@ class Publisher(Protocol):
 class ProtobufProducer:
     def __init__(self, settings: MessagingSettings | None = None):
         self._settings = settings or load_settings()
+        self._settings.require_client_keys()
         self._producer = Producer(self._settings.producer_conf())
         self._registry = SchemaRegistryClient({"url": self._settings.schema_registry_url})
         self._key_serializer = StringSerializer("utf_8")
-        self._value_serializers: dict[type, ProtobufSerializer] = {}
+        self._schema_ids: dict[tuple[str, type[Message]], SchemaId] = {}
 
-    def _value_serializer(self, message_type: type) -> ProtobufSerializer:
-        if message_type not in self._value_serializers:
-            self._value_serializers[message_type] = ProtobufSerializer(
-                message_type, self._registry, _SERIALIZER_CONF
-            )
-        return self._value_serializers[message_type]
+    def _schema_id(self, topic: str, message_type: type[Message]) -> SchemaId:
+        if (topic, message_type) not in self._schema_ids:
+            latest = self._registry.get_latest_version(f"{topic}-value")
+            schema_id = SchemaId("PROTOBUF", latest.schema_id, latest.guid)
+            schema_id.message_indexes = _create_index_array(message_type.DESCRIPTOR)
+            self._schema_ids[(topic, message_type)] = schema_id
+        return self._schema_ids[(topic, message_type)]
 
     def publish(self, topic: str, message, key: str | None = None) -> None:
         """Serialize and send one message, then block until it's acked."""
         ctx = SerializationContext(topic, MessageField.VALUE)
-        value = self._value_serializer(type(message))(message, ctx)
+        value = prefix_schema_id_serializer(
+            message.SerializeToString(), ctx, self._schema_id(topic, type(message))
+        )
 
         delivery_error = None
 

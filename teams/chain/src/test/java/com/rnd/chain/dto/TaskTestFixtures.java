@@ -9,13 +9,12 @@ import java.util.UUID;
  * has already changed more than once in this project's history. Centralizing the sensible
  * defaults here means a future shape change only needs updating in one place.
  *
- * <p>{@code TaskEligibilityServiceConcurrencyTest} and {@code TaskTest} call this directly.
+ * <p>{@code TaskTest} call this directly.
  * {@code TaskEligibilityServiceTest} keeps its own private {@code buildTask(id, blockingCount,
  * openConstraintCount, isReady[, status])} - a positional-args convenience wrapper used at 30+
  * call sites in that file - but its body now delegates to {@link #defaultTask(UUID)} rather than
  * duplicating the {@code Task.builder()} construction, so this class is still the single place
- * the actual defaults live. {@code InMemoryTaskRepositoryTest} doesn't use either form - it
- * extends {@code TaskRepositoryContractTest}, which has its own fixture.
+ * the actual defaults live.
  *
  * <p>{@link #DEFAULT_TENANT_ID} (issue #580): every {@link #defaultTask(UUID)} shares this same
  * constant, so two tasks built from this fixture always share a tenant and pass the strict
@@ -36,9 +35,6 @@ public final class TaskTestFixtures {
                 .id(id)
                 .tenantId(DEFAULT_TENANT_ID)
                 .status(TaskStatus.ACTIVE)
-                .isReady(false)
-                .blockingCount(0)
-                .openConstraintCount(0)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now());
     }

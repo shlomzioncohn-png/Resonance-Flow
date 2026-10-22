@@ -10,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.List;
 
 public interface SpringDataTaskStateHistoryJpaRepository extends JpaRepository<TaskStateHistoryEntity, UUID> {
 
@@ -28,4 +29,16 @@ public interface SpringDataTaskStateHistoryJpaRepository extends JpaRepository<T
             @Param("fromStatus") String fromStatus, @Param("toStatus") String toStatus,
             @Param("countBefore") Integer countBefore, @Param("countAfter") Integer countAfter,
             @Param("createdAt") Instant createdAt);
+    
+    @Query(value = """
+        SELECT DISTINCT ON (task_id)
+               task_id,
+               created_at
+        FROM task_state_history
+        WHERE task_id IN (:taskIds)
+          AND event_type = 'BLOCKED'
+        ORDER BY task_id, created_at DESC, sequence DESC
+        """, nativeQuery = true)
+    List<Object[]> findLatestBlockedSinceByTaskIds(
+        @Param("taskIds") List<UUID> taskIds);
 }

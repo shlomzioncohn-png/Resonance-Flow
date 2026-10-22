@@ -39,6 +39,11 @@ class JsonDealRepositoryTest {
     }
 
     @Test
+    void sourceIsJson() {
+        assertEquals("json", repository.source());
+    }
+
+    @Test
     void loadsTheWholeFeed() {
         assertEquals(79, snapshot.allDeals().size());
         assertEquals(32, snapshot.dealIds().size());

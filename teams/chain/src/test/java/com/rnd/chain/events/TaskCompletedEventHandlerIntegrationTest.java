@@ -1,10 +1,14 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.dto.TaskReadinessSnapshot;
+import com.rnd.chain.testsupport.PgCleanup;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
+import org.springframework.jdbc.core.JdbcTemplate;
+
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.inbox.event.TaskCompletedEvent;
@@ -39,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * End-to-end test for {@link TaskCompletedEventHandler} against an embedded broker, same setup as
  * {@link TaskUpdatedEventHandlerIntegrationTest}. The broker stamps records with the current time.
  */
+@Tag("postgres")
 @SpringBootTest
 @EmbeddedKafka(partitions = 1, bootstrapServersProperty = "spring.kafka.bootstrap-servers")
 @TestPropertySource(properties = {
@@ -46,23 +51,30 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 })
 class TaskCompletedEventHandlerIntegrationTest {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.rnd.chain.repository.TaskReadinessRepository taskReadinessRepository;
+
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
+
     private static final String TOPIC = "task.completed";
     private static final LocalDateTime BASE_TIME = LocalDateTime.of(2026, 1, 1, 12, 0, 0);
 
     @TestConfiguration
     static class Fixtures {
-
-        @Bean
-        @Primary
-        TaskRepository testTaskRepository() {
-            return new InMemoryTaskRepository(List.of());
-        }
-
-        @Bean
-        @Primary
-        TaskDependencyRepository testTaskDependencyRepository() {
-            return new InMemoryTaskDependencyRepository(List.of());
-        }
 
         @Bean
         @Primary
@@ -96,8 +108,19 @@ class TaskCompletedEventHandlerIntegrationTest {
 
     private KafkaTemplate<String, TaskCompletedEvent> producer;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private PgCleanup cleanup;
+
+    @AfterEach
+    void cleanUpRows() {
+        cleanup.restore();
+    }
+
     @BeforeEach
     void setUp() {
+        cleanup = new PgCleanup(jdbcTemplate);
         Map<String, Object> producerProps = new HashMap<>();
         producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
@@ -109,14 +132,13 @@ class TaskCompletedEventHandlerIntegrationTest {
 
     private static Task buildTask(UUID id, TaskStatus status, LocalDateTime updatedAt, int blockingCount) {
         return Task.builder()
-                .id(id).status(status)
-                .isReady(blockingCount == 0).blockingCount(blockingCount).openConstraintCount(0)
+                .id(id).status(status).tenantId(com.rnd.chain.testsupport.TaskFixtures.DEFAULT_TENANT_ID)
                 .createdAt(BASE_TIME).updatedAt(updatedAt)
                 .build();
     }
 
     private void saveTask(Task task) {
-        ((InMemoryTaskRepository) taskRepository).save(task);
+        taskRepository.save(task);
     }
 
     private void sendCompleted(UUID taskId) {
@@ -136,14 +158,14 @@ class TaskCompletedEventHandlerIntegrationTest {
         UUID dependent = UUID.randomUUID();
         saveTask(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME, 0));
         saveTask(buildTask(dependent, TaskStatus.PENDING, BASE_TIME, 1));
-        ((InMemoryTaskDependencyRepository) taskDependencyRepository).save(new TaskDependency(dependent, blocker));
+        taskDependencyRepository.save(new TaskDependency(dependent, blocker));
 
         sendCompleted(blocker);
 
         await().atMost(Duration.ofSeconds(20)).alias("the dependent to be released").until(() ->
-                taskRepository.findById(dependent).map(Task::isReady).orElse(false));
+                taskRepository.findById(dependent).map(this::isReady).orElse(false));
 
-        assertEquals(0, taskRepository.findById(dependent).orElseThrow().getBlockingCount());
+        assertEquals(0, blockingCount(taskRepository.findById(dependent).orElseThrow()));
         assertEquals(TaskStatus.DONE, taskRepository.findById(blocker).orElseThrow().getStatus());
 
         // The event is published right after the repository update, so wait for it rather than assert at once.
@@ -162,20 +184,20 @@ class TaskCompletedEventHandlerIntegrationTest {
         saveTask(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME, 0));
         saveTask(buildTask(otherBlocker, TaskStatus.ACTIVE, BASE_TIME, 0));
         saveTask(buildTask(dependent, TaskStatus.PENDING, BASE_TIME, 2));
-        ((InMemoryTaskDependencyRepository) taskDependencyRepository).save(new TaskDependency(dependent, blocker));
-        ((InMemoryTaskDependencyRepository) taskDependencyRepository).save(new TaskDependency(dependent, otherBlocker));
+        taskDependencyRepository.save(new TaskDependency(dependent, blocker));
+        taskDependencyRepository.save(new TaskDependency(dependent, otherBlocker));
 
         sendCompleted(blocker);
         sendCompleted(blocker);
 
         await().atMost(Duration.ofSeconds(20)).alias("first completion to be applied").until(() ->
-                taskRepository.findById(dependent).map(t -> t.getBlockingCount() == 1).orElse(false));
+                taskRepository.findById(dependent).map(t -> blockingCount(t) == 1).orElse(false));
 
         // A second decrement would show up within this window; the count must stay at 1 throughout.
         await().during(Duration.ofSeconds(3)).atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
             Task unchanged = taskRepository.findById(dependent).orElseThrow();
-            assertEquals(1, unchanged.getBlockingCount());
-            assertTrue(!unchanged.isReady());
+            assertEquals(1, blockingCount(unchanged));
+            assertTrue(!isReady(unchanged));
             assertTrue(schedulingEventsFor(dependent).isEmpty());
         });
     }
@@ -186,7 +208,7 @@ class TaskCompletedEventHandlerIntegrationTest {
         UUID dependent = UUID.randomUUID();
         saveTask(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME, 0));
         saveTask(buildTask(dependent, TaskStatus.PENDING, BASE_TIME, 1));
-        ((InMemoryTaskDependencyRepository) taskDependencyRepository).save(new TaskDependency(dependent, blocker));
+        taskDependencyRepository.save(new TaskDependency(dependent, blocker));
 
         sendCompleted(blocker);
         sendCompleted(blocker);
@@ -206,13 +228,13 @@ class TaskCompletedEventHandlerIntegrationTest {
         // updatedAt far in the future stands in for a reopen newer than the record's broker timestamp.
         saveTask(buildTask(blocker, TaskStatus.ACTIVE, LocalDateTime.of(2099, 1, 1, 0, 0), 0));
         saveTask(buildTask(dependent, TaskStatus.PENDING, BASE_TIME, 1));
-        ((InMemoryTaskDependencyRepository) taskDependencyRepository).save(new TaskDependency(dependent, blocker));
+        taskDependencyRepository.save(new TaskDependency(dependent, blocker));
 
         sendCompleted(blocker);
 
         await().during(Duration.ofSeconds(3)).atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
             assertEquals(TaskStatus.ACTIVE, taskRepository.findById(blocker).orElseThrow().getStatus());
-            assertEquals(1, taskRepository.findById(dependent).orElseThrow().getBlockingCount());
+            assertEquals(1, blockingCount(taskRepository.findById(dependent).orElseThrow()));
         });
     }
 }

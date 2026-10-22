@@ -11,10 +11,10 @@ Vectors, semantic search, duplicate/related-task detection.
 ## What's here
 
 ```
-__init__.py          public interface -- embed()/embed_batch() (+ async), SearchResult, VectorStore, nearest_tasks(), resolve_dependency_targets()
+__init__.py          public interface -- embed()/embed_batch() (+ async), SearchResult, VectorIndex, VectorStore, DEMO_TENANT_ID, nearest_tasks(), resolve_dependency_targets()
 embeddings.py         embed() family -- the real model
-base.py               VectorStore abstract contract + SearchResult
-pgvector_store.py     the ONLY file that knows Postgres/pgvector
+base.py               VectorIndex (whole index) + VectorStore (one tenant) contracts + SearchResult
+pgvector_store.py     the ONLY file that knows Postgres/pgvector: PgVectorStore (the index) + PgTenantStore (one tenant)
 index_consumer.py     #470 -- Kafka task.{created,updated,completed} handlers
 index_consumer_runner.py  #470 -- the process: python -m mind.embeddings.index_consumer_runner
 search.py             nearest_tasks() -- the shared embed()+search() primitive behind #471/#245
@@ -27,6 +27,16 @@ verify.py             table row count vs. manifest record count
 ```
 
 Config lives in `mind.config`. Only `PgVectorStore` is constructed directly outside `__init__.py` -- no factory/singleton.
+
+## Tenants (#841)
+
+`task_embeddings` columns: `task_id`, `embedding`, `is_completed`, `content_hash`, `tenant_id` (UUID, btree index, migration `0004`). Without a tenant, a duplicate, a dependency or a related task could come from another customer.
+
+- **`PgVectorStore` is the index, not a store.** It owns the pool (`open()`, `close()`, `clear()`) and implements `VectorIndex`: `for_tenant(tenant_id)` and `tenant_of(task_id)`. It is not a `VectorStore`, so mypy rejects a search that has no tenant.
+- **`index.for_tenant(tenant_id)` is a `VectorStore`** for one tenant. Every write sets `tenant_id`, every read and search adds `WHERE tenant_id = %s`. `nearest_tasks()`, `resolve_dependency_targets()`, `find_duplicate()` and `find_related()` keep their signatures: they take that scoped store.
+- **Where the tenant comes from:** `task.created` / `task.updated` carry it (index consumer). `task.completed` does not, so its handler reads it from the row with `tenant_of()`. So does `GET /v1/tasks/{task_id}/related`: the tenant is taken from the task's own row, never from the caller, and the endpoint is unchanged. A non-UUID `tenant_id` on an event is logged and skipped. `ingest.py`, `scripts/` and `benchmarks/` use `DEMO_TENANT_ID` (Inbox's built-in System tenant).
+- **Rows from before #841** have `tenant_id = NULL`. They never match a search and `tenant_of()` returns `None` for them. The next `task.updated` fills them: under the event's tenant the row has no `content_hash`, so it is re-embedded once and `upsert()` writes the tenant. `upsert()` never takes over a row that belongs to another tenant (it logs a warning). Once no `NULL` rows are left, a later migration can make the column `NOT NULL`.
+- **`hnsw.iterative_scan` is always on**, because the tenant condition alone can leave fewer than `k` matching rows inside the `ef_search` window. For a large tenant Postgres uses the HNSW index with the tenant as a filter. For a small one it uses the `tenant_id` btree and sorts exactly. Both return the right rows.
 
 ```python
 from contextlib import asynccontextmanager
@@ -60,7 +70,9 @@ python -m mind.embeddings.verify    # table row count vs. manifest
 ```bash
 make dev
 export MIND_ENVIRONMENT=local
-export MIND_VECTOR_STORE__DSN="postgresql://mind:mind@localhost:5432/mind"
+# #481: connection settings come from these files, not a DSN env var --
+# see src/mind/api/README.md "Configuration (#481)".
+export CONFIG_FILE_PATH=config.example.yml SECRETS_FILE_PATH=secrets.example.yml
 ```
 
 `embed()` downloads `BAAI/bge-small-en-v1.5` on first use unless `MODEL_CACHE_DIR` points at a local copy.
@@ -73,8 +85,9 @@ End-to-end walkthrough for someone outside the MIND team (#469's acceptance crit
 cd teams/mind
 docker compose up -d vector-store
 make dev
+make migrate-local
 export MIND_ENVIRONMENT=local
-export MIND_VECTOR_STORE__DSN="postgresql://mind:mind@localhost:5432/mind"
+export CONFIG_FILE_PATH=config.example.yml SECRETS_FILE_PATH=secrets.example.yml
 
 python scripts/load_real_slice.py   # loads eval/real_slice/'s 16 real tasks
 python scripts/query_sample.py      # one sample similarity query
@@ -97,7 +110,8 @@ from mind.config import get_settings
 from mind.embeddings import embed_async, task_text
 from mind.embeddings.pgvector_store import PgVectorStore
 
-store = PgVectorStore(get_settings().vector_store)
+index = PgVectorStore(get_settings().vector_store)  # one per process, open()/close() it
+store = index.for_tenant(task.tenant_id)
 
 vector = await embed_async(
     task_text(task.title, task.description)
@@ -271,7 +285,9 @@ GET /v1/tasks/{task_id}/related
 -> 200 {"related": [{"task_id": str, "similarity": float}, ...]}
 ```
 
-`related: []` covers every "nothing to return" case alike -- an unindexed `task_id`, an index with nothing else in it, or no candidate clearing the threshold -- matching `find_related()`'s own contract (see above). Not a 404: Mind doesn't own the canonical task registry, so "unknown to Mind's index" isn't the same claim as "doesn't exist" -- a clean empty result, not an error, for all of them. `threshold` isn't exposed as a request param (R4's call); `k` could be added later as an optional query param without breaking anything.
+The router reads the tenant of `task_id` from its row (`index.tenant_of()`) and calls `find_related()` on `index.for_tenant(...)`, so results never cross tenants (#841).
+
+`related: []` covers every "nothing to return" case alike -- an unindexed `task_id` (or one indexed before #841, with no tenant yet), an index with nothing else in it, or no candidate clearing the threshold -- matching `find_related()`'s own contract (see above). Not a 404: Mind doesn't own the canonical task registry, so "unknown to Mind's index" isn't the same claim as "doesn't exist" -- a clean empty result, not an error, for all of them. `threshold` isn't exposed as a request param (R4's call); `k` could be added later as an optional query param without breaking anything.
 
 ## Connection resilience
 

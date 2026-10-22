@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.core.io.DefaultResourceLoader;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -43,7 +44,7 @@ class CrmLaneIntegrationTest {
 
     private static CrmLane newLane(DealRepository repository) {
         return new CrmLane(
-                new CrmSourceReader(repository),
+                new CrmSourceReader(List.of(repository)),
                 new DealToTaskMapper(VALID_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher(), 0),
                 new CrmTaskValidator(new TaskValidator()),
                 new LoggingPayloadPublisher<Task>());
@@ -78,7 +79,7 @@ class CrmLaneIntegrationTest {
         // passes this validator while still being obviously fake.
         DealRepository repository = repository();
         CrmLane lane = new CrmLane(
-                new CrmSourceReader(repository),
+                new CrmSourceReader(List.of(repository)),
                 new DealToTaskMapper(
                         CrmTaskValidator.LOCAL_PLACEHOLDER_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher(), 0),
                 new CrmTaskValidator(new TaskValidator()),

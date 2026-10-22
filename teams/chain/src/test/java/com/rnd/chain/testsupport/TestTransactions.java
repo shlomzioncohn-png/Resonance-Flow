@@ -4,6 +4,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionSynchronizationUtils;
 
+import java.util.List;
 import java.util.function.Supplier;
 
 /**
@@ -23,6 +24,9 @@ import java.util.function.Supplier;
  */
 public final class TestTransactions {
 
+    private static final String PENDING_PUBLISH_KEY =
+            "com.rnd.chain.service.SchedulingUpdateService.pendingSchedulingPublishes";
+
     private TestTransactions() {
     }
 
@@ -39,7 +43,7 @@ public final class TestTransactions {
 
     /** Same as {@link #runCommitted(Runnable)}, for an {@code action} that returns a value. */
     public static <T> T runCommitted(Supplier<T> action) {
-        TransactionSynchronizationManager.initSynchronization();
+        Suspended outer = suspendOuter();
         try {
             T result = action.get();
             TransactionSynchronizationUtils.triggerAfterCommit();
@@ -47,6 +51,7 @@ public final class TestTransactions {
             return result;
         } finally {
             clearIfActive();
+            restoreOuter(outer);
         }
     }
 
@@ -54,12 +59,44 @@ public final class TestTransactions {
      * {@code afterCommit()} is deliberately never called (a rolled-back transaction never
      * commits), only {@code afterCompletion(STATUS_ROLLED_BACK)}. */
     public static void runRolledBack(Runnable action) {
-        TransactionSynchronizationManager.initSynchronization();
+        Suspended outer = suspendOuter();
         try {
             action.run();
             TransactionSynchronizationUtils.triggerAfterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
         } finally {
             clearIfActive();
+            restoreOuter(outer);
+        }
+    }
+
+    // A @Transactional test already has synchronization active; park its callbacks so the simulated
+    // commit below only fires the ones registered by the action itself.
+    private record Suspended(List<TransactionSynchronization> synchronizations, Object pendingPublishes) {
+    }
+
+    // Also parks SchedulingUpdateService's per-transaction pending-publish set, which is bound to the thread
+    // (not to the synchronization list) and would otherwise make the simulated commit dedup against
+    // publishes queued earlier in the outer test transaction.
+    private static Suspended suspendOuter() {
+        Suspended outer = null;
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            Object pending = TransactionSynchronizationManager.hasResource(PENDING_PUBLISH_KEY)
+                    ? TransactionSynchronizationManager.unbindResource(PENDING_PUBLISH_KEY) : null;
+            outer = new Suspended(List.copyOf(TransactionSynchronizationManager.getSynchronizations()), pending);
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+        TransactionSynchronizationManager.initSynchronization();
+        return outer;
+    }
+
+    private static void restoreOuter(Suspended outer) {
+        if (outer != null) {
+            TransactionSynchronizationManager.unbindResourceIfPossible(PENDING_PUBLISH_KEY);
+            if (outer.pendingPublishes() != null) {
+                TransactionSynchronizationManager.bindResource(PENDING_PUBLISH_KEY, outer.pendingPublishes());
+            }
+            TransactionSynchronizationManager.initSynchronization();
+            outer.synchronizations().forEach(TransactionSynchronizationManager::registerSynchronization);
         }
     }
 

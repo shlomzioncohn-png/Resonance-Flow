@@ -1,0 +1,63 @@
+{
+  "id": 8150223471,
+  "uuid": "TmV3dGh3aW5kU3luYzA1MQ==",
+  "topic": "Northwind account weekly sync",
+  "user_email": "lior@brightline.example",
+  "user_name": "Lior",
+  "dept": "Sales",
+  "start_time": "2026-10-05T09:00:00Z",
+  "end_time": "2026-10-05T09:30:00Z",
+  "duration": 30,
+  "total_minutes": 90,
+  "participants_count": 3,
+  "type": 2,
+  "custom_keys": [],
+  "tracking_fields": [],
+  "participants": [
+    {
+      "id": "lR7kT7bTIKSNUFEuH0Qlg",
+      "user_id": "16790001",
+      "participant_user_id": "lR7kT7bTIKSNUFEuH0Qlg",
+      "name": "Lior",
+      "user_email": "lior@brightline.example",
+      "join_time": "2026-10-05T09:00:00Z",
+      "leave_time": "2026-10-05T09:30:00Z",
+      "duration": 1800,
+      "status": "in_meeting",
+      "failover": false,
+      "customer_key": "",
+      "registrant_id": "",
+      "bo_mtg_id": ""
+    },
+    {
+      "id": "dN4o5P6q7R8s9T0uA1b2C",
+      "user_id": "16790002",
+      "participant_user_id": "dN4o5P6q7R8s9T0uA1b2C",
+      "name": "Dana",
+      "user_email": "dana@brightline.example",
+      "join_time": "2026-10-05T09:00:00Z",
+      "leave_time": "2026-10-05T09:30:00Z",
+      "duration": 1800,
+      "status": "in_meeting",
+      "failover": false,
+      "customer_key": "",
+      "registrant_id": "",
+      "bo_mtg_id": ""
+    },
+    {
+      "id": "oE3f4G5h6I7j8K9l0M1n2",
+      "user_id": "16790003",
+      "participant_user_id": "oE3f4G5h6I7j8K9l0M1n2",
+      "name": "Omer",
+      "user_email": "omer@brightline.example",
+      "join_time": "2026-10-05T09:01:00Z",
+      "leave_time": "2026-10-05T09:30:00Z",
+      "duration": 1740,
+      "status": "in_meeting",
+      "failover": false,
+      "customer_key": "",
+      "registrant_id": "",
+      "bo_mtg_id": ""
+    }
+  ]
+}
