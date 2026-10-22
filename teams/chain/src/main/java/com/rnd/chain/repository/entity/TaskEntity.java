@@ -66,6 +66,9 @@ public class TaskEntity {
     @Column(name = "tier")
     private TaskTier tier;
 
+    @Column(name = "scored_at")
+    private LocalDateTime scoredAt;
+
     @Version
     @Setter(AccessLevel.NONE)
     private long version;

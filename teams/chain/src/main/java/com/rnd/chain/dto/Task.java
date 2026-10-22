@@ -63,6 +63,10 @@ public final class Task {
     /** Latest tier Inbox sent (issue #864); null until Inbox classifies the task. */
     private final TaskTier tier;
 
+    /** When Mind computed the current {@link #score} (task.score.proposed scored_at). Null until
+     * a score arrives with one; an event scored earlier than this is ignored. */
+    private final LocalDateTime scoredAt;
+
     private final LocalDateTime createdAt;
     private final LocalDateTime updatedAt;
     private final LocalDateTime deletedAt;
@@ -80,6 +84,7 @@ public final class Task {
                  Double confidence,
                  Double priorityScore,
                  TaskTier tier,
+                 LocalDateTime scoredAt,
                  LocalDateTime createdAt,
                  LocalDateTime updatedAt,
                  LocalDateTime deletedAt) {
@@ -107,6 +112,7 @@ public final class Task {
         this.confidence = confidence;
         this.priorityScore = priorityScore;
         this.tier = tier;
+        this.scoredAt = scoredAt;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.deletedAt = deletedAt;
