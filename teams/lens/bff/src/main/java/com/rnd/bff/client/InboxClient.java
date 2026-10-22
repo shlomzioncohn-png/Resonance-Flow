@@ -70,6 +70,9 @@ public class InboxClient {
 
     private static final String ACTOR_HEADER = "X-Actor-Id";
     private static final String TASKS_PATH = "/api/v1/tasks";
+    private static final int TENANT_TASKS_PAGE_SIZE = 200;
+    /** A safety stop for getTenantTasks: 50 pages of 200 = 10,000 tasks. */
+    private static final int TENANT_TASKS_MAX_PAGES = 50;
 
     private final String inboxServiceUrl;
     private final boolean mockEnabled;
@@ -352,6 +355,47 @@ public class InboxClient {
         for (InboxTaskRecord record : tasksById.values()) {
             result.add(toTaskDTO(record));
         }
+        return result;
+    }
+
+    /**
+     * Every task in the acting user's tenant, all pages - for organization-wide
+     * counts (the Manager Dashboard's KPIs). No userId filter: Inbox scopes the
+     * list to the actor's own tenant, so the tenant never comes from the request.
+     */
+    public List<TaskDTO> getTenantTasks(String userId) {
+        if (mockEnabled) {
+            return getTasksForUser(null);
+        }
+        List<TaskDTO> result = new ArrayList<>();
+        for (int page = 0; page < TENANT_TASKS_MAX_PAGES; page++) {
+            URI uri = UriComponentsBuilder.fromHttpUrl(inboxServiceUrl)
+                    .path(TASKS_PATH)
+                    .queryParam("page", page)
+                    .queryParam("size", TENANT_TASKS_PAGE_SIZE)
+                    .encode()
+                    .build()
+                    .toUri();
+            InboxPageResponse body;
+            try {
+                body = restTemplate.exchange(
+                        uri, HttpMethod.GET, new HttpEntity<>(actorHeaders(userId)), InboxPageResponse.class)
+                        .getBody();
+            } catch (HttpClientErrorException ex) {
+                throw rejected(ex);
+            }
+            if (body == null) {
+                throw new IllegalStateException("Inbox returned an empty task page");
+            }
+            if (body.getContent() != null) {
+                body.getContent().stream().map(InboxClient::toTaskDTO).forEach(result::add);
+            }
+            if (page + 1 >= body.getTotalPages()) {
+                return result;
+            }
+        }
+        logger.warn("Tenant has more than {} tasks - KPIs count only the first {}",
+                TENANT_TASKS_MAX_PAGES * TENANT_TASKS_PAGE_SIZE, result.size());
         return result;
     }
 

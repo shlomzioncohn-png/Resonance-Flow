@@ -23,7 +23,9 @@ import org.springframework.stereotype.Component;
  * {@link DocumentScan.Outcome#ALL_BLANK}, since unchecked pages may well have content.
  * <p>
  * Never throws for a bad file: an unsupported format or one that fails to open/render is reported
- * as an outcome, and the item simply stays unclassified.
+ * as an outcome, and the item simply stays unclassified. The same goes for a hostile one: a file
+ * over documents.max-file-size-bytes is never opened, and a page whose size would exceed
+ * documents.max-page-pixels is never rendered (checked from its header first) - both UNREADABLE.
  */
 @Component
 public class DocumentScanner {
@@ -34,6 +36,8 @@ public class DocumentScanner {
     private final BlankPageDetector blankPageDetector;
     private final int maxPagesToScan;
     private final int pagesToSend;
+    private final long maxFileSizeBytes;
+    private final long maxPagePixels;
 
     public DocumentScanner(List<PagedDocumentReader> readers, BlankPageDetector blankPageDetector,
                            MediaClassificationProperties properties) {
@@ -41,6 +45,8 @@ public class DocumentScanner {
         this.blankPageDetector = blankPageDetector;
         this.maxPagesToScan = properties.documents().maxPagesToScan();
         this.pagesToSend = properties.documents().pagesToSend();
+        this.maxFileSizeBytes = properties.documents().maxFileSizeBytes();
+        this.maxPagePixels = properties.documents().maxPagePixels();
     }
 
     public DocumentScan scan(byte[] content, String filename) {
@@ -48,6 +54,11 @@ public class DocumentScanner {
         if (reader.isEmpty()) {
             log.info("{}: format not supported for classification", filename);
             return DocumentScan.unsupportedFormat();
+        }
+        if (content.length > maxFileSizeBytes) {
+            log.warn("{}: {} bytes is over documents.max-file-size-bytes ({}) - not opened", filename,
+                    content.length, maxFileSizeBytes);
+            return DocumentScan.unreadable();
         }
         try (PagedDocument document = reader.get().open(content)) {
             return scanPages(document, filename);
@@ -67,6 +78,12 @@ public class DocumentScanner {
         List<DocumentScan.ContentPage> contentPages = new ArrayList<>(pagesToSend);
         int scanned = 0;
         while (scanned < limit && contentPages.size() < pagesToSend) {
+            long pixels = document.pagePixels(scanned);
+            if (pixels <= 0 || pixels > maxPagePixels) {
+                log.warn("{}: page {} would be {} pixels, over documents.max-page-pixels ({}) - not rendered",
+                        filename, scanned + 1, pixels, maxPagePixels);
+                return DocumentScan.unreadable();
+            }
             BufferedImage page = document.renderPage(scanned);
             scanned++;
             if (!blankPageDetector.isBlank(page)) {

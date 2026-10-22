@@ -99,7 +99,9 @@ def test_health_endpoint_is_instrumented():
 
     response = client.get("/health")
 
-    assert response.status_code == 200
+    # This client never runs the lifespan, so the app isn't ready: 503 since
+    # #481. Counted either way -- readiness isn't what's under test here.
+    assert response.status_code in (200, 503)
     assert instrumentation_summary().call_count == before + 1
 
 

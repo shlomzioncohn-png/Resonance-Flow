@@ -2,6 +2,7 @@ package com.rnd.chain.repository;
 
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTier;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -29,8 +30,6 @@ abstract class TaskRepositoryContractTest {
         return Task.builder()
                 .id(id)
                 .status(TaskStatus.ACTIVE)
-                .blockingCount(0)
-                .openConstraintCount(0)
                 .createdAt(now)
                 .updatedAt(now);
     }
@@ -139,14 +138,43 @@ abstract class TaskRepositoryContractTest {
     }
 
     @Test
-    void save_overwritesExistingTaskWithSameId() {
+    void save_persistsTier_roundTrip() {
         UUID id = UUID.randomUUID();
-        TaskRepository repository = createRepository(List.of(newTaskBuilder(id).blockingCount(0).build()));
+        TaskRepository repository = createRepository(List.of(newTaskBuilder(id).tier(TaskTier.TACTICAL).build()));
 
-        repository.save(newTaskBuilder(id).blockingCount(5).build());
-
-        assertThat(repository.findById(id).orElseThrow().getBlockingCount()).isEqualTo(5);
+        assertThat(repository.findById(id).orElseThrow().getTier()).isEqualTo(TaskTier.TACTICAL);
     }
+
+    @Test
+    void save_withNullTier_doesNotResetStoredTier() {
+        UUID id = UUID.randomUUID();
+        TaskRepository repository = createRepository(List.of(newTaskBuilder(id).tier(TaskTier.STRATEGIC).build()));
+
+        repository.save(newTaskBuilder(id).tier(null).build());
+
+        assertThat(repository.findById(id).orElseThrow().getTier()).isEqualTo(TaskTier.STRATEGIC);
+    }
+
+    @Test
+    void save_withNewTier_replacesStoredTier() {
+        UUID id = UUID.randomUUID();
+        TaskRepository repository = createRepository(List.of(newTaskBuilder(id).tier(TaskTier.STRATEGIC).build()));
+
+        repository.save(newTaskBuilder(id).tier(TaskTier.OPERATIONAL).build());
+
+        assertThat(repository.findById(id).orElseThrow().getTier()).isEqualTo(TaskTier.OPERATIONAL);
+    }
+
+    @Test
+    void insertIfAbsent_persistsTier() {
+        UUID id = UUID.randomUUID();
+        TaskRepository repository = createRepository(List.of());
+
+        repository.insertIfAbsent(newTaskBuilder(id).tier(TaskTier.OPERATIONAL).build());
+
+        assertThat(repository.findById(id).orElseThrow().getTier()).isEqualTo(TaskTier.OPERATIONAL);
+    }
+
     // --- insertIfAbsent -----------------------------------------------------
     @Test
 void insertIfAbsent_insertsTask_whenTaskDoesNotExist() {
@@ -156,7 +184,6 @@ void insertIfAbsent_insertsTask_whenTaskDoesNotExist() {
     boolean inserted = repository.insertIfAbsent(
             newTaskBuilder(id)
                     .status(TaskStatus.PENDING)
-                    .blockingCount(0)
                     .build()
     );
 
@@ -164,7 +191,6 @@ void insertIfAbsent_insertsTask_whenTaskDoesNotExist() {
 
     Task persisted = repository.findById(id).orElseThrow();
     assertThat(persisted.getStatus()).isEqualTo(TaskStatus.PENDING);
-    assertThat(persisted.getBlockingCount()).isZero();
 }
 
 @Test
@@ -184,18 +210,12 @@ void insertIfAbsent_doesNotOverwriteExistingTaskWithSameId() {
 
     Task existing = newTaskBuilder(id)
             .status(TaskStatus.ACTIVE)
-            .blockingCount(3)
-            .openConstraintCount(1)
-            .isReady(false)
             .build();
 
     TaskRepository repository = createRepository(List.of(existing));
 
     Task attemptedReplacement = newTaskBuilder(id)
             .status(TaskStatus.DONE)
-            .blockingCount(0)
-            .openConstraintCount(0)
-            .isReady(true)
             .build();
 
     boolean inserted = repository.insertIfAbsent(attemptedReplacement);
@@ -205,9 +225,6 @@ void insertIfAbsent_doesNotOverwriteExistingTaskWithSameId() {
     Task persisted = repository.findById(id).orElseThrow();
 
     assertThat(persisted.getStatus()).isEqualTo(TaskStatus.ACTIVE);
-    assertThat(persisted.getBlockingCount()).isEqualTo(3);
-    assertThat(persisted.getOpenConstraintCount()).isEqualTo(1);
-    assertThat(persisted.isReady()).isFalse();
 }
 
     // --- update ----------------------------------------------------------
@@ -215,21 +232,19 @@ void insertIfAbsent_doesNotOverwriteExistingTaskWithSameId() {
     @Test
     void update_appliesMutatorAndPersistsResult() {
         UUID id = UUID.randomUUID();
-        TaskRepository repository = createRepository(List.of(newTaskBuilder(id).blockingCount(0).build()));
+        TaskRepository repository = createRepository(List.of(newTaskBuilder(id).build()));
 
         Optional<Task> result = repository.update(id, task ->
                 Task.builder()
                         .id(task.getId())
-                        .status(task.getStatus())
-                        .blockingCount(task.getBlockingCount() + 1)
-                        .openConstraintCount(task.getOpenConstraintCount())
+                        .status(TaskStatus.DONE)
                         .createdAt(task.getCreatedAt())
                         .updatedAt(task.getUpdatedAt())
                         .build());
 
         assertThat(result).isPresent();
-        assertThat(result.get().getBlockingCount()).isEqualTo(1);
-        assertThat(repository.findById(id).orElseThrow().getBlockingCount()).isEqualTo(1);
+        assertThat(result.get().getStatus()).isEqualTo(TaskStatus.DONE);
+        assertThat(repository.findById(id).orElseThrow().getStatus()).isEqualTo(TaskStatus.DONE);
     }
 
     @Test

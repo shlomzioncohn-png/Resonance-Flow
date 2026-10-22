@@ -3,6 +3,7 @@ package com.rnd.bridge.github.service;
 import com.rnd.bridge.github.dto.GitHubIssue;
 import com.rnd.bridge.github.mapper.GitHubIssueMapper;
 import com.rnd.bridge.github.mapper.GitHubPullRequestMapper;
+import com.rnd.bridge.core.error.ValidationException;
 import com.rnd.bridge.task.model.Task;
 import com.rnd.bridge.task.TaskValidator;
 import org.slf4j.Logger;
@@ -12,10 +13,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 
 @Service
 public class GitHubClient {
@@ -34,6 +37,9 @@ public class GitHubClient {
     @Value("${github.target.repo:Resonance-Flow}")
     private String defaultRepo;
 
+    @Value("${github.page-size:100}")
+    private int pageSize;
+
     public GitHubClient(WebClient webClient, GitHubIssueMapper gitHubIssueMapper, GitHubPullRequestMapper gitHubPullRequestMapper, TaskValidator taskValidator) {
         this.webClient = webClient;
         this.gitHubIssueMapper = gitHubIssueMapper;
@@ -42,34 +48,25 @@ public class GitHubClient {
     }
 
     public Flux<Task> fetchIssues(String owner, String repo) {
-        String url = String.format("/repos/%s/%s/issues", owner, repo);
-        log.info("Fetching issues from GitHub: {}", url);
-
-        return webClient.get()
-                .uri(url)
-                .retrieve()
-                .bodyToFlux(GitHubIssue.class)
+        String path = String.format("/repos/%s/%s/issues", owner, repo);
+        log.info("Fetching issues from GitHub: {}", path);
+       return fetchAllPages(path)
+                // The /issues endpoint also returns pull requests (they carry a
+                // pull_request field). They are fetched via /pulls below, so
+                // filtering them here prevents publishing every PR twice.
+                .filter(issue -> issue.getPullRequest() == null)
                 .map(issue -> gitHubIssueMapper.map(issue, Instant.now()))
-                .doOnNext(taskValidator::validate)
-                .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
-                        .filter(this::isRetryableException)
-                        .doBeforeRetry(retrySignal -> log.warn("Retrying GitHub API call, attempt: {}", retrySignal.totalRetries() + 1)))
+                .concatMap(this::validateOrSkip)
                 .doOnError(error -> log.error("Failed to fetch issues from GitHub", error));
     }
 
     public Flux<Task> fetchPullRequests(String owner, String repo) {
-        String url = String.format("/repos/%s/%s/pulls", owner, repo);
-        log.info("Fetching pull requests from GitHub: {}", url);
+        String path = String.format("/repos/%s/%s/pulls", owner, repo);
+        log.info("Fetching pull requests from GitHub: {}", path);
 
-        return webClient.get()
-                .uri(url)                                                                                                                                                                                                                                                                                                                                                       
-                .retrieve()
-                .bodyToFlux(GitHubIssue.class)
+        return fetchAllPages(path)
                 .map(pr -> gitHubPullRequestMapper.map(pr, Instant.now()))
-                .doOnNext(taskValidator::validate)
-                .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
-                        .filter(this::isRetryableException)
-                        .doBeforeRetry(retrySignal -> log.warn("Retrying GitHub API call, attempt: {}", retrySignal.totalRetries() + 1)))
+                .concatMap(this::validateOrSkip)
                 .doOnError(error -> log.error("Failed to fetch pull requests from GitHub", error));
     }
 
@@ -81,6 +78,49 @@ public class GitHubClient {
         return Flux.merge(fetchIssues(owner, repo), fetchPullRequests(owner, repo));
     }
 
+    /**
+     * Fetches every page of a list endpoint. A full page (size == pageSize)
+     * means there may be more pages; a short page ends the traversal.
+     */
+    private Flux<GitHubIssue> fetchAllPages(String path) {
+        return fetchPage(path, 1)
+                .expand(page -> page.items().size() == pageSize
+                        ? fetchPage(path, page.number() + 1)
+                        : Mono.empty())
+                .concatMapIterable(GitHubPage::items);
+    }
+
+    private Mono<GitHubPage> fetchPage(String path, int page) {
+        return webClient.get()
+                .uri(uriBuilder -> uriBuilder.path(path)
+                       .queryParam("per_page", pageSize)
+                        .queryParam("page", page)
+                        .build())
+                .retrieve()
+                .bodyToFlux(GitHubIssue.class)
+                .collectList()
+                .map(items -> new GitHubPage(page, items))
+                .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
+                        .filter(this::isRetryableException)
+                        .doBeforeRetry(retrySignal -> log.warn("Retrying GitHub API call, attempt: {}", retrySignal.totalRetries() + 1)));
+    }
+
+    private record GitHubPage(int number, List<GitHubIssue> items) {
+    }
+
+    /**
+     * Validates a single task; an invalid record is logged and dropped instead
+     * of failing the entire stream.
+     */
+    private Mono<Task> validateOrSkip(Task task) {
+        try {
+            taskValidator.validate(task);
+            return Mono.just(task);
+        } catch (ValidationException e) {
+            log.warn("Skipping invalid task {}: {}", task.sourceRef(), e.getMessage());
+            return Mono.empty();
+        }
+    }
 
     private boolean isRetryableException(Throwable throwable) {
         if (throwable instanceof WebClientResponseException) {

@@ -119,7 +119,6 @@ class BridgeTaskEventDtoInboxContractTest {
                 "crm:D-1",
                 30,
                 Instant.parse("2026-08-24T09:00:00Z"),
-                Instant.parse("2026-08-25T09:00:00Z"),
                 Instant.parse("2026-08-23T09:00:00Z"));
     }
 

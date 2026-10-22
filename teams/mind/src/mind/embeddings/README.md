@@ -60,7 +60,9 @@ python -m mind.embeddings.verify    # table row count vs. manifest
 ```bash
 make dev
 export MIND_ENVIRONMENT=local
-export MIND_VECTOR_STORE__DSN="postgresql://mind:mind@localhost:5432/mind"
+# #481: connection settings come from these files, not a DSN env var --
+# see src/mind/api/README.md "Configuration (#481)".
+export CONFIG_FILE_PATH=config.example.yml SECRETS_FILE_PATH=secrets.example.yml
 ```
 
 `embed()` downloads `BAAI/bge-small-en-v1.5` on first use unless `MODEL_CACHE_DIR` points at a local copy.
@@ -73,8 +75,9 @@ End-to-end walkthrough for someone outside the MIND team (#469's acceptance crit
 cd teams/mind
 docker compose up -d vector-store
 make dev
+make migrate-local
 export MIND_ENVIRONMENT=local
-export MIND_VECTOR_STORE__DSN="postgresql://mind:mind@localhost:5432/mind"
+export CONFIG_FILE_PATH=config.example.yml SECRETS_FILE_PATH=secrets.example.yml
 
 python scripts/load_real_slice.py   # loads eval/real_slice/'s 16 real tasks
 python scripts/query_sample.py      # one sample similarity query

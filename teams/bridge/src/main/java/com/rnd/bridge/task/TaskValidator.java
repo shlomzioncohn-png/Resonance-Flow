@@ -30,13 +30,6 @@ public final class TaskValidator implements PayloadValidator<Task> {
         if (task.effortEstimateMinutes() != null && task.effortEstimateMinutes() <= 0) {
             throw invalid("effortEstimateMinutes", task.effortEstimateMinutes(), "must be > 0");
         }
-
-        boolean snoozed = task.status() == TaskStatus.SNOOZED;
-        boolean hasSnoozedUntil = task.snoozedUntil() != null;
-        if (snoozed != hasSnoozedUntil) {
-            throw invalid("snoozedUntil", task.snoozedUntil(),
-                    "must be present if and only if status = SNOOZED (status was " + task.status() + ")");
-        }
     }
 
     private static void requireNonNull(Object value, String field) {

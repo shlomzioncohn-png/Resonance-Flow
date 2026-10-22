@@ -7,6 +7,7 @@
 # The schema list AND the compatibility level also come from <git-ref>
 # (schema-subjects.tsv on that ref), not from this checkout — so a PR can't
 # weaken its own gate. Reuses register-schema.sh for the actual registration.
+# Exception: a library row this checkout adds is seeded from the checkout (#857).
 # Pairs with check-all-schemas.sh. Driven by .github/workflows/relay-schema-ci.yaml.
 #
 # Usage: seed-registry.sh <git-ref>
@@ -57,6 +58,11 @@ while IFS=$'\t' read -r FILE SUBJECT || [ -n "$FILE" ]; do
     git -C "$REPO_ROOT" show "${BASE_REF}:${BASE_FILE}" > "${TMP_DIR}/${FILE}"
     echo "=== seeding ${SUBJECT} from ${BASE_REF} ==="
     SCHEMA_REGISTRY_URL="$REGISTRY_URL" bash "${SCRIPT_DIR}/register-schema.sh" "${TMP_DIR}/${FILE}" "${SUBJECT}"
+  elif [ "$FILE" = "$SUBJECT" ] && [ -f "${REPO_ROOT}/${PROTO_DIR}/${FILE}" ] \
+       && grep -qxF "${FILE}"$'\t'"${SUBJECT}" <<< "$ADDED_ROWS"; then
+    # No base version to protect, and a base schema the PR makes import it can't resolve otherwise.
+    echo "=== ${SUBJECT}: library added in this checkout — seeding its checkout version ==="
+    SCHEMA_REGISTRY_URL="$REGISTRY_URL" bash "${SCRIPT_DIR}/register-schema.sh" "${REPO_ROOT}/${PROTO_DIR}/${FILE}" "${SUBJECT}"
   else
     echo "=== ${SUBJECT}: ${FILE} does not exist on ${BASE_REF} — new schema, nothing to seed ==="
   fi
