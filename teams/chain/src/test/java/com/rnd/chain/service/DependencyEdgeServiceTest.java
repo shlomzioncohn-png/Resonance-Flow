@@ -70,21 +70,22 @@ class DependencyEdgeServiceTest {
         GraphLock lock =
                 PgRepos.graphLock();
 
-        TaskCounterUpdater counterUpdater =
-                new TaskCounterUpdater(
-                        taskRepository,
-                        dependencyRepository,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
                                 taskRepository,
-                                schedulingUpdateService),
-                        taskReadinessRepository);
+                                dependencyRepository,
+                                taskReadinessRepository,
+                                schedulingUpdateService,
+                                new SchedulingPublishListener(
+                                taskRepository,
+                                schedulingUpdateService));
 
         service =
                 new DependencyEdgeService(
+                        taskRepository,
                         dependencyRepository,
                         lock,
-                        counterUpdater,
+                        priorityScoreService,
                         TaskStateHistoryFixtures.newRecorder(),
                         taskReadinessRepository);
     }
@@ -1452,21 +1453,22 @@ class DependencyEdgeServiceTest {
         GraphLock lock =
                 PgRepos.graphLock();
 
-        TaskCounterUpdater counterUpdater =
-                new TaskCounterUpdater(
-                        taskRepo,
-                        dependencyRepo,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
                                 taskRepo,
-                                scheduling),
-                        taskReadinessRepository);
+                                dependencyRepo,
+                                taskReadinessRepository,
+                                scheduling,
+                                new SchedulingPublishListener(
+                                taskRepo,
+                                scheduling));
 
         DependencyEdgeService edgeService =
                 new DependencyEdgeService(
+                        taskRepo,
                         dependencyRepo,
                         lock,
-                        counterUpdater,
+                        priorityScoreService,
                         TaskStateHistoryFixtures.newRecorder(),
                         taskReadinessRepository);
 

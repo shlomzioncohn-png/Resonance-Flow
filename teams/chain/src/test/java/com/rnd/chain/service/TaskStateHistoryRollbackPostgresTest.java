@@ -89,7 +89,7 @@ class TaskStateHistoryRollbackPostgresTest {
 
     private UUID savedActiveTask() {
         UUID id = UUID.randomUUID();
-        Task task = TaskCounterUpdater.copyOf(newTask(id)).status(TaskStatus.ACTIVE).updatedAt(STORED_AT).build();
+        Task task = newTask(id).toBuilder().status(TaskStatus.ACTIVE).updatedAt(STORED_AT).build();
         taskRepository.save(task);
         createdTaskIds.add(id);
         return id;

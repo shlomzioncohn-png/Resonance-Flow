@@ -52,32 +52,36 @@ class TaskStateHistoryWritingTest {
         TaskDependencyRepository dependencyRepository = PgRepos.dependencies(List.of());
         GraphLock lock = PgRepos.graphLock();
 
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(
-                taskRepository,
-                dependencyRepository,
-                new PriorityScoreService(),
-                new SchedulingPublishListener(
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
                         taskRepository,
-                        new SchedulingUpdateService(event -> { })),
-                taskReadinessRepository);
+                        dependencyRepository,
+                        taskReadinessRepository,
+                        new SchedulingUpdateService(event -> { }),
+                        new SchedulingPublishListener(
+                        taskRepository,
+                        new SchedulingUpdateService(event -> { })));
 
         TaskStateHistoryRecorder recorder =
                 new TaskStateHistoryRecorder(history, Clock.systemUTC());
+
+        edgeService = new DependencyEdgeService(
+                taskRepository,
+                dependencyRepository,
+                lock,
+                priorityScoreService,
+                recorder,
+                taskReadinessRepository);
 
         service = new TaskEligibilityService(
                 taskRepository,
                 dependencyRepository,
                 lock,
-                counterUpdater,
+                edgeService,
+                priorityScoreService,
                 recorder,
                 taskReadinessRepository);
 
-        edgeService = new DependencyEdgeService(
-                dependencyRepository,
-                lock,
-                counterUpdater,
-                recorder,
-                taskReadinessRepository);
     }
 
     private UUID savedTask(TaskStatus status, LocalDateTime updatedAt) {

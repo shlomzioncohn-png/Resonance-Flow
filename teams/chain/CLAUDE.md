@@ -149,7 +149,10 @@ the code with Lombok.
     also fails independently (`reason` round-trips as `{}` instead of `null`) - also pre-existing,
     also unrelated.
 - #649: TaskEligibilityService was split by domain - edges in `DependencyEdgeService`, constraints in
-  `ConstraintEligibilityService`, counter helpers in `TaskCounterUpdater`. The graph lock is the
+  `ConstraintEligibilityService`, stored-counter maintenance (`updateCounters`, `adjustBlockingCount`) in `DependencyEdgeService` (`TaskCounterUpdater` was removed, #917 PR 1), priority-score recompute/publish
+  in `PriorityScoreService` (`recomputePriorityScoreAndPublish`, `onScoreProposed`), the publish-after-commit
+  queue in `SchedulingUpdateService` (`requestPublishAfterCommit`), and placeholder-task inserts in
+  `DependencyEdgeService` (`insertPlaceholdersIfAbsent`) (issue #917, PR 1). The graph lock is the
   `GraphLock` bean (see "Graph lock" below) shared by `DependencyEdgeService` and
   `TaskEligibilityService`; older notes below that name `TaskEligibilityService` for moved methods predate this.
 - PR #468 review (2026-09-23, leaRevivo) findings addressed 2026-09-24:

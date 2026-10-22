@@ -8,7 +8,7 @@ The dependency/constraint update flow is split by domain (#649): `DependencyEdge
 (`addDependency`, `addDependencies`, `removeDependency`), `TaskEligibilityService`
 (`onTaskStatusChanged`, `recalculateTaskEligibility`, `getTaskEligibility`) and
 `ConstraintEligibilityService` (`onConstraintAdded`, `onConstraintStatusChanged`), sharing
-`TaskCounterUpdater` and `GraphLock`, against the Postgres-backed repositories (the in-memory
+`PriorityScoreService` and `GraphLock`, against the Postgres-backed repositories (the in-memory
 repositories and `MockDataConfig` were removed on 2026-10-15; Postgres is the only persistence).
 `TaskEligibilityService` and `TaskTraversalService` are plain Spring beans wired by constructor
 injection. Chain also
@@ -279,9 +279,10 @@ template starts from those properties, so the same settings apply everywhere.
 `priority_score` is Mind's per-task importance score, adjusted by Chain's own feasibility state
 (dependencies, constraints), stored on `Task` and published on `task.scheduling.updated` alongside
 `is_available`. It is `null` until Mind has scored the task; Mind clearing a score clears it again.
-Computed by `PriorityScoreService` (pure function, no repository access) and wired into
-`TaskEligibilityService`, which gathers its inputs from the dependency graph and publishes whenever
-either `priority_score` or `is_available` changes.
+Computed by `PriorityScoreService.compute` (a pure function, no repository access).
+`PriorityScoreService.recomputePriorityScoreAndPublish` gathers its inputs from the dependency graph and
+`task_readiness`, persists the result and queues a publish whenever either `priority_score` or
+`is_available` changes; `DependencyEdgeService` and `TaskEligibilityService` call it.
 
 ### Formula
 
@@ -352,8 +353,8 @@ the profile didn't override the build's own value). CI runs them too now, agains
 
 None of `TaskEligibilityService`/`DependencyEdgeService`/`ConstraintEligibilityService` call
 `SchedulingUpdateService` directly or synchronously. Every trigger
-(`TaskCounterUpdater.recomputePriorityScoreAndPublish`) instead calls
-`requestPublishAfterCommit(taskId)`, which:
+(`PriorityScoreService.recomputePriorityScoreAndPublish`) instead calls
+`SchedulingUpdateService.requestPublishAfterCommit(taskId, listener)`, which:
 
 - Binds a `Set<UUID>` to the current transaction via `TransactionSynchronizationManager` and adds
   `taskId` to it - a task touched several times in one transaction (e.g. `addDependencies`'s batch
@@ -368,9 +369,10 @@ None of `TaskEligibilityService`/`DependencyEdgeService`/`ConstraintEligibilityS
   mutator that forgot `@Transactional`, which would otherwise desync Inbox's copy of
   `priority_score`/`is_available` permanently and silently). This is why every public mutator on
   `TaskEligibilityService`, `DependencyEdgeService`, `ConstraintEligibilityService`, and
-  `TaskCounterUpdater` itself is `@Transactional` (issue #649 split
+  `PriorityScoreService` itself is `@Transactional` (issue #649 split
   `TaskEligibilityService`'s original `addDependency`/`removeDependency`/`onScoreProposed` out
-  into the first two of those), and why `SchedulingPublishTransactionalCoverageTest` exists: a
+  into the first two of those; `onScoreProposed` now lives on `PriorityScoreService`), and why
+  `SchedulingPublishTransactionalCoverageTest` exists: a
   reflection-based guardrail covering all four classes that fails the build if a future public
   mutator is added without `@Transactional`, since that failure mode is otherwise silent at
   runtime.
@@ -388,12 +390,12 @@ same methods a real transaction manager calls, exposed for exactly this kind of 
 `testsupport/TestTransactions.java` (`runCommitted`/`runRolledBack`) - used both by the ~15
 pre-#445-Phase-3 tests that asserted synchronous publish behavior (updated to simulate a commit
 around the call) and by the new tests that specifically prove the commit/rollback/dedup behavior
-(`TaskEligibilityServiceTest`'s "Phase 3" section at the bottom of the file).
+(`PriorityScoreServicePostgresTest`, plus the hand-simulated `SchedulingUpdateServiceTest`).
 
 ### `task.score.proposed`
 
 `TaskScoreProposedEventHandler` stores Mind's `mind_score`, `confidence` and `tier` on the task via
-`TaskCounterUpdater.onScoreProposed`, which recomputes `priority_score` and publishes
+`PriorityScoreService.onScoreProposed`, which recomputes `priority_score` and publishes
 `task.scheduling.updated`. `mind_score` and `confidence` are rounded to two decimals (so `0.8f` is
 stored as `0.8`); a value outside [0, 1], NaN or an `InvalidRequestException` goes to `.errors`
 without retry. A task Chain hasn't seen yet is created as a PENDING placeholder in the event's
@@ -896,8 +898,8 @@ action in `TaskDependencyService` was **not** removed - see "Dependency graph pe
 Append-only table `task_state_history` (V9) for status changes and blocking transitions. This
 schema, `TaskStateHistoryEntry`/`TaskStateEventType` and `TaskStateHistoryRepository`
 (Postgres) landed in #773. Rows are written (#774) in the same transaction as the
-change, via `TaskStateHistoryRecorder` (independent of `TaskCounterUpdater`, which is slated for
-removal): `TaskEligibilityService` records status changes (`onTaskStatusChangedIfNewer`,
+change, via `TaskStateHistoryRecorder` (independent of the stored-counter code in
+`DependencyEdgeService`, which is slated for removal): `TaskEligibilityService` records status changes (`onTaskStatusChangedIfNewer`,
 `onTaskStatusChanged`, `onTaskCompleted`) and the blocking transitions of dependents it releases
 or re-blocks; `DependencyEdgeService` records the blocking transition of an edge add/remove.
 A stale/duplicate event, or one that leaves the status or the

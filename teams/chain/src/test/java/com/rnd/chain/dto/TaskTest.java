@@ -47,24 +47,7 @@ class TaskTest {
     }
 
     @Test
-    void copyOf_throwsNullPointerException_whenSourceIsNull() {
-        assertThatThrownBy(() -> Task.copyOf(null))
-                .isInstanceOf(NullPointerException.class);
-    }
-
-    @Test
-    void copyOf_producesEqualButDistinctInstance() {
-        Task source = TaskTestFixtures.defaultTask(UUID.randomUUID()).blockingCount(1).build();
-
-        Task copy = Task.copyOf(source);
-
-        assertThat(copy).isNotSameAs(source).isEqualTo(source);
-        assertThat(copy.getBlockingCount()).isEqualTo(source.getBlockingCount());
-        assertThat(copy.getStatus()).isEqualTo(source.getStatus());
-    }
-
-    @Test
-    void copyOf_andToBuilder_copyEveryField() {
+    void toBuilder_copiesEveryField() {
         LocalDateTime created = LocalDateTime.of(2026, 1, 2, 3, 4);
         LocalDateTime updated = LocalDateTime.of(2026, 5, 6, 7, 8);
         LocalDateTime deleted = LocalDateTime.of(2026, 9, 10, 11, 12);
@@ -86,8 +69,30 @@ class TaskTest {
                 .deletedAt(deleted)
                 .build();
 
-        assertThat(Task.copyOf(source)).usingRecursiveComparison().isEqualTo(source);
         assertThat(source.toBuilder().build()).usingRecursiveComparison().isEqualTo(source);
+    }
+
+    @Test
+    void withCounters_returnsTheSameInstance_whenNothingChanges() {
+        Task task = TaskTestFixtures.defaultTask(UUID.randomUUID()).isReady(true).build();
+
+        assertThat(task.withCounters(0, 0)).isSameAs(task);
+    }
+
+    @Test
+    void withCounters_derivesIsReadyFromBothCounters() {
+        Task task = TaskTestFixtures.defaultTask(UUID.randomUUID()).isReady(true).build();
+
+        Task blocked = task.withCounters(1, 0);
+        Task constrained = task.withCounters(0, 2);
+        Task freed = blocked.withCounters(0, 0);
+
+        assertThat(blocked.getBlockingCount()).isEqualTo(1);
+        assertThat(blocked.isReady()).isFalse();
+        assertThat(constrained.getOpenConstraintCount()).isEqualTo(2);
+        assertThat(constrained.isReady()).isFalse();
+        assertThat(freed.isReady()).isTrue();
+        assertThat(task.getBlockingCount()).isZero();
     }
 
     @Test

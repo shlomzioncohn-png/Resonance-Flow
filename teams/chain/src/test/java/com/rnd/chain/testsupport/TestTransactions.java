@@ -25,7 +25,7 @@ import java.util.function.Supplier;
 public final class TestTransactions {
 
     private static final String PENDING_PUBLISH_KEY =
-            "com.rnd.chain.service.TaskCounterUpdater.pendingSchedulingPublishes";
+            "com.rnd.chain.service.SchedulingUpdateService.pendingSchedulingPublishes";
 
     private TestTransactions() {
     }
@@ -74,7 +74,7 @@ public final class TestTransactions {
     private record Suspended(List<TransactionSynchronization> synchronizations, Object pendingPublishes) {
     }
 
-    // Also parks TaskCounterUpdater's per-transaction pending-publish set, which is bound to the thread
+    // Also parks SchedulingUpdateService's per-transaction pending-publish set, which is bound to the thread
     // (not to the synchronization list) and would otherwise make the simulated commit dedup against
     // publishes queued earlier in the outer test transaction.
     private static Suspended suspendOuter() {

@@ -12,7 +12,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.dto.TaskTier;
 import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.events.SchedulingUpdatePublisher;
@@ -43,6 +42,9 @@ import static org.junit.jupiter.api.Assertions.*;
 @Transactional
 class TaskEligibilityServiceTest {
 
+    // compute() is pure, so the collaborators are not needed to derive expected scores.
+    private static final PriorityScoreService PURE_SCORER = new PriorityScoreService(null, null, null, null, null);
+
     private TaskRepository taskRepository;
     private TaskDependencyRepository dependencyRepository;
 
@@ -69,35 +71,38 @@ class TaskEligibilityServiceTest {
         GraphLock lock =
             PgRepos.graphLock();
 
-        TaskCounterUpdater counterUpdater =
-            new TaskCounterUpdater(
-                    taskRepository,
-                    dependencyRepository,
-                    new PriorityScoreService(),
-                    new SchedulingPublishListener(
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
                             taskRepository,
-                            schedulingUpdateService),
-                    taskReadinessRepository);
+                            dependencyRepository,
+                            taskReadinessRepository,
+                            schedulingUpdateService,
+                            new SchedulingPublishListener(
+                            taskRepository,
+                            schedulingUpdateService));
 
         TaskStateHistoryRecorder historyRecorder =
             TaskStateHistoryFixtures.newRecorder();
+
+        edgeService =
+            new DependencyEdgeService(
+                    taskRepository,
+                    dependencyRepository,
+                    lock,
+                    priorityScoreService,
+                    historyRecorder,
+                    taskReadinessRepository);
 
         service =
             new TaskEligibilityService(
                     taskRepository,
                     dependencyRepository,
                     lock,
-                    counterUpdater,
+                    edgeService,
+                    priorityScoreService,
                     historyRecorder,
                     taskReadinessRepository);
 
-        edgeService =
-            new DependencyEdgeService(
-                    dependencyRepository,
-                    lock,
-                    counterUpdater,
-                    historyRecorder,
-                    taskReadinessRepository);
 }
 
     @Test
@@ -523,7 +528,7 @@ class TaskEligibilityServiceTest {
                             RecordingSchedulingUpdatePublisher publisher,
                             TaskEligibilityService service,
                             DependencyEdgeService edgeService,
-                            TaskCounterUpdater counterUpdater) {
+                            PriorityScoreService priorityScoreService) {
     }
 
     private Fixture newFixture(
@@ -548,33 +553,35 @@ class TaskEligibilityServiceTest {
         GraphLock lock =
             PgRepos.graphLock();
 
-        TaskCounterUpdater counterUpdater =
-            new TaskCounterUpdater(
-                    taskRepo,
-                    dependencyRepo,
-                    new PriorityScoreService(),
-                    new SchedulingPublishListener(
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
                             taskRepo,
-                            scheduling),
-                    taskReadinessRepository);
+                            dependencyRepo,
+                            taskReadinessRepository,
+                            scheduling,
+                            new SchedulingPublishListener(
+                            taskRepo,
+                            scheduling));
 
         TaskStateHistoryRecorder historyRecorder =
             TaskStateHistoryFixtures.newRecorder();
+
+        DependencyEdgeService edgeService =
+            new DependencyEdgeService(
+                    taskRepo,
+                    dependencyRepo,
+                    lock,
+                    priorityScoreService,
+                    historyRecorder,
+                    taskReadinessRepository);
 
         TaskEligibilityService eligibilityService =
             new TaskEligibilityService(
                     taskRepo,
                     dependencyRepo,
                     lock,
-                    counterUpdater,
-                    historyRecorder,
-                    taskReadinessRepository);
-
-        DependencyEdgeService edgeService =
-            new DependencyEdgeService(
-                    dependencyRepo,
-                    lock,
-                    counterUpdater,
+                    edgeService,
+                    priorityScoreService,
                     historyRecorder,
                     taskReadinessRepository);
 
@@ -585,7 +592,7 @@ class TaskEligibilityServiceTest {
             fixturePublisher,
             eligibilityService,
             edgeService,
-            counterUpdater);
+            priorityScoreService);
 }
 
     private static Task buildTask(UUID id, int blockingCount, int openConstraintCount, boolean isReady) {
@@ -602,135 +609,9 @@ class TaskEligibilityServiceTest {
                 .build();
     }
 
-    // Issue #445: priority_score, now spanning TaskCounterUpdater/DependencyEdgeService after the
-    // #649 split - exercised here via the Fixture, which wires all three collaborators together.
-
-    @Test
-    void onScoreProposed_setsScoreAndConfidence_andPublishesComputedPriorityScore() {
-        UUID taskId = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
-
-        TestTransactions.runCommitted(() -> fixture.counterUpdater().onScoreProposed(taskId, 0.8, 0.5));
-
-        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
-        assertEquals(0.8, task.getScore());
-        assertEquals(0.5, task.getConfidence());
-
-        Double expected = new PriorityScoreService().compute(0.8, 0.5, 0, 0, 0);
-        assertEquals(expected, task.getPriorityScore());
-
-        List<TaskSchedulingUpdatedEvent> events = fixture.publisher().getEvents();
-        assertEquals(1, events.size());
-        assertEquals(expected, events.get(0).getPriorityScore());
-    }
-
-    @Test
-    void onScoreProposed_withNullMindScore_clearsPriorityScoreAndPublishesTheClear() {
-        UUID taskId = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
-        fixture.counterUpdater().onScoreProposed(taskId, 0.8, 0.5);
-        fixture.publisher().clear();
-
-        TestTransactions.runCommitted(() -> fixture.counterUpdater().onScoreProposed(taskId, null, null));
-
-        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
-        assertNull(task.getScore());
-        assertNull(task.getConfidence());
-        assertNull(task.getPriorityScore());
-
-        List<TaskSchedulingUpdatedEvent> events = fixture.publisher().getEvents();
-        assertEquals(1, events.size());
-        assertNull(events.get(0).getPriorityScore());
-    }
-
-    @Test
-    void onScoreProposed_mindScoreOutOfRange_throwsAndDoesNotPublish() {
-        UUID taskId = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
-
-        assertThrows(InvalidRequestException.class,
-                () -> fixture.counterUpdater().onScoreProposed(taskId, 1.5, 0.5));
-
-        assertTrue(fixture.publisher().getEvents().isEmpty());
-        assertNull(fixture.taskRepo().findById(taskId).orElseThrow().getScore());
-    }
-
-    @Test
-    void onScoreProposed_unknownTask_throwsAndDoesNotPublish() {
-        Fixture fixture = newFixture(List.of(), List.of());
-
-        assertThrows(TaskNotFoundException.class,
-                () -> fixture.counterUpdater().onScoreProposed(UUID.randomUUID(), 0.5, 0.5));
-
-        assertTrue(fixture.publisher().getEvents().isEmpty());
-    }
-
-    @Test
-    void onScoreProposed_withTenant_createsPlaceholderForUnknownTaskAndStoresScoreTierAndScoredAt() {
-        UUID taskId = UUID.randomUUID();
-        UUID tenantId = UUID.randomUUID();
-        LocalDateTime scoredAt = LocalDateTime.of(2026, 10, 20, 12, 0);
-        Fixture fixture = newFixture(List.of(), List.of());
-
-        TestTransactions.runCommitted(() -> fixture.counterUpdater()
-                .onScoreProposed(taskId, tenantId, TaskTier.TACTICAL, 0.8, 0.5, scoredAt));
-
-        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
-        assertEquals(tenantId, task.getTenantId());
-        assertEquals(TaskTier.TACTICAL, task.getTier());
-        assertEquals(0.8, task.getScore());
-        assertEquals(scoredAt, task.getScoredAt());
-        assertNotNull(task.getPriorityScore());
-    }
-
-    @Test
-    void onScoreProposed_withOlderScoredAt_isIgnored() {
-        UUID taskId = UUID.randomUUID();
-        UUID tenantId = TaskTestFixtures.DEFAULT_TENANT_ID;
-        LocalDateTime scoredAt = LocalDateTime.of(2026, 10, 20, 12, 0);
-        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
-        TestTransactions.runCommitted(() -> fixture.counterUpdater()
-                .onScoreProposed(taskId, tenantId, TaskTier.TACTICAL, 0.8, 0.5, scoredAt));
-        fixture.publisher().clear();
-
-        TestTransactions.runCommitted(() -> fixture.counterUpdater()
-                .onScoreProposed(taskId, tenantId, TaskTier.STRATEGIC, 0.2, 0.9, scoredAt.minusMinutes(1)));
-
-        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
-        assertEquals(0.8, task.getScore());
-        assertEquals(0.5, task.getConfidence());
-        assertEquals(TaskTier.TACTICAL, task.getTier());
-        assertEquals(scoredAt, task.getScoredAt());
-        assertTrue(fixture.publisher().getEvents().isEmpty());
-    }
-
-    @Test
-    void onScoreProposed_withNewerScoredAt_replacesTheScore() {
-        UUID taskId = UUID.randomUUID();
-        UUID tenantId = TaskTestFixtures.DEFAULT_TENANT_ID;
-        LocalDateTime scoredAt = LocalDateTime.of(2026, 10, 20, 12, 0);
-        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
-        TestTransactions.runCommitted(() -> fixture.counterUpdater()
-                .onScoreProposed(taskId, tenantId, null, 0.8, 0.5, scoredAt));
-
-        TestTransactions.runCommitted(() -> fixture.counterUpdater()
-                .onScoreProposed(taskId, tenantId, null, 0.2, 0.9, scoredAt.plusMinutes(1)));
-
-        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
-        assertEquals(0.2, task.getScore());
-        assertEquals(scoredAt.plusMinutes(1), task.getScoredAt());
-    }
-
-    @Test
-    void onScoreProposed_withTenantDifferentFromStored_throwsAndDoesNotChangeTheTask() {
-        UUID taskId = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
-
-        assertThrows(TenantReassignmentException.class, () -> fixture.counterUpdater()
-                .onScoreProposed(taskId, UUID.randomUUID(), null, 0.8, 0.5, null));
-
-        assertNull(fixture.taskRepo().findById(taskId).orElseThrow().getScore());
-    }
+    // Issue #445: priority_score, spanning PriorityScoreService/DependencyEdgeService after the
+    // #649 split - exercised here via the Fixture, which wires the collaborators together. The
+    // direct PriorityScoreService tests live in PriorityScoreServicePostgresTest.
 
     @Test
     void addDependencies_withMindConfidence_lowersPriorityScoreByBlockerConfidence() {
@@ -739,7 +620,7 @@ class TaskEligibilityServiceTest {
         Fixture fixture = newFixture(
                 List.of(buildTask(taskId, 0, 0, true), buildTask(blockerId, 0, 0, true)),
                 List.of());
-        fixture.counterUpdater().onScoreProposed(taskId, 0.8, 1.0);
+        fixture.priorityScoreService().onScoreProposed(taskId, 0.8, 1.0);
         Double beforeBlocker = fixture.taskRepo().findById(taskId).orElseThrow().getPriorityScore();
 
         fixture.edgeService().addDependencies(taskId, Map.of(blockerId, 0.9));
@@ -759,7 +640,7 @@ class TaskEligibilityServiceTest {
         Fixture fixture = newFixture(
                 List.of(buildTask(taskId, 0, 0, true), buildTask(blockerId, 0, 0, true)),
                 List.of());
-        fixture.counterUpdater().onScoreProposed(taskId, 0.8, 1.0);
+        fixture.priorityScoreService().onScoreProposed(taskId, 0.8, 1.0);
         fixture.edgeService().addDependencies(taskId, Map.of(blockerId, 0.2));
         Double withLowConfidence = fixture.taskRepo().findById(taskId).orElseThrow().getPriorityScore();
         PgRepos.clearPersistenceContext(); // the native upsert changes confidence behind the JPA cache
@@ -779,7 +660,7 @@ class TaskEligibilityServiceTest {
         Fixture fixture = newFixture(
                 List.of(buildTask(dependentId, 0, 0, true), buildTask(taskId, 0, 0, true)),
                 List.of());
-        fixture.counterUpdater().onScoreProposed(taskId, 0.5, 1.0);
+        fixture.priorityScoreService().onScoreProposed(taskId, 0.5, 1.0);
         Double beforeDependent = fixture.taskRepo().findById(taskId).orElseThrow().getPriorityScore();
 
         fixture.edgeService().addDependencies(dependentId, Map.of(taskId, 0.8));
@@ -813,14 +694,14 @@ class TaskEligibilityServiceTest {
         Fixture fixture = newFixture(
                 List.of(buildTask(taskId, 1, 0, false), buildTask(blockerId, 0, 0, true)),
                 List.of(new TaskDependency(taskId, blockerId, 0.9)));
-        fixture.counterUpdater().onScoreProposed(taskId, 0.8, 1.0);
+        fixture.priorityScoreService().onScoreProposed(taskId, 0.8, 1.0);
         fixture.publisher().clear();
 
         TestTransactions.runCommitted(() -> fixture.service().onTaskStatusChanged(blockerId, TaskStatus.DONE));
 
         Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertTrue(task.isReady());
-        assertEquals(new PriorityScoreService().compute(0.8, 1.0, 0, 0, 0), task.getPriorityScore());
+        assertEquals(PURE_SCORER.compute(0.8, 1.0, 0, 0, 0), task.getPriorityScore());
         assertEquals(1, fixture.publisher().getEvents().size());
     }
     @Test
@@ -924,76 +805,11 @@ class TaskEligibilityServiceTest {
     void noOpRecalculation_doesNotPublishAgain() {
         UUID taskId = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
-        fixture.counterUpdater().onScoreProposed(taskId, 0.8, 1.0);
+        fixture.priorityScoreService().onScoreProposed(taskId, 0.8, 1.0);
         fixture.publisher().clear();
 
         fixture.service().recalculateTaskEligibility(taskId);
 
-        assertTrue(fixture.publisher().getEvents().isEmpty());
-    }
-
-    // Issue #445 Phase 3: AFTER_COMMIT publish - commit/rollback/dedup.
-
-    @Test
-    void rollback_neverPublishes() {
-        UUID taskId = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
-
-        TestTransactions.runRolledBack(() -> fixture.counterUpdater().onScoreProposed(taskId, 0.8, 1.0));
-
-        // The DB write itself is unconditional (issue #445 doesn't touch that) - only the
-        // Kafka-facing publish is gated on commit.
-        assertEquals(0.8, fixture.taskRepo().findById(taskId).orElseThrow().getScore());
-        assertTrue(fixture.publisher().getEvents().isEmpty());
-    }
-
-    @Test
-    void sameTaskChangedTwiceInOneTransaction_publishesExactlyOnce_withTheFinalState() {
-        // Locked decision: "Deduplication: By taskId within the transaction."
-        UUID taskId = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
-
-        TestTransactions.runCommitted(() -> {
-            fixture.counterUpdater().onScoreProposed(taskId, 0.5, 1.0);
-            fixture.counterUpdater().onScoreProposed(taskId, 0.8, 1.0); // same task, changed again
-        });
-
-        List<TaskSchedulingUpdatedEvent> events = fixture.publisher().getEvents();
-        assertEquals(1, events.size());
-        assertEquals(new PriorityScoreService().compute(0.8, 1.0, 0, 0, 0), events.get(0).getPriorityScore());
-    }
-
-    @Test
-    void twoDifferentTasksChangedInOneTransaction_publishesOncePerTask() {
-        UUID taskA = UUID.randomUUID();
-        UUID taskB = UUID.randomUUID();
-        Fixture fixture = newFixture(
-                List.of(buildTask(taskA, 0, 0, true), buildTask(taskB, 0, 0, true)), List.of());
-
-        TestTransactions.runCommitted(() -> {
-            fixture.counterUpdater().onScoreProposed(taskA, 0.5, 1.0);
-            fixture.counterUpdater().onScoreProposed(taskB, 0.6, 1.0);
-        });
-
-        List<TaskSchedulingUpdatedEvent> events = fixture.publisher().getEvents();
-        assertEquals(2, events.size());
-        assertEquals(
-                Set.of(taskA, taskB),
-                events.stream().map(TaskSchedulingUpdatedEvent::getTaskId).collect(Collectors.toSet()));
-    }
-
-    @Test
-    void noActiveTransaction_doesNotPublish() {
-        // fallbackExecution=false (locked decision): called with no transaction at all - the DB
-        // write still happens, but nothing is published. Every production call site is
-        // @Transactional (enforced by the guardrail test), so this only happens here, in a test
-        // that deliberately skips TestTransactions.
-        UUID taskId = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
-
-        fixture.counterUpdater().onScoreProposed(taskId, 0.8, 1.0);
-
-        assertEquals(0.8, fixture.taskRepo().findById(taskId).orElseThrow().getScore());
         assertTrue(fixture.publisher().getEvents().isEmpty());
     }
 }

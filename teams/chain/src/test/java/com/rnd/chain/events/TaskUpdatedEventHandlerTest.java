@@ -20,8 +20,9 @@ import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.PriorityScoreService;
-import com.rnd.chain.service.TaskCounterUpdater;
+import com.rnd.chain.service.DependencyEdgeService;
 import com.rnd.chain.service.TaskEligibilityService;
+import com.rnd.chain.service.TaskStateHistoryRecorder;
 import com.rnd.inbox.event.TaskUpdatedEvent;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -81,10 +82,17 @@ class TaskUpdatedEventHandlerTest {
         TaskRepository taskRepo = PgRepos.tasks(tasks);
         TaskDependencyRepository dependencyRepo = PgRepos.dependencies(edges);
         SchedulingUpdateService scheduling = mock(SchedulingUpdateService.class);
+        PriorityScoreService priorityScoreService = new PriorityScoreService(
+                taskRepo,
+                dependencyRepo,
+                taskReadinessRepository,
+                scheduling,
+                new SchedulingPublishListener(taskRepo, scheduling));
+        TaskStateHistoryRecorder recorder = TaskStateHistoryFixtures.newRecorder();
+        DependencyEdgeService edgeService = new DependencyEdgeService(taskRepo, dependencyRepo,
+                PgRepos.graphLock(), priorityScoreService, recorder, taskReadinessRepository);
         TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
-                PgRepos.graphLock(), new TaskCounterUpdater(taskRepo, dependencyRepo,
-                        new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling), taskReadinessRepository),
-                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
+                PgRepos.graphLock(), edgeService, priorityScoreService, recorder, taskReadinessRepository);
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(PgRepos.processedEvents());
         return new Fixture(taskRepo, new TaskUpdatedEventHandler(eligibilityService, template), eligibilityService, dependencyRepo);
     }
