@@ -19,11 +19,12 @@ import asyncio
 import logging
 import os
 import threading
-from functools import partial
 from typing import Any
+from uuid import UUID
 
 from mind.config import LandedConsumerSettings, get_settings
 from mind.contracts import RawObjectEvent
+from mind.embeddings.base import SearchResult
 from mind.embeddings.duplicate_detection import find_duplicate
 from mind.embeddings.pgvector_store import PgVectorStore
 from mind.extraction.config import ExtractionConfig
@@ -117,9 +118,14 @@ def main() -> None:
     search_index = PgVectorStore(vector_store)
     loop.run_until_complete(search_index.open())
     extractor = BasicExtractor(provider, ExtractionConfig(classify=True))
+
+    async def _find_duplicate(tenant_id: UUID, title: str, description: str) -> SearchResult | None:
+        # Only the item's own tenant (#841).
+        return await find_duplicate(search_index.for_tenant(tenant_id), title, description)
+
     pipeline = CreationPipeline(
         extract=lambda item: extractor.extract(item.text, item.source_type, item.item_key),
-        find_duplicate=partial(find_duplicate, search_index),
+        find_duplicate=_find_duplicate,
         sender=flow,
     )
 

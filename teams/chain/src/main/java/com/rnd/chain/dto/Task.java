@@ -7,7 +7,6 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
-import java.util.Objects;
 import java.util.UUID;
 
 // Identifier type: UUID, pending Inbox publishing its own task id type.
@@ -35,18 +34,6 @@ public final class Task {
 
     private final TaskStatus status;
 
-    /** Whether all of this task's dependencies and constraints are satisfied, so it can be worked on.
-     * Invariant: must equal {@code blockingCount == 0 && openConstraintCount == 0}. Not enforced by
-     * this class (a stored field, not derived) - {@code TaskCounterUpdater.withCounters} is the
-     * single place responsible for keeping it in sync whenever either counter changes. */
-    private final boolean isReady;
-
-    /** Number of not-yet-completed tasks that this task depends on (i.e. tasks blocking it). */
-    private final int blockingCount;
-
-    /** Number of unresolved constraints (e.g. scheduling/resource constraints) still open on this task. */
-    private final int openConstraintCount;
-
     private final Integer estimatedDurationMin;
     private final Double score;
 
@@ -63,6 +50,10 @@ public final class Task {
     /** Latest tier Inbox sent (issue #864); null until Inbox classifies the task. */
     private final TaskTier tier;
 
+    /** When Mind computed the current {@link #score} (task.score.proposed scored_at). Null until
+     * a score arrives with one; an event scored earlier than this is ignored. */
+    private final LocalDateTime scoredAt;
+
     private final LocalDateTime createdAt;
     private final LocalDateTime updatedAt;
     private final LocalDateTime deletedAt;
@@ -72,25 +63,17 @@ public final class Task {
                  UUID parentTaskId,
                  UUID tenantId,
                  TaskStatus status,
-                 boolean isReady,
-                 int blockingCount,
-                 int openConstraintCount,
                  Integer estimatedDurationMin,
                  Double score,
                  Double confidence,
                  Double priorityScore,
                  TaskTier tier,
+                 LocalDateTime scoredAt,
                  LocalDateTime createdAt,
                  LocalDateTime updatedAt,
                  LocalDateTime deletedAt) {
         if (id == null) {
             throw new IllegalArgumentException("id must not be null");
-        }
-        if (blockingCount < 0) {
-            throw new IllegalArgumentException("blockingCount must not be negative");
-        }
-        if (openConstraintCount < 0) {
-            throw new IllegalArgumentException("openConstraintCount must not be negative");
         }
         if (status == null) {
             throw new IllegalArgumentException("status must not be null");
@@ -99,38 +82,35 @@ public final class Task {
         this.parentTaskId = parentTaskId;
         this.tenantId = tenantId;
         this.status = status;
-        this.isReady = isReady;
-        this.blockingCount = blockingCount;
-        this.openConstraintCount = openConstraintCount;
         this.estimatedDurationMin = estimatedDurationMin;
         this.score = score;
         this.confidence = confidence;
         this.priorityScore = priorityScore;
         this.tier = tier;
+        this.scoredAt = scoredAt;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.deletedAt = deletedAt;
     }
 
     /**
-     * Returns a new, independent Task with the same field values as {@code source}. Repositories
-     * hand out copies (rather than the stored instance) from their read methods, and store a copy
-     * on save(), so a caller mutating a Task it received can never change repository state without
-     * going through save() - see CLAUDE.md "Open items" (this is a stand-in for the isolation a
-     * real persistence layer gives for free).
+     * A PENDING stand-in for a task Chain has not received yet, with an epoch {@code updatedAt} so
+     * the first real update always wins.
      */
-    public static Task copyOf(Task source) {
-        Objects.requireNonNull(source, "source must not be null");
-        return source.toBuilder().build();
+    public static Task placeholder(UUID id, UUID tenantId) {
+        return Task.builder()
+                .id(id)
+                .tenantId(tenantId)
+                .status(TaskStatus.PENDING)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.ofEpochSecond(0, 0, java.time.ZoneOffset.UTC))
+                .build();
     }
 
     @Override
     public String toString() {
         return "Task{id=" + id
                 + ", status=" + status
-                + ", isReady=" + isReady
-                + ", blockingCount=" + blockingCount
-                + ", openConstraintCount=" + openConstraintCount
                 + ", priorityScore=" + priorityScore
                 + ", deletedAt=" + deletedAt
                 + "}";

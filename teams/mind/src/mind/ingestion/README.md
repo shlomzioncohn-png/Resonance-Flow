@@ -63,18 +63,21 @@ bridge.raw.landed ─► to_raw_object_event ─► classify_arrival ─► extr
    requests on `correlation_id`.
 5. **Items to creation requests** (`CreationPipeline.handle`, #919). Each
    item is extracted with the classification and the effort estimate
-   (#350–#352), assembled into a `TaskCreationRequested` (tenant and
-   `source_ref` from the event, no owner yet: #132), and checked against the
-   index with `find_duplicate` (#471). A duplicate is not sent: it is logged
+   (#350–#352) into its tasks — none, one or several (#690) — each
+   assembled into a `TaskCreationRequested` (tenant and `source_ref` from the
+   event, no owner yet: #132) and checked against the item's tenant's index
+   with `find_duplicate` (#471, #841). A duplicate is not sent: it is logged
    at INFO with the matched `task_id` — Mind has no update path and Inbox no
    "possible duplicate" field, so sending would only make a second task. The
    line carries the candidate's title only when Bridge classified the item
    `NONE` or `LOW` sensitivity; for `HIGH`, or an item with no
    classification, only the title's length (the title is written from the
    content). Anything else goes to `TaskCreationFlow.send` with Bridge's
-   `correlation_id` and `revision`. `task_index` is the item's position in
-   the event, not a count of tasks sent, so an item that fails now and
-   passes on redelivery does not change the next item's `correlation_id`.
+   `correlation_id` and `revision`. `task_index` is `item position × 100 +
+   task position` (`TASK_SLOTS_PER_ITEM`, fixed for ever), not a count of
+   tasks sent: an item that fails now and passes on redelivery, or whose task
+   list comes back longer, does not change any other item's
+   `correlation_id`. A one-task item's first task keeps 0.
    An extraction that failed because of the environment, not the item (the
    provider down past its retries, the key, the credit), stops the message
    with `ExtractionUnavailable` instead of skipping it: otherwise a spent
@@ -142,11 +145,15 @@ An environment variable still wins over both.
 most one byte past it is fetched, whatever the event's `size_bytes` says, and
 the read itself stops there even if the server ignores the Range header.
 Kafka and the Schema Registry come from `messaging/config.py`; this consumer
-alone raises `max.poll.interval.ms` to 30 minutes (`conf_overrides`). The
-runner also needs the vector store (`MIND_VECTOR_STORE__DSN`, through
-`Settings`), migrated, and an LLM provider (`llm.provider` in the mounted
-`config.yaml`, see `extraction/README.md`); either missing fails at start-up.
-In Docker: `docker compose --profile kafka up mind-landed-consumer`.
+alone raises `max.poll.interval.ms` to 30 minutes (`conf_overrides`). Since
+#481 that means a `config.yaml` is required here too: set `CONFIG_FILE_PATH`
+to a file whose `kafka.bootstrap_servers` / `kafka.schema_registry_url` point
+at your broker, or the consumer stops at start-up with a `ConfigFileError`
+(see `src/mind/api/README.md`, "Configuration (#481)"). The object-storage
+settings above are unchanged by #481. The runner also needs the vector store
+(`vector_store` in the same files, through `Settings`), migrated, and an LLM
+provider (`llm.provider`, see `extraction/README.md`); either missing fails
+at start-up. In Docker: `docker compose --profile kafka up mind-landed-consumer`.
 
 Each item is still logged by its event, file and length before extraction,
 never its content (Bridge may have classified it HIGH sensitivity), which
@@ -184,14 +191,14 @@ MIND_LANDED_CONSUMER__GROUP_ID=mind-landed-joint-test make run-landed-consumer
 
 ## Not yet in
 
-- **Duplicates across tenants (#841).** The index is not scoped by tenant
-  yet, so `find_duplicate` may match another tenant's task and the request
-  is then not sent.
 - **Duplicates close together.** The index holds only tasks Inbox has
-  confirmed. Two items of one event, or two items landed seconds apart (the
-  demo's `slack-first` order), may both be sent before either is indexed.
-- **One task per text (#690).** Extraction returns one task, so a meeting
-  with several action items keeps only one.
+  confirmed. Two tasks of one event (an email body and its scanned form, in
+  the #919 demo run), or two items landed seconds apart (the demo's
+  `slack-first` order), may both be sent before either is indexed.
+- **A task list that changes on re-extraction.** A task is numbered by its
+  position in its item's list. If a redelivered item's list comes back in
+  another order, a task can take another's number, and Inbox may make a
+  second task for it.
 - **Owner (#132).** Requests go without a suggested owner.
 - **Dependencies (#834).** `on_matched` is a no-op until the adapter lands.
 - **A restart forgets pending requests (#918).** A `task.created` that

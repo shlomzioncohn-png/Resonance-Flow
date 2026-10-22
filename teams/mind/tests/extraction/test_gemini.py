@@ -14,6 +14,7 @@ import json
 
 import httpx
 import pytest
+from tests.extraction.fakes import answer_of, only
 
 from mind.contracts.base_enums import SourceType
 from mind.extraction.extractor import BasicExtractor, ExtractionFailure, ExtractionSuccess
@@ -28,7 +29,7 @@ from mind.extraction.providers.base import (
 from mind.extraction.providers.gemini import GeminiProvider
 from mind.extraction.providers.settings import GeminiSettings
 
-VALID_ANSWER = json.dumps(
+VALID_ANSWER = answer_of(
     {
         "title": "Send the Q3 report to finance",
         "description": "Finance asked for the Q3 report before the close.",
@@ -419,15 +420,15 @@ def test_the_extractor_drives_the_real_client_end_to_end() -> None:
     outcome = extractor.extract(SOURCE_TEXT, SourceType.EMAIL)
 
     assert isinstance(outcome, ExtractionSuccess)
-    assert outcome.fields.title == "Send the Q3 report to finance"
-    assert outcome.fields.source_ref == "MSG-4471"
+    assert only(outcome).fields.title == "Send the Q3 report to finance"
+    assert only(outcome).fields.source_ref == "MSG-4471"
     assert outcome.model == "gemini-3.6-flash"
     assert outcome.provider_calls == 1
 
 
 def test_the_repair_round_works_over_http() -> None:
     handler, seen = _scripted(
-        httpx.Response(200, json=_envelope('{"title": "no deps field"}')),
+        httpx.Response(200, json=_envelope(answer_of({"title": "no deps field"}))),
         httpx.Response(200, json=_envelope(VALID_ANSWER)),
     )
     extractor = BasicExtractor(_provider(handler), sleep=lambda _: None)

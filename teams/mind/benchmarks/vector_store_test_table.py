@@ -21,8 +21,19 @@ async def create_vector_store_test_table(settings: VectorStoreSettings) -> None:
             sql.SQL(
                 "CREATE TABLE IF NOT EXISTS {table} "
                 "(task_id TEXT PRIMARY KEY, embedding VECTOR({dim}) NOT NULL, "
-                "is_completed BOOLEAN NOT NULL DEFAULT FALSE, content_hash TEXT);"
+                "is_completed BOOLEAN NOT NULL DEFAULT FALSE, content_hash TEXT, tenant_id UUID);"
             ).format(table=table, dim=sql.Literal(EMBEDDING_DIM))
+        )
+        # A table left over from before #841 (CREATE ... IF NOT EXISTS skips it).
+        await conn.execute(
+            sql.SQL("ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tenant_id UUID;").format(
+                table=table
+            )
+        )
+        await conn.execute(
+            sql.SQL("CREATE INDEX IF NOT EXISTS {idx} ON {table} (tenant_id);").format(
+                idx=sql.Identifier(f"{settings.table}_tenant_id_idx"), table=table
+            )
         )
         await conn.execute(
             sql.SQL(

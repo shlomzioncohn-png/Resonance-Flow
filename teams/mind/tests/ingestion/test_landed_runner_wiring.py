@@ -11,12 +11,13 @@ import asyncio
 import threading
 from types import SimpleNamespace
 from typing import Any
+from uuid import UUID
 
 import pytest
 from tests.extraction.fakes import ScriptedProvider
 from tests.ingestion.test_creation_pipeline import ANSWER, TASK_ID, TITLE, FakeProducer
-from tests.ingestion.test_landed_consumer import ITEM, _message, _read
-from tests.test_index_consumer import FakeVectorStore
+from tests.ingestion.test_landed_consumer import ITEM, TENANT, _message, _read
+from tests.test_index_consumer import FakeTenantStore, FakeVectorIndex
 
 import mind.ingestion.landed_consumer_runner as runner
 from mind.embeddings.base import SearchResult
@@ -26,7 +27,7 @@ from mind.task_creation.correlation import correlation_id_for
 from mind.task_creation.flow import TaskCreationFlow
 
 
-class Store(FakeVectorStore):
+class Store(FakeVectorIndex):
     """Remembers the loop it was opened on, and whether it was closed."""
 
     def __init__(self, settings: object) -> None:
@@ -66,7 +67,7 @@ class World:
         match: SearchResult | None = None,
     ) -> None:
         self.stores: list[Store] = []
-        self.searched_in: list[Store] = []
+        self.searched_in: list[tuple[FakeVectorIndex, UUID]] = []
         self.producer = Producer()
         self.provider = Provider(*[ANSWER] * len(messages))
         self.consumer: dict[str, Any] = {}
@@ -78,8 +79,11 @@ class World:
             self.stores.append(Store(settings))
             return self.stores[-1]
 
-        async def find_duplicate(store: Store, title: str, description: str) -> SearchResult | None:
-            self.searched_in.append(store)
+        async def find_duplicate(
+            store: FakeTenantStore, title: str, description: str
+        ) -> SearchResult | None:
+            # The tenant's slice of an index: which index, and which tenant (#841).
+            self.searched_in.append((store.index, store.tenant_id))
             return match
 
         def listener(flow: TaskCreationFlow, loop: asyncio.AbstractEventLoop) -> None:
@@ -137,7 +141,7 @@ def test_a_landed_item_is_sent_and_its_reply_matched_through_the_listeners_flow(
     flow, listener_loop = world.listener
     assert world.timer[0] is flow
     reply = TaskCreatedEvent(
-        id=TASK_ID, title=TITLE, description="Asked for in Slack, due tomorrow."
+        id=TASK_ID, tenant_id=TENANT, title=TITLE, description="Asked for in Slack, due tomorrow."
     )
     matched = listener_loop.run_until_complete(
         flow.on_task_created(reply, [("correlation_id", key.encode())])
@@ -146,7 +150,8 @@ def test_a_landed_item_is_sent_and_its_reply_matched_through_the_listeners_flow(
 
     # Two indexes, each opened on the loop that uses it: the listener's gets
     # the matched task, the other is the one searched for duplicates.
-    (searched,) = world.searched_in
+    ((searched, tenant),) = world.searched_in
+    assert tenant == UUID(TENANT)  # only the item's own tenant's tasks (#841)
     (indexed,) = [store for store in world.stores if TASK_ID in store.rows]
     assert searched is not indexed
     assert indexed.opened_on is listener_loop
