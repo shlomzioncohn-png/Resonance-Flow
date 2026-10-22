@@ -1,12 +1,20 @@
 """#920: the score publisher runs inside the API. It starts only when Kafka is
 configured, and the API's lifespan starts and stops it."""
 
+import threading
+import time
 from types import SimpleNamespace
+from typing import ClassVar
 
+import pytest
 from fastapi.testclient import TestClient
 
 import mind.api.main as api_main
 from mind.messaging.config import MessagingSettings
+from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
+from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
+from mind.scoring import score_publisher_runner as runner
+from mind.scoring.score_publisher import ScorePublisher
 from mind.scoring.score_publisher_runner import kafka_configured, start_score_publisher
 
 
@@ -71,3 +79,106 @@ def test_the_api_stops_the_publisher_on_shutdown(monkeypatch):
         assert not running.stopped
 
     assert running.stopped
+
+
+# --- with Kafka configured: the three threads start --------------------------
+
+KAFKA = MessagingSettings(bootstrap_servers="broker:9092", schema_registry_url="http://sr:8080")
+
+
+class _FakeProducer:
+    def __init__(self, settings: MessagingSettings) -> None:
+        self.settings = settings
+
+
+class _FakeConsumer:
+    """Records how it was built, hands one event to its handler, then waits for stop."""
+
+    built: ClassVar[list["_FakeConsumer"]] = []
+
+    def __init__(self, group_id: str, topics: list[str], settings: MessagingSettings) -> None:
+        self.group_id = group_id
+        self.topics = topics
+        self.settings = settings
+        self.message_type: type | None = None
+        self.ended = threading.Event()
+        _FakeConsumer.built.append(self)
+
+    def run(self, message_type, handler, *, idle_timeout=None, stop) -> int:
+        self.message_type = message_type
+        handler(f"event from {self.topics[0]}", None)
+        stop.wait()
+        self.ended.set()
+        return 1
+
+
+@pytest.fixture
+def started(monkeypatch):
+    """start_score_publisher with Kafka configured, on fakes for the producer and
+    consumers. Each handler records which topic's event reached it."""
+    _FakeConsumer.built = []
+    handled: dict[str, object] = {}
+    monkeypatch.setattr(runner, "ProtobufProducer", _FakeProducer)
+    monkeypatch.setattr(runner, "ProtobufConsumer", _FakeConsumer)
+    monkeypatch.setattr(
+        ScorePublisher, "handle_task_created", lambda self, e: handled.update(created=e)
+    )
+    monkeypatch.setattr(
+        ScorePublisher, "handle_task_updated", lambda self, e: handled.update(updated=e)
+    )
+
+    running = start_score_publisher(KAFKA)
+    assert running is not None
+    yield running, handled
+    running.stop()
+
+
+def _wait_until(condition, seconds: float = 2.0) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.01)
+    return condition()
+
+
+def test_with_kafka_the_three_threads_start(started):
+    running, _ = started
+
+    assert running.threads.names == [
+        "score-publisher-task.created",
+        "score-publisher-task.updated",
+        "score-publisher-rescore",
+    ]
+    assert running.healthy
+
+
+def test_each_topic_reaches_its_own_handler(started):
+    _, handled = started
+
+    assert _wait_until(lambda: len(handled) == 2)
+    assert handled == {
+        "created": "event from task.created",
+        "updated": "event from task.updated",
+    }
+    by_topic = {c.topics[0]: c for c in _FakeConsumer.built}
+    assert by_topic["task.created"].message_type is TaskCreatedEvent
+    assert by_topic["task.updated"].message_type is TaskUpdatedEvent
+    assert {c.group_id for c in _FakeConsumer.built} == {"mind-score-publisher"}
+
+
+def test_the_consumers_get_the_same_kafka_settings(started):
+    _ = started
+
+    assert _wait_until(lambda: len(_FakeConsumer.built) == 2)
+    assert all(c.settings is KAFKA for c in _FakeConsumer.built)
+
+
+def test_stop_halts_every_thread(started):
+    running, _ = started
+    assert _wait_until(lambda: len(_FakeConsumer.built) == 2)
+
+    running.stop()
+
+    assert all(c.ended.is_set() for c in _FakeConsumer.built)
+    assert not running.healthy

@@ -280,9 +280,17 @@ class ScorePublisher:
                 # The state is in memory: unknown since start-up until its next event.
                 logger.warning("score_publisher: task %s is unknown, not re-scored", task_id)
                 return False
-            return self._score_and_send(
-                state, _scoring_inputs_hash(state.task), only_if_changed=True
-            )
+            try:
+                return self._score_and_send(
+                    state, _scoring_inputs_hash(state.task), only_if_changed=True
+                )
+            except Exception:
+                # Only a send failure gets here (_score_and_send skips the rest).
+                # The id is already off the queue, and unlike a Kafka message
+                # nothing would deliver it again: queue it back before raising,
+                # so the worker picks it up when it runs again.
+                self.rescore(task_id)
+                raise
 
     def _score_and_send(
         self, state: _TaskState, inputs: bytes, *, only_if_changed: bool = False

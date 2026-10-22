@@ -454,9 +454,10 @@ When a score is published:
   redelivery (a malformed id, a result without `base_score`, a score outside
   0..1, a model bug for one task). Propagating it would kill the process on the
   same message forever, so it is logged with the task id and skipped. Only a
-  failure to send to Kafka propagates: it ends that consumer thread with the
-  message uncommitted, so the message is handled again once the thread is
-  restarted (see "Running inside the API" for what restarts it). Anything the
+  failure to send to Kafka propagates: it ends that run of the consumer with
+  the message uncommitted, and the thread runs again after a short wait and
+  reads it again (see "Running inside the API"). A re-score whose send fails is
+  queued back the same way. Anything the
   model raises counts as permanent, so a model must not raise on a transient
   failure (#474 already requires falling back to the baseline score).
 - **When propagation changes a score without an Inbox event** (#474: a parent
@@ -491,14 +492,17 @@ API and needs no entry of its own in Relay's chart.
   `app.state.score_publisher` is `None`.
 - **Stopped on shutdown**: the consumers end within a second and leave their
   group cleanly, instead of Kafka waiting for a session timeout.
-- **A thread that dies does not take the API down.** The threads run through
-  `messaging/background.py`'s `BackgroundThreads`, which logs the failure and
-  turns `app.state.score_publisher.healthy` false. There is no `os._exit`.
-- **Nothing restarts a dead thread yet.** `/health` does not read `healthy`:
-  how it reaches the probes (for example a split into `/health/live` and
-  `/health/ready`, since `/health` also drives readiness and startup) is #481's.
-  Until then, a Kafka failure stops that topic's scoring until the pod restarts
-  for another reason.
+- **A failed thread runs again on its own, and never takes the API down.** The
+  threads run through `messaging/background.py`'s `BackgroundThreads`: when a
+  run raises (a Kafka send failure), it is logged and run again after a wait
+  that doubles each time, 1 s up to 60 s, as the `task.created` listener does.
+  Each run of a consumer builds a new one, so the uncommitted message is read
+  again: the recovery a pod restart would give, without one. There is no
+  `os._exit`, and the retries do not give up.
+- **`app.state.score_publisher.healthy`** is false only while a thread waits to
+  run again. Recovery does not depend on it. Surfacing it in `/health` is #481's
+  call; since `/health` also drives readiness and startup, a 503 there would
+  take all of Mind's API out of service, so liveness at most.
 - **MIND must run as one replica (`replicaCount: 1`) with one uvicorn worker.**
   The publisher keeps its state in memory: a second copy would split the
   topics between two states, and the stale-event and loop checks would break.

@@ -512,8 +512,8 @@ def test_a_conversion_error_other_than_a_bad_id_is_skipped(publisher, sink, monk
 
 
 def test_a_kafka_error_in_the_rescore_worker_propagates(model):
-    # Only scoring errors are skipped; a send failure must reach the worker
-    # thread so the process restarts and nothing is silently lost.
+    # Only scoring errors are skipped; a send failure must reach the worker's
+    # thread, so BackgroundThreads waits and runs it again.
     class FailsOnSecond(ListSink):
         def send(self, payload):
             if self.sent:
@@ -527,6 +527,30 @@ def test_a_kafka_error_in_the_rescore_worker_propagates(model):
 
     with pytest.raises(RuntimeError, match="broker down"):
         publisher.drain_rescores()
+
+
+def test_a_rescore_whose_send_fails_is_queued_back(model):
+    # Unlike a Kafka message, nothing would deliver the request again: the
+    # worker must find it in the queue when it runs again, once Kafka is back.
+    class FailsOnceAfterTheFirst(ListSink):
+        failed = False
+
+        def send(self, payload):
+            if self.sent and not self.failed:
+                self.failed = True
+                raise RuntimeError("broker down")
+            super().send(payload)
+
+    sink = FailsOnceAfterTheFirst()
+    publisher = ScorePublisher(sink, model=model, clock=lambda: NOW)
+    publisher.handle_task_created(_created())
+    model.base = 0.9
+    publisher.rescore(TASK_A)
+    with pytest.raises(RuntimeError):
+        publisher.drain_rescores()
+
+    assert publisher.drain_rescores() == 1  # the worker, run again
+    assert [p.mind_score for p in sink.sent] == [0.5, 0.9]
 
 
 # --- bounding re-scores -----------------------------------------------------
