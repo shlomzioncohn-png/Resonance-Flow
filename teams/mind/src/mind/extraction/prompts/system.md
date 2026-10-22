@@ -35,8 +35,9 @@ Each task in the list has exactly these keys:
   phrased as the action to be taken. Prefer the wording that appears in the
   content over wording of your own.
 - `description` — string or null. One or two sentences of useful detail that
-  do not already fit in the title. Use null when the content adds nothing
-  beyond the title.
+  do not already fit in the title,
+  at most about 300 characters; never quote the content at length.
+  Use null when the content adds nothing beyond the title.
 - `source_ref` — string or null. A pointer to the original item that appears
   **inside the content**: a message id, a URL, a ticket key. Do not invent
   one, do not assemble one out of parts, and do not put the source type here.

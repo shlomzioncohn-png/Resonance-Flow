@@ -156,7 +156,9 @@ DeepSeek.
 that filters `api.deepseek.com` it is the only one that can actually be run. It
 is not `deepseek.py` with the URL swapped — Gemini takes the system prompt as
 its own `system_instruction` field, returns the answer as a list of parts, and
-puts its retry hint in the error body instead of a header.
+puts its retry hint in the error body instead of a header. Thinking tokens
+count against `maxOutputTokens`: a model that ignores `thinkingBudget: 0`
+spends part of the cap a full list of tasks needs.
 
 ```yaml
 llm:
@@ -704,6 +706,16 @@ one object holding a list:
 | A bare list without the object is formatting, like a code fence: wrapped, not repaired | `parsing._read_payload` |
 | Grounding and confidence run per task; `item_key`, model and attempts stay on the answer | `ExtractedTask`, `ExtractionSuccess.tasks` |
 | One `TaskCreationRequested` per task, in order; none for an empty list | `assembly.to_task_creation_requested` |
+
+**One call per text, so all or nothing per call.** Every task of an item
+comes from one answer. A provider failure — the output cap, a safety block,
+a timeout after its retries — loses all of them together, where per-task calls
+would have lost one. Chosen because one call is cheaper and the model sees the
+whole context (a recap names what was asked earlier). What guards it: the
+output cap sized for a full list (`TOKENS_PER_TASK`, `DEFAULT_MAX_OUTPUT_TOKENS`
+2048), descriptions held to about 300 characters by the prompt and dropped past
+`MAX_DESCRIPTION_LENGTH` (600), and at most 10 mentions of a title's length. An
+empty meeting with an `ExtractionFailure` is this, not a parsing bug.
 
 `system.md` now also says what a task is: work someone is asked to do, offers
 to do, or agrees to do — not a topic only discussed, not work already done.

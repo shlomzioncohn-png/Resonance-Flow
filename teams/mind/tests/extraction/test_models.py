@@ -1,9 +1,12 @@
 """Tests for the internal extraction models."""
 
+import logging
+
 import pytest
 from pydantic import ValidationError
 
 from mind.extraction.models import (
+    MAX_DESCRIPTION_LENGTH,
     MAX_TASKS_PER_TEXT,
     MAX_TITLE_LENGTH,
     ExtractedFields,
@@ -159,3 +162,30 @@ def test_one_bad_task_rejects_the_answer_and_says_which_one() -> None:
 def test_a_single_task_or_an_extra_key_is_not_the_list(answer: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         ExtractedTasks[ExtractedFields].model_validate(answer)
+
+
+# --- a runaway description is dropped, not repaired (#690) -----------------
+
+
+def test_a_runaway_description_becomes_none_and_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Optional, so not worth a repair round of the whole meeting."""
+
+    with caplog.at_level(logging.WARNING, logger="mind.extraction"):
+        fields = ExtractedFields(
+            title="Send the Q3 report",
+            description="x" * (MAX_DESCRIPTION_LENGTH + 1),
+            has_dependencies=False,
+        )
+
+    assert fields.description is None
+    assert "description" in caplog.text
+
+
+def test_a_description_at_the_limit_is_kept() -> None:
+    kept = "x" * MAX_DESCRIPTION_LENGTH
+
+    fields = ExtractedFields(title="Send it", description=kept, has_dependencies=False)
+
+    assert fields.description == kept

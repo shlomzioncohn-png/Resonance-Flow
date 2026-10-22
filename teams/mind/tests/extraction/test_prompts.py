@@ -509,3 +509,13 @@ def test_the_rules_say_the_same_direction_as_the_field() -> None:
 
     assert "when the content shows this task waits for work it does not name" in prompt
     assert "other work is involved" not in prompt
+
+
+def test_the_prompt_keeps_descriptions_short() -> None:
+    """The model check runs after the answer is written; only the prompt can
+    stop one long description from pushing a meeting past the output cap."""
+
+    prompt = system_prompt()
+
+    assert "at most about 300 characters" in prompt
+    assert "never quote the content at length" in prompt

@@ -30,6 +30,13 @@ logger = logging.getLogger("mind.extraction")
 # summarising it, and that is worth a repair attempt.
 MAX_TITLE_LENGTH = 200
 
+# Past this a description is the content quoted back, not a summary of it
+# (#690). Dropped rather than repaired: the field is optional, and one long
+# description must not cost a repair round of a whole meeting. The prompt asks
+# for about half of this; that is what keeps the answer under the output cap,
+# since this check only runs once the answer is written.
+MAX_DESCRIPTION_LENGTH = 600
+
 # Named dependencies kept per task (#690). A task waiting on more than this
 # many named pieces of work is almost always a model listing every noun.
 MAX_MENTIONS_PER_TASK = 10
@@ -415,6 +422,20 @@ class ExtractedFields(BaseModel):
         if value is None:
             return None
         return None if value.strip().lower() in _NULL_PLACEHOLDERS else value
+
+    @field_validator("description", mode="after")
+    @classmethod
+    def a_runaway_description_is_dropped(cls, value: str | None) -> str | None:
+        """Too long to be a summary: logged and dropped, never repaired."""
+
+        if value is not None and len(value) > MAX_DESCRIPTION_LENGTH:
+            logger.warning(
+                "extraction: description of %d characters is longer than %d; dropping it",
+                len(value),
+                MAX_DESCRIPTION_LENGTH,
+            )
+            return None
+        return value
 
     @field_validator("title", mode="before")
     @classmethod
