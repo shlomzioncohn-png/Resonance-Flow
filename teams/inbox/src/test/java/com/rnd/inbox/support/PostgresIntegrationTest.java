@@ -27,6 +27,7 @@ public abstract class PostgresIntegrationTest {
             jdbcTemplate.update(
                     "DELETE FROM outbox WHERE aggregate_id IN (SELECT id FROM tasks WHERE tenant_id = ?)", tenantId);
             jdbcTemplate.update("DELETE FROM audit_log WHERE tenant_id = ?", tenantId);
+            jdbcTemplate.update("DELETE FROM insights WHERE tenant_id = ?", tenantId);
             jdbcTemplate.update("DELETE FROM tasks WHERE tenant_id = ?", tenantId);
             jdbcTemplate.update("DELETE FROM teams WHERE tenant_id = ?", tenantId);
             jdbcTemplate.update("DELETE FROM projects WHERE tenant_id = ?", tenantId);

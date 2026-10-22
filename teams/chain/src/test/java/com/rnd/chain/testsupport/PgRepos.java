@@ -97,8 +97,6 @@ public class PgRepos {
 
     private static Task rebuild(Task t, UUID tenant, UUID parent) {
         return Task.builder().id(t.getId()).parentTaskId(parent).tenantId(tenant).status(t.getStatus())
-                .isReady(t.isReady()).blockingCount(t.getBlockingCount())
-                .openConstraintCount(t.getOpenConstraintCount())
                 .estimatedDurationMin(t.getEstimatedDurationMin()).score(t.getScore())
                 .confidence(t.getConfidence()).priorityScore(t.getPriorityScore())
                 .createdAt(t.getCreatedAt() != null ? t.getCreatedAt() : java.time.LocalDateTime.now())

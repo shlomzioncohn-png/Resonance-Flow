@@ -3,11 +3,11 @@ package com.rnd.chain.service;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskReadinessSnapshot;
-import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.exception.CrossTenantDependencyException;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
+import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskReadinessRepository;
@@ -37,51 +37,77 @@ public class DependencyEdgeService {
     private static final Logger log =
             LoggerFactory.getLogger(DependencyEdgeService.class);
 
+    private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
     private final GraphLock graphLock;
-    private final TaskCounterUpdater taskCounterUpdater;
+    private final PriorityScoreService priorityScoreService;
     private final TaskStateHistoryRecorder historyRecorder;
     private final TaskReadinessRepository taskReadinessRepository;
 
     public DependencyEdgeService(
+            TaskRepository taskRepository,
             TaskDependencyRepository taskDependencyRepository,
             GraphLock graphLock,
-            TaskCounterUpdater taskCounterUpdater,
+            PriorityScoreService priorityScoreService,
             TaskStateHistoryRecorder historyRecorder,
-            TaskReadinessRepository taskReadinessRepository
-            ) {
+            TaskReadinessRepository taskReadinessRepository) {
 
+        this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
         this.graphLock = graphLock;
-        this.taskCounterUpdater = taskCounterUpdater;
+        this.priorityScoreService = priorityScoreService;
         this.historyRecorder = historyRecorder;
         this.taskReadinessRepository = taskReadinessRepository;
     }
 
     /**
-     * Maintains the stored blocking counter for backwards compatibility,
-     * but history/readiness/publish decisions are based on task_readiness.
+     * Creates a PENDING placeholder with epoch updatedAt for each missing task.
+     * Existing tasks are never modified.
      */
-    private void adjustBlockingCountAndRecord(
+    @Transactional
+    public void insertPlaceholdersIfAbsent(
             UUID taskId,
-            boolean dependsOnIsDone,
-            int delta,
+            UUID dependsOnTaskId,
+            UUID tenantId) {
+
+        insertPlaceholderIfAbsent(
+                taskId,
+                tenantId);
+
+        insertPlaceholderIfAbsent(
+                dependsOnTaskId,
+                tenantId);
+    }
+
+    private void insertPlaceholderIfAbsent(
+            UUID taskId,
+            UUID tenantId) {
+
+        taskRepository.insertIfAbsent(
+                Task.placeholder(
+                        taskId,
+                        tenantId));
+    }
+
+    /**
+     * History/readiness/publish decisions are based on task_readiness.
+     */
+    private void recomputeAndRecord(
+            UUID taskId,
             TaskReadinessSnapshot beforeReadiness,
             TaskReadinessSnapshot afterReadiness) {
 
-        taskCounterUpdater.adjustBlockingCount(
+        recomputePriority(
                 taskId,
-                dependsOnIsDone,
-                delta,
                 beforeReadiness,
                 afterReadiness);
 
         historyRecorder.recordBlockingTransition(
                 taskId,
-                beforeReadiness.blockingCount()
-                        + beforeReadiness.openConstraintCount(),
+                 beforeReadiness.blockingCount()
+                + beforeReadiness.openConstraintCount(),
                 afterReadiness.blockingCount()
-                        + afterReadiness.openConstraintCount());
+                + afterReadiness.openConstraintCount());
     }
 
     /**
@@ -109,11 +135,9 @@ public class DependencyEdgeService {
             UUID dependsOnTaskId,
             Double confidence) {
 
-        return doAddDependency(
-                taskId,
-                dependsOnTaskId,
-                confidence,
-                null);
+
+        return doAddDependency(taskId, dependsOnTaskId, confidence, null);
+
     }
 
     /**
@@ -127,21 +151,13 @@ public class DependencyEdgeService {
             Double confidence,
             UUID tenantId) {
 
-        Objects.requireNonNull(
-                tenantId,
-                "tenantId must not be null");
 
-        return doAddDependency(
-                taskId,
-                dependsOnTaskId,
-                confidence,
-                tenantId);
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
+        return doAddDependency(taskId, dependsOnTaskId, confidence, tenantId);
+
     }
 
-    /**
-     * A non-null tenantId means missing tasks are created
-     * as placeholders in that tenant.
-     */
+    /** A non-null {@code tenantId} means missing tasks are created as placeholders in that tenant. */
     private TaskDependency doAddDependency(
             UUID taskId,
             UUID dependsOnTaskId,
@@ -167,128 +183,100 @@ public class DependencyEdgeService {
                             + " must be between 0 and 1, got "
                             + confidence);
         }
-
-        /*
-         * addDependencyCreatingMissing already has the tenant
-         * from the event.
-         *
-         * For regular addDependency, read it from the task
-         * before entering the graph lock.
-         */
         UUID lockTenantId =
-                tenantId != null
-                        ? tenantId
-                        : tenantIdForTask(taskId);
+            tenantId != null
+                ? tenantId
+                : tenantIdForTask(taskId);
+        return graphLock.runExclusive(lockTenantId, () -> {
 
-        return graphLock.runExclusive(
-                lockTenantId,
-                () -> {
 
-                    if (tenantId != null) {
-                        taskCounterUpdater.insertPlaceholdersIfAbsent(
-                                taskId,
-                                dependsOnTaskId,
-                                tenantId);
-                    }
+            if (tenantId != null) {
+                insertPlaceholdersIfAbsent(taskId, dependsOnTaskId, tenantId);
 
-                    /*
-                     * Duplicate is checked before task/cycle lookup:
-                     * an existing edge cannot introduce a new cycle.
-                     */
-                    if (taskDependencyRepository.existsDependency(
-                            taskId,
-                            dependsOnTaskId)) {
+            }
 
-                        throw new DuplicateDependencyException(
-                                "Task "
-                                        + taskId
-                                        + " already depends on "
-                                        + dependsOnTaskId);
-                    }
+            /*
+             * Duplicate is checked before task/cycle lookup:
+             * an existing edge cannot introduce a new cycle.
+             */
+            if (taskDependencyRepository.existsDependency(
+                    taskId,
+                    dependsOnTaskId)) {
 
-                    if (wouldCreateCycle(
-                            taskId,
-                            dependsOnTaskId)) {
+                throw new DuplicateDependencyException(
+                        "Task "
+                                + taskId
+                                + " already depends on "
+                                + dependsOnTaskId);
+            }
 
-                        throw new InvalidDependencyException(
-                                "Dependency would create a cycle: "
-                                        + taskId
-                                        + " -> "
-                                        + dependsOnTaskId);
-                    }
+            if (wouldCreateCycle(
+                    taskId,
+                    dependsOnTaskId)) {
 
-                    Task task =
-                            taskCounterUpdater.requireTask(taskId);
+                throw new InvalidDependencyException(
+                        "Dependency would create a cycle: "
+                                + taskId
+                                + " -> "
+                                + dependsOnTaskId);
+            }
 
-                    Task dependencyTask =
-                            taskCounterUpdater.requireTask(
-                                    dependsOnTaskId);
 
-                    if (tenantId != null) {
+            Task task = taskRepository.findById(taskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(taskId));
+            Task dependencyTask = taskRepository.findById(dependsOnTaskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(dependsOnTaskId));
+            if (tenantId != null) {
+                requireTenant(task, tenantId);
+                requireTenant(dependencyTask, tenantId);
+            } else {
+                requireSameTenant(task, dependencyTask);
 
-                        requireTenant(
-                                task,
-                                tenantId);
+            }
 
-                        requireTenant(
-                                dependencyTask,
-                                tenantId);
+            /*
+             * IMPORTANT:
+             * Must be captured BEFORE inserting the edge,
+             * because task_readiness derives blocking_count
+             * directly from task_dependency.
+             */
+            TaskReadinessSnapshot beforeReadiness =
+                    requireReadinessSnapshot(taskId);
 
-                    } else {
+            Optional<TaskDependency> saved =
+                    taskDependencyRepository.save(
+                            new TaskDependency(
+                                    taskId,
+                                    dependsOnTaskId,
+                                    confidence));
 
-                        requireSameTenant(
-                                task,
-                                dependencyTask);
-                    }
+            TaskDependency dependency =
+                    saved.orElseThrow(
+                            () -> new DuplicateDependencyException(
+                                    "Task "
+                                            + taskId
+                                            + " already depends on "
+                                            + dependsOnTaskId));
 
-                    /*
-                     * IMPORTANT:
-                     * Must be captured BEFORE inserting the edge,
-                     * because task_readiness derives blocking_count
-                     * directly from task_dependency.
-                     */
-                    TaskReadinessSnapshot beforeReadiness =
-                            requireReadinessSnapshot(taskId);
+            /*
+             * The edge now exists, so the View represents
+             * the new authoritative state.
+             */
+            TaskReadinessSnapshot afterReadiness =
+                    requireReadinessSnapshot(taskId);
 
-                    Optional<TaskDependency> saved =
-                            taskDependencyRepository.save(
-                                    new TaskDependency(
-                                            taskId,
-                                            dependsOnTaskId,
-                                            confidence));
+            recomputeAndRecord(
+                    task.getId(),
+                    beforeReadiness,
+                    afterReadiness);
 
-                    TaskDependency dependency =
-                            saved.orElseThrow(
-                                    () ->
-                                            new DuplicateDependencyException(
-                                                    "Task "
-                                                            + taskId
-                                                            + " already depends on "
-                                                            + dependsOnTaskId));
+            recomputeDependencyTargetPriority(
+                    dependsOnTaskId);
 
-                    /*
-                     * The edge now exists, so the View represents
-                     * the new authoritative state.
-                     */
-                    TaskReadinessSnapshot afterReadiness =
-                            requireReadinessSnapshot(taskId);
-
-                    boolean dependencyAlreadyDone =
-                            dependencyTask.getStatus()
-                                    == TaskStatus.DONE;
-
-                    adjustBlockingCountAndRecord(
-                            task.getId(),
-                            dependencyAlreadyDone,
-                            1,
-                            beforeReadiness,
-                            afterReadiness);
-
-                    recomputeDependencyTargetPriority(
-                            dependsOnTaskId);
-
-                    return dependency;
-                });
+            return dependency;
+        });
     }
 
     /**
@@ -302,12 +290,10 @@ public class DependencyEdgeService {
             UUID dependsOnTaskId) {
 
         TaskReadinessSnapshot readiness =
-                requireReadinessSnapshot(
-                        dependsOnTaskId);
+                requireReadinessSnapshot(dependsOnTaskId);
 
-        taskCounterUpdater.updateCounters(
+        recomputePriority(
                 dependsOnTaskId,
-                UnaryOperator.identity(),
                 readiness,
                 readiness);
     }
@@ -315,8 +301,7 @@ public class DependencyEdgeService {
     private record PendingEdge(
             UUID dependsOnTaskId,
             Double confidence,
-            boolean isNewEdge,
-            boolean dependsOnAlreadyDone) {
+            boolean isNewEdge) {
     }
 
     /**
@@ -334,7 +319,6 @@ public class DependencyEdgeService {
             return new PendingEdge(
                     dependsOnTaskId,
                     confidence,
-                    false,
                     false);
         }
 
@@ -350,34 +334,30 @@ public class DependencyEdgeService {
         }
 
         Task task =
-                taskCounterUpdater.requireTask(
-                        taskId);
+                taskRepository.findById(taskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(taskId));
 
         Task dependsOnTask =
-                taskCounterUpdater.requireTask(
-                        dependsOnTaskId);
+                taskRepository.findById(dependsOnTaskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(dependsOnTaskId));
 
         requireSameTenant(
                 task,
                 dependsOnTask);
 
-        boolean dependsOnAlreadyDone =
-                dependsOnTask.getStatus()
-                        == TaskStatus.DONE;
-
         return new PendingEdge(
                 dependsOnTaskId,
                 confidence,
-                true,
-                dependsOnAlreadyDone);
+                true);
     }
 
     private static void requireTenant(
             Task task,
             UUID tenantId) {
 
-        if (!tenantId.equals(
-                task.getTenantId())) {
+        if (!tenantId.equals(task.getTenantId())) {
 
             throw new CrossTenantDependencyException(
                     "Dependency rejected: task "
@@ -405,8 +385,7 @@ public class DependencyEdgeService {
 
         if (taskTenantId == null
                 || dependsOnTenantId == null
-                || !taskTenantId.equals(
-                        dependsOnTenantId)) {
+                || !taskTenantId.equals(dependsOnTenantId)) {
 
             throw new CrossTenantDependencyException(
                     "Dependency rejected: task "
@@ -429,16 +408,13 @@ public class DependencyEdgeService {
             PendingEdge edge) {
 
         /*
-         * Capture authoritative readiness BEFORE
-         * changing/upserting the edge.
+         * Capture authoritative readiness BEFORE changing/upserting the edge.
          */
         TaskReadinessSnapshot beforeReadiness =
-                requireReadinessSnapshot(
-                        taskId);
+                requireReadinessSnapshot(taskId);
 
         /*
-         * Save also performs confidence upsert
-         * for an existing edge.
+         * Save also performs confidence upsert for an existing edge.
          */
         taskDependencyRepository.save(
                 new TaskDependency(
@@ -447,14 +423,12 @@ public class DependencyEdgeService {
                         edge.confidence()));
 
         TaskReadinessSnapshot afterReadiness =
-                requireReadinessSnapshot(
-                        taskId);
+                requireReadinessSnapshot(taskId);
 
         if (!edge.isNewEdge()) {
 
             log.info(
                     "Dependency {} -> {} already existed, "
-                            + "blockingCount left unchanged, "
                             + "confidence updated to {}",
                     taskId,
                     edge.dependsOnTaskId(),
@@ -464,9 +438,8 @@ public class DependencyEdgeService {
              * Redelivery does not change readiness,
              * but confidence may change priorityScore.
              */
-            taskCounterUpdater.updateCounters(
+            recomputePriority(
                     taskId,
-                    UnaryOperator.identity(),
                     beforeReadiness,
                     afterReadiness);
 
@@ -476,10 +449,8 @@ public class DependencyEdgeService {
             return;
         }
 
-        adjustBlockingCountAndRecord(
+        recomputeAndRecord(
                 taskId,
-                edge.dependsOnAlreadyDone(),
-                1,
                 beforeReadiness,
                 afterReadiness);
 
@@ -488,8 +459,7 @@ public class DependencyEdgeService {
     }
 
     /**
-     * Same as addDependencies(Map),
-     * with default confidence 1.0.
+     * Same as addDependencies(Map), with default confidence 1.0.
      */
     @Transactional
     public void addDependencies(
@@ -540,8 +510,7 @@ public class DependencyEdgeService {
 
                     Objects.requireNonNull(
                             id,
-                            "dependsOnTaskIdsWithConfidence "
-                                    + "must not contain a null id");
+                            "dependsOnTaskIdsWithConfidence must not contain a null id");
 
                     if (confidence == null
                             || confidence < 0.0
@@ -561,40 +530,29 @@ public class DependencyEdgeService {
                 "Adding {} distinct dependency(ies) for task {}",
                 dependsOnTaskIdsWithConfidence.size(),
                 taskId);
+        UUID lockTenantId = tenantIdForTask(taskId);
+       graphLock.runExclusive(lockTenantId, () -> {
 
-        /*
-         * Resolve tenant before entering the lock.
-         * Missing task -> null -> legacy shared lock.
-         */
-        UUID lockTenantId =
-                tenantIdForTask(taskId);
+            List<PendingEdge> validated =
+                    new ArrayList<>(
+                            dependsOnTaskIdsWithConfidence.size());
 
-        graphLock.runExclusive(
-                lockTenantId,
-                () -> {
+            for (Map.Entry<UUID, Double> entry :
+                    dependsOnTaskIdsWithConfidence.entrySet()) {
 
-                    List<PendingEdge> validated =
-                            new ArrayList<>(
-                                    dependsOnTaskIdsWithConfidence.size());
-
-                    for (Map.Entry<UUID, Double> entry :
-                            dependsOnTaskIdsWithConfidence.entrySet()) {
-
-                        validated.add(
-                                validateEdge(
-                                        taskId,
-                                        entry.getKey(),
-                                        entry.getValue()));
-                    }
-
-                    for (PendingEdge edge :
-                            validated) {
-
-                        applyEdge(
+                validated.add(
+                        validateEdge(
                                 taskId,
-                                edge);
-                    }
-                });
+                                entry.getKey(),
+                                entry.getValue()));
+            }
+
+            for (PendingEdge edge : validated) {
+                applyEdge(
+                        taskId,
+                        edge);
+            }
+        });
     }
 
     @Transactional
@@ -610,67 +568,51 @@ public class DependencyEdgeService {
                 dependsOnTaskId,
                 "dependsOnTaskId must not be null");
 
-        /*
-         * Resolve tenant before entering the lock.
-         * Missing task -> null -> legacy shared lock.
-         */
-        UUID lockTenantId =
-                tenantIdForTask(taskId);
+        UUID lockTenantId = tenantIdForTask(taskId);
 
-        graphLock.runExclusive(
-                lockTenantId,
-                () -> {
+        graphLock.runExclusive(lockTenantId, () -> {
+            taskRepository.findById(taskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(taskId));
 
-                    taskCounterUpdater.requireTask(
-                            taskId);
+            taskRepository.findById(dependsOnTaskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(dependsOnTaskId));
 
-                    Task dependencyTask =
-                            taskCounterUpdater.requireTask(
-                                    dependsOnTaskId);
+            /*
+             * Capture BEFORE while the edge still exists.
+             */
+            TaskReadinessSnapshot beforeReadiness =
+                    requireReadinessSnapshot(taskId);
 
-                    /*
-                     * Capture BEFORE while the edge still exists.
-                     */
-                    TaskReadinessSnapshot beforeReadiness =
-                            requireReadinessSnapshot(
-                                    taskId);
-
-                    boolean removed =
-                            taskDependencyRepository.delete(
-                                    taskId,
-                                    dependsOnTaskId);
-
-                    if (!removed) {
-
-                        throw new DependencyNotFoundException(
-                                "No dependency from "
-                                        + taskId
-                                        + " to "
-                                        + dependsOnTaskId);
-                    }
-
-                    /*
-                     * Now the View contains the state
-                     * without the edge.
-                     */
-                    TaskReadinessSnapshot afterReadiness =
-                            requireReadinessSnapshot(
-                                    taskId);
-
-                    boolean dependencyCurrentlyDone =
-                            dependencyTask.getStatus()
-                                    == TaskStatus.DONE;
-
-                    adjustBlockingCountAndRecord(
+            boolean removed =
+                    taskDependencyRepository.delete(
                             taskId,
-                            dependencyCurrentlyDone,
-                            -1,
-                            beforeReadiness,
-                            afterReadiness);
-
-                    recomputeDependencyTargetPriority(
                             dependsOnTaskId);
-                });
+
+            if (!removed) {
+
+                throw new DependencyNotFoundException(
+                        "No dependency from "
+                                + taskId
+                                + " to "
+                                + dependsOnTaskId);
+            }
+
+            /*
+             * Now the View contains the state without the edge.
+             */
+            TaskReadinessSnapshot afterReadiness =
+                    requireReadinessSnapshot(taskId);
+
+            recomputeAndRecord(
+                    taskId,
+                    beforeReadiness,
+                    afterReadiness);
+
+            recomputeDependencyTargetPriority(
+                    dependsOnTaskId);
+        });
     }
 
     private boolean wouldCreateCycle(
@@ -691,24 +633,21 @@ public class DependencyEdgeService {
             UUID current =
                     toVisit.pop();
 
-            if (current.equals(
-                    taskId)) {
+            if (current.equals(taskId)) {
                 return true;
             }
 
-            if (!visited.add(
-                    current)) {
+            if (!visited.add(current)) {
                 continue;
             }
 
             /*
-             * Under graph lock, so repository-level
-             * read lock is unnecessary here.
+             * Under graph lock, so repository-level read lock
+             * is unnecessary here.
              */
             for (TaskDependency dependency :
                     taskDependencyRepository
-                            .findByTaskIdUnderExternalLock(
-                                    current)) {
+                            .findByTaskIdUnderExternalLock(current)) {
 
                 toVisit.push(
                         dependency.dependsOnTaskId());
@@ -723,8 +662,7 @@ public class DependencyEdgeService {
 
         TaskReadinessSnapshot snapshot =
                 taskReadinessRepository
-                        .findByIds(
-                                List.of(taskId))
+                        .findByIds(List.of(taskId))
                         .get(taskId);
 
         if (snapshot == null) {
@@ -738,12 +676,38 @@ public class DependencyEdgeService {
     }
 
     /**
-     * Returns the task's tenant for choosing the graph lock.
-     *
-     * If the task does not exist, null is returned so the
-     * shared legacy lock is used. The existing requireTask
-     * inside the lock still throws TaskNotFoundException.
+     * Recomputes the task's priority score and queues a scheduling publish when the
+     * authoritative before/after View snapshots (or the score) changed. The task row is
+     * locked for the duration, as the old counter update did.
      */
+    @Transactional
+    public Task recomputePriority(
+            UUID taskId,
+            TaskReadinessSnapshot beforeReadiness,
+            TaskReadinessSnapshot afterReadiness) {
+
+        Objects.requireNonNull(
+                beforeReadiness,
+                "beforeReadiness must not be null");
+
+        Objects.requireNonNull(
+                afterReadiness,
+                "afterReadiness must not be null");
+
+        Task locked =
+                taskRepository.update(
+                                taskId,
+                                UnaryOperator.identity())
+                        .orElseThrow(
+                                () -> new TaskNotFoundException(taskId));
+
+        return priorityScoreService.recomputePriorityScoreAndPublish(
+                taskId,
+                locked,
+                locked,
+                beforeReadiness,
+                afterReadiness);
+    }
     private UUID tenantIdForTask(UUID taskId) {
         TaskReadinessSnapshot snapshot =
             taskReadinessRepository
