@@ -23,7 +23,14 @@ from mind.extraction.extractor import (
     ExtractionItem,
     ExtractionSuccess,
 )
-from mind.extraction.providers.base import LLMRejected, LLMTimeout
+from mind.extraction.providers.base import (
+    LLMAccessDenied,
+    LLMError,
+    LLMRateLimited,
+    LLMRejected,
+    LLMTimeout,
+    LLMUnavailable,
+)
 from mind.extraction.providers.pricing import estimate_cost
 from mind.observability.tracking import (
     CallKind,
@@ -413,3 +420,43 @@ def test_a_batch_keeps_each_outcome_attached_to_its_own_item() -> None:
     assert [o.item_key for o in outcomes] == ["first-key", "second-key"]
     assert isinstance(outcomes[0], ExtractionFailure)
     assert isinstance(outcomes[1], ExtractionSuccess)
+
+
+# --- whose fault a failure is (#919) ------------------------------------------
+
+
+def test_an_answer_that_never_fits_is_the_items_failure() -> None:
+    result = extractor("nope", "still nope", "nope again", max_attempts=3).extract(
+        EMAIL_TEXT, SourceType.EMAIL
+    )
+
+    assert isinstance(result, ExtractionFailure)
+    assert result.environmental is False
+
+
+@pytest.mark.parametrize("error", [LLMTimeout("t"), LLMRateLimited("429"), LLMUnavailable("503")])
+def test_a_provider_down_past_its_retries_is_environmental(error: LLMError) -> None:
+    result = extractor(error, error, error, max_transient_retries=2).extract(
+        EMAIL_TEXT, SourceType.EMAIL
+    )
+
+    assert isinstance(result, ExtractionFailure)
+    assert result.provider_calls == 3
+    assert result.environmental is True
+
+
+def test_a_refused_account_is_environmental_and_not_retried() -> None:
+    result = extractor(LLMAccessDenied("402 insufficient balance"), GOOD_ANSWER).extract(
+        EMAIL_TEXT, SourceType.EMAIL
+    )
+
+    assert isinstance(result, ExtractionFailure)
+    assert result.provider_calls == 1
+    assert result.environmental is True
+
+
+def test_a_refused_request_is_the_items_failure() -> None:
+    result = extractor(LLMRejected("400 invalid request")).extract(EMAIL_TEXT, SourceType.EMAIL)
+
+    assert isinstance(result, ExtractionFailure)
+    assert result.environmental is False
