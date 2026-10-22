@@ -5,6 +5,8 @@ import com.rnd.chain.dto.TaskStateHistoryEntry;
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Persistence port for the append-only task state history - no REST/Kafka/DB coupling.
@@ -21,4 +23,6 @@ public interface TaskStateHistoryRepository {
      * Newest first: createdAt descending, true insertion order as tiebreaker.
      */
     PageResponse<TaskStateHistoryEntry> findByTaskId(UUID taskId, Instant from, Instant to, int page, int size);
+
+    Map<UUID, Instant> findLatestBlockedSinceByTaskIds(List<UUID> taskIds);
 }

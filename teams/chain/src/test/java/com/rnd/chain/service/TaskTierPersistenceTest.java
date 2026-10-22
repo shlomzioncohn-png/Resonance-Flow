@@ -1,5 +1,6 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTestFixtures;
@@ -36,6 +37,22 @@ class TaskTierPersistenceTest {
     @Autowired
     private TaskReadinessRepository taskReadinessRepository;
 
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
+
     private TaskRepository taskRepository;
     private TaskStateHistoryRepository history;
     private TaskEligibilityService service;
@@ -46,12 +63,18 @@ class TaskTierPersistenceTest {
         history = PgRepos.stateHistory();
         TaskDependencyRepository dependencyRepository = PgRepos.dependencies(List.of());
         GraphLock lock = PgRepos.graphLock();
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
-                new PriorityScoreService(),
-                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> { })),
-                taskReadinessRepository);
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
+                        taskRepository,
+                        dependencyRepository,
+                        taskReadinessRepository,
+                        new SchedulingUpdateService(event -> { },taskReadinessRepository),
+                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> { },taskReadinessRepository)));
+
         TaskStateHistoryRecorder recorder = new TaskStateHistoryRecorder(history, Clock.systemUTC());
-        service = new TaskEligibilityService(taskRepository, dependencyRepository, lock, counterUpdater, recorder,
+        DependencyEdgeService edgeService = new DependencyEdgeService(
+                taskRepository, dependencyRepository, lock, priorityScoreService, recorder, taskReadinessRepository);
+        service = new TaskEligibilityService(taskRepository, dependencyRepository, lock, edgeService, priorityScoreService, recorder,
                 taskReadinessRepository);
     }
 
@@ -120,13 +143,13 @@ class TaskTierPersistenceTest {
         LocalDateTime stored = LocalDateTime.now();
         UUID id = UUID.randomUUID();
         taskRepository.save(TaskTestFixtures.defaultTask(id)
-                .status(TaskStatus.ACTIVE).isReady(true).priorityScore(7.5).updatedAt(stored).build());
+                .status(TaskStatus.ACTIVE).priorityScore(7.5).updatedAt(stored).build());
 
         service.onTaskStatusChangedIfNewer(id, TaskStatus.ACTIVE, stored.plusSeconds(10), TENANT, TaskTier.STRATEGIC);
 
         Task after = taskRepository.findById(id).orElseThrow();
         assertThat(after.getTier()).isEqualTo(TaskTier.STRATEGIC);
         assertThat(after.getPriorityScore()).isEqualTo(7.5);
-        assertThat(after.isReady()).isTrue();
+        assertThat(isReady(after)).isTrue();
     }
 }

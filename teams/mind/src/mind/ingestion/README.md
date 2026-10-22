@@ -1,7 +1,8 @@
 # ingestion
 
-Mind's entry point (#349): reads what Bridge lands and turns it into text for
-extraction. Also loads AMI's human transcripts for the extraction eval (see
+Mind's entry point (#349): reads what Bridge lands, turns it into text, and
+runs the creation pipeline on it (#919): extraction, the duplicate check, and
+the request to Inbox. Also loads AMI's human transcripts for the extraction eval (see
 "AMI transcripts" at the end). Bridge stores each item's files in MinIO and publishes one
 `RawObjectEvent` on `bridge.raw.landed` carrying pointers, not content. This
 package fetches the files one at a time, checks them, and turns each into an
@@ -19,8 +20,9 @@ bridge.raw.landed ─► to_raw_object_event ─► classify_arrival ─► extr
 
 | file | what it does |
 |---|---|
-| `landed_consumer_runner.py` | the process: Kafka consumer, real MinIO, `asr.warm_up()` |
+| `landed_consumer_runner.py` | the process: Kafka consumer, real MinIO, `asr.warm_up()`, the creation flow and its listener |
 | `landed_consumer.py` | `LandedHandler`: one message through every step below |
+| `creation_pipeline.py` | `CreationPipeline`: the items → extraction → duplicate check → `task.creation.requested` |
 | `raw_object_event_proto.py` | the protobuf message → the `RawObjectEvent` contract |
 | `seen_revisions.py` | whether an item was already processed, and at which revision |
 | `extraction_items.py` | the event → one `ExtractionItem` per file, one file at a time |
@@ -59,6 +61,28 @@ bridge.raw.landed ─► to_raw_object_event ─► classify_arrival ─► extr
    and `correlation_id` extraction needs. Marked only after the hand-off: a
    crash in between processes the item again, and Inbox de-duplicates task
    requests on `correlation_id`.
+5. **Items to creation requests** (`CreationPipeline.handle`, #919). Each
+   item is extracted with the classification and the effort estimate
+   (#350–#352) into its tasks — none, one or several (#690) — each
+   assembled into a `TaskCreationRequested` (tenant and `source_ref` from the
+   event, no owner yet: #132) and checked against the item's tenant's index
+   with `find_duplicate` (#471, #841). A duplicate is not sent: it is logged
+   at INFO with the matched `task_id` — Mind has no update path and Inbox no
+   "possible duplicate" field, so sending would only make a second task. The
+   line carries the candidate's title only when Bridge classified the item
+   `NONE` or `LOW` sensitivity; for `HIGH`, or an item with no
+   classification, only the title's length (the title is written from the
+   content). Anything else goes to `TaskCreationFlow.send` with Bridge's
+   `correlation_id` and `revision`. `task_index` is `item position × 100 +
+   task position` (`TASK_SLOTS_PER_ITEM`, fixed for ever), not a count of
+   tasks sent: an item that fails now and passes on redelivery, or whose task
+   list comes back longer, does not change any other item's
+   `correlation_id`. A one-task item's first task keeps 0.
+   An extraction that failed because of the environment, not the item (the
+   provider down past its retries, the key, the credit), stops the message
+   with `ExtractionUnavailable` instead of skipping it: otherwise a spent
+   budget would mark the whole topic processed with no task created. See
+   "Skip or retry".
 
 ## Skip or retry
 
@@ -78,7 +102,12 @@ so each failure is one of two kinds:
 | OCR/ASR: our bug (BUG), or a reason with no decision yet | that file skipped (ERROR), the rest goes on |
 | OCR/ASR: the tool is missing here (`*_UNAVAILABLE`) | `MediaUnavailable` raised: the process stops, the message comes again |
 | MinIO unreachable, or any MinIO error but a missing key | raised, same |
-| the hand-off fails | raised, same |
+| extraction: the model's answer never fits the schema (`invalid_output`) | that item skipped (ERROR, by the extractor), the rest goes on |
+| extraction: the provider refuses the item's request or content (400, 422, a safety block, a truncated answer) | that item skipped (ERROR, by the extractor), the rest goes on |
+| extraction: the provider is down, times out or rate-limits past its retries (timeout, 429, 5xx) | `ExtractionUnavailable` raised: the process stops, the message comes again |
+| extraction: the provider refuses the account (401, 403 key; 402 credit; 404 model not available) | `ExtractionUnavailable` raised, same |
+| the extracted task is a duplicate | not sent, logged at INFO, the rest goes on |
+| the duplicate search or the publish to Inbox fails | raised, same |
 | any other error (a bug of ours) | raised, same: loud rather than lost |
 
 A skip is for what a retry cannot fix: the same message would fail the same
@@ -116,19 +145,45 @@ An environment variable still wins over both.
 most one byte past it is fetched, whatever the event's `size_bytes` says, and
 the read itself stops there even if the server ignores the Range header.
 Kafka and the Schema Registry come from `messaging/config.py`; this consumer
-alone raises `max.poll.interval.ms` to 30 minutes (`conf_overrides`). No
-database is needed: the runner reads `LandedConsumerSettings` (group id,
-`MIND_LOG_LEVEL`), not `Settings`, which requires the vector-store DSN.
+alone raises `max.poll.interval.ms` to 30 minutes (`conf_overrides`). Since
+#481 that means a `config.yaml` is required here too: set `CONFIG_FILE_PATH`
+to a file whose `kafka.bootstrap_servers` / `kafka.schema_registry_url` point
+at your broker, or the consumer stops at start-up with a `ConfigFileError`
+(see `src/mind/api/README.md`, "Configuration (#481)"). The object-storage
+settings above are unchanged by #481. The runner also needs the vector store
+(`vector_store` in the same files, through `Settings`), migrated, and an LLM
+provider (`llm.provider`, see `extraction/README.md`); either missing fails
+at start-up. In Docker: `docker compose --profile kafka up mind-landed-consumer`.
 
-Until extraction is wired in, `on_items` logs each item by its event, file and
-length, never its content (Bridge may have classified it HIGH sensitivity),
-which also shows the stage in a demo run.
+Each item is still logged by its event, file and length before extraction,
+never its content (Bridge may have classified it HIGH sensitivity), which
+also shows the stage in a demo run.
 
-**A run commits offsets.** The consumer group is `mind-landed-consumer`. Until
-extraction is wired, a run marks items processed and commits their offsets
-with nothing extracted, so a later run in the same group never sees them
-again. For a test against the shared topic (the joint test with Bridge, a
-demo rehearsal), use a group of its own, in the environment or in `.env`:
+### One process, three threads
+
+The pending store of `TaskCreationFlow` is in memory, so the sender and the
+`task.created` listener must share it, and so one process
+(`task_creation/README.md`, "Running it"):
+
+- **main thread**: this consumer, the creation pipeline, and its own loop,
+  with an index opened on it for `find_duplicate`;
+- **`task-created-listener`**: `run_task_created_listener`, its own loop, and
+  the index matched tasks are written to, opened on that loop (a pool
+  belongs to the loop that opened it); group `mind-task-creation`;
+- **`overdue-timer`**: `run_overdue_timer`.
+
+A thread that dies takes the process with it (`threading.excepthook`), so it
+is restarted rather than consuming on with nobody matching the replies.
+`on_matched` is a no-op until #834's `DependencyAdapter.on_task_created`
+lands. When the store moves to Postgres (#918), the listener can move to a
+process of its own.
+
+**A run commits offsets and sends real requests.** The consumer group is
+`mind-landed-consumer`. A run marks items processed and commits their
+offsets, so a later run in the same group never sees them again, and every
+new task it extracts is sent to Inbox. For a test against the shared topic
+(the joint test with Bridge, a demo rehearsal), use a group of its own, in
+the environment or in `.env`:
 
 ```
 MIND_LANDED_CONSUMER__GROUP_ID=mind-landed-joint-test make run-landed-consumer
@@ -136,7 +191,18 @@ MIND_LANDED_CONSUMER__GROUP_ID=mind-landed-joint-test make run-landed-consumer
 
 ## Not yet in
 
-- **The hand-off to extraction (#350).** `on_items` only logs today.
+- **Duplicates close together.** The index holds only tasks Inbox has
+  confirmed. Two tasks of one event (an email body and its scanned form, in
+  the #919 demo run), or two items landed seconds apart (the demo's
+  `slack-first` order), may both be sent before either is indexed.
+- **A task list that changes on re-extraction.** A task is numbered by its
+  position in its item's list. If a redelivered item's list comes back in
+  another order, a task can take another's number, and Inbox may make a
+  second task for it.
+- **Owner (#132).** Requests go without a suggested owner.
+- **Dependencies (#834).** `on_matched` is a no-op until the adapter lands.
+- **A restart forgets pending requests (#918).** A `task.created` that
+  arrives after a restart is still indexed by R3's consumer, but not matched.
 - **Bridge updates.** A newer revision is skipped. Acting on it means finding
   and updating the tasks the earlier revision produced, a feature of its own.
   It also means an item first `EXCLUDED`, then re-classified `INCLUDED` in a
@@ -187,8 +253,8 @@ MIND_LANDED_CONSUMER__GROUP_ID=mind-landed-joint-test make run-landed-consumer
 ## Open in Mind
 
 - **HIGH-sensitivity content.** Bridge's `classification` is converted but not
-  read yet: every `INCLUDED` item's text is handed on, and once extraction is
-  wired it reaches the external LLM. Whether HIGH-sensitivity content may be
+  read yet: every `INCLUDED` item's text is handed on and reaches the
+  external LLM. Whether HIGH-sensitivity content may be
   sent there, and what to do with `UNREADABLE` quality, are decisions not
   taken yet.
 
