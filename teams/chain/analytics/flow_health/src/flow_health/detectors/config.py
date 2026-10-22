@@ -30,12 +30,26 @@ class RecurringCycleConfig:
 
 
 @dataclass(frozen=True)
+class SlowChainConfig:
+    min_length: int = 4
+    max_length: int = 8
+    min_group_size: int = 8
+    min_ratio_to_median: float = 3.0
+    min_robust_z: float = 3.5
+    max_link_share: float = 0.5
+    medium_from_ratio: float = 4.0
+    high_from_ratio: float = 6.0
+
+
+@dataclass(frozen=True)
 class DetectorConfig:
     chronic_blocker: ChronicBlockerConfig = ChronicBlockerConfig()
     recurring_cycle: RecurringCycleConfig = RecurringCycleConfig()
+    slow_chain: SlowChainConfig = SlowChainConfig()
 
 
 def load_config(path: Path | str | None = None) -> DetectorConfig:
     raw = yaml.safe_load(Path(path or DEFAULT_PATH).read_text(encoding="utf-8")) or {}
     return DetectorConfig(chronic_blocker=ChronicBlockerConfig(**raw.get("chronic_blocker", {})),
-                          recurring_cycle=RecurringCycleConfig(**raw.get("recurring_cycle", {})))
+                          recurring_cycle=RecurringCycleConfig(**raw.get("recurring_cycle", {})),
+                          slow_chain=SlowChainConfig(**raw.get("slow_chain", {})))

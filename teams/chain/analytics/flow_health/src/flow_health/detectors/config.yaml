@@ -15,3 +15,13 @@ recurring_cycle:
   high_min_transitions: 8       # high from here, or from medium_min_transitions when the gaps are even (see tight_cv)
   tight_cv: 0.3                 # coefficient of variation of the gaps (std / mean) at or below which gaps are "even"
   pair_min_return_days: 1.0     # near-cycle: the removed edge must stay away at least this long before it returns
+
+slow_chain:
+  min_length: 4                 # chains are compared only with chains of the same length, in tasks
+  max_length: 8
+  min_group_size: 8             # fewer chains of one length: no baseline, nothing is flagged
+  min_ratio_to_median: 3.0      # end-to-end days / median end-to-end days of the same length
+  min_robust_z: 3.5             # 0.6745 * (x - median) / MAD, within the same length
+  max_link_share: 0.5           # no single link may account for more than this share of the total time
+  medium_from_ratio: 4.0        # severity bands, same shape as the chronic blocker's
+  high_from_ratio: 6.0
