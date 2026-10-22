@@ -499,10 +499,12 @@ API and needs no entry of its own in Relay's chart.
   Each run of a consumer builds a new one, so the uncommitted message is read
   again: the recovery a pod restart would give, without one. There is no
   `os._exit`, and the retries do not give up.
-- **`app.state.score_publisher.healthy`** is false only while a thread waits to
-  run again. Recovery does not depend on it. Surfacing it in `/health` is #481's
-  call; since `/health` also drives readiness and startup, a 503 there would
-  take all of Mind's API out of service, so liveness at most.
+- **`app.state.score_publisher.healthy`** is false only if a thread has died,
+  which the retries should never let happen. A Kafka outage, including Kafka
+  being down when the API starts, stays healthy and is retried inside the
+  thread. That makes it safe for liveness (#481's `/health/live`): a broker
+  that is down never restarts the API, nor loops a pod that starts without it.
+  Recovery does not depend on it. It is `None` when Kafka isn't configured.
 - **MIND must run as one replica (`replicaCount: 1`) with one uvicorn worker.**
   The publisher keeps its state in memory: a second copy would split the
   topics between two states, and the stale-event and loop checks would break.

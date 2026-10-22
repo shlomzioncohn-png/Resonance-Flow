@@ -99,7 +99,7 @@ def _consume(
     def run(stop: Event) -> None:
         def _handler(event: object, msg: object) -> None:
             # No try/except: a Kafka error must end the loop with the offset
-            # uncommitted. BackgroundThreads logs it and reports unhealthy.
+            # uncommitted. BackgroundThreads logs it and runs this again.
             handle(event)
 
         consumer = ProtobufConsumer(group_id=_GROUP_ID, topics=[topic], settings=settings)

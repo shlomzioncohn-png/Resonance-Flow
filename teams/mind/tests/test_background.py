@@ -87,9 +87,27 @@ def test_a_failed_thread_runs_again_and_becomes_healthy_again(quick_retries):
     threads.stop()
 
 
-def test_it_is_unhealthy_while_waiting_to_run_again():
-    # The first retry waits a full second here, long enough to observe.
+def test_it_stays_healthy_while_waiting_to_run_again(caplog):
+    # Michal Brecher's liveness probe reads `healthy`: a Kafka outage (or Kafka
+    # down at startup) must not restart the API. The first retry waits a full
+    # second here, so the check falls inside the wait.
+    caplog.set_level(logging.INFO, logger="mind.messaging.background")
     threads = BackgroundThreads([("broken", lambda stop: 1 / 0), ("ok", _loop)])
+    threads.start()
+
+    assert _wait_until(lambda: "again in 1.0s" in caplog.text)
+    assert threads.healthy
+
+    threads.stop()
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_a_thread_that_died_is_unhealthy():
+    # What the retries can't catch, such as SystemExit, ends the thread for good.
+    def exits(stop: threading.Event) -> None:
+        raise SystemExit
+
+    threads = BackgroundThreads([("dies", exits), ("ok", _loop)])
     threads.start()
 
     assert _wait_until(lambda: not threads.healthy)
@@ -143,12 +161,13 @@ def test_a_thread_that_returns_on_its_own_runs_again(quick_retries):
     threads.stop()
 
 
-def test_stop_does_not_wait_out_the_backoff(monkeypatch):
+def test_stop_does_not_wait_out_the_backoff(monkeypatch, caplog):
     # A shutdown must not wait up to 60 s for a thread between two retries.
+    caplog.set_level(logging.INFO, logger="mind.messaging.background")
     monkeypatch.setattr(background, "_FIRST_RESTART_WAIT", 30.0)
     threads = BackgroundThreads([("broken", lambda stop: 1 / 0)])
     threads.start()
-    assert _wait_until(lambda: not threads.healthy)
+    assert _wait_until(lambda: "again in 30.0s" in caplog.text)
 
     began = time.monotonic()
     threads.stop()

@@ -18,8 +18,11 @@ too. A Kafka consumer target builds a new consumer on every run, so the
 message it failed on, still uncommitted, is read again: the same recovery a
 pod restart would give, without one. The way Chain's consumers work too.
 
-`healthy` is False while any thread waits to be run again. How it reaches the
-probes is up to the API (/health, #481); recovery does not depend on it.
+`healthy` is False only if a thread has died, which the retries above should
+never let happen. A Kafka outage, including one at startup, stays healthy and
+is retried inside the thread, so a liveness probe on it never restarts the API
+for a broker that is merely down. How it reaches the probes is up to the API
+(/health, #481); recovery does not depend on it.
 """
 
 from __future__ import annotations
@@ -51,9 +54,6 @@ class BackgroundThreads:
 
     def __init__(self, targets: list[tuple[str, Target]]) -> None:
         self._stop = threading.Event()
-        # Names of the threads waiting to run their target again.
-        self._failing: set[str] = set()
-        self._failing_lock = threading.Lock()
         # Daemon: if stop() is never reached, the threads still end with the process.
         self._threads = [
             threading.Thread(target=self._guard, args=(name, target), name=name, daemon=True)
@@ -78,10 +78,8 @@ class BackgroundThreads:
 
     @property
     def healthy(self) -> bool:
-        """True while every thread runs its target; False while one waits to retry."""
-        with self._failing_lock:
-            failing = bool(self._failing)
-        return not failing and all(thread.is_alive() for thread in self._threads)
+        """True while every thread is alive, retrying included; False once one has died."""
+        return all(thread.is_alive() for thread in self._threads)
 
     def _guard(self, name: str, target: Target) -> None:
         failures = 0
@@ -101,10 +99,6 @@ class BackgroundThreads:
                 failures = 0
             wait = min(_FIRST_RESTART_WAIT * 2.0**failures, _MAX_RESTART_WAIT)
             failures += 1
-            with self._failing_lock:
-                self._failing.add(name)
             logger.info("background: running thread %s again in %ss", name, wait)
             # Wakes at once on stop(), so a shutdown never waits out the backoff.
             self._stop.wait(wait)
-            with self._failing_lock:
-                self._failing.discard(name)
