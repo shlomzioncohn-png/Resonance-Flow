@@ -41,7 +41,7 @@ class DependencyPublisher:
     async def publish_dependencies(
         self,
         *,
-        task_id: str,
+        task_id: UUID,
         tenant_id: UUID,
         dependency_mentions: list[str],
     ) -> None:
@@ -63,8 +63,7 @@ class DependencyPublisher:
         if not mentions:
             return
 
-        task_uuid = UUID(task_id)
-        task_id_normalized = str(task_uuid)
+        task_id_normalized = str(task_id)
 
         resolved_lists = await resolve_dependency_targets(
             self._store, mentions, k=1, exclude_task_id=task_id_normalized
@@ -89,13 +88,22 @@ class DependencyPublisher:
                     result.task_id,
                 )
                 continue
+            # The store's own exclude_task_id filter is a case-sensitive SQL
+            # string compare -- a target stored in different case than our
+            # normalized lowercase id would slip through it. Compare as UUIDs.
+            if target_uuid == task_id:
+                logger.warning(
+                    "dependencies: task %s resolved itself as a dependency target, skipping",
+                    task_id,
+                )
+                continue
             if target_uuid not in candidates or result.similarity > candidates[target_uuid]:
                 candidates[target_uuid] = result.similarity
 
         for target_uuid, confidence in candidates.items():
             event_id = uuid5(_NAMESPACE, f"{task_id_normalized}:{target_uuid}")
             event = build_dependency_event(
-                task_uuid, tenant_id, {target_uuid: confidence}, event_id=event_id
+                task_id, tenant_id, {target_uuid: confidence}, event_id=event_id
             )
             # Off the loop: send() blocks until Kafka acks.
             await asyncio.to_thread(self._sink.send, event)

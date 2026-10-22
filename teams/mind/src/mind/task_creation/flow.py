@@ -4,7 +4,6 @@ so all three use one pending store. How to compose it: README.md, "Running it".
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -49,7 +48,7 @@ class TaskCreationFlow:
         bridge_correlation_id: UUID,
         revision: int,
         task_index: int = 0,
-        dependency_mentions: Sequence[str] = (),
+        dependency_mentions: tuple[str, ...] = (),
     ) -> UUID:
         """What the pipeline calls for each task it extracted."""
 

@@ -24,7 +24,7 @@ class DependencyAdapter:
 
     async def on_task_created(self, matched: MatchedReply) -> None:
         try:
-            task_id = str(UUID(matched.task_id))
+            task_id = UUID(matched.task_id)
         except ValueError:
             logger.warning("dependencies: task_id %r is not a UUID, skipping", matched.task_id)
             return

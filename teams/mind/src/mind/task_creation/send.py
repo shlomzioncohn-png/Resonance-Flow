@@ -7,7 +7,6 @@ Why the order, and what a failed or repeated publish does: README.md,
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -36,7 +35,7 @@ async def send_creation_request(
     bridge_correlation_id: UUID,
     revision: int,
     task_index: int = 0,
-    dependency_mentions: Sequence[str] = (),
+    dependency_mentions: tuple[str, ...] = (),
 ) -> UUID:
     """Publish `request` to Inbox and register it; return its correlation_id."""
 

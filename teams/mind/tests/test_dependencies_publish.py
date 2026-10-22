@@ -53,7 +53,7 @@ def _resolved(*per_mention: list[SearchResult]):
 async def test_a_resolved_mention_is_published_as_one_edge(publisher, sink) -> None:
     with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
         await publisher.publish_dependencies(
-            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
         )
 
     [event] = sink.sent
@@ -68,7 +68,7 @@ async def test_an_unresolved_mention_is_logged_not_raised(
 ) -> None:
     with _resolved([]), caplog.at_level("WARNING"):
         await publisher.publish_dependencies(
-            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["a task that doesn't exist yet"]
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["a task that doesn't exist yet"]
         )
 
     assert sink.sent == []
@@ -78,7 +78,7 @@ async def test_an_unresolved_mention_is_logged_not_raised(
 async def test_one_unresolved_mention_does_not_block_another_resolved_one(publisher, sink) -> None:
     with _resolved([], [SearchResult(task_id=TASK_B, similarity=0.9)]):
         await publisher.publish_dependencies(
-            task_id=TASK_A,
+            task_id=UUID(TASK_A),
             tenant_id=TENANT,
             dependency_mentions=["doesn't exist yet", "the DB upgrade"],
         )
@@ -93,7 +93,7 @@ async def test_each_resolved_mention_becomes_its_own_event(publisher, sink) -> N
         [SearchResult(task_id=TASK_C, similarity=0.8)],
     ):
         await publisher.publish_dependencies(
-            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["mention one", "mention two"]
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["mention one", "mention two"]
         )
 
     assert len(sink.sent) == 2
@@ -113,7 +113,7 @@ async def test_two_mentions_resolving_to_the_same_target_publish_one_edge_at_the
         [SearchResult(task_id=TASK_B, similarity=0.95)],
     ):
         await publisher.publish_dependencies(
-            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["mention one", "mention two"]
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["mention one", "mention two"]
         )
 
     [event] = sink.sent
@@ -126,7 +126,7 @@ async def test_the_same_target_in_different_case_is_deduped_across_mentions(publ
         [SearchResult(task_id=TASK_B, similarity=0.95)],
     ):
         await publisher.publish_dependencies(
-            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["mention one", "mention two"]
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["mention one", "mention two"]
         )
 
     assert len(sink.sent) == 1
@@ -138,7 +138,7 @@ async def test_all_blank_mentions_publish_nothing_and_skip_resolution(
 ) -> None:
     with _resolved() as mock_resolve, caplog.at_level("WARNING"):
         await publisher.publish_dependencies(
-            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["  ", "\t"]
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["  ", "\t"]
         )
 
     assert sink.sent == []
@@ -154,11 +154,11 @@ async def test_the_event_id_is_deterministic_so_a_redelivery_resends_the_same_ed
 
     with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
         await publisher.publish_dependencies(
-            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
         )
     with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
         await publisher.publish_dependencies(
-            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
         )
 
     assert len(sink.sent) == 2
@@ -168,11 +168,11 @@ async def test_the_event_id_is_deterministic_so_a_redelivery_resends_the_same_ed
 async def test_a_different_target_gets_a_different_event_id(publisher, sink) -> None:
     with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
         await publisher.publish_dependencies(
-            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["mention one"]
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["mention one"]
         )
     with _resolved([SearchResult(task_id=TASK_C, similarity=0.9)]):
         await publisher.publish_dependencies(
-            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["mention two"]
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["mention two"]
         )
 
     assert sink.sent[0].event_id != sink.sent[1].event_id
@@ -183,7 +183,7 @@ async def test_a_blank_mention_is_dropped_with_a_warning(
 ) -> None:
     with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]), caplog.at_level("WARNING"):
         await publisher.publish_dependencies(
-            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["  ", "the DB upgrade"]
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["  ", "the DB upgrade"]
         )
 
     assert len(sink.sent) == 1
@@ -191,7 +191,7 @@ async def test_a_blank_mention_is_dropped_with_a_warning(
 
 
 async def test_no_mentions_is_a_no_op(publisher, sink) -> None:
-    await publisher.publish_dependencies(task_id=TASK_A, tenant_id=TENANT, dependency_mentions=[])
+    await publisher.publish_dependencies(task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=[])
 
     assert sink.sent == []
 
@@ -201,11 +201,28 @@ async def test_a_resolved_target_that_is_not_a_uuid_is_skipped_with_a_warning(
 ) -> None:
     with _resolved([SearchResult(task_id="not-a-uuid", similarity=0.9)]), caplog.at_level("WARNING"):
         await publisher.publish_dependencies(
-            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
         )
 
     assert sink.sent == []
     assert "not-a-uuid" in caplog.text
+
+
+async def test_a_resolved_target_matching_the_task_itself_is_skipped_even_in_different_case(
+    publisher, sink, caplog: pytest.LogCaptureFixture
+) -> None:
+    """exclude_task_id is a case-sensitive SQL compare against the lowercase
+    normalized id -- a self-match stored in different case would slip past
+    it and get published as "A depends on A", which Chain rejects as a cycle."""
+    with _resolved([SearchResult(task_id=TASK_A.upper(), similarity=0.9)]), caplog.at_level(
+        "WARNING"
+    ):
+        await publisher.publish_dependencies(
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+
+    assert sink.sent == []
+    assert "resolved itself" in caplog.text
 
 
 async def test_resolve_is_called_once_for_every_mention_together(publisher, sink) -> None:
@@ -214,7 +231,7 @@ async def test_resolve_is_called_once_for_every_mention_together(publisher, sink
         [SearchResult(task_id=TASK_C, similarity=0.8)],
     ) as mock_resolve:
         await publisher.publish_dependencies(
-            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["mention one", "mention two"]
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["mention one", "mention two"]
         )
 
     mock_resolve.assert_awaited_once_with(

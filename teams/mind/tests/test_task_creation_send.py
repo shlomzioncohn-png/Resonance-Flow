@@ -97,16 +97,16 @@ async def test_what_is_registered_keeps_the_item_its_revision_and_task_number() 
     assert (entry.bridge_correlation_id, entry.revision, entry.task_index) == (ITEM, 3, 0)
 
 
-async def test_a_list_of_mentions_is_coerced_to_a_tuple_so_the_entry_stays_hashable() -> None:
-    """The parameter accepts any `Sequence[str]`, including the list a caller
-    naturally reaches for -- coerced to a tuple so it doesn't sit inside this
-    frozen dataclass and break hashing it."""
+async def test_dependency_mentions_lands_in_the_entry_and_stays_hashable() -> None:
+    """`dependency_mentions` is a `tuple[str, ...]`, not `Sequence[str]` --
+    a bare `str` also satisfies `Sequence[str]`, which would silently treat
+    a single mention string as one mention per character."""
 
     pending = PendingRequests()
     correlation_id = await send_creation_request(
         FakeProducer(pending), pending, _request(),
         bridge_correlation_id=ITEM, revision=0,
-        dependency_mentions=["the DB upgrade"],
+        dependency_mentions=("the DB upgrade",),
     )
 
     entry = await pending.get(correlation_id)
