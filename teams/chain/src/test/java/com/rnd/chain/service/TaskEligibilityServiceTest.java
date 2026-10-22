@@ -12,6 +12,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTier;
 import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.events.SchedulingUpdatePublisher;
@@ -428,7 +429,7 @@ class TaskEligibilityServiceTest {
                 List.of(TaskTestFixtures.defaultTask(taskId).isReady(true).tenantId(null).build()), List.of());
 
         fixture.service().onTaskStatusChangedIfNewer(taskId, TaskStatus.ACTIVE,
-                LocalDateTime.now().plusMinutes(1), tenantId);
+                LocalDateTime.now().plusMinutes(1), tenantId, null);
 
         assertEquals(tenantId, fixture.taskRepo().findById(taskId).orElseThrow().getTenantId());
     }
@@ -439,7 +440,7 @@ class TaskEligibilityServiceTest {
         Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
 
         fixture.service().onTaskStatusChangedIfNewer(taskId, TaskStatus.DONE,
-                LocalDateTime.now().plusMinutes(1), TaskTestFixtures.DEFAULT_TENANT_ID);
+                LocalDateTime.now().plusMinutes(1), TaskTestFixtures.DEFAULT_TENANT_ID, null);
 
         assertEquals(TaskStatus.DONE, fixture.taskRepo().findById(taskId).orElseThrow().getStatus());
     }
@@ -450,7 +451,7 @@ class TaskEligibilityServiceTest {
         Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
 
         assertThrows(TenantReassignmentException.class, () -> fixture.service().onTaskStatusChangedIfNewer(
-                taskId, TaskStatus.DONE, LocalDateTime.now().plusMinutes(1), TaskTestFixtures.OTHER_TENANT_ID));
+                taskId, TaskStatus.DONE, LocalDateTime.now().plusMinutes(1), TaskTestFixtures.OTHER_TENANT_ID, null));
         assertEquals(TaskStatus.ACTIVE, fixture.taskRepo().findById(taskId).orElseThrow().getStatus(),
                 "the status change must not apply alongside the rejected tenant change");
     }
@@ -465,7 +466,7 @@ class TaskEligibilityServiceTest {
         Fixture fixture = newFixture(List.of(task), List.of());
 
         assertThrows(TenantReassignmentException.class, () -> fixture.service().onTaskStatusChangedIfNewer(
-                taskId, TaskStatus.DONE, createdAt.minusMinutes(1), TaskTestFixtures.OTHER_TENANT_ID));
+                taskId, TaskStatus.DONE, createdAt.minusMinutes(1), TaskTestFixtures.OTHER_TENANT_ID, null));
     }
 
     private Task createTask(
@@ -665,6 +666,73 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
+    void onScoreProposed_withTenant_createsPlaceholderForUnknownTaskAndStoresScoreTierAndScoredAt() {
+        UUID taskId = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
+        LocalDateTime scoredAt = LocalDateTime.of(2026, 10, 20, 12, 0);
+        Fixture fixture = newFixture(List.of(), List.of());
+
+        TestTransactions.runCommitted(() -> fixture.counterUpdater()
+                .onScoreProposed(taskId, tenantId, TaskTier.TACTICAL, 0.8, 0.5, scoredAt));
+
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
+        assertEquals(tenantId, task.getTenantId());
+        assertEquals(TaskTier.TACTICAL, task.getTier());
+        assertEquals(0.8, task.getScore());
+        assertEquals(scoredAt, task.getScoredAt());
+        assertNotNull(task.getPriorityScore());
+    }
+
+    @Test
+    void onScoreProposed_withOlderScoredAt_isIgnored() {
+        UUID taskId = UUID.randomUUID();
+        UUID tenantId = TaskTestFixtures.DEFAULT_TENANT_ID;
+        LocalDateTime scoredAt = LocalDateTime.of(2026, 10, 20, 12, 0);
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+        TestTransactions.runCommitted(() -> fixture.counterUpdater()
+                .onScoreProposed(taskId, tenantId, TaskTier.TACTICAL, 0.8, 0.5, scoredAt));
+        fixture.publisher().clear();
+
+        TestTransactions.runCommitted(() -> fixture.counterUpdater()
+                .onScoreProposed(taskId, tenantId, TaskTier.STRATEGIC, 0.2, 0.9, scoredAt.minusMinutes(1)));
+
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
+        assertEquals(0.8, task.getScore());
+        assertEquals(0.5, task.getConfidence());
+        assertEquals(TaskTier.TACTICAL, task.getTier());
+        assertEquals(scoredAt, task.getScoredAt());
+        assertTrue(fixture.publisher().getEvents().isEmpty());
+    }
+
+    @Test
+    void onScoreProposed_withNewerScoredAt_replacesTheScore() {
+        UUID taskId = UUID.randomUUID();
+        UUID tenantId = TaskTestFixtures.DEFAULT_TENANT_ID;
+        LocalDateTime scoredAt = LocalDateTime.of(2026, 10, 20, 12, 0);
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+        TestTransactions.runCommitted(() -> fixture.counterUpdater()
+                .onScoreProposed(taskId, tenantId, null, 0.8, 0.5, scoredAt));
+
+        TestTransactions.runCommitted(() -> fixture.counterUpdater()
+                .onScoreProposed(taskId, tenantId, null, 0.2, 0.9, scoredAt.plusMinutes(1)));
+
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
+        assertEquals(0.2, task.getScore());
+        assertEquals(scoredAt.plusMinutes(1), task.getScoredAt());
+    }
+
+    @Test
+    void onScoreProposed_withTenantDifferentFromStored_throwsAndDoesNotChangeTheTask() {
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+
+        assertThrows(TenantReassignmentException.class, () -> fixture.counterUpdater()
+                .onScoreProposed(taskId, UUID.randomUUID(), null, 0.8, 0.5, null));
+
+        assertNull(fixture.taskRepo().findById(taskId).orElseThrow().getScore());
+    }
+
+    @Test
     void addDependencies_withMindConfidence_lowersPriorityScoreByBlockerConfidence() {
         UUID taskId = UUID.randomUUID();
         UUID blockerId = UUID.randomUUID();
@@ -796,7 +864,7 @@ class TaskEligibilityServiceTest {
                             blockerId,
                             TaskStatus.DONE,
                             eventTime,
-                            TaskTestFixtures.DEFAULT_TENANT_ID));
+                            TaskTestFixtures.DEFAULT_TENANT_ID, null));
 
         assertEquals(
             1,
@@ -826,7 +894,7 @@ class TaskEligibilityServiceTest {
                             blockerId,
                             TaskStatus.DONE,
                             eventTime,
-                            TaskTestFixtures.DEFAULT_TENANT_ID));
+                            TaskTestFixtures.DEFAULT_TENANT_ID, null));
 
         assertEquals(
             1,

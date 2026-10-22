@@ -30,7 +30,8 @@ open follow-up, not done as part of this merge. **Postgres-backed implementation
 - Java 21
 - Spring Boot 3.3.13 (Maven)
 - Spring Kafka, with Confluent Protobuf (de)serialization against a Schema Registry
-- Lombok (`Task`/`TaskDependency` accessors/builder/equals-hashCode; `Constraint`'s
+- Lombok (`Task`/`TaskDependency` accessors/builder/equals-hashCode, `TaskEntity` accessors,
+  `@RequiredArgsConstructor`/`@Slf4j` in services and handlers; `Constraint`'s
   equals/hashCode are hand-written, see the 2026-09-08 fixes below)
 - Docker / Docker Compose
 
@@ -60,6 +61,7 @@ app-code change needed. Inbox's own Postgres password isn't wired this way yet (
 |---|---|---|
 | `task.dependencies.proposed` | consume (Mind) | `addDependency` |
 | `task.dependencies.removed` | consume (Mind) | `removeDependency` |
+| `task.score.proposed` | consume (Mind) | `onScoreProposed` |
 | `task.status.updated` | consume (Inbox) | `onTaskStatusChanged` |
 | `task.scheduling.updated` | produce | consumed by Inbox |
 
@@ -129,7 +131,8 @@ src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_
                                   # V10 processed_events - Kafka event dedup claims,
                                   # V11 task readiness view + indexes,
                                   # V12 constraint_history - issue #815,
-                                  # V13 drops unresolved_dependencies - replaced by placeholder tasks)
+                                  # V13 drops unresolved_dependencies - replaced by placeholder tasks,
+                                  # V14 task.tier - issue #864)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskDependencyServicePostgresIntegrationTest,
@@ -190,6 +193,7 @@ own `@KafkaListener` handler, and the handlers share the claim/logging skeleton 
 | `task.updated` | Inbox | `TaskUpdatedEventHandler` | state-based, last-write-wins on `updated_at`; `DONE` is not applied (see Idempotency) | 3 attempts, 2s apart |
 | `task.completed` | Inbox | `TaskCompletedEventHandler` | state-based; Kafka record timestamp compared to stored `updated_at`, never written | 3 attempts, 2s apart |
 | `task.dependencies.proposed` | Mind | `DependencyProposedEventHandler` | `event_id` claim in `ProcessedEventStore` | 3 attempts, 2s apart |
+| `task.score.proposed` | Mind | `TaskScoreProposedEventHandler` | `event_id` claim in `ProcessedEventStore` | 3 attempts, 2s apart |
 
 **Retry and dead-lettering**: retries are non-blocking, via `@RetryableTopic`, so a message waiting
 to retry never stalls the rest of its partition. Every exception is retried except
@@ -201,7 +205,7 @@ lands on `<topic>.errors`. A typical retried case is a `task.completed` for a ta
 only after its record is handled or handed to its retry/DLT topic, so a crash mid-processing
 redelivers the record instead of losing it.
 
-**Idempotency**: `task.dependencies.proposed` is deduplicated by `event_id`. The claim is released if
+**Idempotency**: `task.dependencies.proposed` and `task.score.proposed` are deduplicated by `event_id`. The claim is released if
 the handler fails, so a retry can process the event again. `task.updated` and `task.completed` carry no
 event id, so they rely on their state changes being safe to repeat. `task.completed` has no
 timestamp either, so its Kafka record timestamp is compared against the stored `updated_at` (to
@@ -224,6 +228,14 @@ not what releases a `DONE` task, though: `task.updated` intercepts Inbox's `DONE
 only `task.completed` releases it. `CANCELLED` and `REJECTED` still release through `task.updated`. `IN_PROGRESS`
 maps to `ACTIVE`, and every other status maps to `PENDING`.
 
+**Tier (Issue #864)**: `task.updated` may carry an optional `tier` (strategic / tactical / operational).
+Chain stores only the latest one in `task.tier` (V14, nullable, CHECK on the three values). It is not exposed
+in any API and has no effect on `priority_score` or `is_available`. `InboxTaskTierMapper` reads it only
+when `hasTier()`; a missing, `UNSPECIFIED` or unrecognized tier maps to null. Merge rule: an event with a tier
+replaces the stored one, an event without a tier keeps it, so a stored tier can never be cleared. The tier is
+written in the same transaction and under the same newest-wins check as the status, both when the task is
+created from `task.updated` and when it already exists. A tier-only change writes no `task_state_history` row.
+
 **Publishing**: the only publisher for `task.scheduling.updated` is `KafkaSchedulingUpdatePublisher`
 (`com.rnd.chain.events` - the same package as the consumers, see #543), used by `SchedulingUpdateService`. It maps `TaskSchedulingUpdatedEvent` to the
 `SchedulingUpdatedEvent` Protobuf message (`scheduling-updated-event.proto`) and sends it with
@@ -235,7 +247,8 @@ maps to `ACTIVE`, and every other status maps to `PENDING`.
 reads as "leave the stored value unchanged". `KafkaEventPublisher` (flat JSON, no envelope) was removed under #543 - it had no production caller.
 
 **Schemas**: the `.proto` sources come from the repo's [`shared/proto/`](../../shared/proto)
-(`chain-task-updated-event` - a self-contained copy of `task-updated-event` - and
+(`chain-task-updated-event` - a self-contained copy of `task-updated-event` -,
+`chain-task-score-proposed-event` - a copy of `task-score-proposed-event` that reuses its `TaskTier` -,
 `task-dependencies-proposed-event`,
 `scheduling-updated-event`). Messages are
 validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock registry
@@ -248,6 +261,7 @@ validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock
 | `chain.kafka.topics.task-updated` (env `TASK_UPDATED_TOPIC`) | Topic consumed for `task.updated` | `task.updated` |
 | `chain.kafka.topics.task-completed` (env `TASK_COMPLETED_TOPIC`) | Topic consumed for `task.completed` | `task.completed` |
 | `chain.kafka.topics.dependencies-proposed` (env `DEPENDENCIES_PROPOSED_TOPIC`) | Topic consumed for `task.dependencies.proposed` | `task.dependencies.proposed` |
+| `chain.kafka.topics.score-proposed` (env `SCORE_PROPOSED_TOPIC`) | Topic consumed for `task.score.proposed` | `task.score.proposed` |
 | `chain.kafka.topics.scheduling-updated` (env `CHAIN_SCHEDULING_UPDATED_TOPIC`) | Topic published to for `task.scheduling.updated` | `task.scheduling.updated` |
 | `KAFKA_BOOTSTRAP_SERVERS` (env var, not `chain.*`) | Kafka broker(s) address | `localhost:9092` |
 | `chain.kafka.consumer-group-id` (env `KAFKA_CONSUMER_GROUP_ID`) | Consumer group ID | `chain-service` |
@@ -376,15 +390,18 @@ pre-#445-Phase-3 tests that asserted synchronous publish behavior (updated to si
 around the call) and by the new tests that specifically prove the commit/rollback/dedup behavior
 (`TaskEligibilityServiceTest`'s "Phase 3" section at the bottom of the file).
 
-### Not yet wired (tracked separately from #445)
+### `task.score.proposed`
 
-- **`task.score.proposed` consumer**: `TaskEligibilityService.onScoreProposed` exists and is
-  covered by its own tests, but nothing calls it yet from a `@KafkaListener` - that's #386, pending
-  Mind's contract.
-- ~~**Publish format**: #545~~ - done (merged from `main`, see "Kafka event infrastructure" above):
-  `KafkaSchedulingUpdatePublisher` publishes real Protobuf against the registered
-  `shared/proto/scheduling-updated-event.proto`, with a per-event `event_id`. Covered end-to-end by
-  `SchedulingUpdatedEventContractTest` and `SchedulingUpdatePublishIntegrationTest` (a real broker).
+`TaskScoreProposedEventHandler` stores Mind's `mind_score`, `confidence` and `tier` on the task via
+`TaskCounterUpdater.onScoreProposed`, which recomputes `priority_score` and publishes
+`task.scheduling.updated`. `mind_score` and `confidence` are rounded to two decimals (so `0.8f` is
+stored as `0.8`); a value outside [0, 1], NaN or an `InvalidRequestException` goes to `.errors`
+without retry. A task Chain hasn't seen yet is created as a PENDING placeholder in the event's
+`tenant_id`; a task stored with a different tenant is rejected to `.errors` (a null stored tenant is
+backfilled). The tier is stored in the same `task.tier` column as the one from `task.updated`, with the
+same merge rule: an unspecified `tier` leaves the stored tier unchanged. `scored_at` is stored in
+`task.scored_at` (V15): an event scored earlier than the stored value is ignored (no write, no
+publish), and an event without `scored_at` is applied and keeps the stored value. `factors` is ignored.
 
 ## Running locally with Maven
 

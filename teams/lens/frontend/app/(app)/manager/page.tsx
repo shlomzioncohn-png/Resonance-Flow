@@ -11,6 +11,7 @@ import Typography from '@mui/material/Typography';
 import PageContainer from '@/components/layout/PageContainer';
 import DependencyGraph from '@/components/ui/DependencyGraph';
 import { useDependencyGraph } from '@/hooks/useDependencyGraph';
+import { useManagerKpis } from '@/hooks/useManagerKpis';
 import { getErrorMessage } from '@/services/api';
 import ManagerKpiTiles from '@/components/layout/ManagerKpiTiles';
 import { useManagerKpis } from '@/hooks/useManagerKpis';
@@ -36,6 +37,7 @@ export default function ManagerDashboardPage() {
   const kpis = useManagerKpis();
   // Same cache entry as /manager/bottlenecks, so opening the full graph from here doesn't refetch.
   const graph = useDependencyGraph();
+  const kpis = useManagerKpis();
 
   // Update every second so the "updated Xs ago" tag stays current.
   // (Without this, it would only update when the data itself refetches.)
@@ -55,7 +57,10 @@ export default function ManagerDashboardPage() {
   }, []);
 
   return (
-    <PageContainer title="Manager Dashboard" description="What needs your attention across the team.">
+    <PageContainer
+      title="Manager Dashboard"
+      description="What needs your attention across the team."
+    >
       <Stack spacing={3}>
         <ManagerKpiTiles
           kpis={kpis.data}
@@ -97,7 +102,9 @@ export default function ManagerDashboardPage() {
             loading={graph.isPending}
             error={graph.isError ? getErrorMessage(graph.error) : null}
             onRetry={() => graph.refetch()}
-            onNodeSelect={(id) => router.push(`/manager/bottlenecks?taskId=${encodeURIComponent(id)}`)}
+            onNodeSelect={(id) =>
+              router.push(`/manager/bottlenecks?taskId=${encodeURIComponent(id)}`)
+            }
           />
         </Card>
       </Stack>

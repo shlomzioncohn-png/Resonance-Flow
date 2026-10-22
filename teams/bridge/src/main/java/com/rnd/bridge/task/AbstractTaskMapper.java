@@ -83,8 +83,6 @@ public abstract class AbstractTaskMapper<S> implements PayloadMapper<S, Task> {
 
     protected abstract Instant toDeadline(S source);
 
-    protected abstract Instant toSnoozedUntil(S source);
-
     protected abstract Instant toCompletedAt(S source);
 
     @Override
@@ -137,7 +135,6 @@ public abstract class AbstractTaskMapper<S> implements PayloadMapper<S, Task> {
                 sourceRef,
                 enrichment.effortEstimateMinutes() != null ? enrichment.effortEstimateMinutes() : null,
                 finalDeadline,
-                toSnoozedUntil(source),
                 toCompletedAt(source));
     }
 

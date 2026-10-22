@@ -37,7 +37,6 @@ public record Task(
         // TIMESTAMPTZ. The date-to-instant conversion (presumably
         // start-of-day UTC) isn't decided yet - not building it until it is.
         Instant deadline,
-        Instant snoozedUntil,
         // Set only when status = DONE and the source actually recorded a
         // completion date - e.g. a CRM deal's close date. A DONE task with
         // no completedAt is legitimate (see DealToTaskMapper for the

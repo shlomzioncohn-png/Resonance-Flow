@@ -6,6 +6,7 @@
  * All manager queries include relevant filters (period, team, project) in their keys,
  * so that changing filters triggers a refetch with new data.
  */
+import type { ManagerKpiFilters } from './managerApi';
 import type { WorkspaceRequest } from './workspaceApi';
 
 export const taskKeys = {
@@ -25,6 +26,11 @@ export const workloadKeys = {
   all: ['manager', 'workload'] as const,
   filtered: (filters?: ManagerFilters) =>
     [...workloadKeys.all, filters ? { ...filters } : {}] as const,
+};
+
+export const kpiKeys = {
+  all: ['manager', 'kpis'] as const,
+  list: (filters: ManagerKpiFilters) => [...kpiKeys.all, filters] as const,
 };
 
 export const projectKeys = {

@@ -46,6 +46,10 @@ already has (edgeExists() / the task's own stored previousStatus).
   once it believes an event was "already handled" can permanently lose
   a Constraint row instead of just delaying a counter update.
 
+## Coding guideline
+Wherever Lombok can replace boilerplate (accessors, constructors, builders, equals/hashCode), write
+the code with Lombok.
+
 ## Real repository contracts (from chain/ruthHoltzman/dependency-repository-66)
 - TaskRepository: findById, findAllById, findByParentTaskId, save
   (no atomic increment yet — in-memory HashMap, not real DB)

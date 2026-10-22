@@ -115,7 +115,7 @@ class TaskStateHistoryRollbackPostgresTest {
         UUID id = savedActiveTask();
 
         eligibilityService.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, STORED_AT.plusSeconds(10),
-                taskRepository.findById(id).orElseThrow().getTenantId());
+                taskRepository.findById(id).orElseThrow().getTenantId(), null);
 
         assertThat(taskRepository.findById(id).orElseThrow().getStatus()).isEqualTo(TaskStatus.PENDING);
         assertThat(historyRowCount(id)).isEqualTo(1);
@@ -127,7 +127,7 @@ class TaskStateHistoryRollbackPostgresTest {
         FailingHistoryConfig.FAIL.set(true);
 
         assertThatThrownBy(() -> eligibilityService.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING,
-                STORED_AT.plusSeconds(10), taskRepository.findById(id).orElseThrow().getTenantId()))
+                STORED_AT.plusSeconds(10), taskRepository.findById(id).orElseThrow().getTenantId(), null))
                 .isInstanceOf(IllegalStateException.class);
 
         Task after = taskRepository.findById(id).orElseThrow();

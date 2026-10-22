@@ -3,6 +3,7 @@ package com.rnd.chain.repository;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.repository.entity.TaskEntity;
 import com.rnd.chain.repository.jpa.SpringDataTaskJpaRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,14 +16,11 @@ import java.util.function.UnaryOperator;
 
 /** Postgres-backed {@link TaskRepository}. Maps {@link TaskEntity} <-> {@link Task} here only -
  * neither type crosses this class's boundary in the other direction. */
+@RequiredArgsConstructor
 @Repository
 public class PostgresTaskRepository implements TaskRepository {
 
     private final SpringDataTaskJpaRepository jpaRepository;
-
-    public PostgresTaskRepository(SpringDataTaskJpaRepository jpaRepository) {
-        this.jpaRepository = jpaRepository;
-    }
 
     @Override
     public Optional<Task> findById(UUID id) {
@@ -56,6 +54,7 @@ public class PostgresTaskRepository implements TaskRepository {
                 task.getStatus().name(), task.isReady(), task.getBlockingCount(),
                 task.getOpenConstraintCount(), task.getEstimatedDurationMin(), task.getScore(),
                 task.getConfidence(), task.getPriorityScore(),
+                task.getTier() != null ? task.getTier().name() : null, task.getScoredAt(),
                 task.getCreatedAt(), task.getUpdatedAt(), task.getDeletedAt());
         // Read-back after the row-count-only native upsert; unlike findByIdAndDeletedAtIsNull(),
         // findById() also returns soft-deleted rows.
@@ -78,6 +77,7 @@ public class PostgresTaskRepository implements TaskRepository {
                 task.getOpenConstraintCount(),
                 task.getEstimatedDurationMin(),
                 task.getScore(),
+                task.getTier() != null ? task.getTier().name() : null,
                 task.getCreatedAt(),
                 task.getUpdatedAt(),
                 task.getDeletedAt()
@@ -147,6 +147,8 @@ public class PostgresTaskRepository implements TaskRepository {
                 .score(entity.getScore())
                 .confidence(entity.getConfidence())
                 .priorityScore(entity.getPriorityScore())
+                .tier(entity.getTier())
+                .scoredAt(entity.getScoredAt())
                 .createdAt(entity.getCreatedAt())
                 .updatedAt(entity.getUpdatedAt())
                 .deletedAt(entity.getDeletedAt())
@@ -166,6 +168,8 @@ public class PostgresTaskRepository implements TaskRepository {
         entity.setScore(updated.getScore());
         entity.setConfidence(updated.getConfidence());
         entity.setPriorityScore(updated.getPriorityScore());
+        entity.setTier(updated.getTier());
+        entity.setScoredAt(updated.getScoredAt());
         entity.setCreatedAt(updated.getCreatedAt());
         entity.setUpdatedAt(updated.getUpdatedAt());
         entity.setDeletedAt(updated.getDeletedAt());

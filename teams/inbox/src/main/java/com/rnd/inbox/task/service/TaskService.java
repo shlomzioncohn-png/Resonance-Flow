@@ -313,6 +313,7 @@ public class TaskService {
         return saved;
     }
 
+    @Transactional
     public Task applySchedulingUpdate(SchedulingEventDto event) {
         return applySchedulingUpdate(
                 UUID.fromString(event.getTaskId()),
