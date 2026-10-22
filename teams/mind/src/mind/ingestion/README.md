@@ -116,7 +116,12 @@ An environment variable still wins over both.
 most one byte past it is fetched, whatever the event's `size_bytes` says, and
 the read itself stops there even if the server ignores the Range header.
 Kafka and the Schema Registry come from `messaging/config.py`; this consumer
-alone raises `max.poll.interval.ms` to 30 minutes (`conf_overrides`). No
+alone raises `max.poll.interval.ms` to 30 minutes (`conf_overrides`). Since
+#481 that means a `config.yaml` is required here too: set `CONFIG_FILE_PATH`
+to a file whose `kafka.bootstrap_servers` / `kafka.schema_registry_url` point
+at your broker, or the consumer stops at start-up with a `ConfigFileError`
+(see `src/mind/api/README.md`, "Configuration (#481)"). The object-storage
+settings above are unchanged by #481. No
 database is needed: the runner reads `LandedConsumerSettings` (group id,
 `MIND_LOG_LEVEL`), not `Settings`, which requires the vector-store DSN.
 
