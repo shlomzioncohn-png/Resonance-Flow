@@ -43,6 +43,13 @@ Key names are the chart's (`teams/relay/helm/resonance-flow/README.md`,
 | `kafka.bootstrap_servers`, `.schema_registry_url`, `.producer.acks`, `.producer.retries` | config.yaml | `mind.messaging.config` | Both of the first two, or neither: neither means Kafka is off, and building a producer or consumer then fails. |
 | `kafka.sasl.mechanism`, `.username`, `.password` | secrets.yaml | `mind.messaging.config` | Absent: no SASL. |
 
+**Coming with #900 (#648, not merged yet):** the Kafka SASL password will
+be read first from `/etc/resonance-flow/secrets/kafka-sasl/client-passwords`,
+a file mounted from the Secret the chart's hook creates (the directory can be
+overridden with `KAFKA_SASL_SECRETS_DIR`). `kafka.sasl.password` in
+secrets.yaml stays as the fallback. Until #900 lands, only secrets.yaml is
+read.
+
 The vector-store DSN is built **only** from these files. A
 `MIND_VECTOR_STORE__DSN` in the environment or `.env` is ignored. Tuning
 knobs that aren't connection settings still come from env vars:
