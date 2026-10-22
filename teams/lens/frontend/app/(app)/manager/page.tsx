@@ -9,12 +9,11 @@ import Chip from '@mui/material/Chip';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import PageContainer from '@/components/layout/PageContainer';
+import ManagerKpiTiles from '@/components/layout/ManagerKpiTiles';
 import DependencyGraph from '@/components/ui/DependencyGraph';
 import { useDependencyGraph } from '@/hooks/useDependencyGraph';
 import { useManagerKpis } from '@/hooks/useManagerKpis';
 import { getErrorMessage } from '@/services/api';
-import ManagerKpiTiles from '@/components/layout/ManagerKpiTiles';
-import { useManagerKpis } from '@/hooks/useManagerKpis';
 
 /**
  * Format the time elapsed since dataUpdatedAt into a human-readable string.
@@ -37,7 +36,6 @@ export default function ManagerDashboardPage() {
   const kpis = useManagerKpis();
   // Same cache entry as /manager/bottlenecks, so opening the full graph from here doesn't refetch.
   const graph = useDependencyGraph();
-  const kpis = useManagerKpis();
 
   // Update every second so the "updated Xs ago" tag stays current.
   // (Without this, it would only update when the data itself refetches.)
