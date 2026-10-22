@@ -91,6 +91,13 @@ class SlackEventMessageParser {
         if ("file_share".equals(subtype)) {
             return parseMessageNode(event, event);
         }
+        // "Also send to channel" on a thread reply arrives as a top-level "message" event with
+        // subtype "thread_broadcast" and its own thread_ts - same shape otherwise, and treated as
+        // an ordinary thread reply (lands only in the thread transcript via its threadId, never
+        // the channel group - no channel-group handling here by design).
+        if ("thread_broadcast".equals(subtype)) {
+            return parseMessageNode(event, event);
+        }
         if ("message_changed".equals(subtype) && event.hasNonNull("message")) {
             JsonNode nested = event.get("message");
             // A root-with-replies deletion arrives as message_changed with a nested
@@ -99,8 +106,9 @@ class SlackEventMessageParser {
             // javadoc). A link-unfurl's nested message is Slack's own "bot_message" subtype,
             // typically missing "user" - ignored outright (neither edit nor new message),
             // same as the existing top-level bot_message rejection below. A nested "file_share"
-            // subtype (an edit of a message that has a file) isn't special-cased at all - it
-            // falls straight through to parseMessageNode below, same as an edit with no subtype.
+            // or "thread_broadcast" subtype (editing a message that has a file, or editing a
+            // thread reply that broadcast to the channel) isn't special-cased at all - it falls
+            // straight through to parseMessageNode below, same as an edit with no subtype.
             if (nested.hasNonNull("subtype")) {
                 String nestedSubtype = nested.get("subtype").asText();
                 if ("tombstone".equals(nestedSubtype) || "bot_message".equals(nestedSubtype)) {

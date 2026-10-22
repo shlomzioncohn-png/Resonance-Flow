@@ -248,6 +248,62 @@ class SlackEventMessageParserTest {
     }
 
     @Test
+    void topLevelThreadBroadcastIsRoutedAsAnOrdinaryThreadReply() throws Exception {
+        // "Also send to channel" on a thread reply - still just a thread reply (threadId set),
+        // no channel-group handling here by design.
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"thread_broadcast\",\"channel\":\"C123\",\"user\":\"U1\","
+                        + "\"ts\":\"1000.5\",\"thread_ts\":\"1000.0\",\"text\":\"heads up everyone\"}");
+
+        Optional<ChatMessage> result = parser.parse(event);
+
+        assertThat(result).isPresent();
+        ChatMessage message = result.orElseThrow();
+        assertThat(message.text()).isEqualTo("heads up everyone");
+        assertThat(message.threadId()).isEqualTo("1000.0");
+    }
+
+    @Test
+    void messageChangedWithNestedThreadBroadcastSubtypeIsParsedAsAnOrdinaryEdit() throws Exception {
+        // A nested "thread_broadcast" subtype (editing a thread reply that broadcast to the
+        // channel) isn't special-cased either - falls straight through to parseMessageNode, same
+        // as an edit with no nested subtype. No code change was needed for this case; this test
+        // documents that it already worked.
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_changed\",\"channel\":\"C123\",\"ts\":\"1000.9\","
+                        + "\"message\":{\"type\":\"message\",\"subtype\":\"thread_broadcast\",\"user\":\"U1\","
+                        + "\"ts\":\"1000.0\",\"thread_ts\":\"999.0\",\"text\":\"edited broadcast reply\"}}");
+
+        Optional<ChatMessage> result = parser.parse(event);
+
+        assertThat(result).isPresent();
+        ChatMessage message = result.orElseThrow();
+        assertThat(message.id()).isEqualTo("1000.0");
+        assertThat(message.threadId()).isEqualTo("999.0");
+        assertThat(message.text()).isEqualTo("edited broadcast reply");
+    }
+
+    @Test
+    void messageDeletedWithThreadBroadcastPreviousMessageIsStillAThreadReplyDeletion() throws Exception {
+        // parseDeletion's message_deleted path never reads previous_message's own subtype or
+        // thread_ts at all - identity comes solely from the top-level deleted_ts/channel fields
+        // (see parseDeletion's javadoc) - so a thread_broadcast previous_message is handled
+        // exactly like any other message_deleted event. This test documents current (already
+        // correct) behavior; no code change was made to parseDeletion.
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_deleted\",\"channel\":\"C123\","
+                        + "\"ts\":\"1000.9\",\"deleted_ts\":\"1000.0\","
+                        + "\"previous_message\":{\"type\":\"message\",\"subtype\":\"thread_broadcast\",\"user\":\"U1\","
+                        + "\"ts\":\"1000.0\",\"thread_ts\":\"999.0\",\"text\":\"heads up everyone\"}}");
+
+        Optional<com.rnd.bridge.intake.model.SlackMessageDeletion> result = parser.parseDeletion(event);
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().chatId()).isEqualTo("C123");
+        assertThat(result.orElseThrow().messageId()).isEqualTo("1000.0");
+    }
+
+    @Test
     void messageChangedWithNestedFileShareSubtypeIsParsedAsAnOrdinaryEdit() throws Exception {
         // A nested "file_share" subtype (editing a message that has a file attached) isn't
         // special-cased - only "tombstone" and "bot_message" are filtered above - so this falls
