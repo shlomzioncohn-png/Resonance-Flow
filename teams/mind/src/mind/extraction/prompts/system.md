@@ -63,7 +63,7 @@ Rules:
 - Never output priority, owner or deadline. Other stages handle those, and
   inventing them here corrupts their input.
 - When `dependency_mentions` is not empty, `has_dependencies` is true. It may
-  be true with an empty list, when the content shows other work is involved
-  without naming it.
+  be true with an empty list,
+  when the content shows this task waits for work it does not name.
 - For a missing value use `null`. Never use `""`, `"N/A"`, `"unknown"` or `"-"`.
 - Base every field on the content. Do not carry over knowledge of your own.

@@ -499,3 +499,13 @@ def test_no_two_example_tasks_name_each_other() -> None:
         for title, mentions in names.items():
             for other in mentions:
                 assert title not in names.get(other, set()), (title, other)
+
+
+def test_the_rules_say_the_same_direction_as_the_field() -> None:
+    """A rule saying "other work is involved" allowed true for a blocker
+    again, beside a bullet that says a blocker is false."""
+
+    prompt = system_prompt()
+
+    assert "when the content shows this task waits for work it does not name" in prompt
+    assert "other work is involved" not in prompt
