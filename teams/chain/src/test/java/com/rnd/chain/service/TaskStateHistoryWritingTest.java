@@ -52,32 +52,36 @@ class TaskStateHistoryWritingTest {
         TaskDependencyRepository dependencyRepository = PgRepos.dependencies(List.of());
         GraphLock lock = PgRepos.graphLock();
 
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(
-                taskRepository,
-                dependencyRepository,
-                new PriorityScoreService(),
-                new SchedulingPublishListener(
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
                         taskRepository,
-                        new SchedulingUpdateService(event -> { })),
-                taskReadinessRepository);
+                        dependencyRepository,
+                        taskReadinessRepository,
+                        new SchedulingUpdateService(event -> { },taskReadinessRepository),
+                        new SchedulingPublishListener(
+                        taskRepository,
+                        new SchedulingUpdateService(event -> { },taskReadinessRepository)));
 
         TaskStateHistoryRecorder recorder =
                 new TaskStateHistoryRecorder(history, Clock.systemUTC());
+
+        edgeService = new DependencyEdgeService(
+                taskRepository,
+                dependencyRepository,
+                lock,
+                priorityScoreService,
+                recorder,
+                taskReadinessRepository);
 
         service = new TaskEligibilityService(
                 taskRepository,
                 dependencyRepository,
                 lock,
-                counterUpdater,
+                edgeService,
+                priorityScoreService,
                 recorder,
                 taskReadinessRepository);
 
-        edgeService = new DependencyEdgeService(
-                dependencyRepository,
-                lock,
-                counterUpdater,
-                recorder,
-                taskReadinessRepository);
     }
 
     private UUID savedTask(TaskStatus status, LocalDateTime updatedAt) {
@@ -239,7 +243,6 @@ class TaskStateHistoryWritingTest {
                 .score(7.0)
                 .confidence(0.5)
                 .priorityScore(4.0)
-                .isReady(true)
                 .build();
         taskRepository.save(original);
         LocalDateTime eventTime = stored.plusSeconds(10);
@@ -249,8 +252,6 @@ class TaskStateHistoryWritingTest {
         Task after = taskRepository.findById(id).orElseThrow();
         assertThat(after.getStatus()).isEqualTo(TaskStatus.PENDING);
         assertThat(after.getUpdatedAt()).isEqualTo(eventTime);
-        assertThat(after.isReady()).isEqualTo(original.isReady());
-        assertThat(after.getBlockingCount()).isEqualTo(original.getBlockingCount());
         assertThat(after.getPriorityScore()).isEqualTo(original.getPriorityScore());
         assertThat(after.getScore()).isEqualTo(original.getScore());
     }

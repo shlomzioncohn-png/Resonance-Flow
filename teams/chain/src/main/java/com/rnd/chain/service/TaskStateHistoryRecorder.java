@@ -15,8 +15,8 @@ import java.util.UUID;
 /**
  * Appends rows to the task state history (issue #774). Callers invoke it only after the change it
  * describes was actually written, inside the same transaction, so a failure here rolls the
- * change back too. Deliberately independent of {@link TaskCounterUpdater}, which is slated for
- * removal once the counters become computed.
+ * change back too. Deliberately independent of the stored-counter maintenance in
+ * {@link DependencyEdgeService}, which is slated for removal once the counters become computed.
  */
 @Component
 public class TaskStateHistoryRecorder {

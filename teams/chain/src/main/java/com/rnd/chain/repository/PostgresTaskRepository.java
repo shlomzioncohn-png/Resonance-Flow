@@ -47,12 +47,21 @@ public class PostgresTaskRepository implements TaskRepository {
     }
 
     @Override
+    public List<Task> findByTenantId(UUID tenantId) {
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
+
+        return jpaRepository.findByTenantIdAndDeletedAtIsNull(tenantId).stream()
+            .map(PostgresTaskRepository::toDto)
+            .toList();
+   }
+
+    @Override
     @Transactional
     public Task save(Task task) {
         Objects.requireNonNull(task, "task must not be null");
         jpaRepository.upsert(task.getId(), task.getParentTaskId(), task.getTenantId(),
-                task.getStatus().name(), task.isReady(), task.getBlockingCount(),
-                task.getOpenConstraintCount(), task.getEstimatedDurationMin(), task.getScore(),
+                task.getStatus().name(),
+                task.getEstimatedDurationMin(), task.getScore(),
                 task.getConfidence(), task.getPriorityScore(),
                 task.getTier() != null ? task.getTier().name() : null, task.getScoredAt(),
                 task.getCreatedAt(), task.getUpdatedAt(), task.getDeletedAt());
@@ -72,9 +81,6 @@ public class PostgresTaskRepository implements TaskRepository {
                 task.getParentTaskId(),
                 task.getTenantId(),
                 task.getStatus().name(),
-                task.isReady(),
-                task.getBlockingCount(),
-                task.getOpenConstraintCount(),
                 task.getEstimatedDurationMin(),
                 task.getScore(),
                 task.getTier() != null ? task.getTier().name() : null,
@@ -140,9 +146,6 @@ public class PostgresTaskRepository implements TaskRepository {
                 .parentTaskId(entity.getParentTaskId())
                 .tenantId(entity.getTenantId())
                 .status(entity.getStatus())
-                .isReady(entity.isReady())
-                .blockingCount(entity.getBlockingCount())
-                .openConstraintCount(entity.getOpenConstraintCount())
                 .estimatedDurationMin(entity.getEstimatedDurationMin())
                 .score(entity.getScore())
                 .confidence(entity.getConfidence())
@@ -161,9 +164,6 @@ public class PostgresTaskRepository implements TaskRepository {
         entity.setParentTaskId(updated.getParentTaskId());
         entity.setTenantId(updated.getTenantId());
         entity.setStatus(updated.getStatus());
-        entity.setReady(updated.isReady());
-        entity.setBlockingCount(updated.getBlockingCount());
-        entity.setOpenConstraintCount(updated.getOpenConstraintCount());
         entity.setEstimatedDurationMin(updated.getEstimatedDurationMin());
         entity.setScore(updated.getScore());
         entity.setConfidence(updated.getConfidence());
