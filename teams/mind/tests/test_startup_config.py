@@ -62,13 +62,30 @@ def test_index_consumer_fails_before_starting_any_thread(monkeypatch: pytest.Mon
         index_consumer_runner.main()
 
 
-def test_score_publisher_fails_before_starting_any_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_api_startup_fails_on_an_incomplete_kafka_config_before_any_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The score publisher runs inside the API (#920): one kafka key without
+    # the other must stop start-up, not quietly leave the publisher off.
+    from mind.api import main
     from mind.scoring import score_publisher_runner
 
-    monkeypatch.setattr(score_publisher_runner.threading, "Thread", _no_threads)
+    (tmp_path / "config.yaml").write_text(
+        "vector_store: {url: 'db.invalid:5432', user: mind, db: mind}\n"
+        "kafka: {bootstrap_servers: 'broker:9092'}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "secrets.yaml").write_text("vector_store: {password: x}\n", encoding="utf-8")
+    monkeypatch.setenv("CONFIG_FILE_PATH", str(tmp_path / "config.yaml"))
+    monkeypatch.setenv("SECRETS_FILE_PATH", str(tmp_path / "secrets.yaml"))
+    monkeypatch.setattr(main, "PgVectorStore", _FakeStore)
+    monkeypatch.setattr(score_publisher_runner, "BackgroundThreads", _no_threads)
 
-    with pytest.raises(ConfigFileError, match=r"\$CONFIG_FILE_PATH is not set"):
-        score_publisher_runner.main()
+    with (
+        pytest.raises(ConfigFileError, match=r"kafka\.schema_registry_url is missing"),
+        TestClient(main.app),
+    ):
+        pass
 
 
 def test_llm_settings_still_tolerate_a_missing_config(monkeypatch: pytest.MonkeyPatch) -> None:

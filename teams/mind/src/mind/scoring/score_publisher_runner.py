@@ -9,7 +9,9 @@ worker that re-scores the tasks #474's propagation asks for.
 
 Only started when Kafka is configured (the chart's config file sets
 kafka.bootstrap_servers and kafka.schema_registry_url). Locally and in tests,
-with no such file, the API starts without it.
+with no kafka section, the API starts without it. Only one of the two set is
+a broken config (#481), so the ConfigFileError naming the missing key stops
+the API's start-up before any thread starts.
 
 The publisher keeps its state in memory, so MIND must run as one replica with
 one uvicorn worker: a second copy would split the topics between two states.
@@ -56,16 +58,15 @@ class RunningScorePublisher:
         self.threads.stop()
 
 
-def kafka_configured(settings: MessagingSettings) -> bool:
-    return bool(settings.bootstrap_servers and settings.schema_registry_url)
-
-
 def start_score_publisher(
     settings: MessagingSettings | None = None,
 ) -> RunningScorePublisher | None:
-    """Start the publisher's threads, or return None when Kafka is not configured."""
+    """Start the publisher's threads, or return None when Kafka is not configured.
+
+    Raises ConfigFileError when only one of the two kafka keys is set.
+    """
     settings = settings or load_settings()
-    if not kafka_configured(settings):
+    if not settings.kafka_configured():
         logger.info("score_publisher: Kafka is not configured, not started")
         return None
 

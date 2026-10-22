@@ -488,8 +488,10 @@ API and needs no entry of its own in Relay's chart.
 - **Started from the API's lifespan** (`api/main.py`) by `start_score_publisher()`,
   **only when Kafka is configured** (the chart's config file sets
   `kafka.bootstrap_servers` and `kafka.schema_registry_url`). Locally and in
-  tests, with no such file, the API starts without it and
-  `app.state.score_publisher` is `None`.
+  tests, with no kafka section, the API starts without it and
+  `app.state.score_publisher` is `None`. Only one of the two keys set is a
+  broken config (#481): start-up stops with a `ConfigFileError` naming the
+  missing key, before any thread starts.
 - **Stopped on shutdown**: the consumers end within a second and leave their
   group cleanly, instead of Kafka waiting for a session timeout.
 - **A failed thread runs again on its own, and never takes the API down.** The

@@ -10,12 +10,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 import mind.api.main as api_main
+from mind.config_file import ConfigFileError
 from mind.messaging.config import MessagingSettings
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
 from mind.scoring import score_publisher_runner as runner
 from mind.scoring.score_publisher import ScorePublisher
-from mind.scoring.score_publisher_runner import kafka_configured, start_score_publisher
+from mind.scoring.score_publisher_runner import start_score_publisher
 
 
 def test_without_kafka_settings_it_does_not_start():
@@ -23,12 +24,17 @@ def test_without_kafka_settings_it_does_not_start():
     assert start_score_publisher(MessagingSettings()) is None
 
 
-def test_kafka_needs_both_the_brokers_and_the_registry():
-    assert not kafka_configured(MessagingSettings(bootstrap_servers="broker:9092"))
-    assert not kafka_configured(MessagingSettings(schema_registry_url="http://sr:8080"))
-    assert kafka_configured(
-        MessagingSettings(bootstrap_servers="broker:9092", schema_registry_url="http://sr:8080")
-    )
+@pytest.mark.parametrize(
+    "settings",
+    [
+        MessagingSettings(bootstrap_servers="broker:9092"),
+        MessagingSettings(schema_registry_url="http://sr:8080"),
+    ],
+)
+def test_only_one_kafka_key_is_a_broken_config_not_kafka_off(settings):
+    # #481: fail loudly, naming the missing key, rather than not start.
+    with pytest.raises(ConfigFileError, match="incomplete Kafka config"):
+        start_score_publisher(settings)
 
 
 class _FakeStore:
@@ -55,14 +61,17 @@ class _FakeRunning:
 
 def _isolate_lifespan(monkeypatch, start) -> None:
     monkeypatch.setattr(api_main, "PgVectorStore", _FakeStore)
-    monkeypatch.setattr(api_main, "get_settings", lambda: SimpleNamespace(vector_store=None))
+    monkeypatch.setattr(
+        api_main, "get_settings", lambda: SimpleNamespace(vector_store=None, log_level="INFO")
+    )
     monkeypatch.setattr(api_main, "start_score_publisher", start)
 
 
 def test_the_api_starts_without_kafka_and_serves_health(monkeypatch, tmp_path):
-    # The real start_score_publisher, with no Kafka config file to read.
-    monkeypatch.setenv("CONFIG_FILE_PATH", str(tmp_path / "nope.yaml"))
-    monkeypatch.setenv("SECRETS_FILE_PATH", str(tmp_path / "nope2.yaml"))
+    # The real start_score_publisher, on a config file with no kafka section.
+    (tmp_path / "config.yaml").write_text("service: {log_level: INFO}\n", encoding="utf-8")
+    monkeypatch.setenv("CONFIG_FILE_PATH", str(tmp_path / "config.yaml"))
+    monkeypatch.setenv("SECRETS_FILE_PATH", str(tmp_path / "nope.yaml"))
     _isolate_lifespan(monkeypatch, start_score_publisher)
 
     with TestClient(api_main.app) as client:
