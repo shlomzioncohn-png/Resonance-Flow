@@ -174,8 +174,9 @@ The pending store of `TaskCreationFlow` is in memory, so the sender and the
 
 A thread that dies takes the process with it (`threading.excepthook`), so it
 is restarted rather than consuming on with nobody matching the replies.
-`on_matched` is a no-op until #834's `DependencyAdapter.on_task_created`
-lands. When the store moves to Postgres (#918), the listener can move to a
+`on_matched` is #834's `DependencyAdapter.on_task_created` (#359): each
+matched task's dependency mentions are resolved against the listener's index
+and published to `task.dependencies.proposed`. When the store moves to Postgres (#918), the listener can move to a
 process of its own.
 
 **A run commits offsets and sends real requests.** The consumer group is
@@ -200,7 +201,9 @@ MIND_LANDED_CONSUMER__GROUP_ID=mind-landed-joint-test make run-landed-consumer
   another order, a task can take another's number, and Inbox may make a
   second task for it.
 - **Owner (#132).** Requests go without a suggested owner.
-- **Dependencies (#834).** `on_matched` is a no-op until the adapter lands.
+- **Dependencies on a task not yet indexed (#355).** A mention is resolved
+  once, when its task is matched, with no retry: a task whose prerequisite
+  is confirmed after it gets no edge to it.
 - **A restart forgets pending requests (#918).** A `task.created` that
   arrives after a restart is still indexed by R3's consumer, but not matched.
 - **Bridge updates.** A newer revision is skipped. Acting on it means finding
