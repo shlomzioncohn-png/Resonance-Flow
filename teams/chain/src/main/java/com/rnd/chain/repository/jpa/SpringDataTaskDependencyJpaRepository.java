@@ -19,6 +19,8 @@ public interface SpringDataTaskDependencyJpaRepository extends JpaRepository<Tas
 
     long deleteByIdTaskIdAndIdDependsOnTaskId(UUID taskId, UUID dependsOnTaskId);
 
+    List<TaskDependencyEntity> findByIdTaskIdIn(List<UUID> taskIds);
+
     /**
      * Native upsert (issue #445): inserts the edge, or - on a PK collision - updates its
      * {@code confidence} instead of no-op'ing, since Mind can republish the same edge with an

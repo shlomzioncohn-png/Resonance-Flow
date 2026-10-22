@@ -35,9 +35,6 @@ public final class TaskTestFixtures {
                 .id(id)
                 .tenantId(DEFAULT_TENANT_ID)
                 .status(TaskStatus.ACTIVE)
-                .isReady(false)
-                .blockingCount(0)
-                .openConstraintCount(0)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now());
     }

@@ -35,7 +35,6 @@ class PostgresTaskRepositoryTest {
         LocalDateTime now = LocalDateTime.now();
         Task first = Task.builder()
                 .id(id).status(TaskStatus.ACTIVE)
-                .blockingCount(1).openConstraintCount(0)
                 .createdAt(now).updatedAt(now).build();
 
         assertThatCode(() -> postgresTaskRepository.save(first)).doesNotThrowAnyException();
@@ -43,7 +42,6 @@ class PostgresTaskRepositoryTest {
 
         Task second = Task.builder()
                 .id(id).status(TaskStatus.DONE)
-                .blockingCount(5).openConstraintCount(2)
                 .createdAt(now).updatedAt(now).build();
 
         assertThatCode(() -> postgresTaskRepository.save(second)).doesNotThrowAnyException();
@@ -53,8 +51,6 @@ class PostgresTaskRepositoryTest {
 
         TaskEntity persisted = rowsForId.get(0);
         assertThat(persisted.getStatus()).isEqualTo(TaskStatus.DONE);
-        assertThat(persisted.getBlockingCount()).isEqualTo(5);
-        assertThat(persisted.getOpenConstraintCount()).isEqualTo(2);
         assertThat(persisted.getVersion()).isGreaterThan(versionAfterFirst);
     }
 
@@ -64,7 +60,6 @@ class PostgresTaskRepositoryTest {
         LocalDateTime now = LocalDateTime.now();
         Task task = Task.builder()
                 .id(id).status(TaskStatus.ACTIVE)
-                .blockingCount(0).openConstraintCount(0)
                 .score(0.8).confidence(0.5).priorityScore(7.66)
                 .createdAt(now).updatedAt(now).build();
 
@@ -82,14 +77,12 @@ class PostgresTaskRepositoryTest {
         LocalDateTime now = LocalDateTime.now();
         Task scored = Task.builder()
                 .id(id).status(TaskStatus.ACTIVE)
-                .blockingCount(0).openConstraintCount(0)
                 .score(0.8).confidence(0.5).priorityScore(7.66)
                 .createdAt(now).updatedAt(now).build();
         postgresTaskRepository.save(scored);
 
         Task cleared = Task.builder()
                 .id(id).status(TaskStatus.ACTIVE)
-                .blockingCount(0).openConstraintCount(0)
                 .createdAt(now).updatedAt(now).build(); // score/confidence/priorityScore left null
         postgresTaskRepository.save(cleared);
 
@@ -106,7 +99,7 @@ class PostgresTaskRepositoryTest {
         LocalDateTime now = LocalDateTime.now();
 
         boolean inserted = postgresTaskRepository.insertIfAbsent(Task.builder()
-                .id(id).tenantId(tenantId).status(TaskStatus.PENDING).isReady(true)
+                .id(id).tenantId(tenantId).status(TaskStatus.PENDING)
                 .createdAt(now).updatedAt(now).build());
 
         assertThat(inserted).isTrue();
