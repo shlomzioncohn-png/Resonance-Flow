@@ -87,7 +87,7 @@ def test_settings_are_read_from_prefixed_env_vars(monkeypatch):
 
     settings = InboxDirectorySettings(_env_file=None)
 
-    assert settings.base_url == "http://inbox.test"
+    assert str(settings.base_url) == "http://inbox.test/"
     assert settings.actor_id == actor_id
     assert settings.cache_ttl_seconds == 60
 
@@ -95,6 +95,16 @@ def test_settings_are_read_from_prefixed_env_vars(monkeypatch):
 def test_settings_reject_an_actor_that_is_not_a_uuid():
     with pytest.raises(ValidationError):
         InboxDirectorySettings(_env_file=None, actor_id="not-a-uuid")
+
+
+@pytest.mark.parametrize(
+    "address",
+    ["inbox:8080", "inbox.internal", "ftp://inbox.test", "http://inbox:port"],
+    ids=["no-scheme-with-port", "no-scheme", "not-http", "port-not-a-number"],
+)
+def test_an_address_that_is_not_an_http_url_stops_the_settings_from_loading(address):
+    with pytest.raises(ValidationError, match="base_url"):
+        InboxDirectorySettings(_env_file=None, base_url=address)
 
 
 def test_an_exported_but_empty_address_or_actor_means_not_set(monkeypatch):
@@ -413,21 +423,6 @@ def test_a_bad_record_is_logged_by_field_name_and_never_by_its_contents(caplog):
     assert "dana.secret" not in caplog.text
 
 
-def test_an_address_that_is_not_a_url_is_logged_as_an_error_and_does_not_raise(caplog):
-    def handler(request):
-        return httpx.Response(200, json=_page([]))
-
-    # httpx accepts "http://[inbox" without complaint; a port that is not a number it does not.
-    directory = _directory(handler, base_url="http://inbox:port")
-    with caplog.at_level(logging.INFO, logger="mind.integrations"):
-        result = directory.find_candidates(uuid4(), "Dana")
-
-    assert result == []
-    assert len(caplog.records) == 1
-    assert caplog.records[0].levelno == logging.ERROR
-    assert "MIND_INBOX_DIRECTORY__BASE_URL" in caplog.records[0].getMessage()
-
-
 def test_rows_that_all_fail_the_filter_are_logged_with_counts_not_names(caplog):
     tenant = uuid4()
 
@@ -473,7 +468,38 @@ def test_an_inbox_that_is_too_slow_is_given_up_on_within_the_time_budget(caplog)
         result = directory.find_candidates(tenant, "Dana")
 
     assert result == []
-    assert len(requests) == 2  # the third page would start 20s in, past the 15s budget
+    assert len(requests) == 2  # the second page is cut off while it arrives, at 20s of 15s
+    assert "did not finish within 15" in caplog.text
+    assert directory._cache == {}
+
+
+class _TrickleStream(httpx.SyncByteStream):
+    """A body that arrives in pieces, each one taking ten seconds."""
+
+    def __init__(self, clock, pieces):
+        self._clock = clock
+        self._pieces = pieces
+
+    def __iter__(self):
+        for piece in self._pieces:
+            self._clock.now += 10
+            yield piece
+
+
+def test_one_slow_page_is_cut_off_while_it_arrives_not_only_between_pages(caplog):
+    clock, requests = _Clock(), []
+
+    def handler(request):
+        requests.append(request)
+        pieces = [b'{"content": [', b'], "total_pages": 1}']
+        return httpx.Response(200, stream=_TrickleStream(clock, pieces))
+
+    directory = _directory(handler, clock=clock, max_fetch_seconds=15)
+    with caplog.at_level(logging.WARNING, logger="mind.integrations"):
+        result = directory.find_candidates(uuid4(), "Dana")
+
+    assert result == []
+    assert len(requests) == 1  # the very first page already ran past the budget
     assert "did not finish within 15" in caplog.text
     assert directory._cache == {}
 

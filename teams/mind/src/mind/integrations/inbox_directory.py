@@ -261,11 +261,6 @@ class InboxDirectory:
                 )
             else:
                 logger.warning("Inbox answered %d: no owner candidates", status)
-        except httpx.InvalidURL:
-            # Not an HTTPError, so it needs its own clause. Wrong on every call.
-            logger.error(
-                "MIND_INBOX_DIRECTORY__BASE_URL is not a valid URL: no owner candidates"
-            )
         except httpx.HTTPError as exc:
             # Connection refused, DNS failure, a socket dropped mid-read.
             logger.warning(
@@ -326,27 +321,49 @@ class InboxDirectory:
         actor_id = self._settings.actor_id
         if base_url is None or actor_id is None:
             return []
+        url = str(base_url).rstrip("/") + path
 
         items: list[Item] = []
         page = 0
         while page < _MAX_PAGES:
-            if deadline is not None and self._clock() > deadline:
-                raise _GaveUp(
-                    f"Reading {path} did not finish within "
-                    f"{self._settings.max_fetch_seconds}s"
-                )
-            response = self._client.get(
-                base_url.rstrip("/") + path,
-                params={"page": page, "size": _PAGE_SIZE, "sort": "id,asc"},
-                headers={_ACTOR_HEADER: str(actor_id)},
-            )
-            response.raise_for_status()
-            body = page_type.model_validate(response.json())
+            self._check_deadline(path, deadline)
+            raw = self._read_body(url, actor_id, page, path, deadline)
+            body = page_type.model_validate(json.loads(raw))
             items.extend(body.content)
             page += 1
             if page >= body.total_pages:
                 return items
         raise _GaveUp(f"Inbox has more than {_MAX_PAGES} pages of {path}")
+
+    def _read_body(
+        self, url: str, actor_id: UUID, page: int, path: str, deadline: float | None
+    ) -> bytes:
+        """One page of one list, as bytes, read piece by piece.
+
+        Streamed so the deadline can be checked while the body arrives. The
+        timeout of the HTTP client is for each wait on its own: a server that
+        sends a little every few seconds never trips it, and without a check
+        between the pieces a single page could take as long as it liked.
+        """
+
+        with self._client.stream(
+            "GET",
+            url,
+            params={"page": page, "size": _PAGE_SIZE, "sort": "id,asc"},
+            headers={_ACTOR_HEADER: str(actor_id)},
+        ) as response:
+            response.raise_for_status()
+            pieces: list[bytes] = []
+            for piece in response.iter_bytes():
+                self._check_deadline(path, deadline)
+                pieces.append(piece)
+        return b"".join(pieces)
+
+    def _check_deadline(self, path: str, deadline: float | None) -> None:
+        if deadline is not None and self._clock() > deadline:
+            raise _GaveUp(
+                f"Reading {path} did not finish within {self._settings.max_fetch_seconds}s"
+            )
 
     def close(self) -> None:
         """Close the HTTP client, if this directory owns it."""

@@ -72,9 +72,16 @@ there is no token yet.
 | timeout, connection failure | WARNING | no |
 | 401 / 403 | ERROR (the actor is wrong on every call) | no |
 | any other HTTP error | WARNING | no |
-| address is not a URL | ERROR | no |
 | body is not JSON, or not the page we read | WARNING (field names only) | no |
 | more than 100 pages, or more than `MAX_FETCH_SECONDS` | WARNING | no |
+
+The time budget is checked while a page is arriving, not only between pages: the
+HTTP timeout is for each wait on its own, so a server that sends a little every
+few seconds would otherwise never trip it.
+
+An address that is not an http(s) URL (no `http://`, a port that is not a
+number) is not a runtime failure: the settings do not load and Mind stops at
+start-up, naming `base_url`. An empty value means "not set".
 
 A failure on either list gives no candidates at all: half an answer could hide
 the person the name belongs to. Only an answer is cached, so a recovered Inbox

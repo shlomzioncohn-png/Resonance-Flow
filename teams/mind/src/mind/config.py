@@ -10,7 +10,16 @@ from typing import Any, Literal
 from uuid import UUID
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, PostgresDsn, Secret, SecretStr, field_validator
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PostgresDsn,
+    Secret,
+    SecretStr,
+    field_validator,
+)
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
@@ -202,7 +211,11 @@ class InboxDirectorySettings(BaseSettings):
         env_prefix="MIND_INBOX_DIRECTORY__", env_file=_ENV_FILE, extra="ignore"
     )
 
-    base_url: str | None = None
+    # An http(s) URL, checked when the settings load: an address with a typo
+    # (no "http://", a port that is not a number) stops Mind at start-up with
+    # the setting named, instead of looking like Inbox being down on every call.
+    # Empty means unset, see _blank_means_unset.
+    base_url: AnyHttpUrl | None = None
     # Sent as X-Actor-Id. Its role decides what Inbox returns: TENANT_ADMIN or
     # SYSTEM_ADMIN see everyone, a TEAM_LEAD or EMPLOYEE gets a partial list.
     actor_id: UUID | None = None
