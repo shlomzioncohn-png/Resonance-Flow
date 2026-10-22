@@ -36,7 +36,7 @@ class StructuredTaskEventInboxMappingTest {
                 TaskStatus.NEW, null, null,
                 null, ExtractionProvenance.ETL, null,
                 SourceType.CRM_DEAL, "crm:D-1",
-                null, deadline, null, null);
+                null, deadline, null);
 
         StructuredTaskEvent event = StructuredTaskEventMapper.from(task);
 

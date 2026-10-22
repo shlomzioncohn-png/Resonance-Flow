@@ -21,10 +21,9 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
+from mind import config_file
+from mind.config_file import ConfigFileError
 
-_DEFAULT_CONFIG = "/etc/resonance-flow/config/config.yaml"
-_DEFAULT_SECRETS = "/etc/resonance-flow/secret/secrets.yaml"
 _DEFAULT_KAFKA_SASL_SECRETS_DIR = "/etc/resonance-flow/secrets/kafka-sasl"
 
 
@@ -46,6 +45,45 @@ class MessagingSettings:
     acks: str = "all"
     retries: int = 3
     sasl: SaslSettings = field(default_factory=SaslSettings)
+
+    def kafka_configured(self) -> bool:
+        """Whether Kafka is set up at all.
+
+        False when neither `kafka.bootstrap_servers` nor `kafka.schema_registry_url`
+        is set: "Kafka is off", which a local run without a broker relies on (#924).
+        Only one of them set is a broken config, not "off", so that raises a
+        ConfigFileError naming the missing key.
+        """
+        missing = [
+            f"kafka.{name}"
+            for name, value in (
+                ("bootstrap_servers", self.bootstrap_servers),
+                ("schema_registry_url", self.schema_registry_url),
+            )
+            if not (value or "").strip()
+        ]
+        if len(missing) == 1:
+            raise ConfigFileError(
+                f"{missing[0]} is missing from config.yaml (${config_file.CONFIG_FILE_PATH_ENV}) "
+                "while the other kafka key is set: an incomplete Kafka config, not Kafka "
+                "switched off"
+            )
+        return not missing
+
+    def require_client_keys(self) -> None:
+        """Raise ConfigFileError unless both keys a Kafka client needs are set.
+
+        Called where a producer or consumer is built (#481 review), not in
+        load_settings(): there, empty values mean "Kafka is off". A client built
+        without them would only log a librdkafka warning and then poll nothing,
+        or fail much later on an "Invalid url" naming no key.
+        """
+        if not self.kafka_configured():
+            raise ConfigFileError(
+                "kafka.bootstrap_servers and kafka.schema_registry_url are missing from "
+                f"config.yaml (${config_file.CONFIG_FILE_PATH_ENV}): a Kafka client can't be "
+                "built without them"
+            )
 
     def producer_conf(self) -> dict:
         conf = {
@@ -78,26 +116,10 @@ class MessagingSettings:
         }
 
 
-def _read_yaml(path: str) -> dict:
-    p = Path(path)
-    return yaml.safe_load(p.read_text()) if p.is_file() else {}
-
-
-def _deep_merge(base: dict, over: dict) -> dict:
-    out = dict(base)
-    for k, v in over.items():
-        out[k] = _deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
-    return out
-
-
 def load_settings() -> MessagingSettings:
-    merged = _deep_merge(
-        _read_yaml(os.environ.get("CONFIG_FILE_PATH", _DEFAULT_CONFIG)),
-        _read_yaml(os.environ.get("SECRETS_FILE_PATH", _DEFAULT_SECRETS)),
-    )
-    kafka = merged.get("kafka", {}) or {}
-    producer = kafka.get("producer", {}) or {}
-    sasl = kafka.get("sasl", {}) or {}
+    kafka = config_file.section(config_file.load_merged(), "kafka")
+    producer = config_file.section(kafka, "producer")
+    sasl = config_file.section(kafka, "sasl")
     password_file = (
         Path(os.environ.get("KAFKA_SASL_SECRETS_DIR", _DEFAULT_KAFKA_SASL_SECRETS_DIR))
         / "client-passwords"

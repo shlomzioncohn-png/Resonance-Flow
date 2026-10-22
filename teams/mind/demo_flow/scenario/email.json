@@ -1,5 +1,4 @@
 {
-  "tenantId": "demo-tenant",
   "from": "lisa.grant@northwind.example",
   "to": ["dana@brightline.example"],
   "subject": "Supplier registration form - please return by Friday",

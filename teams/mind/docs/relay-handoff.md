@@ -26,6 +26,8 @@ docker compose up -d --build
 one-shot service `mind`/`mind-index-consumer` wait on). Running the
 built image standalone (no compose) needs `alembic upgrade head` (or
 `make migrate`) against it first -- `mind` refuses to start otherwise.
+Either way the container needs its two config files (see "Configuration
+files" below); Compose mounts `config.compose.yml` for them.
 
 `docker-compose.yml`'s `mind` service builds from the `Dockerfile` in
 this directory (multi-stage; the final image has no compiler, no dev
@@ -64,42 +66,44 @@ HTTP port) — it exits non-zero on a thread crash, but can't signal
 | `8000` | MIND API | HTTP. All routes in `docs/API.md` live here. |
 | `5432` | `vector-store` (pgvector/Postgres) | Only relevant if Relay runs the full compose stack rather than just the `mind` image; MIND's own code doesn't use this port. |
 
+## Configuration files (#481)
+
+MIND reads every connection setting from the two files your chart already
+mounts, and nothing else: the vector store, Kafka and the schema registry.
+There are no hardcoded hosts, and no connection settings in env vars.
+
+| File | Path in the pod | Env var naming it | Required? |
+|---|---|---|---|
+| `config.yaml` (ConfigMap) | `/etc/resonance-flow/config/config.yaml` | `CONFIG_FILE_PATH` | **Yes**: MIND, its runners and `alembic` refuse to start without it |
+| `secrets.yaml` (Secret) | `/etc/resonance-flow/secret/secrets.yaml` | `SECRETS_FILE_PATH` | No, it's mounted `optional: true`; but `vector_store.password` must be there before MIND can start |
+
+Keys are the ones `templates/services/mind/configmap.yaml` renders. Which
+ones MIND reads, the exact error for each missing piece, and the two parts
+not aligned yet (the LLM keys, waiting on your confirmation, and object
+storage, #349) are in `src/mind/api/README.md`, "Configuration (#481)".
+The migration initContainer needs the same two files; the chart already
+mounts them into it.
+
 ## Environment variables
 
-Source of truth: `.env.example` in this directory.
-
-**Required now: `MIND_ENVIRONMENT`, `POSTGRES_USER`/`POSTGRES_PASSWORD`/
-`POSTGRES_DB`.** The app now opens a real vector-store connection pool at
-startup (a FastAPI `lifespan` handler, not lazily on first request), so
-`mind.config.Settings` validates these eagerly -- **the process refuses
-to start at all if they're missing**, not just the routes that use them.
-This is a real change from earlier: previously nothing read env vars at
-startup.
-
-`docker-compose.yml` computes `MIND_VECTOR_STORE__DSN` for the `mind`
-service from `POSTGRES_USER`/`PASSWORD`/`DB`, pointed at the
-`vector-store` service by name -- you only need to set the three
-`POSTGRES_*` vars yourself; the DSN itself isn't something you set by
-hand in Compose. Running the `mind` image outside Compose (no
-`vector-store` service next to it) means setting
-`MIND_VECTOR_STORE__DSN` directly instead, as a single connection
-string -- see `.env.example`'s comment on why Compose builds one and a
-standalone run needs one supplied directly.
+Source of truth: `.env.example` in this directory. None of these is a
+connection setting.
 
 | Variable | Default | For |
 |---|---|---|
-| `MIND_ENVIRONMENT` | *(required, no default)* | `local` / `ci` / `staging` / `production` -- fails fast on anything else. |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | *(required, no default)* | Configure the `vector-store` container itself, and are interpolated into `MIND_VECTOR_STORE__DSN` for the `mind` service -- see above. |
+| `MIND_ENVIRONMENT` | `local` | `local` / `ci` / `staging` / `production` -- fails fast on anything else. |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | *(none)* | **Compose only.** They configure the `vector-store` container; Compose also builds MIND's local secrets.yaml from `POSTGRES_PASSWORD`. Not read by MIND itself. |
 | `MIND_VECTOR_STORE__TABLE` | `task_embeddings` | Test-only knob. The migration always creates `task_embeddings` -- changing this in a real deploy points at a table that doesn't exist. |
 | `MIND_VECTOR_STORE__SEARCH_EFFORT` | `400` | HNSW query-time accuracy/speed knob (pgvector's `hnsw.ef_search`). |
-| `MIND_DUPLICATE_SIMILARITY_THRESHOLD` | `0.90` | Untuned placeholder -- see `src/mind/embeddings/README.md` "Known limitations". |
-| `LLM_API_KEY` / `LLM_MODEL` | blank | Not used yet — MIND runs local models only (see team README "Important Updates"). |
+| `MIND_DUPLICATE_SIMILARITY_THRESHOLD` (and the other `MIND_*_THRESHOLD`s) | calibrated | See `src/mind/embeddings/README.md` "Threshold calibration". |
 | `MODEL_CACHE_DIR` | `./models` | Where local model weights get mounted (see `docker-compose.yml`'s `models` volume). Never bake weights into the image. |
-| `OCR_PROVIDER` / `ASR_PROVIDER` | `local` | Which provider extraction uses once built. |
-| `WHISPER_MODEL` | `base.en` | Local Whisper size, once ASR is built — decided in #135, see `benchmarks/ocr-asr-benchmark.md`. |
-| `OBJECT_STORAGE_*` | blank | Bridge handoff credentials — not used until MIND reads from Bridge's object storage. |
-| `MIND_API_PORT` | `8000` | Documented for completeness; the port MIND actually binds to today is hardcoded to `8000` in the `Dockerfile` (`EXPOSE`/`CMD`) and `docker-compose.yml`. Changing this variable alone does not currently move the port — flagged here as a known gap, not a working override. |
-| `MIND_LOG_LEVEL` | `INFO` | Documented for completeness; not yet wired to `logging.basicConfig()` in `api/main.py`, which hardcodes `INFO`. Same gap as `MIND_API_PORT` above. |
+| `WHISPER_MODEL` | `base.en` | Fallback only: config.yaml's `asr.whisper_model` wins. Decided in #135, see `benchmarks/ocr-asr-benchmark.md`. |
+| `MIND_LOG_LEVEL` | `INFO` | Fallback only: config.yaml's `service.log_level` wins, and the API applies it at start-up. |
+| `MIND_API_PORT` | `8000` | Documented for completeness; the port MIND actually binds to is hardcoded to `8000` in the `Dockerfile` (`EXPOSE`/`CMD`) and `docker-compose.yml`. Changing this variable alone does not move the port -- a known gap, not a working override. |
+
+A `MIND_VECTOR_STORE__DSN` set anywhere is ignored. The `LLM_*`,
+`OCR_PROVIDER`/`ASR_PROVIDER` and `OBJECT_STORAGE_*` vars that used to be
+listed here are gone: no code read them.
 
 ## Schema migrations
 
@@ -134,6 +138,10 @@ surfacing on whichever request happens to hit it first.
 
 ### `GET /health`
 
+`200` only once start-up has completed successfully (config loaded, vector
+store opened and migrated) — #481. It doesn't re-check dependencies per
+request, since your chart uses this path for the liveness probe too.
+
 **Response — `200 OK`**
 
 ```json
@@ -146,7 +154,7 @@ surfacing on whichever request happens to hit it first.
 
 | Field | Meaning |
 |---|---|
-| `status` | Always `"ok"` when this endpoint responds at all — no degraded state exists today. |
+| `status` | `"ok"` with `200`; `"not_ready"` with `503`. |
 | `version` | MIND's package version, so Relay can tell which build is running. |
 | `uptime_seconds` | Seconds since the process started. |
 
@@ -154,8 +162,13 @@ surfacing on whichever request happens to hit it first.
 
 | Code | Meaning |
 |---|---|
-| `200` | The process is up. The only code `/health` returns today. |
-| *(no response / connection refused / timeout)* | The process isn't serving HTTP at all — Relay's own connection/timeout handling should treat this as down. There is no `5xx` case: `/health` has no code path that raises. |
+| `200` | Start-up completed successfully; MIND accepts work. |
+| `503` | Start-up hasn't completed, or shutdown has begun (`"status": "not_ready"`). |
+| *(no response / connection refused / timeout)* | The process isn't serving HTTP at all — including a start-up that failed (missing or broken config, unreachable or unmigrated database), which exits with a clear error. Treat as down. |
+
+The chart's startup probe covers the start-up window; the Docker
+`HEALTHCHECK` and CI's `smoke-test.sh` (`curl -sf`) count a `503` as
+not healthy, the same as no answer.
 
 Full error-response format (for every other, non-2xx endpoint) is in
 `docs/API.md`.
@@ -192,6 +205,14 @@ curl -f http://localhost:8000/health
 
 Expected: `curl` prints the JSON body above and exits `0`; `docker
 compose ps` shows both `mind` and `vector-store` as `(healthy)`.
+
+**Status for #481:** this full smoke test has **not** been re-run since
+MIND moved to the config files. The image didn't build on the network it
+was tried on (`apt-get` couldn't reach `deb.debian.org`). What *was*
+verified end-to-end on a real Postgres was the migration, then MIND
+starting and `/health` returning `200`, run on the host -- see
+`src/mind/api/README.md`, "What has been verified (#481)". The chart in
+kind or Kubernetes is also unverified for #481.
 
 Not yet wired into CI (no `mind-ci.yml`/CI pipeline exists in this repo
 today) — run it manually as above until that's added.

@@ -66,7 +66,7 @@ class KafkaPayloadPublisherTest {
                 TaskStatus.NEW, 3, null,
                 Tier.TACTICAL, ExtractionProvenance.ETL, RoleContext.SALESPERSON,
                 SourceType.CRM_DEAL, sourceRef,
-                null, null, null, null);
+                null, null, null);
     }
 
     private static SendResult<String, StructuredTaskEvent> sendResult(Task task) {

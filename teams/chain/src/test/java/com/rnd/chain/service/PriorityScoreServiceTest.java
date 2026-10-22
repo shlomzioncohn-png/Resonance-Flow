@@ -7,7 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PriorityScoreServiceTest {
 
-    private final PriorityScoreService service = new PriorityScoreService();
+    private final PriorityScoreService service = new PriorityScoreService(null, null, null, null, null); // compute() is pure - no collaborators needed
 
     @Test
     void mindScoreNull_returnsNull() {

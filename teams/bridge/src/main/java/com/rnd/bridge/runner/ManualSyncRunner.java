@@ -1,9 +1,10 @@
 package com.rnd.bridge.runner;
 
+import com.rnd.bridge.core.PayloadPublisher;
+import com.rnd.bridge.core.error.PublishException;
+import com.rnd.bridge.core.error.ValidationException;
 import com.rnd.bridge.github.service.GitHubClient;
-import com.rnd.bridge.github.service.GitHubKafkaProducer;
 import com.rnd.bridge.jira.service.JiraClient;
-import com.rnd.bridge.jira.service.JiraKafkaProducer;
 import com.rnd.bridge.task.model.Task;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,7 +15,6 @@ import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * One-shot manual sync runner.
@@ -22,9 +22,9 @@ import java.util.concurrent.CompletableFuture;
  * Activates only when {@code bridge.manual-sync.enabled=true} is set
  * (for example, in an IntelliJ Run Configuration VM option).
  *
- * Fetches all GitHub and Jira tasks, publishes them to their respective
- * Kafka topics, waits for the GitHub send futures to complete, then exits the
- * application with an appropriate exit code.
+ * Fetches all GitHub and Jira tasks, publishes them to the shared
+ * bridge.structured.tasks topic via the central PayloadPublisher (blocking,
+ * per-record), then exits the application with an appropriate exit code.
  *
  * This is intentionally not a cron and not triggered on every startup.
  */
@@ -35,20 +35,17 @@ public class ManualSyncRunner implements CommandLineRunner {
     private static final Logger log = LoggerFactory.getLogger(ManualSyncRunner.class);
 
     private final GitHubClient gitHubClient;
-    private final GitHubKafkaProducer gitHubKafkaProducer;
     private final JiraClient jiraClient;
-    private final JiraKafkaProducer jiraKafkaProducer;
+    private final PayloadPublisher<Task> taskPublisher;
     private final ConfigurableApplicationContext context;
 
     public ManualSyncRunner(GitHubClient gitHubClient,
-                            GitHubKafkaProducer gitHubKafkaProducer,
                             JiraClient jiraClient,
-                            JiraKafkaProducer jiraKafkaProducer,
+                            PayloadPublisher<Task> taskPublisher,
                             ConfigurableApplicationContext context) {
         this.gitHubClient = gitHubClient;
-        this.gitHubKafkaProducer = gitHubKafkaProducer;
         this.jiraClient = jiraClient;
-        this.jiraKafkaProducer = jiraKafkaProducer;
+        this.taskPublisher = taskPublisher;
         this.context = context;
     }
 
@@ -76,18 +73,7 @@ public class ManualSyncRunner implements CommandLineRunner {
             return;
         }
 
-        log.info("Publishing {} GitHub task(s) to Kafka", tasks.size());
-
-        CompletableFuture<?>[] futures = tasks.stream()
-                .map(gitHubKafkaProducer::publish)
-                .toArray(CompletableFuture[]::new);
-
-        try {
-            CompletableFuture.allOf(futures).join();
-            log.info("Successfully published {} GitHub task(s)", tasks.size());
-        } catch (Exception ex) {
-            throw new RuntimeException("Failed to publish GitHub tasks to Kafka", ex);
-        }
+        publishAll("GitHub", tasks);
     }
 
     private void syncJira() {
@@ -99,8 +85,24 @@ public class ManualSyncRunner implements CommandLineRunner {
             return;
         }
 
-        log.info("Publishing {} Jira task(s) to Kafka", tasks.size());
-        jiraKafkaProducer.publishAll(tasks);
-        log.info("Successfully published {} Jira task(s)", tasks.size());
+        publishAll("Jira", tasks);
+    }
+
+    /**
+     * publish() blocks and fails the record - so each task gets its own attempt:
+     * one invalid/unpublishable record must not kill the rest of the batch.
+     */
+    private void publishAll(String lane, List<Task> tasks) {
+        log.info("Publishing {} {} task(s) to Kafka", tasks.size(), lane);
+        int published = 0;
+        for (Task task : tasks) {
+            try {
+                taskPublisher.publish(task);
+                published++;
+            } catch (PublishException | ValidationException e) {
+                log.error("Failed to publish {} task {}", lane, task.sourceRef(), e);
+            }
+        }
+        log.info("Successfully published {}/{} {} task(s)", published, tasks.size(), lane);
     }
 }

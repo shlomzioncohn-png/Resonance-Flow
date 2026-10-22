@@ -35,6 +35,7 @@ public interface TaskRepository {
      */
     List<Task> findByParentTaskId(UUID parentTaskId);
 
+    List<Task> findByTenantId(UUID tenantId);
     /**
      * Persists the given task - inserts it if its id doesn't already
      * exist, or replaces the existing one if it does (upsert). Contract:
