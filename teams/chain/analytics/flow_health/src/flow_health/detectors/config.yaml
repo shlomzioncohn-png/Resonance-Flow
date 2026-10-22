@@ -1,0 +1,8 @@
+# Starting thresholds of the detectors. Tuned on the dev set (seed 42) only; the eval set is not opened before task 4.
+
+chronic_blocker:
+  min_ratio_to_tier: 3.0        # blocked time / median blocked time of the task's tier
+  min_dependents: 3             # the most dependents the task ever had at the same time
+  late_age_ratio_to_tier: 3.0   # a finished task is a candidate only if its age was at least this many tier medians
+  medium_from_ratio: 4.0        # low: [min, medium); medium: [medium, high); high: [high, ...)
+  high_from_ratio: 6.0
