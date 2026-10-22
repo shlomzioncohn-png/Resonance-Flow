@@ -47,6 +47,15 @@ public class PostgresTaskRepository implements TaskRepository {
     }
 
     @Override
+    public List<Task> findByTenantId(UUID tenantId) {
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
+
+        return jpaRepository.findByTenantIdAndDeletedAtIsNull(tenantId).stream()
+            .map(PostgresTaskRepository::toDto)
+            .toList();
+   }
+
+    @Override
     @Transactional
     public Task save(Task task) {
         Objects.requireNonNull(task, "task must not be null");

@@ -19,6 +19,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.Map;
+
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -83,6 +85,11 @@ class TaskStateHistoryRollbackPostgresTest {
                                                                        int page, int size) {
                     return real.findByTaskId(taskId, from, to, page, size);
                 }
+                    @Override
+                public Map<UUID, Instant> findLatestBlockedSinceByTaskIds(
+                    List<UUID> taskIds) {
+                    return Map.of();
+                }
             };
         }
     }
@@ -118,6 +125,7 @@ class TaskStateHistoryRollbackPostgresTest {
     private long historyRowCount(UUID taskId) {
         return historyRepository.findByTaskId(taskId, null, null, 0, 10).totalElements();
     }
+
 
     @AfterEach
     void cleanUp() {

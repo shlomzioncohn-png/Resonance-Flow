@@ -20,6 +20,7 @@ public interface SpringDataTaskJpaRepository extends JpaRepository<TaskEntity, U
     List<TaskEntity> findByIdInAndDeletedAtIsNull(List<UUID> ids);
 
     List<TaskEntity> findByParentTaskIdAndDeletedAtIsNull(UUID parentTaskId);
+    List<TaskEntity> findByTenantIdAndDeletedAtIsNull(UUID tenantId);
 
     /** Deliberately not filtering deleted_at here - the soft-delete check happens in
      * {@link com.rnd.chain.repository.PostgresTaskRepository}, against the already-locked row. */
