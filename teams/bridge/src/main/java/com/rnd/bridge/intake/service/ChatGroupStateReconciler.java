@@ -266,8 +266,7 @@ public class ChatGroupStateReconciler {
             Integer claimedRevision = contentUnchanged ? current.claimedRevision() : null;
             return new GroupState(
                     current.groupId(), current.sourceType(), current.tenantId(), current.chatId(),
-                    current.threadId(), current.correlationId(), merged, false, revision, claimedRevision,
-                    current.superseded());
+                    current.threadId(), current.correlationId(), merged, false, revision, claimedRevision);
         });
     }
 
@@ -319,12 +318,23 @@ public class ChatGroupStateReconciler {
             // the thread was created - see resolveCurrentGroupId's javadoc for why the stale
             // messageId index can't be trusted here). Route by the resolved group's kind, not by
             // event shape: thread groups always merge-and-publish immediately.
+            String threadGroupId = resolved.get().groupId();
             List<SourceRecord> records = mergeAndMaybePublish(
-                    sourceType, tenantId, resolved.get().groupId(), MISSING_GROUP_SENTINEL, List.of(message));
-            GroupState threadState = groupStateStore.load(sourceType, tenantId, resolved.get().groupId())
+                    sourceType, tenantId, threadGroupId, MISSING_GROUP_SENTINEL, List.of(message));
+            GroupState threadState = groupStateStore.load(sourceType, tenantId, threadGroupId)
                     .orElseThrow(() -> new IllegalStateException(
-                            "Thread group vanished immediately after being merged: " + resolved.get().groupId()));
-            return new RealtimeReconcileResult(threadState, records, false, true);
+                            "Thread group vanished immediately after being merged: " + threadGroupId));
+            // A root edit must also reach the channel group's own still-living copy of the root
+            // (see docs/plans/slack-superseded-fix.md §2) - reuses mergeIntoGroupState, the same
+            // primitive the ordinary edit path below uses, so a Slack retry of this same event is
+            // just as idempotent here (contentUnchanged branch) as it already is there.
+            GroupState channelGroupState = findChannelGroupIfDifferentFromThread(
+                            sourceType, tenantId, message.id(), threadGroupId)
+                    .map(channelGroupId -> mergeIntoGroupState(
+                            sourceType, tenantId, channelGroupId, MISSING_GROUP_SENTINEL, List.of(message),
+                            new AtomicBoolean()))
+                    .orElse(null);
+            return new RealtimeReconcileResult(threadState, records, false, true, channelGroupState);
         }
 
         GroupState updated = resolved.isPresent()
@@ -353,9 +363,13 @@ public class ChatGroupStateReconciler {
      * This order is what fixes the pre-existing thread-root edit bug: GroupStateStore.
      * writeMessageIndex deliberately never indexes a thread group under its own groupId (the
      * root), so findGroupIdForMessage(rootTs) alone permanently resolves to the root's ORIGINAL
-     * (now superseded) non-thread group - see GroupStateStore's javadoc and
+     * channel (non-thread) group - see GroupStateStore's javadoc and
      * ChatGroupStateReconciler.newThreadGroupState. The direct load bypasses that stale index
-     * entirely whenever a thread group actually exists at that id.
+     * entirely whenever a thread group actually exists at that id, so this method alone resolves
+     * to exactly the thread group for a single edit/delete lookup; a root edit/delete also
+     * needing to reach the channel group's own copy (see §2 of docs/plans/slack-superseded-fix.md)
+     * is handled by a second, explicit lookup alongside this one in reconcileNonThreadedMessage/
+     * removeMessage, not by widening what this method itself returns.
      * The caller inspects the resolved GroupState's own threadId()/groupId() fields (see
      * isThreadGroup) to decide routing - never which lookup succeeded.
      */
@@ -374,6 +388,23 @@ public class ChatGroupStateReconciler {
      * resolveCurrentGroupId's javadoc). */
     private boolean isThreadGroup(GroupState state) {
         return state.threadId() != null && state.groupId().equals(state.threadId());
+    }
+
+    /**
+     * Resolves the channel (non-thread) group that still holds messageId's own index entry, if
+     * that is a different group than the thread already resolved for it - the same filter idiom
+     * migratedRootSnapshot already uses (findGroupIdForMessage(...).filter(id -> !id.equals(...))).
+     * Only ever non-empty for messageId == a thread's own root (threadId==groupId==root's id, see
+     * GroupState's javadoc): a reply's id is indexed to the thread itself, so this always returns
+     * empty for a reply edit/delete. Used by reconcileNonThreadedMessage/removeMessage to also
+     * reach the channel group's own still-living copy of the root (see
+     * docs/plans/slack-superseded-fix.md §2) alongside resolveCurrentGroupId's single-group
+     * resolution, rather than widening what that method itself returns.
+     */
+    private Optional<String> findChannelGroupIfDifferentFromThread(
+            RawSourceType sourceType, String tenantId, String messageId, String threadGroupId) {
+        return groupStateStore.findGroupIdForMessage(sourceType, tenantId, messageId)
+                .filter(id -> !id.equals(threadGroupId));
     }
 
     /**
@@ -403,12 +434,35 @@ public class ChatGroupStateReconciler {
     public RemovalResult removeMessage(RawSourceType sourceType, String tenantId, String messageId) {
         Optional<GroupState> resolved = resolveCurrentGroupId(sourceType, tenantId, messageId);
         if (resolved.isEmpty()) {
-            return new RemovalResult(null, false, false);
+            return new RemovalResult(null, false, false, null);
         }
         GroupState target = resolved.get();
         AtomicBoolean removed = new AtomicBoolean(false);
-        GroupState updated = groupStateStore.update(
-                target.sourceType(), target.tenantId(), target.groupId(), MISSING_GROUP_SENTINEL, current -> {
+        GroupState updated = removeFromGroup(
+                target.sourceType(), target.tenantId(), target.groupId(), messageId, removed);
+
+        // A root deletion must also reach the channel group's own still-living copy of the root
+        // (see docs/plans/slack-superseded-fix.md §2) - reuses this exact same removeFromGroup
+        // primitive, so a Slack retry of this same event is just as idempotent here (the
+        // noneMatch no-op branch) as the ordinary single-group removal above already is.
+        GroupState channelGroupState = isThreadGroup(updated)
+                ? findChannelGroupIfDifferentFromThread(sourceType, tenantId, messageId, updated.groupId())
+                        .map(channelGroupId -> removeFromGroup(
+                                sourceType, tenantId, channelGroupId, messageId, new AtomicBoolean()))
+                        .orElse(null)
+                : null;
+
+        return new RemovalResult(updated, removed.get(), isThreadGroup(updated), channelGroupState);
+    }
+
+    /** The actual per-group removal mutator shared by {@link #removeMessage}'s thread/channel-
+     * group lookups - see that method's Invariant javadoc (an empty, revision &gt;= 0 group is
+     * only ever produced here). removed is set (not returned) so a caller doing a second,
+     * channel-group removal for the same messageId can track it independently of the first. */
+    private GroupState removeFromGroup(
+            RawSourceType sourceType, String tenantId, String groupId, String messageId, AtomicBoolean removed) {
+        return groupStateStore.update(
+                sourceType, tenantId, groupId, MISSING_GROUP_SENTINEL, current -> {
                     if (current == MISSING_GROUP_SENTINEL) {
                         return current;
                     }
@@ -425,10 +479,8 @@ public class ChatGroupStateReconciler {
                     int revision = supersedesAnOutstandingVersion ? current.revision() + 1 : Math.max(current.revision(), 0);
                     return new GroupState(
                             current.groupId(), current.sourceType(), current.tenantId(), current.chatId(),
-                            current.threadId(), current.correlationId(), remaining, false, revision, null,
-                            current.superseded());
+                            current.threadId(), current.correlationId(), remaining, false, revision, null);
                 });
-        return new RemovalResult(updated, removed.get(), isThreadGroup(updated));
     }
 
     /**
@@ -448,8 +500,13 @@ public class ChatGroupStateReconciler {
      * attempt (null if resolveCurrentGroupId found nothing at all); removed is false for a
      * no-op (unknown/already-removed messageId, or no group found) - the caller must not treat
      * groupState as having actually changed in that case; isThreadGroup tells the caller which
-     * publish mechanism applies (see this class's javadoc). */
-    public record RemovalResult(GroupState groupState, boolean removed, boolean isThreadGroup) {
+     * publish mechanism applies (see this class's javadoc). channelGroupState is the channel
+     * group's own resulting state when this was a root deletion that also reached its still-
+     * living channel-group copy (see docs/plans/slack-superseded-fix.md §2) - null for every
+     * ordinary (non-root) deletion, where there is only ever one group. The caller
+     * (SlackEventsController) is responsible for scheduling it (sessionScheduler.
+     * scheduleOrReschedule) - this class never schedules, only persists. */
+    public record RemovalResult(GroupState groupState, boolean removed, boolean isThreadGroup, GroupState channelGroupState) {
     }
 
     /**
@@ -518,11 +575,10 @@ public class ChatGroupStateReconciler {
     }
 
     /** Whether a candidate GroupState is still OPEN for a genuinely-new message to join - false
-     * once it's published (CLOSED), has an outstanding publication claim (CLAIMED/CLOSING), or
-     * has been superseded (its content was migrated elsewhere - see GroupStateStore.
-     * markSuperseded), per the session-lifecycle decision above. */
+     * once it's published (CLOSED) or has an outstanding publication claim (CLAIMED/CLOSING),
+     * per the session-lifecycle decision above. */
     private boolean isOpenForNewMessages(GroupState candidate) {
-        return !candidate.published() && !candidate.superseded() && candidate.claimedRevision() == null;
+        return !candidate.published() && candidate.claimedRevision() == null;
     }
 
     /**
@@ -559,13 +615,21 @@ public class ChatGroupStateReconciler {
      * ready for the caller to publish immediately through the lane, exactly like the ordinary
      * threaded path (group()); false for the normal non-thread case, where it only ever holds
      * newly-landable attachment records and the transcript stays pending for the scheduler.
+     * channelGroupState is the channel group's own resulting state when this was a root edit
+     * that also reached its still-living channel-group copy (see
+     * docs/plans/slack-superseded-fix.md §2) - null for every ordinary (non-root) case, where
+     * there is only ever one group. The caller (SlackEventsController) is responsible for
+     * scheduling it (sessionScheduler.scheduleOrReschedule) - this class never schedules, only
+     * persists.
      */
     public record RealtimeReconcileResult(
-            GroupState groupState, List<SourceRecord> newAttachmentRecords, boolean newActivity, boolean threadRouted) {
+            GroupState groupState, List<SourceRecord> newAttachmentRecords, boolean newActivity, boolean threadRouted,
+            GroupState channelGroupState) {
 
-        /** Convenience constructor for every existing non-thread-routed call site. */
+        /** Convenience constructor for every existing non-thread-routed call site - there is
+         * only ever one group to report for those, so channelGroupState is always null. */
         public RealtimeReconcileResult(GroupState groupState, List<SourceRecord> newAttachmentRecords, boolean newActivity) {
-            this(groupState, newAttachmentRecords, newActivity, false);
+            this(groupState, newAttachmentRecords, newActivity, false, null);
         }
     }
 
@@ -639,12 +703,11 @@ public class ChatGroupStateReconciler {
      * were already durably landed to MinIO before the migration, and their refs are reused
      * verbatim by ChatSourceRecordMapper.toSourceRecords(GroupState, List) when this thread
      * group is published, rather than being re-landed or dropped.
-     * The original group is only ever read here (groupStateStore.load, not update) for its
-     * message content - but migratedRootSnapshot does call GroupStateStore.markSuperseded on it
-     * once a migration is detected, specifically so its own still-pending inactivity timer (if
-     * any) becomes a no-op instead of independently publishing the root a second time under the
-     * original non-thread correlationId (see SlackSessionScheduler.onDeadline). Nothing about the
-     * original group's own messages/revision/correlationId is touched - only superseded flips.
+     * The original (channel) group is only ever read here (groupStateStore.load, not update) for
+     * its root's message content - it is otherwise left completely untouched and keeps living
+     * normally (its own timer, its own publish, open to new messages - see
+     * docs/plans/slack-superseded-fix.md): the root now legitimately appears in two transcripts,
+     * this thread's and the channel group's own.
      * GroupStateStore.writeMessageIndex separately guarantees that persisting this seeded thread
      * group can never overwrite the root's existing index entry (still pointing at the original
      * group) - see that method's javadoc.
@@ -665,12 +728,11 @@ public class ChatGroupStateReconciler {
     /**
      * Resolves the root's CURRENT group via the messageId index; if that is a different
      * (non-thread) group than threadId itself, this thread is being created by migrating that
-     * root out of it - its snapshot (landedAttachments included, see this method's own javadoc
-     * above) is returned to seed the new thread, and the original group is marked superseded
-     * (GroupStateStore.markSuperseded) so it is never independently published again. If the index
-     * resolves to threadId itself, or to nothing at all, this is an ordinary thread (e.g. the
-     * batch/poll path, where the root and replies were already grouped together from the first
-     * run) and there is nothing to migrate or supersede.
+     * root's snapshot (landedAttachments included, see this method's own javadoc above) to seed
+     * the new thread. The original (channel) group is left otherwise untouched - it keeps living
+     * normally, see newThreadGroupState's javadoc. If the index resolves to threadId itself, or
+     * to nothing at all, this is an ordinary thread (e.g. the batch/poll path, where the root and
+     * replies were already grouped together from the first run) and there is nothing to migrate.
      */
     private Optional<MessageSnapshot> migratedRootSnapshot(RawSourceType sourceType, String tenantId, String threadId) {
         Optional<String> rootGroupId = groupStateStore.findGroupIdForMessage(sourceType, tenantId, threadId)
@@ -678,11 +740,9 @@ public class ChatGroupStateReconciler {
         if (rootGroupId.isEmpty()) {
             return Optional.empty();
         }
-        Optional<MessageSnapshot> rootSnapshot = groupStateStore.load(sourceType, tenantId, rootGroupId.get())
+        return groupStateStore.load(sourceType, tenantId, rootGroupId.get())
                 .flatMap(rootGroup -> rootGroup.messages().stream()
                         .filter(snapshot -> snapshot.messageId().equals(threadId))
                         .findFirst());
-        rootSnapshot.ifPresent(snapshot -> groupStateStore.markSuperseded(sourceType, tenantId, rootGroupId.get()));
-        return rootSnapshot;
     }
 }

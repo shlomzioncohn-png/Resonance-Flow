@@ -211,8 +211,8 @@ the timer racing a burst of corrections) shared the same root cause/fix surface 
    tries a direct `GroupStateStore.load(messageId)` before falling back to the messageId index.
    This fixes a **pre-existing, independent bug**: a thread root's own event never carries
    `thread_ts`, so an edit/deletion of a root arriving after the thread was created used to resolve
-   (via the index alone) to the root's original, now-`superseded` non-thread group forever —
-   silently absorbed, never reaching Kafka. The direct load bypasses that stale index whenever a
+   (via the index alone) to the root's original channel group forever (at the time, permanently
+   marked `superseded` — see §3.1a, since removed) — silently absorbed, never reaching Kafka. The direct load bypasses that stale index whenever a
    thread group actually exists at that id. `SlackEventsController`/`reconcileNonThreadedMessage`
    now route by the **resolved group's own kind** (thread vs. non-thread), not by the event's own
    `threadId()` field.
@@ -247,13 +247,38 @@ the timer racing a burst of corrections) shared the same root cause/fix surface 
 5. **Thread groups** — reuse the same removal logic; publish immediately (no `correctionDelay`,
    nothing to debounce against — threads have no timer).
 6. **Known limitations** (not fixed here, out of scope per the plan):
-   - A channel group `confirmPublished` **before** a reply caused thread migration is permanently
-     unreachable for correction — the thread group has no back-reference to the original's
-     `correlationId`, and `superseded` permanently blocks the original from publishing again.
    - A deletion/tombstone arriving **before** the message it targets was ever indexed is a no-op;
      if that message later arrives via delayed delivery, it's ingested normally with no record it
      was already deleted (Slack doesn't guarantee ordered delivery).
    - §3.4 (stale-claim recovery after restart) remains separate and unaddressed.
+   - ~~A channel group `confirmPublished` before a reply caused thread migration is permanently
+     unreachable for correction~~ — **fixed, see §3.1a below.**
+
+### 3.1a `superseded` removed — a channel group survives its root being threaded
+(`docs/plans/slack-superseded-fix.md`, 2026-10-22) `GroupState.superseded` is gone entirely (field
+and every read/write site — `GroupStateStore.markSuperseded`/`confirmPublished`/
+`claimForPublication`, `ChatGroupStateReconciler.isOpenForNewMessages`,
+`SlackSessionScheduler.onDeadline`). Previously, once a channel (time-gap) group's root got its
+first reply and was migrated into a brand-new thread group, the channel group was marked
+`superseded` and permanently blocked from publishing/accepting new messages again — which didn't
+just retire a lone root, it **stranded any other real message already sitting in that same channel
+group** (proven by the repro test, re-enabled below), since the migration only ever copies the
+root's own snapshot forward, never anything else in the group.
+Fix: the channel group now keeps living normally after its root is threaded — its own timer,
+its own publish, still open to new messages within the session gap — with its own copy of the
+root still in it. The root legitimately appears in two transcripts (channel + thread) by design;
+see `docs/slack-deletion-contract.md`. A root edit/deletion now also propagates to the channel
+group's own copy (reusing `mergeIntoGroupState`/`removeMessage`, the same primitives the ordinary
+single-group path already uses — no new merge logic, so the existing redelivery-idempotency
+guarantees carry over unchanged); `SlackEventsController` schedules the channel-group step first,
+uncaught, before the thread's publish, so it can never be silently skipped on a retry.
+`secondNonThreadMessageIsNotStrandedInTheOriginalChannelGroupWhenTheFirstIsLaterThreaded`
+(`ChatGroupStateReconcilerTest`) is the re-enabled acceptance test for this (previously
+`@Disabled` from `caceb819`).
+Existing stranded rows already in Postgres (`superseded=true`, never published) are **not**
+touched by this change — an audit query is documented in the plan but intentionally not run; any
+backfill/republish decision is left to whoever owns the data, since a row with non-root content
+represents real, deliberately-not-yet-republished lost data (see the plan's §3 for the tradeoffs).
 7. **Verified via the full test suite** (full `mvn test` run has 8 pre-existing, unrelated
    environment failures — `BridgeApplicationTests`/`CrmBridgeControllerTest`/
    `HubSpotDealRecordObjectMapperNamingStrategyTest` all need a local Postgres/Kafka this machine

@@ -413,7 +413,7 @@ class SlackEventsControllerTest {
         SourceRecord transcript = attachmentRecord();
         when(eventMessageParser.parse(any())).thenReturn(Optional.of(message));
         when(reconciler.reconcileNonThreadedMessage(message)).thenReturn(
-                new ChatGroupStateReconciler.RealtimeReconcileResult(groupState(), List.of(transcript), false, true));
+                new ChatGroupStateReconciler.RealtimeReconcileResult(groupState(), List.of(transcript), false, true, null));
         when(slackLane.run(any(Stream.class), any())).thenReturn(new IntakeResult(1, 1, 0, List.of()));
 
         ResponseEntity<?> response = controller.handle("1000", "v0=valid", requestWithBody(body));
@@ -424,6 +424,34 @@ class SlackEventsControllerTest {
         verify(sessionScheduler, never()).scheduleOrReschedule(any());
     }
 
+    /**
+     * docs/plans/slack-superseded-fix.md §2b's ordering contract: when a root edit also updated
+     * the channel group's own copy of the root, that channel-group scheduling must happen
+     * regardless of whether the thread publish (the only step whose result participates in the
+     * returned boolean/HTTP status) succeeds. Here the thread publish fails (IntakeResult with
+     * rejected() > 0) - the overall response must still be non-2xx (Slack retries), but the
+     * channel group must still have been scheduled, not skipped or rolled back.
+     */
+    @Test
+    void channelGroupSchedulingStillHappensWhenTheThreadPublishFails() throws Exception {
+        String body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\"}}";
+        when(verifier.isValid("1000", "v0=valid", body)).thenReturn(true);
+        ChatMessage message = nonThreadMessage();
+        SourceRecord transcript = attachmentRecord();
+        GroupState channelGroupState = groupState();
+        when(eventMessageParser.parse(any())).thenReturn(Optional.of(message));
+        when(reconciler.reconcileNonThreadedMessage(message)).thenReturn(
+                new ChatGroupStateReconciler.RealtimeReconcileResult(
+                        groupState(), List.of(transcript), false, true, channelGroupState));
+        when(slackLane.run(any(Stream.class), any())).thenReturn(new IntakeResult(1, 0, 1, List.of()));
+
+        ResponseEntity<?> response = controller.handle("1000", "v0=valid", requestWithBody(body));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        verify(sessionScheduler).scheduleOrReschedule(channelGroupState);
+        verify(slackLane).run(any(Stream.class), any());
+    }
+
     @Test
     void messageDeletedOfAnUnknownMessageIsAckedAsANoOpWithoutPublishing() throws Exception {
         String body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"subtype\":\"message_deleted\","
@@ -431,7 +459,7 @@ class SlackEventsControllerTest {
                 + "\"previous_message\":{\"type\":\"message\",\"user\":\"U1\",\"ts\":\"1000.1\",\"text\":\"hi\"}}}";
         when(verifier.isValid("1000", "v0=valid", body)).thenReturn(true);
         when(reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "1000.1"))
-                .thenReturn(new ChatGroupStateReconciler.RemovalResult(null, false, false));
+                .thenReturn(new ChatGroupStateReconciler.RemovalResult(null, false, false, null));
 
         ResponseEntity<?> response = controllerWithRealParser.handle("1000", "v0=valid", requestWithBody(body));
 
@@ -450,7 +478,7 @@ class SlackEventsControllerTest {
         when(verifier.isValid("1000", "v0=valid", body)).thenReturn(true);
         GroupState groupState = groupState();
         when(reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "1000.1"))
-                .thenReturn(new ChatGroupStateReconciler.RemovalResult(groupState, true, false));
+                .thenReturn(new ChatGroupStateReconciler.RemovalResult(groupState, true, false, null));
 
         ResponseEntity<?> response = controllerWithRealParser.handle("1000", "v0=valid", requestWithBody(body));
 
@@ -469,7 +497,7 @@ class SlackEventsControllerTest {
                 "1000.0", RawSourceType.SLACK, "kamatech", "chat-a", "1000.0", "corr-1", List.of(), false, 1, null);
         SourceRecord deleteReview = attachmentRecord();
         when(reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "1000.2"))
-                .thenReturn(new ChatGroupStateReconciler.RemovalResult(threadGroupState, true, true));
+                .thenReturn(new ChatGroupStateReconciler.RemovalResult(threadGroupState, true, true, null));
         when(reconciler.toSourceRecordsForPublishedGroup(threadGroupState)).thenReturn(List.of(deleteReview));
         when(slackLane.run(any(Stream.class), any())).thenReturn(new IntakeResult(1, 1, 0, List.of()));
 

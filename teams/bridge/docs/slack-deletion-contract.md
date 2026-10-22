@@ -51,11 +51,26 @@ messages left.
   single publish. A group that has never been published/claimed/revised stays on the ordinary
   `latestActivity + sessionGapMinutes` debounce, unchanged from before this feature.
 
+## A thread's root also lives on in its channel group (see ROADMAP.md §3.1a)
+
+Once a channel (time-gap) group's root gets its first reply, its own snapshot is copied into a
+brand-new thread group — but the channel group itself is **not** retired. It keeps living
+normally (its own timer, its own publish, still open to new messages within the session gap),
+still holding its own copy of the root. This means the root message legitimately appears in
+**two** transcripts: the channel group's own (time-gap session) transcript, and the thread's own
+transcript — exactly mirroring how Slack itself displays a root message both inline in the
+channel and as the thread's first message.
+
+**This is not a duplicate-publish bug.** The two transcripts are different logical items, with
+different `correlationId`s, by design — the channel group's `correlationId` was minted when that
+group was first created and never changes; the thread group mints its own, separate
+`correlationId` at creation. A later edit or deletion of the root propagates to **both** copies
+(the thread's, published/applied immediately as always; the channel group's own, following that
+group's ordinary revision/timing rules above) — so both transcripts stay in sync with the root's
+actual current content, they just aren't the same Kafka event.
+
 ## Known limitations (see ROADMAP.md §3.1 for the full list)
 
-- A channel group already `confirmPublished` *before* a reply caused thread migration is
-  permanently unreachable for correction (no back-reference from the new thread group to the
-  original's `correlationId`).
 - A deletion/tombstone arriving before the message it targets was ever indexed is a no-op; a
   later delayed arrival of that message is ingested normally, with no record it was already
   deleted.

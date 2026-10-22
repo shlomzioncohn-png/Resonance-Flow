@@ -144,7 +144,7 @@ public class SlackSessionScheduler {
         }
         GroupState state = maybeState.get();
         boolean maybePublished = maybePublished(state);
-        if (state.published() || state.superseded() || (state.messages().isEmpty() && !maybePublished)) {
+        if (state.published() || (state.messages().isEmpty() && !maybePublished)) {
             registry.remove(key, myFuture);
             return;
         }

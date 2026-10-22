@@ -179,6 +179,13 @@ public class SlackEventsController {
         // group's kind, not by event shape, and publishes immediately like any other thread group.
         ChatGroupStateReconciler.RealtimeReconcileResult result = reconciler.reconcileNonThreadedMessage(message);
         if (result.threadRouted()) {
+            // Channel-group step first, uncaught - see reconcileAndPublishDeletion's javadoc for
+            // the full ordering rationale (docs/plans/slack-superseded-fix.md §2b): a root edit
+            // may also have updated the channel group's own still-living copy of the root, and
+            // scheduling that is never allowed to influence the boolean this method returns.
+            if (result.channelGroupState() != null) {
+                sessionScheduler.scheduleOrReschedule(result.channelGroupState());
+            }
             return publishGroups(result.newAttachmentRecords());
         }
         boolean allLanded = landAttachments(result.newAttachmentRecords());
@@ -206,6 +213,24 @@ public class SlackEventsController {
      * removal only advances GroupState - the inactivity timer (now possibly sped up via
      * correctionDelay, see SlackSessionScheduler) publishes it later. An unknown/already-removed
      * messageId is a no-op - acknowledged, nothing scheduled or published.
+     * <p>
+     * A root deletion/edit now also updates the channel group's own still-living copy of the
+     * root (see ChatGroupStateReconciler §2 / docs/plans/slack-superseded-fix.md §2b). That
+     * channel-group step is always done FIRST, scheduled, uncaught: if
+     * {@code sessionScheduler.scheduleOrReschedule} itself throws (an unexpected RuntimeException
+     * out of GroupStateStore.update), it propagates straight to Spring's default 500, which is
+     * correct - the thread side (attempted next, below) hasn't even run yet, so the whole event
+     * must be retried. Scheduling the channel group is purely internal state, never influences
+     * this method's returned boolean, exactly like the ordinary non-thread branch above always
+     * returns true after a schedule-only call regardless of whether the TaskScheduler
+     * registration could be said to have "succeeded". Only the thread group's publish result
+     * (the only step with an external Kafka-facing ack) participates in the returned boolean.
+     * A retry (Slack redelivering on a non-2xx) is safe on both sides: the channel-group
+     * merge/removal reuses the exact same mergeIntoGroupState/removeMessage primitives the
+     * ordinary single-group path already proves idempotent against a redelivered event (see
+     * duplicateDeliveryOfTheSameEditDoesNotAdvanceTheRevisionTwice/
+     * removeMessageTwiceIsANoOpTheSecondTime), and scheduleOrReschedule always cancels-and-
+     * replaces rather than double-scheduling.
      */
     private boolean reconcileAndPublishDeletion(SlackMessageDeletion deletion) {
         ChatGroupStateReconciler.RemovalResult result =
@@ -214,6 +239,9 @@ public class SlackEventsController {
             return true;
         }
         if (result.isThreadGroup()) {
+            if (result.channelGroupState() != null) {
+                sessionScheduler.scheduleOrReschedule(result.channelGroupState());
+            }
             List<SourceRecord> records = reconciler.toSourceRecordsForPublishedGroup(result.groupState());
             return publishGroups(records);
         }

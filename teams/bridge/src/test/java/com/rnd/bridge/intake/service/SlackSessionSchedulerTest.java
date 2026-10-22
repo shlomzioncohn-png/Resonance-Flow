@@ -345,20 +345,21 @@ class SlackSessionSchedulerTest {
     }
 
     /**
-     * Regression test for the thread-root migration fix: once a non-thread group's root has been
-     * adopted into a new thread group (ChatGroupStateReconciler.newThreadGroupState), the original
-     * group is marked superseded (GroupStateStore.markSuperseded) so its own still-pending
-     * inactivity timer - scheduled before the migration ever happened - becomes a no-op instead of
-     * independently publishing the root a second time under the original non-thread correlationId.
-     * This is what keeps "only one logical Kafka event ultimately contains the root content" true
-     * even though the original GroupState itself is never deleted.
+     * Regression test for docs/plans/slack-superseded-fix.md: once a non-thread (channel) group's
+     * root has been adopted into a new thread group (ChatGroupStateReconciler.
+     * newThreadGroupState), the channel group's own pending inactivity timer - scheduled before
+     * the migration ever happened - must still fire normally and publish, since the channel group
+     * keeps living (its own copy of the root, plus whatever else landed in it) rather than being
+     * retired. This replaces the old aSupersededGroupsPendingTimerBecomesANoOpInsteadOf... test,
+     * whose premise (the channel group is dead once its root is threaded) no longer holds.
      */
     @Test
-    void aSupersededGroupsPendingTimerBecomesANoOpInsteadOfRepublishingTheMigratedRoot() {
+    void theChannelGroupsPendingTimerStillFiresAndPublishesNormallyAfterItsRootIsThreaded() {
         ChatSessionProperties properties = new ChatSessionProperties(45);
         ChatGroupStateReconciler reconciler = new ChatGroupStateReconciler(
                 properties, new ChatSessionGrouper(properties), new ChatSourceRecordMapper(), groupStateStore);
         SlackSessionScheduler scheduler = newScheduler(45);
+        doNothing().when(sessionPublisher).publishSession(any(), any());
 
         ChatMessage root = new ChatMessage(
                 RawSourceType.SLACK, "kamatech", "chat-a", "malki", Instant.parse("2026-08-18T09:00:00Z"),
@@ -367,26 +368,23 @@ class SlackSessionSchedulerTest {
         String originalGroupId = rootResult.groupState().groupId();
         scheduler.scheduleOrReschedule(rootResult.groupState());
 
-        // A reply names the root via thread_ts, migrating it into a brand-new thread group and
-        // marking the original (above) superseded - see ChatGroupStateReconciler.
-        // newThreadGroupState/migratedRootSnapshot.
+        // A reply names the root via thread_ts, migrating its content into a brand-new thread
+        // group - the channel group keeps living (see ChatGroupStateReconciler.
+        // newThreadGroupState/migratedRootSnapshot).
         ChatMessage reply = new ChatMessage(
                 RawSourceType.SLACK, "kamatech", "chat-a", "ruth", Instant.parse("2026-08-18T09:05:00Z"), "reply",
                 List.of(), "reply1", "r1");
         reconciler.group(List.of(reply));
-        assertThat(groupStateStore.load(RawSourceType.SLACK, "kamatech", originalGroupId).orElseThrow().superseded())
-                .isTrue();
 
-        // The original group's own timer, scheduled before the migration, now fires - it must do
-        // nothing at all, never publish, never claim.
+        // The channel group's own timer, scheduled before the migration, now fires - it must
+        // still publish the channel group's own content (the root) normally.
         clock.set(Instant.parse("2026-08-18T09:45:00Z"));
         taskScheduler.scheduled.get(0).task().run();
 
-        verify(sessionPublisher, never()).publishSession(any(), any());
+        verify(sessionPublisher, times(1)).publishSession(any(), any());
         GroupState originalAfterFiring =
                 groupStateStore.load(RawSourceType.SLACK, "kamatech", originalGroupId).orElseThrow();
-        assertThat(originalAfterFiring.published()).isFalse();
-        assertThat(originalAfterFiring.claimedRevision()).isNull();
+        assertThat(originalAfterFiring.messages()).extracting(MessageSnapshot::messageId).containsExactly("r1");
     }
 
     @Test
@@ -550,7 +548,7 @@ class SlackSessionSchedulerTest {
      * Narrower case than aGenuinelyNewMessageArrivingWhileATimerHoldsAClaimGoesToANewGroupInsteadOfInvalidatingTheClaim
      * below: here the group is maybePublished purely via revision() > 0 while published() is
      * still false and nothing is claimed - isOpenForNewMessages (which only reads published/
-     * superseded/claimedRevision) alone would NOT block a new message from joining. It's
+     * claimedRevision) alone would NOT block a new message from joining. It's
      * withinSessionGap - the new message's timestamp landing far outside the stale latestActivity
      * - that actually prevents reuse here (see ChatGroupStateReconciler.mergeIntoCurrentChatGroup's
      * javadoc, "Narrow documented exception").
