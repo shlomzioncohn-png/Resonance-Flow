@@ -10,6 +10,7 @@
 {{- $_ := set $objectStorageConfig "endpoint" (printf "http://%s" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "object-storage"))) }}
 {{- $_ := set $config "minio" $objectStorageConfig }}
 {{- $schemaRegistryUrl := printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) }}
+{{- $_ := set $config.spring.kafka.properties "schema.registry.url" $schemaRegistryUrl }}
 {{- $_ := mergeOverwrite $config (dict "bridge" (dict "kafka" (dict "schema-registry" (dict "url" $schemaRegistryUrl)))) }}
 ---
 {{ include "resonance-flow.configMapHeader" (dict "root" $ "component" "bridge") }}
