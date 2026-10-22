@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from mind import config_file
+from mind.config_file import ConfigFileError
 
 
 @dataclass
@@ -40,6 +41,45 @@ class MessagingSettings:
     acks: str = "all"
     retries: int = 3
     sasl: SaslSettings = field(default_factory=SaslSettings)
+
+    def kafka_configured(self) -> bool:
+        """Whether Kafka is set up at all.
+
+        False when neither `kafka.bootstrap_servers` nor `kafka.schema_registry_url`
+        is set: "Kafka is off", which a local run without a broker relies on (#924).
+        Only one of them set is a broken config, not "off", so that raises a
+        ConfigFileError naming the missing key.
+        """
+        missing = [
+            f"kafka.{name}"
+            for name, value in (
+                ("bootstrap_servers", self.bootstrap_servers),
+                ("schema_registry_url", self.schema_registry_url),
+            )
+            if not (value or "").strip()
+        ]
+        if len(missing) == 1:
+            raise ConfigFileError(
+                f"{missing[0]} is missing from config.yaml (${config_file.CONFIG_FILE_PATH_ENV}) "
+                "while the other kafka key is set: an incomplete Kafka config, not Kafka "
+                "switched off"
+            )
+        return not missing
+
+    def require_client_keys(self) -> None:
+        """Raise ConfigFileError unless both keys a Kafka client needs are set.
+
+        Called where a producer or consumer is built (#481 review), not in
+        load_settings(): there, empty values mean "Kafka is off". A client built
+        without them would only log a librdkafka warning and then poll nothing,
+        or fail much later on an "Invalid url" naming no key.
+        """
+        if not self.kafka_configured():
+            raise ConfigFileError(
+                "kafka.bootstrap_servers and kafka.schema_registry_url are missing from "
+                f"config.yaml (${config_file.CONFIG_FILE_PATH_ENV}): a Kafka client can't be "
+                "built without them"
+            )
 
     def producer_conf(self) -> dict:
         conf = {

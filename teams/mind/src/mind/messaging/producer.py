@@ -39,6 +39,7 @@ _SERIALIZER_CONF = {
 class ProtobufProducer:
     def __init__(self, settings: MessagingSettings | None = None):
         self._settings = settings or load_settings()
+        self._settings.require_client_keys()
         self._producer = Producer(self._settings.producer_conf())
         self._registry = SchemaRegistryClient({"url": self._settings.schema_registry_url})
         self._key_serializer = StringSerializer("utf_8")

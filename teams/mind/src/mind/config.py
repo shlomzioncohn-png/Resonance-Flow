@@ -325,6 +325,17 @@ class Settings(BaseSettings):
 
 
 @lru_cache
+def get_asr_settings() -> ASRSettings:
+    """Construct (once, cached) and return the ASR settings.
+
+    transcribe() needs them on every recording, so config.yaml is read once per
+    process, not per call (#481 review). Raises ConfigFileError like
+    get_settings(); a failure isn't cached, so a fixed config is picked up.
+    """
+    return ASRSettings()
+
+
+@lru_cache
 def get_settings() -> Settings:
     """Construct (once, cached) and return the Settings.
 

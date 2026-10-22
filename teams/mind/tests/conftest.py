@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -90,6 +91,17 @@ def _default_monitoring_limits(monkeypatch: pytest.MonkeyPatch) -> None:
     from mind.observability import tracking
 
     monkeypatch.setattr(tracking, "monitoring_settings", MonitoringSettings.model_construct)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_asr_settings() -> Iterator[None]:
+    """get_asr_settings() is cached per process; tests set WHISPER_MODEL /
+    CONFIG_FILE_PATH per test, so each one starts from an empty cache."""
+    from mind.config import get_asr_settings
+
+    get_asr_settings.cache_clear()
+    yield
+    get_asr_settings.cache_clear()
 
 
 @pytest.fixture(scope="session")

@@ -38,6 +38,7 @@ class ProtobufConsumer:
         """`conf_overrides` replaces librdkafka config keys for this consumer only,
         e.g. {"max.poll.interval.ms": 1_800_000} for a handler that runs for minutes."""
         self._settings = settings or load_settings()
+        self._settings.require_client_keys()
         conf = self._settings.consumer_conf(group_id) | (conf_overrides or {})
         self._consumer = Consumer(conf)
         self._consumer.subscribe(list(topics))

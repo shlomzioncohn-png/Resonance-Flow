@@ -74,9 +74,10 @@ def test_example_configs_carry_no_credentials(config_name):
 
 def test_make_local_targets_point_at_files_that_exist():
     makefile = (_ROOT / "Makefile").read_text(encoding="utf-8")
-    exported = dict(
-        re.findall(r"^run-local migrate-local: export (\w+) = (\S+)$", makefile, re.MULTILINE)
-    )
+    lines = re.findall(r"^([\w -]+): export (\w+) = (\S+)$", makefile, re.MULTILINE)
+    # demo-check-media too: ASR reads config.yaml (#481 review).
+    assert {targets for targets, _, _ in lines} == {"run-local migrate-local demo-check-media"}
+    exported = {name: path for _, name, path in lines}
 
     assert exported == {
         "CONFIG_FILE_PATH": "config.example.yml",

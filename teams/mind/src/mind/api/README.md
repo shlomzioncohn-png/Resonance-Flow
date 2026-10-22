@@ -40,7 +40,7 @@ Key names are the chart's (`teams/relay/helm/resonance-flow/README.md`,
 | `vector_store.password` | secrets.yaml | `mind.config.Settings` | Required. Never taken from config.yaml. |
 | `service.log_level` | config.yaml | `Settings.log_level` | Optional; the API applies it at start-up. `MIND_LOG_LEVEL` is only a fallback. |
 | `asr.whisper_model` | config.yaml | `ASRSettings` | Optional; `WHISPER_MODEL` is only a fallback, then `base.en` (#135). |
-| `kafka.bootstrap_servers`, `.schema_registry_url`, `.producer.acks`, `.producer.retries` | config.yaml | `mind.messaging.config` | |
+| `kafka.bootstrap_servers`, `.schema_registry_url`, `.producer.acks`, `.producer.retries` | config.yaml | `mind.messaging.config` | Both of the first two, or neither: neither means Kafka is off, and building a producer or consumer then fails. |
 | `kafka.sasl.mechanism`, `.username`, `.password` | secrets.yaml | `mind.messaging.config` | Absent: no SASL. |
 
 The vector-store DSN is built **only** from these files. A
@@ -81,6 +81,9 @@ and `score_publisher_runner` at their first line, and
 | `vector_store.password` missing (or no secrets file) | `vector_store.password is missing from secrets.yaml ... resonance-flow-mind-secret Secret` |
 | `SECRETS_FILE_PATH` unset, or its file absent or empty | Not an error: no secrets. Only a setting that needs one fails, naming it. |
 | A secrets file that exists but is broken | Fails, the same way as config.yaml. |
+| Building a Kafka producer or consumer without `kafka.bootstrap_servers` and/or `kafka.schema_registry_url` | `kafka.<key> ... missing from config.yaml` (at the client, not at start-up: an empty `kafka` section means Kafka is off) |
+| Only one of those two set | `kafka.<key> is missing ... an incomplete Kafka config, not Kafka switched off` |
+| `transcribe()` without the config file | Not raised: `ASR_UNAVAILABLE` (environment, retryable), naming the problem. ASR settings are read once per process. |
 
 The API's `GET /health` returns `200` only after start-up has completed
 (config loaded, vector store opened and migrated), and `503` before that
@@ -103,11 +106,13 @@ make migrate-local                 # once per fresh database
 make run-local                     # the API, on :8000
 ```
 
-`make run` and `make migrate` take the two variables from your
+`make demo-check-media` gets the same two variables, since ASR reads
+`asr.whisper_model` from config.yaml. `make run` and `make migrate` take the two variables from your
 environment, and refuse to start without them. To use other files (e.g. a
-`secrets.local.yaml` with a real key; `*.local.yaml` is gitignored),
+`secrets.local.yaml` with a real key),
 override either one on the command line:
-`make run-local SECRETS_FILE_PATH=secrets.local.yaml`. If you change
+`make run-local SECRETS_FILE_PATH=secrets.local.yaml`. Both `*.local.yaml`
+and `*.local.yml` are gitignored. If you change
 `POSTGRES_*` in `.env`, change the example files to match:
 `tests/test_example_config.py` keeps the committed copies in step.
 

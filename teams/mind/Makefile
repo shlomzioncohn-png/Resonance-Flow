@@ -36,10 +36,11 @@ run: proto
 # $CONFIG_FILE_PATH / $SECRETS_FILE_PATH name, so `run` and `migrate` refuse to
 # start without them. These run them against the committed examples
 # (placeholders only), with `docker compose up -d vector-store` as the database.
+# demo-check-media needs them too: ASR reads asr.whisper_model from config.yaml.
 # Target-specific, so they reach the `run`/`migrate` recipes too; a value given
 # on the command line wins, e.g. `make run-local SECRETS_FILE_PATH=secrets.local.yaml`.
-run-local migrate-local: export CONFIG_FILE_PATH = config.example.yml
-run-local migrate-local: export SECRETS_FILE_PATH = secrets.example.yml
+run-local migrate-local demo-check-media: export CONFIG_FILE_PATH = config.example.yml
+run-local migrate-local demo-check-media: export SECRETS_FILE_PATH = secrets.example.yml
 
 run-local: run
 
