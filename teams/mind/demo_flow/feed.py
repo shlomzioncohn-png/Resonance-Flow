@@ -544,6 +544,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--dry-run", action="store_true", help="build and validate only")
     parser.add_argument(
+        "--run-id",
+        help="name of the run and of its manifest, runs/<run-id>.json "
+        "(default: the UTC time and the order; demo_flow.run passes its own)",
+    )
+    parser.add_argument(
         "--minio-endpoint", default=os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
     )
     parser.add_argument("--minio-bucket", default=os.environ.get("MINIO_BUCKET", "bridge-raw"))
@@ -562,7 +567,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     anchor = _parse_anchor(args.anchor)
     gap_s = args.gap if args.gap is not None else DEFAULT_GAP_S[args.order]
-    run_id = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{args.order}"
+    run_id = args.run_id or f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{args.order}"
 
     items = load_items(args.order, anchor, args.tenant_id)
     logger.info(

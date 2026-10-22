@@ -1,0 +1,141 @@
+# #359 demo stack: everything the demo flow needs except Mind's own
+# processes, which `python -m demo_flow.run` starts on the host (Whisper's
+# weights and tesseract live there; see demo_flow/README.md "How to run it").
+#
+# One broker and one registry for every party, so Bridge's event, Mind's
+# request and Inbox's reply travel on the same topics -- unlike the teams'
+# own compose files, which each bring a broker of their own.
+#
+# No named volumes on purpose: `run.py` takes the stack down with -v before
+# every run, so each run starts on an empty broker, bucket, Inbox database
+# and vector store. That is what makes the demo repeatable (README,
+# "Repeatability").
+name: mind-demo
+
+services:
+  redpanda:
+    # Same broker and listeners as teams/bridge/docker-compose.yml.
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
+    command:
+      - redpanda
+      - start
+      - --kafka-addr=internal://0.0.0.0:29092,external://0.0.0.0:9092
+      - --advertise-kafka-addr=internal://redpanda:29092,external://localhost:9092
+      - --rpc-addr=redpanda:33145
+      - --advertise-rpc-addr=redpanda:33145
+      - --smp=1
+      - --memory=1G
+      - --mode=dev-container
+      - --default-log-level=warn
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:v2.7.2
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_BROKERS: redpanda:29092
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+  schema-registry:
+    # The cluster's registry and setting (teams/bridge/docker-compose.yml says why).
+    image: apicurio/apicurio-registry-mem:2.5.11.Final
+    environment:
+      REGISTRY_CCOMPAT_USE_CANONICAL_HASH: "true"
+    ports:
+      - "8085:8080"
+
+  schema-seed:
+    # One-shot, run by run.py: registers every schema with Relay's scripts
+    # (seed-schemas.sh says why and how). Not started by `up`.
+    image: alpine:3.20
+    profiles: ["seed"]
+    command: ["sh", "/stack/seed-schemas.sh"]
+    volumes:
+      - ../../../..:/repo:ro
+      - .:/stack:ro
+    depends_on:
+      schema-registry:
+        condition: service_started
+
+  minio:
+    # The shared Helm chart's image: minio/minio no longer pulls (README, Findings).
+    image: bitnamilegacy/minio:2025.7.23
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_DEFAULT_BUCKETS: bridge-raw
+    ports:
+      - "9000:9000"
+      - "9091:9001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  inbox-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: resonance_flow
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5442:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d resonance_flow"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+
+  inbox:
+    build:
+      context: ../../../inbox
+      additional_contexts:
+        shared: ../../../../shared
+    image: mind-demo-inbox:local
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_HOST: inbox-db
+      DB_PORT: "5432"
+      DB_NAME: resonance_flow
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v6
+      SQL_LOG_ENABLED: "false"
+    ports:
+      - "8082:8080"
+    depends_on:
+      inbox-db:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      schema-registry:
+        condition: service_started
+
+  vector-store:
+    # Mind's own (teams/mind/docker-compose.yml), on a port of its own so a
+    # developer's vector store on 5432 is left alone.
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: mind
+      POSTGRES_PASSWORD: mind
+      POSTGRES_DB: mind
+    ports:
+      - "5443:5432"
+    volumes:
+      - ../../db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mind -d mind"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
