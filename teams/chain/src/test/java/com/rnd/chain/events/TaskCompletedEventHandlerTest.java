@@ -16,8 +16,9 @@ import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.SchedulingUpdateService;
 import com.rnd.chain.service.PriorityScoreService;
-import com.rnd.chain.service.TaskCounterUpdater;
+import com.rnd.chain.service.DependencyEdgeService;
 import com.rnd.chain.service.TaskEligibilityService;
+import com.rnd.chain.service.TaskStateHistoryRecorder;
 import com.rnd.inbox.event.TaskCompletedEvent;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.internals.RecordHeaders;
@@ -104,14 +105,25 @@ class TaskCompletedEventHandlerTest {
         SchedulingUpdateService scheduling =
                 mock(SchedulingUpdateService.class);
 
-        TaskCounterUpdater counterUpdater =
-                new TaskCounterUpdater(
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
+                                taskRepo,
+                                dependencyRepo,
+                                taskReadinessRepository,
+                                scheduling,
+                                new SchedulingPublishListener(
+                                taskRepo,
+                                scheduling));
+
+        TaskStateHistoryRecorder recorder = TaskStateHistoryFixtures.newRecorder();
+
+        DependencyEdgeService edgeService =
+                new DependencyEdgeService(
                         taskRepo,
                         dependencyRepo,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(
-                                taskRepo,
-                                scheduling),
+                        PgRepos.graphLock(),
+                        priorityScoreService,
+                        recorder,
                         taskReadinessRepository);
 
         TaskEligibilityService service =
@@ -119,8 +131,9 @@ class TaskCompletedEventHandlerTest {
                         taskRepo,
                         dependencyRepo,
                         PgRepos.graphLock(),
-                        counterUpdater,
-                        TaskStateHistoryFixtures.newRecorder(),
+                        edgeService,
+                        priorityScoreService,
+                        recorder,
                         taskReadinessRepository);
 
         ChainEventProcessingTemplate template =
@@ -236,12 +249,12 @@ class TaskCompletedEventHandlerTest {
     }
 
     @Test
-    void onMessage_referencingATaskThatDoesNotExist_throwsReferencedTaskNotFoundException() {
+    void onMessage_referencingATaskThatDoesNotExist_throwsTransientProcessingException() {
         Fixture fixture = newFixture(List.of(), List.of());
         ConsumerRecord<String, TaskCompletedEvent> unknown =
                 record(UUID.randomUUID().toString(), true, BASE_TIME);
 
-        assertThrows(ReferencedTaskNotFoundException.class, () -> fixture.handler().onMessage(unknown));
+        assertThrows(ChainTransientProcessingException.class, () -> fixture.handler().onMessage(unknown));
     }
 
     @Test

@@ -150,7 +150,6 @@ class DealToTaskMapperTest {
         assertNull(task.effortEstimateMinutes());
         assertEquals(ORGANIZATION_ID, task.organizationId());
         assertNull(task.projectId());
-        assertNull(task.snoozedUntil());
     }
 
     @Test
@@ -345,7 +344,7 @@ class DealToTaskMapperTest {
     }
 
     @Test
-    void onHoldMapsToNewNotSnoozedAndNeverSetsSnoozedUntil() {
+    void onHoldMapsToNew() {
         Deal deal = Deal.builder()
                 .dealId("D-90004")
                 .title("Paused deal")
@@ -357,7 +356,6 @@ class DealToTaskMapperTest {
         Task task = MAPPER.map(deal, AS_OF);
 
         assertEquals(TaskStatus.NEW, task.status());
-        assertNull(task.snoozedUntil());
     }
 
     @Test

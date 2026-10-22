@@ -52,32 +52,36 @@ class TaskStateHistoryWritingTest {
         TaskDependencyRepository dependencyRepository = PgRepos.dependencies(List.of());
         GraphLock lock = PgRepos.graphLock();
 
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(
-                taskRepository,
-                dependencyRepository,
-                new PriorityScoreService(),
-                new SchedulingPublishListener(
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
                         taskRepository,
-                        new SchedulingUpdateService(event -> { })),
-                taskReadinessRepository);
+                        dependencyRepository,
+                        taskReadinessRepository,
+                        new SchedulingUpdateService(event -> { }),
+                        new SchedulingPublishListener(
+                        taskRepository,
+                        new SchedulingUpdateService(event -> { })));
 
         TaskStateHistoryRecorder recorder =
                 new TaskStateHistoryRecorder(history, Clock.systemUTC());
+
+        edgeService = new DependencyEdgeService(
+                taskRepository,
+                dependencyRepository,
+                lock,
+                priorityScoreService,
+                recorder,
+                taskReadinessRepository);
 
         service = new TaskEligibilityService(
                 taskRepository,
                 dependencyRepository,
                 lock,
-                counterUpdater,
+                edgeService,
+                priorityScoreService,
                 recorder,
                 taskReadinessRepository);
 
-        edgeService = new DependencyEdgeService(
-                dependencyRepository,
-                lock,
-                counterUpdater,
-                recorder,
-                taskReadinessRepository);
     }
 
     private UUID savedTask(TaskStatus status, LocalDateTime updatedAt) {
@@ -103,7 +107,7 @@ class TaskStateHistoryWritingTest {
         LocalDateTime stored = LocalDateTime.now();
         UUID id = savedTask(TaskStatus.ACTIVE, stored);
 
-        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, stored.plusSeconds(10), TENANT);
+        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, stored.plusSeconds(10), TENANT, null);
 
         List<TaskStateHistoryEntry> rows = rowsOf(id);
         assertThat(rows).hasSize(1);
@@ -117,7 +121,7 @@ class TaskStateHistoryWritingTest {
         LocalDateTime stored = LocalDateTime.now();
         UUID id = savedTask(TaskStatus.ACTIVE, stored);
 
-        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, stored.minusSeconds(10), TENANT);
+        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, stored.minusSeconds(10), TENANT, null);
 
         assertThat(rowsOf(id)).isEmpty();
         assertThat(taskRepository.findById(id).orElseThrow().getStatus()).isEqualTo(TaskStatus.ACTIVE);
@@ -129,8 +133,8 @@ class TaskStateHistoryWritingTest {
         UUID id = savedTask(TaskStatus.ACTIVE, stored);
         LocalDateTime eventTime = stored.plusSeconds(10);
 
-        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, eventTime, TENANT);
-        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, eventTime, TENANT);
+        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, eventTime, TENANT, null);
+        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, eventTime, TENANT, null);
 
         assertThat(rowsOf(id)).hasSize(1);
     }
@@ -140,7 +144,7 @@ class TaskStateHistoryWritingTest {
         LocalDateTime stored = LocalDateTime.now();
         UUID id = savedTask(TaskStatus.ACTIVE, stored);
 
-        service.onTaskStatusChangedIfNewer(id, TaskStatus.ACTIVE, stored.plusSeconds(10), TENANT);
+        service.onTaskStatusChangedIfNewer(id, TaskStatus.ACTIVE, stored.plusSeconds(10), TENANT, null);
 
         assertThat(rowsOf(id)).isEmpty();
     }
@@ -244,7 +248,7 @@ class TaskStateHistoryWritingTest {
         taskRepository.save(original);
         LocalDateTime eventTime = stored.plusSeconds(10);
 
-        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, eventTime, TENANT);
+        service.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, eventTime, TENANT, null);
 
         Task after = taskRepository.findById(id).orElseThrow();
         assertThat(after.getStatus()).isEqualTo(TaskStatus.PENDING);

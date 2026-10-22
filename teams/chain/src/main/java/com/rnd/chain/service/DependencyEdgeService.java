@@ -8,9 +8,11 @@ import com.rnd.chain.exception.CrossTenantDependencyException;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
+import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskReadinessRepository;
+import com.rnd.chain.repository.TaskRepository;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,6 +30,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.UnaryOperator;
 
 @Service
@@ -36,24 +39,56 @@ public class DependencyEdgeService {
     private static final Logger log =
             LoggerFactory.getLogger(DependencyEdgeService.class);
 
+    private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
     private final GraphLock graphLock;
-    private final TaskCounterUpdater taskCounterUpdater;
+    private final PriorityScoreService priorityScoreService;
     private final TaskStateHistoryRecorder historyRecorder;
     private final TaskReadinessRepository taskReadinessRepository;
 
     public DependencyEdgeService(
+            TaskRepository taskRepository,
             TaskDependencyRepository taskDependencyRepository,
             GraphLock graphLock,
-            TaskCounterUpdater taskCounterUpdater,
+            PriorityScoreService priorityScoreService,
             TaskStateHistoryRecorder historyRecorder,
             TaskReadinessRepository taskReadinessRepository) {
 
+        this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
         this.graphLock = graphLock;
-        this.taskCounterUpdater = taskCounterUpdater;
+        this.priorityScoreService = priorityScoreService;
         this.historyRecorder = historyRecorder;
         this.taskReadinessRepository = taskReadinessRepository;
+    }
+
+    /**
+     * Creates a PENDING placeholder with epoch updatedAt for each missing task.
+     * Existing tasks are never modified.
+     */
+    @Transactional
+    public void insertPlaceholdersIfAbsent(
+            UUID taskId,
+            UUID dependsOnTaskId,
+            UUID tenantId) {
+
+        insertPlaceholderIfAbsent(
+                taskId,
+                tenantId);
+
+        insertPlaceholderIfAbsent(
+                dependsOnTaskId,
+                tenantId);
+    }
+
+    private void insertPlaceholderIfAbsent(
+            UUID taskId,
+            UUID tenantId) {
+
+        taskRepository.insertIfAbsent(
+                Task.placeholder(
+                        taskId,
+                        tenantId));
     }
 
     /**
@@ -67,7 +102,7 @@ public class DependencyEdgeService {
             TaskReadinessSnapshot beforeReadiness,
             TaskReadinessSnapshot afterReadiness) {
 
-        taskCounterUpdater.adjustBlockingCount(
+        adjustBlockingCount(
                 taskId,
                 dependsOnIsDone,
                 delta,
@@ -160,7 +195,7 @@ public class DependencyEdgeService {
 
 
             if (tenantId != null) {
-                taskCounterUpdater.insertPlaceholdersIfAbsent(taskId, dependsOnTaskId, tenantId);
+                insertPlaceholdersIfAbsent(taskId, dependsOnTaskId, tenantId);
 
             }
 
@@ -191,8 +226,12 @@ public class DependencyEdgeService {
             }
 
 
-            Task task = taskCounterUpdater.requireTask(taskId);
-            Task dependencyTask = taskCounterUpdater.requireTask(dependsOnTaskId);
+            Task task = taskRepository.findById(taskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(taskId));
+            Task dependencyTask = taskRepository.findById(dependsOnTaskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(dependsOnTaskId));
             if (tenantId != null) {
                 requireTenant(task, tenantId);
                 requireTenant(dependencyTask, tenantId);
@@ -262,7 +301,7 @@ public class DependencyEdgeService {
         TaskReadinessSnapshot readiness =
                 requireReadinessSnapshot(dependsOnTaskId);
 
-        taskCounterUpdater.updateCounters(
+        updateCounters(
                 dependsOnTaskId,
                 UnaryOperator.identity(),
                 readiness,
@@ -307,10 +346,14 @@ public class DependencyEdgeService {
         }
 
         Task task =
-                taskCounterUpdater.requireTask(taskId);
+                taskRepository.findById(taskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(taskId));
 
         Task dependsOnTask =
-                taskCounterUpdater.requireTask(dependsOnTaskId);
+                taskRepository.findById(dependsOnTaskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(dependsOnTaskId));
 
         requireSameTenant(
                 task,
@@ -411,7 +454,7 @@ public class DependencyEdgeService {
              * Redelivery does not change readiness,
              * but confidence may change priorityScore.
              */
-            taskCounterUpdater.updateCounters(
+            updateCounters(
                     taskId,
                     UnaryOperator.identity(),
                     beforeReadiness,
@@ -546,12 +589,14 @@ public class DependencyEdgeService {
 
         graphLock.runExclusive(() -> {
 
-            taskCounterUpdater.requireTask(
-                    taskId);
+            taskRepository.findById(taskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(taskId));
 
             Task dependencyTask =
-                    taskCounterUpdater.requireTask(
-                            dependsOnTaskId);
+                    taskRepository.findById(dependsOnTaskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(dependsOnTaskId));
 
             /*
              * Capture BEFORE while the edge still exists.
@@ -652,5 +697,93 @@ public class DependencyEdgeService {
         }
 
         return snapshot;
+    }
+
+    /**
+     * Updates the stored compatibility counters while using authoritative
+     * before/after View snapshots for all readiness and publish decisions.
+     */
+    @Transactional
+    public Task updateCounters(
+            UUID taskId,
+            UnaryOperator<Task> countersMutator,
+            TaskReadinessSnapshot beforeReadiness,
+            TaskReadinessSnapshot afterReadiness) {
+
+        Objects.requireNonNull(
+                beforeReadiness,
+                "beforeReadiness must not be null");
+
+        Objects.requireNonNull(
+                afterReadiness,
+                "afterReadiness must not be null");
+
+        AtomicReference<Task> previous =
+                new AtomicReference<>();
+
+        Task updated =
+                taskRepository.update(
+                                taskId,
+                                task -> {
+
+                                    previous.set(task);
+
+                                    return countersMutator.apply(
+                                            task);
+                                })
+                        .orElseThrow(
+                                () -> new TaskNotFoundException(taskId));
+
+        Task oldTask =
+                previous.get();
+
+        if (updated != oldTask) {
+
+            log.info(
+                    "Task {} eligibility updated: "
+                            + "blockingCount={}, "
+                            + "openConstraintCount={}, "
+                            + "isReady={}",
+                    taskId,
+                    updated.getBlockingCount(),
+                    updated.getOpenConstraintCount(),
+                    updated.isReady());
+        }
+
+        return priorityScoreService.recomputePriorityScoreAndPublish(
+                taskId,
+                oldTask,
+                updated,
+                beforeReadiness,
+                afterReadiness);
+    }
+
+    /**
+     * Maintains the stored blocking counter while readiness/publishing is
+     * decided exclusively from the supplied View snapshots.
+     */
+    @Transactional
+    public void adjustBlockingCount(
+            UUID taskId,
+            boolean dependsOnIsDone,
+            int delta,
+            TaskReadinessSnapshot beforeReadiness,
+            TaskReadinessSnapshot afterReadiness) {
+
+        int effectiveDelta =
+                dependsOnIsDone
+                        ? 0
+                        : delta;
+
+        updateCounters(
+                taskId,
+                task -> task.withCounters(
+                        Math.max(
+                                0,
+                                task.getBlockingCount()
+                                        + effectiveDelta),
+                        task.getOpenConstraintCount()),
+                beforeReadiness,
+                afterReadiness);
     }
 }

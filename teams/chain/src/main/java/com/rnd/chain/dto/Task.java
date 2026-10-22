@@ -7,7 +7,6 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
-import java.util.Objects;
 import java.util.UUID;
 
 // Identifier type: UUID, pending Inbox publishing its own task id type.
@@ -37,7 +36,7 @@ public final class Task {
 
     /** Whether all of this task's dependencies and constraints are satisfied, so it can be worked on.
      * Invariant: must equal {@code blockingCount == 0 && openConstraintCount == 0}. Not enforced by
-     * this class (a stored field, not derived) - {@code TaskCounterUpdater.withCounters} is the
+     * this class (a stored field, not derived) - {@code withCounters} is the
      * single place responsible for keeping it in sync whenever either counter changes. */
     private final boolean isReady;
 
@@ -60,11 +59,18 @@ public final class Task {
      * {@code TaskEligibilityService}. */
     private final Double priorityScore;
 
+    /** Latest tier Inbox sent (issue #864); null until Inbox classifies the task. */
+    private final TaskTier tier;
+
+    /** When Mind computed the current {@link #score} (task.score.proposed scored_at). Null until
+     * a score arrives with one; an event scored earlier than this is ignored. */
+    private final LocalDateTime scoredAt;
+
     private final LocalDateTime createdAt;
     private final LocalDateTime updatedAt;
     private final LocalDateTime deletedAt;
 
-    @lombok.Builder(builderClassName = "Builder")
+    @lombok.Builder(builderClassName = "Builder", toBuilder = true)
     private Task(UUID id,
                  UUID parentTaskId,
                  UUID tenantId,
@@ -76,6 +82,8 @@ public final class Task {
                  Double score,
                  Double confidence,
                  Double priorityScore,
+                 TaskTier tier,
+                 LocalDateTime scoredAt,
                  LocalDateTime createdAt,
                  LocalDateTime updatedAt,
                  LocalDateTime deletedAt) {
@@ -102,24 +110,49 @@ public final class Task {
         this.score = score;
         this.confidence = confidence;
         this.priorityScore = priorityScore;
+        this.tier = tier;
+        this.scoredAt = scoredAt;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.deletedAt = deletedAt;
     }
 
     /**
-     * Returns a new, independent Task with the same field values as {@code source}. Repositories
-     * hand out copies (rather than the stored instance) from their read methods, and store a copy
-     * on save(), so a caller mutating a Task it received can never change repository state without
-     * going through save() - see CLAUDE.md "Open items" (this is a stand-in for the isolation a
-     * real persistence layer gives for free).
+     * Returns this task with the stored counters set to the given values and {@code isReady}
+     * derived from them, or this same instance when nothing would change.
+     *
+     * Stored counters are still maintained during this migration stage. Readiness decisions must
+     * not rely on the isReady value produced here; task_readiness is the authoritative source.
      */
-    public static Task copyOf(Task source) {
-        Objects.requireNonNull(source, "source must not be null");
-        return new Task(source.id, source.parentTaskId, source.tenantId, source.status,
-                source.isReady, source.blockingCount, source.openConstraintCount,
-                source.estimatedDurationMin, source.score, source.confidence, source.priorityScore,
-                source.createdAt, source.updatedAt, source.deletedAt);
+    public Task withCounters(int blockingCount, int openConstraintCount) {
+        boolean ready = blockingCount == 0 && openConstraintCount == 0;
+
+        if (this.blockingCount == blockingCount
+                && this.openConstraintCount == openConstraintCount
+                && this.isReady == ready) {
+            return this;
+        }
+
+        return toBuilder()
+                .blockingCount(blockingCount)
+                .openConstraintCount(openConstraintCount)
+                .isReady(ready)
+                .build();
+    }
+
+    /**
+     * A PENDING stand-in for a task Chain has not received yet, with an epoch {@code updatedAt} so
+     * the first real update always wins.
+     */
+    public static Task placeholder(UUID id, UUID tenantId) {
+        return Task.builder()
+                .id(id)
+                .tenantId(tenantId)
+                .status(TaskStatus.PENDING)
+                .isReady(true)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.ofEpochSecond(0, 0, java.time.ZoneOffset.UTC))
+                .build();
     }
 
     @Override

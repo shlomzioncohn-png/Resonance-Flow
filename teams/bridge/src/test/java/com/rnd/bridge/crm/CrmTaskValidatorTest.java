@@ -23,7 +23,7 @@ class CrmTaskValidatorTest {
         return new Task(
                 VALID_TENANT_ID, null, "Title", "Description", TaskStatus.NEW, 3, null,
                 Tier.TACTICAL, ExtractionProvenance.ETL, RoleContext.SALESPERSON,
-                SourceType.CRM_DEAL, "crm:D-1", null, null, null, null);
+                SourceType.CRM_DEAL, "crm:D-1", null, null, null);
     }
 
     @Test
@@ -78,7 +78,7 @@ class CrmTaskValidatorTest {
 
     @Test
     void theSharedTaskValidatorOnItsOwnStillAcceptsANullTenantSoGitHubAndJiraAreUnaffected() {
-        // GitHubClient, GitHubKafkaProducer, JiraClient, JiraKafkaProducer and
+        // GitHubClient, JiraClient and
         // TaskEnrichmentConsumer all share TaskValidator directly and never set
         // Task.organizationId. This is what proves adding the tenant/sourceRef checks to
         // CrmTaskValidator, not to TaskValidator itself, doesn't break them.
@@ -89,18 +89,18 @@ class CrmTaskValidatorTest {
     private static Task withTenantId(Task t, String tenantId) {
         return new Task(tenantId, t.projectId(), t.title(), t.description(), t.status(), t.urgency(),
                 t.confidence(), t.tier(), t.extractionProvenance(), t.roleContext(), t.sourceType(), t.sourceRef(),
-                t.effortEstimateMinutes(), t.deadline(), t.snoozedUntil(), t.completedAt());
+                t.effortEstimateMinutes(), t.deadline(), t.completedAt());
     }
 
     private static Task withSourceRef(Task t, String sourceRef) {
         return new Task(t.organizationId(), t.projectId(), t.title(), t.description(), t.status(), t.urgency(),
                 t.confidence(), t.tier(), t.extractionProvenance(), t.roleContext(), t.sourceType(), sourceRef,
-                t.effortEstimateMinutes(), t.deadline(), t.snoozedUntil(), t.completedAt());
+                t.effortEstimateMinutes(), t.deadline(), t.completedAt());
     }
 
     private static Task withTitle(Task t, String title) {
         return new Task(t.organizationId(), t.projectId(), title, t.description(), t.status(), t.urgency(),
                 t.confidence(), t.tier(), t.extractionProvenance(), t.roleContext(), t.sourceType(), t.sourceRef(),
-                t.effortEstimateMinutes(), t.deadline(), t.snoozedUntil(), t.completedAt());
+                t.effortEstimateMinutes(), t.deadline(), t.completedAt());
     }
 }

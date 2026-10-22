@@ -8,9 +8,16 @@ import com.rnd.bridge.task.model.Task;
 import java.util.regex.Pattern;
 
 /**
- * CRM-only wrapper around the shared {@link TaskValidator}: adds tenant-id/{@code sourceRef}
- * checks (finding F5). Other lanes (GitHub/Jira/enrichment) share {@link TaskValidator} directly
- * and never set a tenant id, so they don't use this class.
+ * CRM-only wrapper around the shared {@link TaskValidator}: runs every check that validator
+ * already does, then adds tenant-id/{@code sourceRef} rules specific to a lane that actually has a
+ * tenant id (finding F5 in the CRM-lane audit).
+ * <p>
+ * {@code GitHubClient}, {@code JiraClient} and {@code TaskEnrichmentConsumer} all share
+ * {@link TaskValidator} directly and never set
+ * {@code Task.organizationId} - adding a tenant check to {@link TaskValidator} itself would reject
+ * every task those lanes publish. {@link CrmLane} uses this class instead, never the shared
+ * validator on its own, so the tenant/{@code sourceRef} rules apply only where a tenant id is
+ * actually expected.
  */
 public final class CrmTaskValidator implements PayloadValidator<Task> {
 

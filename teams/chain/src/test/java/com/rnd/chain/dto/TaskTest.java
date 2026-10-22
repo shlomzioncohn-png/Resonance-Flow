@@ -2,6 +2,7 @@ package com.rnd.chain.dto;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -46,20 +47,52 @@ class TaskTest {
     }
 
     @Test
-    void copyOf_throwsNullPointerException_whenSourceIsNull() {
-        assertThatThrownBy(() -> Task.copyOf(null))
-                .isInstanceOf(NullPointerException.class);
+    void toBuilder_copiesEveryField() {
+        LocalDateTime created = LocalDateTime.of(2026, 1, 2, 3, 4);
+        LocalDateTime updated = LocalDateTime.of(2026, 5, 6, 7, 8);
+        LocalDateTime deleted = LocalDateTime.of(2026, 9, 10, 11, 12);
+        Task source = Task.builder()
+                .id(UUID.randomUUID())
+                .parentTaskId(UUID.randomUUID())
+                .tenantId(UUID.randomUUID())
+                .status(TaskStatus.ACTIVE)
+                .isReady(true)
+                .blockingCount(2)
+                .openConstraintCount(3)
+                .estimatedDurationMin(45)
+                .score(0.7)
+                .confidence(0.8)
+                .priorityScore(0.9)
+                .tier(TaskTier.TACTICAL)
+                .createdAt(created)
+                .updatedAt(updated)
+                .deletedAt(deleted)
+                .build();
+
+        assertThat(source.toBuilder().build()).usingRecursiveComparison().isEqualTo(source);
     }
 
     @Test
-    void copyOf_producesEqualButDistinctInstance() {
-        Task source = TaskTestFixtures.defaultTask(UUID.randomUUID()).blockingCount(1).build();
+    void withCounters_returnsTheSameInstance_whenNothingChanges() {
+        Task task = TaskTestFixtures.defaultTask(UUID.randomUUID()).isReady(true).build();
 
-        Task copy = Task.copyOf(source);
+        assertThat(task.withCounters(0, 0)).isSameAs(task);
+    }
 
-        assertThat(copy).isNotSameAs(source).isEqualTo(source);
-        assertThat(copy.getBlockingCount()).isEqualTo(source.getBlockingCount());
-        assertThat(copy.getStatus()).isEqualTo(source.getStatus());
+    @Test
+    void withCounters_derivesIsReadyFromBothCounters() {
+        Task task = TaskTestFixtures.defaultTask(UUID.randomUUID()).isReady(true).build();
+
+        Task blocked = task.withCounters(1, 0);
+        Task constrained = task.withCounters(0, 2);
+        Task freed = blocked.withCounters(0, 0);
+
+        assertThat(blocked.getBlockingCount()).isEqualTo(1);
+        assertThat(blocked.isReady()).isFalse();
+        assertThat(constrained.getOpenConstraintCount()).isEqualTo(2);
+        assertThat(constrained.isReady()).isFalse();
+        assertThat(freed.isReady()).isTrue();
+        assertThat(task.getBlockingCount()).isZero();
     }
 
     @Test

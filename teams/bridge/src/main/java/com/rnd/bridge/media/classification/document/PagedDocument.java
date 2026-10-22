@@ -12,6 +12,12 @@ public interface PagedDocument extends AutoCloseable {
 
     int pageCount() throws IOException;
 
+    /**
+     * Width x height the page would have once rendered, read from the page's own header/box
+     * without decoding or rendering it - checked before {@link #renderPage}.
+     */
+    long pagePixels(int pageIndex) throws IOException;
+
     BufferedImage renderPage(int pageIndex) throws IOException;
 
     @Override

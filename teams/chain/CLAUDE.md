@@ -46,6 +46,10 @@ already has (edgeExists() / the task's own stored previousStatus).
   once it believes an event was "already handled" can permanently lose
   a Constraint row instead of just delaying a counter update.
 
+## Coding guideline
+Wherever Lombok can replace boilerplate (accessors, constructors, builders, equals/hashCode), write
+the code with Lombok.
+
 ## Real repository contracts (from chain/ruthHoltzman/dependency-repository-66)
 - TaskRepository: findById, findAllById, findByParentTaskId, save
   (no atomic increment yet — in-memory HashMap, not real DB)
@@ -106,7 +110,7 @@ already has (edgeExists() / the task's own stored previousStatus).
     null on either side is rejected, same as a mismatch. Confirmed with the user that existing/
     test data without a tenant isn't meaningful enough to justify the weaker "skip when unknown"
     alternative the issue offered. Follow-up: make `task.tenant_id` `NOT NULL` once every row is
-    backfilled through `TaskCreatedEventHandler`/`TaskUpdatedEventHandler`.
+    backfilled through `TaskUpdatedEventHandler`.
   - **`task.updated` claiming a different tenant than stored is rejected** (`TenantReassignmentException`
     -> `NonRetryableEventException`), not applied - confirmed directly with the Inbox team
     (Shlomzion Cohn, Slack) that `tenant_id` never legitimately changes after task creation, so
@@ -145,7 +149,10 @@ already has (edgeExists() / the task's own stored previousStatus).
     also fails independently (`reason` round-trips as `{}` instead of `null`) - also pre-existing,
     also unrelated.
 - #649: TaskEligibilityService was split by domain - edges in `DependencyEdgeService`, constraints in
-  `ConstraintEligibilityService`, counter helpers in `TaskCounterUpdater`. The graph lock is the
+  `ConstraintEligibilityService`, stored-counter maintenance (`updateCounters`, `adjustBlockingCount`) in `DependencyEdgeService` (`TaskCounterUpdater` was removed, #917 PR 1), priority-score recompute/publish
+  in `PriorityScoreService` (`recomputePriorityScoreAndPublish`, `onScoreProposed`), the publish-after-commit
+  queue in `SchedulingUpdateService` (`requestPublishAfterCommit`), and placeholder-task inserts in
+  `DependencyEdgeService` (`insertPlaceholdersIfAbsent`) (issue #917, PR 1). The graph lock is the
   `GraphLock` bean (see "Graph lock" below) shared by `DependencyEdgeService` and
   `TaskEligibilityService`; older notes below that name `TaskEligibilityService` for moved methods predate this.
 - PR #468 review (2026-09-23, leaRevivo) findings addressed 2026-09-24:
@@ -243,6 +250,7 @@ already has (edgeExists() / the task's own stored previousStatus).
   is gone, and so are all `InMemory*` repositories, `MockDataConfig` and `InMemoryProcessedEventStore`
   (2026-10-15): Postgres is the only persistence, including `PostgresProcessedEventStore` (V10) for
   event dedup. The tests that used the in-memory fakes now run against Postgres (`PgRepos`).
+
 - `TaskRepository#update()`'s atomicity is now real: `PostgresTaskRepository`
   uses a pessimistic row lock (`SELECT ... FOR UPDATE`) as the sole
   correctness mechanism for `blockingCount`/`openConstraintCount` under

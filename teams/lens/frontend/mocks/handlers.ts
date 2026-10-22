@@ -14,6 +14,10 @@
  *   memory: changes survive until the page is reloaded.
  * - POST /api/auth/login, which the Gateway doesn't expose yet. Once it does,
  *   delete its handler - services/authApi.ts already has its final shape.
+ * - GET /api/manager/bottlenecks/graph, the Bottlenecks screen's dependency
+ *   graph, until the Gateway/BFF serve it. Once they do, delete its handler -
+ *   services/bottlenecksApi.ts already has its final shape. The data lives in
+ *   mocks/dependencyGraphData.ts, shared with the DependencyGraph stories.
  *
  * The calling code (services/managerUsersApi.ts, services/authApi.ts) is the
  * same either way. Storybook uses these same handlers (.storybook/preview.tsx),
@@ -22,6 +26,7 @@
 import { delay, http, HttpResponse } from 'msw';
 import type { GatewayErrorBody } from '@/services/api';
 import type { LoginRequest, LoginResponse } from '@/services/authApi';
+import type { DependencyGraph } from '@/services/bottlenecksApi';
 import type {
   UserCreateFields,
   UserDetails,
@@ -29,9 +34,11 @@ import type {
   UserListResponse,
   UserStatus,
 } from '@/services/managerUsersApi';
+import { emptyGraph, sampleGraph, sampleGraphForProject } from './dependencyGraphData';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080';
 export const USERS_URL = `${API_BASE_URL}/api/manager/users`;
+export const BOTTLENECKS_GRAPH_URL = `${API_BASE_URL}/api/manager/bottlenecks/graph`;
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -120,6 +127,26 @@ function errorResponse(status: number, errorCode: string, message: string, path:
 function notFound(path: string) {
   return errorResponse(404, 'NOT_FOUND', 'User not found', path);
 }
+
+/**
+ * Alternatives to the graph handler below, for stories (`msw.use(...)`) and
+ * for trying the screen's other states by hand: no dependencies at all, and a
+ * server error.
+ */
+export const bottlenecksGraphEmptyHandler = http.get(BOTTLENECKS_GRAPH_URL, async () => {
+  await delay(300);
+  return HttpResponse.json<DependencyGraph>(emptyGraph);
+});
+
+export const bottlenecksGraphErrorHandler = http.get(BOTTLENECKS_GRAPH_URL, async ({ request }) => {
+  await delay(300);
+  return errorResponse(
+    500,
+    'INTERNAL_SERVER_ERROR',
+    'Downstream service returned an error',
+    new URL(request.url).pathname,
+  );
+});
 
 function touch(user: UserDetails, changes: Partial<UserDetails>): UserDetails {
   Object.assign(user, changes, { updatedAt: new Date().toISOString() });
@@ -233,4 +260,13 @@ export const handlers = [
       });
     },
   ),
+
+  // GET /api/manager/bottlenecks/graph?projectId= - projectId is optional.
+  http.get(BOTTLENECKS_GRAPH_URL, async ({ request }) => {
+    await delay(400);
+    const projectId = new URL(request.url).searchParams.get('projectId');
+    return HttpResponse.json<DependencyGraph>(
+      projectId ? sampleGraphForProject(projectId) : sampleGraph,
+    );
+  }),
 ];

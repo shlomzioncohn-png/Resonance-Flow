@@ -105,8 +105,9 @@ public class UserController {
                             + "the user's role and the actor may not do that (SYSTEM_ADMIN: any role; "
                             + "TENANT_ADMIN: any role except to or from SYSTEM_ADMIN; "
                             + "TEAM_LEAD/EMPLOYEE: cannot change roles)"),
+            @ApiResponse(responseCode = "400", description = "Request tries to change the username"),
             @ApiResponse(responseCode = "404", description = "User not found"),
-            @ApiResponse(responseCode = "409", description = "Email or username already exists")
+            @ApiResponse(responseCode = "409", description = "Email already exists")
     })
     @PatchMapping("/{id}")
     public UserResponseDto updateUser(@PathVariable UUID id, @Valid @RequestBody UserUpdateRequestDto request,

@@ -21,7 +21,6 @@ import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.DependencyEdgeService;
 import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.SchedulingUpdateService;
-import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskDependencyService;
 import com.rnd.mind.event.DependencyProposedEvent;
 import org.junit.jupiter.api.Test;
@@ -92,10 +91,15 @@ class DependencyProposedEventHandlerTest {
         SchedulingUpdateService schedulingUpdateService = mock(SchedulingUpdateService.class);
         DependencyEdgeService edgeService =
                 new DependencyEdgeService(
+                        taskRepo,
                         dependencyRepo,
                         PgRepos.graphLock(),
-                        new TaskCounterUpdater(taskRepo, dependencyRepo, new PriorityScoreService(),
-                                new SchedulingPublishListener(taskRepo, schedulingUpdateService), taskReadinessRepository),
+                        new PriorityScoreService(
+                                        taskRepo,
+                                        dependencyRepo,
+                                        taskReadinessRepository,
+                                        schedulingUpdateService,
+                                        new SchedulingPublishListener(taskRepo, schedulingUpdateService)),
                         TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
 
         DependencyHistoryRepository historyRepo =

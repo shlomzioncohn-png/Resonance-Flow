@@ -16,7 +16,6 @@ import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.DependencyEdgeService;
 import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.SchedulingUpdateService;
-import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskDependencyService;
 import com.rnd.mind.event.DependencyProposedEvent;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
