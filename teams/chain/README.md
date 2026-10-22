@@ -164,6 +164,7 @@ Ancestors has no `/transitive` variant - the ancestor chain already is the trans
 | GET | `/tasks/{taskId}/dependencies/transitive` | All (transitive) dependencies |
 | GET | `/tasks/{taskId}/dependencies/history` | Dependency change history |
 | GET | `/tasks/{taskId}/state-history` | Status / blocking history, filterable by time range |
+| GET | `/tasks/{taskId}/constraints/history` | Constraint history, filterable by time range |
 | GET | `/tasks/{taskId}/dependents` | Direct dependents |
 | GET | `/tasks/{taskId}/dependents/transitive` | All (transitive) dependents |
 | GET | `/tasks/{taskId}/ancestors` | Full ancestor chain (hierarchy) |
@@ -179,6 +180,11 @@ Traversal routes return `TaskResponse` lists, except:
 - `/blockers` returns `TaskAvailability`
 - `/dependencies/history` returns `PageResponse<DependencyHistoryResponse>`
 - `/state-history` returns `PageResponse<TaskStateHistoryResponse>`
+- `/constraints/history` returns `PageResponse<ConstraintHistoryResponse>`
+
+Every `TaskResponse` list is built by `TaskTraversalService.toResponses` from one `findAllById` task
+query plus one `task_readiness` query, in the order the ids were collected. An id with no task, or a
+task with no `task_readiness` row (e.g. soft-deleted between the two queries), is skipped.
 
 An unknown task id returns `404` with an `ApiError` body; an invalid (non-UUID) `taskId` returns `400`.
 
@@ -985,6 +991,25 @@ the JSON:
 - Code: `TaskStateHistoryController` -> `TaskStateHistoryService` -> `TaskStateHistoryRepository`
   (in-memory + `PostgresTaskStateHistoryRepository`); `TaskStateHistoryResponse` is the API-layer
   DTO, kept separate from the domain `TaskStateHistoryEntry`.
+
+## Constraint history read endpoint (Issue #875)
+
+```
+GET /tasks/{taskId}/constraints/history?from=2026-10-01T00:00:00Z&to=2026-11-01T00:00:00Z&page=0&size=20
+```
+
+Same parameters, defaults and `400` cases as the state-history endpoint above (`from` inclusive,
+`to` exclusive, `size` 1..100). Returns a `PageResponse<ConstraintHistoryResponse>`, newest first;
+`previousStatus` is omitted for `CREATED` entries.
+
+- `404` only when `taskId` is unknown to both the tasks and the constraint history, same policy as
+  `TaskStateHistoryService`. A task that exists with no history, or a deleted task that left history,
+  returns `200`.
+- Code: `ConstraintHistoryController` -> `ConstraintHistoryService` -> `ConstraintHistoryRepository`
+  (paged `findByTaskId(taskId, from, to, page, size)` and `existsByTaskId`, JDBC in
+  `PostgresConstraintHistoryRepository`). The unpaged `findByTaskId(taskId)` is kept.
+- Not run yet (no local Postgres): `mvn test -Ppostgres-integration -Dtest=PostgresConstraintHistoryRepositoryTest`
+  and the two new `getTaskEligibility_returnsReadinessView_*` tests in `TaskEligibilityServiceTest`.
 
 ## Dependency-flow health analytics (`analytics/health/`)
 
