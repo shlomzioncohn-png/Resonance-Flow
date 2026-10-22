@@ -15,12 +15,12 @@ The keys read here, one subtree per provider:
         base_url: https://api.deepseek.com
         model: deepseek-chat
         timeout_seconds: 60
-        max_output_tokens: 1024
+        max_output_tokens: 2048
       gemini:
         base_url: https://generativelanguage.googleapis.com
         model: gemini-3.6-flash
         timeout_seconds: 60
-        max_output_tokens: 1024
+        max_output_tokens: 2048
         thinking_budget: 0
     # secrets.yaml
     llm:
@@ -42,10 +42,18 @@ DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-chat"
 DEFAULT_TIMEOUT_SECONDS = 60.0
 
-# An extraction answer is four small fields. Capping the output keeps a
-# runaway generation from costing real money, and nothing we ask for comes
-# anywhere near this.
-DEFAULT_MAX_OUTPUT_TOKENS = 1024
+# Output tokens one extracted task takes, with classification and mentions.
+# Measured on AMI IS1008b (2026-10-22): 11 tasks in 971 tokens, about 88 each;
+# rounded up for longer descriptions. tests/extraction ties the cap below to it.
+TOKENS_PER_TASK = 120
+
+# An extraction answer is a list of up to MAX_TASKS_PER_TEXT tasks (#690), at
+# TOKENS_PER_TASK each. At the cap the answer is cut mid-object and refused, so
+# the whole item fails; this leaves room for a full list. It still caps a
+# runaway generation, and only the tokens actually written are billed. A model
+# that ignores thinkingBudget 0 (gemini-3.8-flash) spends part of this cap on
+# thinking, so raise it when switching to one.
+DEFAULT_MAX_OUTPUT_TOKENS = 2048
 
 GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
 GEMINI_DEFAULT_API_VERSION = "v1beta"

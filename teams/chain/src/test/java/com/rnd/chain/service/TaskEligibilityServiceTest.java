@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
+import com.rnd.chain.dto.TaskEligibilityResponse;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.events.SchedulingPublishListener;
@@ -118,7 +119,8 @@ class TaskEligibilityServiceTest {
                     edgeService,
                     priorityScoreService,
                     historyRecorder,
-                    taskReadinessRepository);
+                    taskReadinessRepository
+                    );
 
 }
 
@@ -228,6 +230,45 @@ class TaskEligibilityServiceTest {
                 TaskNotFoundException.class,
                 () -> service.getTaskEligibility(
                         missingTaskId));
+    }
+
+    @Test
+    void getTaskEligibility_returnsReadinessView_whenStoredCountersSayBlockedButNothingBlocks() {
+
+        UUID taskId = UUID.randomUUID();
+
+        taskRepository.save(
+                createTask(
+                        taskId,
+                        TaskStatus.ACTIVE,
+                        false,
+                        5,
+                        3));
+
+        TaskEligibilityResponse response =
+                service.getTaskEligibility(taskId);
+
+        assertEquals(0, response.getBlockingCount());
+        assertEquals(0, response.getOpenConstraintCount());
+        assertTrue(response.isReady());
+    }
+
+    @Test
+    void getTaskEligibility_returnsReadinessView_whenStoredCountersSayReadyButABlockerExists() {
+
+        UUID taskId = UUID.randomUUID();
+        UUID blockerId = UUID.randomUUID();
+
+        taskRepository.save(createTask(taskId, TaskStatus.ACTIVE, true, 0, 0));
+        taskRepository.save(createTask(blockerId, TaskStatus.ACTIVE, true, 0, 0));
+        dependencyRepository.save(new TaskDependency(taskId, blockerId));
+
+        TaskEligibilityResponse response =
+                service.getTaskEligibility(taskId);
+
+        assertEquals(1, response.getBlockingCount());
+        assertEquals(0, response.getOpenConstraintCount());
+        assertFalse(response.isReady());
     }
 
     @Test

@@ -136,6 +136,89 @@ To lint (includes accessibility checks — see [Design system](#design-system-le
 npm run lint
 ```
 
+To run unit tests:
+
+```bash
+npm run test
+```
+
+## Manager Dashboard — Polling and Real-time Updates
+
+The manager dashboard updates in real time via polling with React Query, without
+requiring page refreshes. All manager-dashboard tiles follow the pattern below.
+
+### Refresh intervals
+
+Two global constants control how often tiles refetch:
+
+- **`constants.ts#MANAGER_LIVE_REFRESH_MS = 15_000`** — live updates for tiles
+  that change frequently: KPI (In progress, Blocked, Delayed), Support signals,
+  Bottlenecks, and Workload by team.
+- **`constants.ts#MANAGER_TREND_REFRESH_MS = 300_000`** — trend and historical
+  data that changes slowly: Flow over time, Workload by week.
+
+### Pattern for new manager dashboard tiles
+
+Every manager dashboard tile must follow this pattern:
+
+1. **Create a hook in `hooks/`** — never fetch directly from a component:
+   ```ts
+   // hooks/useManagerWorkload.ts
+   export function useManagerWorkload(filters?: ManagerFilters) {
+     return useQuery({
+       queryKey: workloadKeys.filtered(filters),
+       queryFn: getManagerWorkload,
+       refetchInterval: MANAGER_LIVE_REFRESH_MS,        // or MANAGER_TREND_REFRESH_MS for trends
+       refetchIntervalInBackground: true,               // don't refetch if tab is hidden
+     });
+   }
+   ```
+
+2. **Define the query key in `services/queryKeys.ts`** under the `['manager', ...]` prefix:
+   ```ts
+   export const workloadKeys = {
+     all: ['manager', 'workload'] as const,
+     filtered: (filters?: ManagerFilters) =>
+       [...workloadKeys.all, filters ? { ...filters } : {}] as const,
+   };
+   ```
+   Keys must include all filters (`period`, `team`, `project`) so that changing
+   filters triggers an immediate refetch with new data.
+
+3. **Use the hook in the page** — pass filters, don't create your own
+   `useState` + `useEffect`:
+   ```tsx
+   const { data = [], isPending, isError, error, refetch } = useManagerWorkload(filters);
+
+   if (isPending) return <LoadingState />;
+   if (isError) return <ErrorState onRetry={() => refetch()} />;
+   return <YourTile data={data} />;
+   ```
+
+4. **Display the update time** — show a "Auto-refresh · updated Xs ago" chip
+   using `query.dataUpdatedAt`:
+   ```tsx
+   const displayTime = useMemo(
+     () => formatTimeSinceUpdate(query.dataUpdatedAt),
+     [query.dataUpdatedAt],
+   );
+   <Chip label={`Auto-refresh · updated ${displayTime}`} />;
+   ```
+
+### Important behaviors
+
+- **Background refetches:** Use `isPending` (not `isFetching`) to detect initial
+  load. Background refetches won't show a loading state or clear existing data.
+- **Failures don't clear data:** If a background refetch fails, the previous data
+  stays on screen. The user sees stale data with "updated Xs ago" in the chip.
+- **Tab visibility:** Refetches pause when the tab is hidden (default React Query
+  behavior via `refetchIntervalInBackground`).
+- **Filter changes:** When a user changes a filter (period, team, project),
+  React Query detects the new query key and refetches immediately with the new
+  criteria.
+
+
+
 ## Storybook
 
 Every shared component has stories next to it (`components/**/<Name>.stories.tsx`).

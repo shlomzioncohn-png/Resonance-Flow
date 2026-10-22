@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
@@ -11,9 +11,9 @@ import ErrorState from '@/components/feedback/ErrorState';
 import FilterChip, { type FilterChipOption } from '@/components/ui/FilterChip';
 import KpiTile from '@/components/ui/KpiTile';
 import ProjectCard from '@/components/ui/ProjectCard';
-import { getProjects, type Project } from '@/services/projectsApi';
-
-type FetchStatus = 'loading' | 'loaded' | 'error';
+import { type Project } from '@/services/projectsApi';
+import { useManagerProjects } from '@/hooks/useManagerProjects';
+import { getErrorMessage } from '@/services/api';
 
 const ALL_OPTION: FilterChipOption = { label: 'All', value: 'all' };
 
@@ -45,31 +45,14 @@ function optionsFrom(values: string[]): FilterChipOption[] {
 }
 
 export default function ManagerProjectsPage() {
-  const [fetchStatus, setFetchStatus] = useState<FetchStatus>('loading');
-  const [projects, setProjects] = useState<Project[]>([]);
-
   const [statusFilter, setStatusFilter] = useState('all');
   const [teamFilter, setTeamFilter] = useState('all');
   const [ownerFilter, setOwnerFilter] = useState('all');
   const [sort, setSort] = useState('health');
 
-  const fetchProjects = useCallback(() => {
-    return getProjects()
-      .then((data) => {
-        setProjects(data);
-        setFetchStatus('loaded');
-      })
-      .catch(() => setFetchStatus('error'));
-  }, []);
-
-  const retry = useCallback(() => {
-    setFetchStatus('loading');
-    fetchProjects();
-  }, [fetchProjects]);
-
-  useEffect(() => {
-    fetchProjects();
-  }, [fetchProjects]);
+  // React Query hook handles polling every 15s, retries, and background refetches.
+  // isPending reflects only the initial load, not background refetches.
+  const { data: projects = [], isPending, isError, error, refetch } = useManagerProjects();
 
   const teamOptions = useMemo(() => optionsFrom(projects.map((p) => p.team)), [projects]);
   const ownerOptions = useMemo(() => optionsFrom(projects.map((p) => p.owner)), [projects]);
@@ -104,13 +87,13 @@ export default function ManagerProjectsPage() {
       title="Projects"
       description="Every active project, at a glance — open one to see process status and the people on it."
     >
-      {fetchStatus === 'loading' && <LoadingState message="Loading projects…" />}
+      {isPending && <LoadingState message="Loading projects…" />}
 
-      {fetchStatus === 'error' && (
-        <ErrorState description="Projects could not be loaded. Please try again." onRetry={retry} />
+      {isError && (
+        <ErrorState description={getErrorMessage(error)} onRetry={() => refetch()} />
       )}
 
-      {fetchStatus === 'loaded' && (
+      {!isPending && (
         <>
           <Stack
             direction={{ xs: 'column', sm: 'row' }}
