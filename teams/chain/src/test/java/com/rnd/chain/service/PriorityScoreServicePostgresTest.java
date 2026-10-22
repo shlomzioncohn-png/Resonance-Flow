@@ -3,11 +3,13 @@ package com.rnd.chain.service;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTestFixtures;
+import com.rnd.chain.dto.TaskTier;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.events.SchedulingUpdatePublisher;
 import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.testsupport.PgRepos;
@@ -18,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -25,6 +28,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -210,5 +214,72 @@ class PriorityScoreServicePostgresTest {
 
         assertEquals(0.8, fixture.taskRepo().findById(taskId).orElseThrow().getScore());
         assertTrue(fixture.publisher().getEvents().isEmpty());
+    }
+
+    @Test
+    void onScoreProposed_withTenant_createsPlaceholderForUnknownTaskAndStoresScoreTierAndScoredAt() {
+        UUID taskId = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
+        LocalDateTime scoredAt = LocalDateTime.of(2026, 10, 20, 12, 0);
+        Fixture fixture = newFixture(List.of());
+
+        TestTransactions.runCommitted(() -> fixture.priorityScoreService()
+                .onScoreProposed(taskId, tenantId, TaskTier.TACTICAL, 0.8, 0.5, scoredAt));
+
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
+        assertEquals(tenantId, task.getTenantId());
+        assertEquals(TaskTier.TACTICAL, task.getTier());
+        assertEquals(0.8, task.getScore());
+        assertEquals(scoredAt, task.getScoredAt());
+        assertNotNull(task.getPriorityScore());
+    }
+
+    @Test
+    void onScoreProposed_withOlderScoredAt_isIgnored() {
+        UUID taskId = UUID.randomUUID();
+        UUID tenantId = TaskTestFixtures.DEFAULT_TENANT_ID;
+        LocalDateTime scoredAt = LocalDateTime.of(2026, 10, 20, 12, 0);
+        Fixture fixture = newFixture(List.of(buildTask(taskId)));
+        TestTransactions.runCommitted(() -> fixture.priorityScoreService()
+                .onScoreProposed(taskId, tenantId, TaskTier.TACTICAL, 0.8, 0.5, scoredAt));
+        fixture.publisher().clear();
+
+        TestTransactions.runCommitted(() -> fixture.priorityScoreService()
+                .onScoreProposed(taskId, tenantId, TaskTier.STRATEGIC, 0.2, 0.9, scoredAt.minusMinutes(1)));
+
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
+        assertEquals(0.8, task.getScore());
+        assertEquals(0.5, task.getConfidence());
+        assertEquals(TaskTier.TACTICAL, task.getTier());
+        assertEquals(scoredAt, task.getScoredAt());
+        assertTrue(fixture.publisher().getEvents().isEmpty());
+    }
+
+    @Test
+    void onScoreProposed_withNewerScoredAt_replacesTheScore() {
+        UUID taskId = UUID.randomUUID();
+        UUID tenantId = TaskTestFixtures.DEFAULT_TENANT_ID;
+        LocalDateTime scoredAt = LocalDateTime.of(2026, 10, 20, 12, 0);
+        Fixture fixture = newFixture(List.of(buildTask(taskId)));
+        TestTransactions.runCommitted(() -> fixture.priorityScoreService()
+                .onScoreProposed(taskId, tenantId, null, 0.8, 0.5, scoredAt));
+
+        TestTransactions.runCommitted(() -> fixture.priorityScoreService()
+                .onScoreProposed(taskId, tenantId, null, 0.2, 0.9, scoredAt.plusMinutes(1)));
+
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
+        assertEquals(0.2, task.getScore());
+        assertEquals(scoredAt.plusMinutes(1), task.getScoredAt());
+    }
+
+    @Test
+    void onScoreProposed_withTenantDifferentFromStored_throwsAndDoesNotChangeTheTask() {
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId)));
+
+        assertThrows(TenantReassignmentException.class, () -> fixture.priorityScoreService()
+                .onScoreProposed(taskId, UUID.randomUUID(), null, 0.8, 0.5, null));
+
+        assertNull(fixture.taskRepo().findById(taskId).orElseThrow().getScore());
     }
 }

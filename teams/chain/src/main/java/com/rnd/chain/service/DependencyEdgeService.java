@@ -19,8 +19,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -87,18 +85,9 @@ public class DependencyEdgeService {
             UUID tenantId) {
 
         taskRepository.insertIfAbsent(
-                Task.builder()
-                        .id(taskId)
-                        .tenantId(tenantId)
-                        .status(TaskStatus.PENDING)
-                        .isReady(true)
-                        .createdAt(LocalDateTime.now())
-                        .updatedAt(
-                                LocalDateTime.ofEpochSecond(
-                                        0,
-                                        0,
-                                        ZoneOffset.UTC))
-                        .build());
+                Task.placeholder(
+                        taskId,
+                        tenantId));
     }
 
     /**

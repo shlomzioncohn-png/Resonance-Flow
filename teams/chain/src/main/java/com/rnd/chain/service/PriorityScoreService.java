@@ -4,20 +4,25 @@ import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTier;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.repository.TaskRepository;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -56,6 +61,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * decision (2026-10-06/07, #445 planning), not derived from data - revisit if the demo shows the
  * ranking feels wrong in practice.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PriorityScoreService {
@@ -292,6 +298,68 @@ public class PriorityScoreService {
                 updated,
                 readiness,
                 readiness);
+    }
+
+    /**
+     * task.score.proposed entry point: like {@link #onScoreProposed(UUID, Double, Double)}, but
+     * creates a PENDING placeholder in {@code tenantId} first if the task is not known yet, and
+     * also stores {@code tier} (null leaves the stored one untouched) and {@code scoredAt}.
+     *
+     * <p>An event whose {@code scoredAt} is earlier than the stored one is ignored entirely (no
+     * write, no publish). A null {@code scoredAt} skips that check and keeps the stored value.
+     *
+     * @throws TenantReassignmentException if the task already has a different, non-null tenant; a
+     * still-null stored tenant is backfilled
+     */
+    @Transactional
+    public void onScoreProposed(
+            UUID taskId,
+            UUID tenantId,
+            TaskTier tier,
+            Double mindScore,
+            Double confidence,
+            LocalDateTime scoredAt) {
+
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
+        requireInUnitRangeIfPresent(mindScore, "mindScore");
+        requireInUnitRangeIfPresent(confidence, "confidence");
+
+        taskRepository.insertIfAbsent(Task.placeholder(taskId, tenantId));
+
+        // Score changes don't modify readiness, so one snapshot serves as both before and after.
+        TaskReadinessSnapshot readiness = requireReadinessSnapshot(taskId);
+
+        AtomicReference<Task> previous = new AtomicReference<>();
+        AtomicBoolean stale = new AtomicBoolean();
+        Task updated = taskRepository.update(taskId, task -> {
+                    previous.set(task);
+                    if (task.getTenantId() != null && !task.getTenantId().equals(tenantId)) {
+                        throw new TenantReassignmentException(
+                                "Task " + taskId + " already has tenant " + task.getTenantId()
+                                        + ", event claims " + tenantId);
+                    }
+                    if (scoredAt != null && task.getScoredAt() != null && scoredAt.isBefore(task.getScoredAt())) {
+                        stale.set(true);
+                        return task;
+                    }
+                    return task.toBuilder()
+                            .tenantId(tenantId)
+                            .tier(tier != null ? tier : task.getTier())
+                            .score(mindScore)
+                            .confidence(confidence)
+                            .scoredAt(scoredAt != null ? scoredAt : task.getScoredAt())
+                            .build();
+                })
+                .orElseThrow(() -> new TaskNotFoundException(taskId));
+
+        if (stale.get()) {
+            log.info("Score for task {} ignored: scoredAt {} is older than stored {}",
+                    taskId, scoredAt, updated.getScoredAt());
+            return;
+        }
+
+        recomputePriorityScoreAndPublish(taskId, previous.get(), updated, readiness, readiness);
     }
 
     /**
