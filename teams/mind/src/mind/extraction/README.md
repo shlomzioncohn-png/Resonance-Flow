@@ -722,7 +722,10 @@ from a rejected answer reaches the output.
 
 One rejection earns no credit at all: **more than 15 tasks**. A model listing
 past the cap is listing non-tasks, so none of what it listed counts as right
-the first time. An extra key beside `tasks` is formatting and keeps the credit.
+the first time. Its rejection says so in its own words ("keep only the real
+tasks ... and leave out the rest"), and `repair_user.md` allows removing tasks
+when the rejection asks: told only to "return every task again, unchanged", a
+model resent the same over-long list until the item failed. An extra key beside `tasks` is formatting and keeps the credit.
 
 This narrows the problem; it does not close it. A valid task the model
 *rewords* during repair cannot be told apart from a new one, and is charged.
@@ -755,16 +758,28 @@ Each task names the work it depends on or blocks, in the content's own words
 It is defined in `system.md`, beside `has_dependencies`, because it is a field
 of every task, with the switch on or off.
 
-- **The rule:** non-empty `dependency_mentions` means `has_dependencies` is
-  true. A `false` beside a named mention is corrected to `true` and logged,
-  not repaired: the mention is the evidence, the `false` the slip. `true` with
-  an empty list is allowed — the content may show other work without naming it.
-- **Cleaned before the rule:** blanks, placeholders and repeats (case-blind)
-  are dropped, non-strings and phrases longer than a title (200) are dropped
-  and logged, at most `MAX_MENTIONS_PER_TASK` (10) are kept, and a bare string
-  becomes a one-item list. Cleaning runs first, so mentions that were all placeholders
-  cannot turn a `false` into a `true`. One empty mention used to stall #834's
-  listener; none leaves here.
+Three steps, in this order, and the order is the point:
+
+1. **Cleaned, in the model** (`only_usable_mentions_survive`): blanks,
+   placeholders and repeats (case-blind) are dropped, non-strings and phrases
+   longer than a title (200) are dropped and logged, at most
+   `MAX_MENTIONS_PER_TASK` (10) are kept, and a bare string becomes a
+   one-item list. One empty mention used to stall #834's listener; none
+   leaves here.
+2. **Grounded, against the content** (`grounding.ground_dependency_mentions`):
+   a mention stays only if at least half of its content words
+   (`MIN_MENTION_GROUNDING`) are in the text the model was sent. Shallower than
+   for `source_ref`, because a mention is a paraphrase, not an identifier.
+   "the security review" in a text that never mentions one is dropped.
+3. **The rule:** a non-empty list after grounding means `has_dependencies` is
+   true. A `false` beside a grounded mention is corrected and logged, not
+   repaired: the mention is the evidence, the `false` the slip. `true` with an
+   empty list is allowed — the content may show other work without naming it.
+
+The rule lives at grounding, not in the model, because the model never sees
+the content: applied there, an invented mention had already turned a `false`
+into a `true` before anything could tell it was invented, and
+`has_dependencies` is a contract field.
 - **Not in the contract.** `TaskCreationRequested` carries only
   `has_dependencies`. The mentions stay on `ExtractedTask.fields` and travel
   separately, through `flow.send(..., dependency_mentions=...)` in #359.
@@ -776,7 +791,9 @@ of every task, with the switch on or off.
 
 - **Long meetings are truncated.** `MAX_CONTENT_CHARS` (8000) cuts the tail,
   and a meeting's action items cluster at the end ("let's wrap up"). The cut
-  is now logged as a warning, with how much was not sent. To be
+  is now logged as a warning, with how much was not sent, and grounding reads
+  only the text that was sent: a pointer past the cut was out of the model's
+  sight, so matching it there would be luck. To be
   settled against the real AMI transcripts before the demo.
 - **Urgency has no reference date.** `source_timestamp` is not in the prompt,
   so "by Friday" cannot be placed in time.

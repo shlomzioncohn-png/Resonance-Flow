@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from pydantic import ValidationError
 
-from mind.extraction.models import ExtractedFields, ExtractedTasks
+from mind.extraction.models import MAX_TASKS_PER_TEXT, ExtractedFields, ExtractedTasks
 
 logger = logging.getLogger("mind.extraction")
 
@@ -82,6 +82,16 @@ def describe_validation_error(error: ValidationError) -> str:
     parts = []
     for detail in error.errors():
         location = ".".join(str(item) for item in detail["loc"]) or "(root)"
+        if detail["type"] == "too_long" and detail["loc"] == ("tasks",):
+            # Pydantic's "at most 15 items" names the limit and not what to
+            # remove, and the repair prompt otherwise says to return every
+            # task again: told only that, a model resends the same list.
+            parts.append(
+                f"tasks: there are {detail['ctx']['actual_length']}, and at most "
+                f"{MAX_TASKS_PER_TEXT} are allowed; keep only the real tasks, work someone "
+                f"is asked to do, offers to do, or agrees to do, and leave out the rest"
+            )
+            continue
         parts.append(f"{location}: {detail['msg']}")
     return "; ".join(parts)
 
@@ -118,7 +128,10 @@ def parse_response(
 class RejectedAnswer:
     """What can still be read from an answer that failed validation."""
 
-    # How many entries its `tasks` list held, valid or not; 0 when unreadable.
+    # False when there was no `tasks` list to read: broken JSON, no object,
+    # or `tasks` not a list. Then the two fields below say nothing.
+    readable: bool
+    # How many entries its `tasks` list held, valid or not.
     task_count: int
     # The entries that pass the task schema each on its own.
     valid: list[ExtractedFields]
@@ -142,11 +155,11 @@ def read_rejected_answer(
     try:
         payload = _read_payload(text)
     except MalformedOutput:
-        return RejectedAnswer(task_count=0, valid=[])
+        return RejectedAnswer(readable=False, task_count=0, valid=[])
 
     tasks = payload.get("tasks") if isinstance(payload, dict) else None
     if not isinstance(tasks, list):
-        return RejectedAnswer(task_count=0, valid=[])
+        return RejectedAnswer(readable=False, task_count=0, valid=[])
 
     found = []
     for task in tasks:
@@ -154,4 +167,4 @@ def read_rejected_answer(
             found.append(schema.model_validate(task))
         except ValidationError:
             continue
-    return RejectedAnswer(task_count=len(tasks), valid=found)
+    return RejectedAnswer(readable=True, task_count=len(tasks), valid=found)

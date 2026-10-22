@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from mind.contracts.base_enums import SourceType
 from mind.extraction.confidence import ConfidenceBreakdown, score_confidence
 from mind.extraction.config import ExtractionConfig
-from mind.extraction.grounding import ground_source_ref
+from mind.extraction.grounding import ground_dependency_mentions, ground_source_ref
 from mind.extraction.models import MAX_TASKS_PER_TEXT, ExtractedFields, response_model
 from mind.extraction.parsing import (
     MalformedOutput,
@@ -27,7 +27,12 @@ from mind.extraction.parsing import (
     parse_response,
     read_rejected_answer,
 )
-from mind.extraction.prompts import extraction_prompt, repair_prompt, system_prompt
+from mind.extraction.prompts import (
+    MAX_CONTENT_CHARS,
+    extraction_prompt,
+    repair_prompt,
+    system_prompt,
+)
 from mind.extraction.providers.base import (
     LLMError,
     LLMProvider,
@@ -153,6 +158,12 @@ def _log_repair_outcome(rejected: RejectedAnswer | None, answer: list[ExtractedF
 
     if rejected is None:
         return
+    if not rejected.readable:
+        logger.info(
+            "extraction: the rejected answer could not be read; the repaired answer has %d",
+            len(answer),
+        )
+        return
     if rejected.task_count > MAX_TASKS_PER_TEXT:
         logger.info(
             "extraction: the rejected answer had %d task(s), over the cap of %d; "
@@ -190,14 +201,18 @@ def _ground_and_score(
     text: str,
     attempts: int,
 ) -> ExtractedTask:
-    """Check one task's pointer against the content, then score that task.
+    """Check one task's pointer and mentions against the content, then score it.
 
-    The content is untrusted, so a pointer it did not contain does not
-    travel. Done here because this is the one place holding both the answer
-    and the text it was supposed to come from.
+    The content is untrusted, so a pointer or a mention it did not contain
+    does not travel. Done here because this is the one place holding both
+    the answer and the text it was supposed to come from.
+
+    `text` is what the model was sent, not the whole item: past the cut it
+    could not have read anything, so a match there is luck, not evidence.
     """
 
     fields, invented_ref = ground_source_ref(fields, text)
+    fields = ground_dependency_mentions(fields, text)
     return ExtractedTask(
         fields=fields,
         confidence=score_confidence(
@@ -242,6 +257,8 @@ class BasicExtractor:
         # from one place: a prompt asking for the classification and a
         # schema without it would fail every answer it received.
         system = system_prompt(self._config.classify)
+        # What the model can see, and so all that grounding may accept.
+        seen = text[:MAX_CONTENT_CHARS]
         schema = response_model(self._config.classify)
         user = extraction_prompt(source_type, text)
 
@@ -312,7 +329,7 @@ class BasicExtractor:
                     _ground_and_score(
                         fields,
                         source_type,
-                        text,
+                        seen,
                         _rounds_needed(fields, earlier_valid, schema_attempts),
                     )
                     for fields in answer

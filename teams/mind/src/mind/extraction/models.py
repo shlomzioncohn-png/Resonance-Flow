@@ -339,6 +339,9 @@ class ExtractedFields(BaseModel):
     # content's own words: "the DB upgrade" (#690, was #842). Never in the
     # contract. They travel beside it to #834's resolver, which turns them into
     # task ids, so a phrase that cannot be resolved there must not leave here.
+    # Checked against the content, and the rule that a mention means a
+    # dependency applied, by `grounding.ground_dependency_mentions`: the
+    # check needs the content, which this model never sees.
     dependency_mentions: list[str] = []
 
     @field_validator("dependency_mentions", mode="before")
@@ -398,25 +401,6 @@ class ExtractedFields(BaseModel):
             )
             kept = kept[:MAX_MENTIONS_PER_TASK]
         return kept
-
-    @model_validator(mode="after")
-    def a_mention_is_a_dependency(self) -> Self:
-        """A named dependency means there is one; the reverse is not required.
-
-        Runs after the cleanup above, so mentions that were all placeholders
-        are already gone and cannot turn a `false` into a `true`. Corrected
-        rather than repaired: the mention is the concrete evidence, and the
-        `false` beside it the slip.
-        """
-
-        if self.dependency_mentions and not self.has_dependencies:
-            logger.warning(
-                "extraction: dependency_mentions named %s but has_dependencies was false; "
-                "recording it as true",
-                self.dependency_mentions,
-            )
-            self.has_dependencies = True
-        return self
 
     @field_validator("description", "source_ref", mode="after")
     @classmethod

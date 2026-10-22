@@ -10,9 +10,11 @@ message can tell the model what to put in this field — and the field is what a
 user later clicks to "see the original".
 """
 
+import logging
+
 import pytest
 
-from mind.extraction.grounding import ground_source_ref
+from mind.extraction.grounding import ground_dependency_mentions, ground_source_ref
 from mind.extraction.models import ExtractedFields
 
 CONTENT = (
@@ -147,3 +149,64 @@ def test_a_link_the_content_itself_carries_is_still_kept() -> None:
 
     assert kept.source_ref == "https://evil.example/pay"
     assert invented is False
+
+
+# --- dependency_mentions (#690) -------------------------------------------
+
+MEETING_TEXT = "I can't finish the components concept until I know the chip budget."
+
+
+def _linked(mentions: list[str], has_dependencies: bool = False) -> ExtractedFields:
+    return ExtractedFields(
+        title="Prepare the components concept",
+        has_dependencies=has_dependencies,
+        dependency_mentions=mentions,
+    )
+
+
+def test_a_mention_the_content_names_is_kept_and_makes_it_a_dependency(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="mind.extraction"):
+        fields = ground_dependency_mentions(_linked(["the chip budget"]), MEETING_TEXT)
+
+    assert (fields.dependency_mentions, fields.has_dependencies) == (["the chip budget"], True)
+    assert "recording it as true" in caplog.text
+
+
+def test_an_invented_mention_is_dropped_and_changes_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="mind.extraction"):
+        fields = ground_dependency_mentions(_linked(["the security review"]), MEETING_TEXT)
+
+    assert (fields.dependency_mentions, fields.has_dependencies) == ([], False)
+    assert "does not appear in the content" in caplog.text
+
+
+def test_a_reworded_mention_counts_when_most_of_its_words_are_there() -> None:
+    fields = ground_dependency_mentions(_linked(["the updated chip budget"]), MEETING_TEXT)
+
+    assert fields.dependency_mentions == ["the updated chip budget"]
+
+
+def test_a_mention_with_no_content_words_names_nothing() -> None:
+    assert ground_dependency_mentions(_linked(["it"]), MEETING_TEXT).dependency_mentions == []
+
+
+def test_mentions_that_were_all_placeholders_do_not_flip_it() -> None:
+    """The model cleans them first, so grounding receives an empty list."""
+
+    fields = ground_dependency_mentions(_linked(["", "N/A"]), MEETING_TEXT)
+
+    assert (fields.dependency_mentions, fields.has_dependencies) == ([], False)
+
+
+def test_a_true_the_model_wrote_itself_survives_its_mentions_being_dropped() -> None:
+    """Only our own correction needs evidence; `true` with no mention is allowed."""
+
+    fields = ground_dependency_mentions(
+        _linked(["the security review"], has_dependencies=True), MEETING_TEXT
+    )
+
+    assert (fields.dependency_mentions, fields.has_dependencies) == ([], True)

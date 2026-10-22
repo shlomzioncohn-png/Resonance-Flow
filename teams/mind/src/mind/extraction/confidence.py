@@ -115,8 +115,11 @@ class ConfidenceBreakdown:
     value: float
 
 
-def _content_words(text: str) -> list[str]:
-    """Lowercase word tokens, minus stopwords and very short tokens."""
+def content_words(text: str) -> list[str]:
+    """Lowercase word tokens, minus stopwords and very short tokens.
+
+    Public because grounding reads dependency mentions the same way.
+    """
 
     return [
         word
@@ -132,7 +135,7 @@ def title_grounding(title: str, raw_text: str) -> float:
     covered by the short-title penalty and should not be charged twice.
     """
 
-    title_words = _content_words(title)
+    title_words = content_words(title)
     if not title_words:
         return 1.0
 
@@ -163,7 +166,7 @@ def _collect_signals(
     if ungrounded > 0:
         signals.append(("title_not_grounded", WEIGHT_TITLE_GROUNDING * ungrounded))
 
-    if len(_content_words(fields.title)) < MIN_TITLE_CONTENT_WORDS:
+    if len(content_words(fields.title)) < MIN_TITLE_CONTENT_WORDS:
         signals.append(("short_title", PENALTY_SHORT_TITLE))
 
     if fields.description is None:

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from mind.extraction.models import ExtractedFieldsWithClassification
+from mind.extraction.models import MAX_TASKS_PER_TEXT, ExtractedFieldsWithClassification
 from mind.extraction.parsing import (
     MalformedOutput,
     RejectedAnswer,
@@ -152,4 +152,16 @@ def test_the_valid_tasks_of_a_rejected_answer_are_found_one_by_one() -> None:
 
 @pytest.mark.parametrize("rejected", ["", "no JSON", '{"tasks": 3}', '{"tasks": [}'])
 def test_reading_a_rejected_answer_never_raises(rejected: str) -> None:
-    assert read_rejected_answer(rejected) == RejectedAnswer(task_count=0, valid=[])
+    assert read_rejected_answer(rejected) == RejectedAnswer(readable=False, task_count=0, valid=[])
+
+
+def test_too_many_tasks_says_which_to_keep() -> None:
+    """Pydantic's "at most 15 items" names the limit, not what to remove."""
+
+    with pytest.raises(MalformedOutput) as caught:
+        parse_response(answer(*[TASK] * (MAX_TASKS_PER_TEXT + 2)))
+
+    message = str(caught.value)
+    assert f"there are {MAX_TASKS_PER_TEXT + 2}" in message
+    assert f"at most {MAX_TASKS_PER_TEXT}" in message
+    assert "leave out the rest" in message

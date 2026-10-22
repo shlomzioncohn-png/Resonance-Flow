@@ -54,20 +54,11 @@ def test_a_shape_that_is_not_a_list_of_words_never_raises(written: object, kept:
     assert _task(written).dependency_mentions == kept
 
 
-def test_a_mention_makes_has_dependencies_true_and_says_so(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    with caplog.at_level(logging.WARNING, logger="mind.extraction"):
-        task = _task(["the DB upgrade"], has_dependencies=False)
+def test_the_model_alone_does_not_flip_has_dependencies() -> None:
+    """The flip needs the content, to check the mention is not invented, so it
+    happens at grounding (grounding.ground_dependency_mentions), not here."""
 
-    assert task.has_dependencies is True
-    assert "dependency_mentions" in caplog.text
-
-
-def test_mentions_that_were_all_placeholders_do_not_flip_it() -> None:
-    task = _task(["", "N/A"], has_dependencies=False)
-
-    assert (task.dependency_mentions, task.has_dependencies) == ([], False)
+    assert _task(["the DB upgrade"], has_dependencies=False).has_dependencies is False
 
 
 def test_true_with_no_mention_is_allowed() -> None:

@@ -380,3 +380,12 @@ def test_the_repair_prompt_lists_no_keys_of_its_own() -> None:
 
     for key in response_model(classify=True).model_fields:
         assert key not in prompt
+
+
+def test_a_repair_may_drop_tasks_when_the_rejection_asks_for_it() -> None:
+    """"Return every task again, unchanged" would otherwise forbid obeying a
+    rejection for having too many."""
+
+    prompt = repair_prompt(SourceType.MEETING, "text", "{}", "tasks: there are 17")
+
+    assert "unless the rejection asks you to remove some" in prompt

@@ -15,6 +15,7 @@ from mind.extraction.extractor import (
     ExtractionSuccess,
 )
 from mind.extraction.models import MAX_TASKS_PER_TEXT
+from mind.extraction.prompts import MAX_CONTENT_CHARS
 from tests.extraction.fakes import ScriptedProvider, answer_of
 
 MEETING = (
@@ -192,3 +193,30 @@ def test_no_task_means_no_proposal() -> None:
     )
 
     assert proposals == []
+
+
+# --- what the logs and the grounding read ----------------------------------
+
+
+def test_an_unreadable_rejected_answer_is_logged_as_unreadable(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.INFO, logger="mind.extraction"):
+        extract('{"tasks": [{"title": "A",}]}', answer_of(MINUTES))
+
+    assert "the rejected answer could not be read" in caplog.text
+    assert "had 0 task(s)" not in caplog.text
+
+
+def test_grounding_reads_only_the_text_the_model_was_sent() -> None:
+    """A pointer past the cut was out of the model's sight, so naming it was a guess."""
+
+    text = "Please book the lab for the prototype test. " + "x" * MAX_CONTENT_CHARS + " DES-2214"
+    provider = ScriptedProvider(answer_of({**LAB, "source_ref": "DES-2214"}))
+
+    outcome = BasicExtractor(provider, sleep=lambda _seconds: None).extract(text, SourceType.EMAIL)
+
+    assert isinstance(outcome, ExtractionSuccess)
+    [task] = outcome.tasks
+    assert task.fields.source_ref is None
+    assert "invented_source_ref" in [p.reason for p in task.confidence.penalties]

@@ -35,6 +35,7 @@ a follow-up, not a change to make while fixing this.
 import logging
 import re
 
+from mind.extraction.confidence import content_words, title_grounding
 from mind.extraction.models import ExtractedFields
 
 logger = logging.getLogger("mind.extraction")
@@ -101,3 +102,52 @@ def ground_source_ref(
         claimed,
     )
     return fields.model_copy(update={"source_ref": None}), True
+
+
+# A mention keeps its place when at least this share of its content words is
+# in the content. Not all: the model paraphrases ("the updated cost sheet" for
+# "the cost sheet"), and a mention only has to find the other task, not quote
+# it. Not calibrated; the persona set has no labelled mentions to tune on.
+MIN_MENTION_GROUNDING = 0.5
+
+
+def ground_dependency_mentions(fields: ExtractedFields, raw_text: str) -> ExtractedFields:
+    """Keep the mentions the content names, then let only those flip the flag.
+
+    The same reason as `ground_source_ref`: the content is untrusted and the
+    model invents, so a phrase naming work the content never mentions does
+    not travel to #834's resolver. Shallower than for a pointer, because a
+    mention is a paraphrase, not an identifier: most of its content words
+    must be in the content, and a mention with none ("it") names nothing.
+
+    The rule "a mention means a dependency" is applied here, after the check,
+    and not in the model: there an invented mention would already have turned
+    a `false` into a `true` before anything could see that it was invented.
+    A `true` the model wrote itself stays, mentions or not: the content may
+    show other work without naming it.
+    """
+
+    kept = []
+    for mention in fields.dependency_mentions:
+        if content_words(mention) and title_grounding(mention, raw_text) >= MIN_MENTION_GROUNDING:
+            kept.append(mention)
+        else:
+            logger.warning(
+                "extraction: dependency mention %r does not appear in the content; dropping it",
+                mention,
+            )
+
+    has_dependencies = fields.has_dependencies
+    if kept and not has_dependencies:
+        logger.warning(
+            "extraction: dependency_mentions named %s but has_dependencies was false; "
+            "recording it as true",
+            kept,
+        )
+        has_dependencies = True
+
+    if kept == fields.dependency_mentions and has_dependencies == fields.has_dependencies:
+        return fields
+    return fields.model_copy(
+        update={"dependency_mentions": kept, "has_dependencies": has_dependencies}
+    )
