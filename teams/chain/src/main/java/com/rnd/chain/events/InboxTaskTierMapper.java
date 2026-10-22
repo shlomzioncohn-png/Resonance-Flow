@@ -16,7 +16,11 @@ final class InboxTaskTierMapper {
         if (!event.hasTier()) {
             return null;
         }
-        return switch (event.getTier()) {
+        return map(event.getTier());
+    }
+
+    static TaskTier map(com.rnd.inbox.event.TaskTier tier) {
+        return switch (tier) {
             case TASK_TIER_OPERATIONAL -> TaskTier.OPERATIONAL;
             case TASK_TIER_TACTICAL -> TaskTier.TACTICAL;
             case TASK_TIER_STRATEGIC -> TaskTier.STRATEGIC;

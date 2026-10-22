@@ -15,6 +15,9 @@ dependencies = [
     "prometheus-fastapi-instrumentator>=7.0",
     # embeddings (src/mind/embeddings)
     "psycopg[binary,pool]>=3.1",
+    # psycopg[pool] extra has no version floor of its own -- pin separately.
+    # >=3.2 for AsyncConnectionPool's check= param (pgvector_store.py).
+    "psycopg-pool>=3.2",
     "sentence-transformers>=3.0",
     # migrations (migrations/) -- runs at deploy time, inside the image,
     # not just in dev, so this belongs here and not in [dev].

@@ -27,6 +27,12 @@ This belongs between parsing and scoring because that is the one point where
 both the raw text and the extracted fields are in hand: the schema never sees
 the content, and the scorer should not be changing what it measures.
 
+**`dependency_mentions` (#690)** are checked here too, by
+`ground_dependency_mentions`, for the same reason and more loosely: a mention
+is a paraphrase of other work, not an identifier. That function is also where
+a grounded mention turns `has_dependencies` true, because only here is the
+content in hand to tell a real mention from an invented one.
+
 `confidence.title_grounding` does the same kind of overlap check for the
 title, but for scoring rather than for dropping. Folding the two together is
 a follow-up, not a change to make while fixing this.
@@ -34,7 +40,9 @@ a follow-up, not a change to make while fixing this.
 
 import logging
 import re
+from collections.abc import Iterable
 
+from mind.extraction.confidence import content_words
 from mind.extraction.models import ExtractedFields
 
 logger = logging.getLogger("mind.extraction")
@@ -101,3 +109,74 @@ def ground_source_ref(
         claimed,
     )
     return fields.model_copy(update={"source_ref": None}), True
+
+
+# A mention keeps its place when every one of its content words is in the
+# content, except that one may be missing from a mention of at least
+# MIN_WORDS_TO_MISS_ONE: the model paraphrases ("the updated cost sheet" for
+# "the cost sheet"). Not a share: in a long meeting "review" or "budget" is
+# said somewhere, so half of a two-word mention grounds almost anything. Not
+# calibrated; the persona set has no labelled mentions to tune on.
+MIN_WORDS_TO_MISS_ONE = 3
+
+
+def ground_dependency_mentions(
+    fields: ExtractedFields,
+    raw_text: str,
+    sibling_titles: Iterable[str] = (),
+) -> ExtractedFields:
+    """Keep the mentions the content names, then let only those flip the flag.
+
+    The same reason as `ground_source_ref`: the content is untrusted and the
+    model invents, so a phrase naming work the content never mentions does
+    not travel to #834's resolver. Shallower than for a pointer, because a
+    mention is a paraphrase, not an identifier: most of its content words
+    must be in the content (see MIN_WORDS_TO_MISS_ONE), and a mention with
+    none ("it") names nothing. A longer mention is not easier to pass: every
+    word it adds is one more that must be in the content, so context the
+    model made up costs it the whole mention.
+
+    A mention equal to the title of another task in the same answer is
+    grounded by that task: the prompt asks for the sibling's title, and a
+    title is the model's own summary, so its words need not all be said.
+
+    Whether the words sit near each other is not checked: "security" early in
+    a meeting and "review" late still ground "the security review". Closing
+    that needs a proximity check, worth it only if live runs show it matters.
+
+    The rule "a mention means a dependency" is applied here, after the check,
+    and not in the model: there an invented mention would already have turned
+    a `false` into a `true` before anything could see that it was invented.
+    A `true` the model wrote itself stays, mentions or not: the content may
+    show other work without naming it.
+    """
+
+    said = set(content_words(raw_text))
+    siblings = {title.strip().lower() for title in sibling_titles}
+    kept = []
+    for mention in fields.dependency_mentions:
+        words = content_words(mention)
+        missing = sum(1 for word in words if word not in said)
+        allowed = 1 if len(words) >= MIN_WORDS_TO_MISS_ONE else 0
+        if mention.strip().lower() in siblings or (words and missing <= allowed):
+            kept.append(mention)
+        else:
+            logger.warning(
+                "extraction: dependency mention %r does not appear in the content; dropping it",
+                mention,
+            )
+
+    has_dependencies = fields.has_dependencies
+    if kept and not has_dependencies:
+        logger.warning(
+            "extraction: dependency_mentions named %s but has_dependencies was false; "
+            "recording it as true",
+            kept,
+        )
+        has_dependencies = True
+
+    if kept == fields.dependency_mentions and has_dependencies == fields.has_dependencies:
+        return fields
+    return fields.model_copy(
+        update={"dependency_mentions": kept, "has_dependencies": has_dependencies}
+    )

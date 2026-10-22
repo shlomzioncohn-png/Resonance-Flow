@@ -21,14 +21,16 @@ async def resolve_dependency_targets(
     k: int = DEFAULT_K,
     threshold: float | None = None,
     is_query: bool = True,
+    exclude_task_id: str | None = None,
 ) -> list[list[SearchResult]]:
     """Up to k candidates per reference, same order as the input. "No
     match" is the default: threshold=None reads Settings.dependency_match_threshold,
     not "no filtering" -- pass threshold=0.0 explicitly for the raw,
     unfiltered ranked list. is_query=True (default) is #245/#244's
     mention-vs-passage case; #471 passes is_query=False (full task vs
-    full task -- symmetric, see nearest_tasks()). Propagates ValueError
-    on empty text, same as embed()."""
+    full task -- symmetric, see nearest_tasks()). exclude_task_id keeps a
+    task's own row out of its own results. Propagates ValueError on empty
+    text, same as embed()."""
     if threshold is None:
         threshold = get_settings().dependency_match_threshold
     # exclude_completed=True at the store level, not a post-hoc Python
@@ -38,7 +40,14 @@ async def resolve_dependency_targets(
     # everything even with a real open match just outside that window.
     results = await asyncio.gather(
         *(
-            nearest_tasks(store, text, k=k, is_query=is_query, exclude_completed=True)
+            nearest_tasks(
+                store,
+                text,
+                k=k,
+                is_query=is_query,
+                exclude_completed=True,
+                exclude_task_id=exclude_task_id,
+            )
             for text in references
         )
     )

@@ -5,6 +5,7 @@ import com.rnd.inbox.event.SchedulingUpdatedEvent;
 import com.rnd.inbox.event.TaskCompletedEvent;
 import com.rnd.inbox.event.TaskUpdatedEvent;
 import com.rnd.mind.event.DependencyProposedEvent;
+import com.rnd.mind.event.TaskScoreProposedEvent;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializerConfig;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
@@ -32,7 +33,7 @@ import java.util.Map;
 
 /**
  * Kafka consumer factories for Chain's Protobuf-based inbound topics: task.updated (Inbox)
- * and task.dependencies.proposed (Mind), plus the producer templates for the
+ * and task.dependencies.proposed and task.score.proposed (Mind), plus the producer templates for the
  * Protobuf topics Chain publishes (task.scheduling.updated). One factory per message type - Confluent's
  * KafkaProtobufDeserializer needs the concrete target class per consumer
  * (specific.protobuf.value.type), and each of these topics carries a different message.
@@ -193,6 +194,22 @@ public class ChainProtobufKafkaConfig {
 
     @Bean
     public KafkaTemplate<String, DependencyProposedEvent> dependencyProposedEventKafkaTemplate() {
+        return protobufTemplate();
+    }
+
+    @Bean
+    public ConsumerFactory<String, TaskScoreProposedEvent> taskScoreProposedEventConsumerFactory() {
+        return new DefaultKafkaConsumerFactory<>(consumerProps(TaskScoreProposedEvent.class));
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, TaskScoreProposedEvent> taskScoreProposedEventKafkaListenerContainerFactory(
+            ConsumerFactory<String, TaskScoreProposedEvent> taskScoreProposedEventConsumerFactory) {
+        return listenerContainerFactory(taskScoreProposedEventConsumerFactory);
+    }
+
+    @Bean
+    public KafkaTemplate<String, TaskScoreProposedEvent> taskScoreProposedEventKafkaTemplate() {
         return protobufTemplate();
     }
 

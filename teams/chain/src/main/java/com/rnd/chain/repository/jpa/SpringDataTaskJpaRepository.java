@@ -20,6 +20,7 @@ public interface SpringDataTaskJpaRepository extends JpaRepository<TaskEntity, U
     List<TaskEntity> findByIdInAndDeletedAtIsNull(List<UUID> ids);
 
     List<TaskEntity> findByParentTaskIdAndDeletedAtIsNull(UUID parentTaskId);
+    List<TaskEntity> findByTenantIdAndDeletedAtIsNull(UUID tenantId);
 
     /** Deliberately not filtering deleted_at here - the soft-delete check happens in
      * {@link com.rnd.chain.repository.PostgresTaskRepository}, against the already-locked row. */
@@ -36,22 +37,19 @@ public interface SpringDataTaskJpaRepository extends JpaRepository<TaskEntity, U
      * cached in the persistence context. */
     @Modifying(clearAutomatically = true)
     @Query(value = """
-        INSERT INTO task (id, parent_task_id, tenant_id, status, is_ready, blocking_count,
-                          open_constraint_count, estimated_duration_min, score, confidence,
-                          priority_score, tier, version, created_at, updated_at, deleted_at)
-        VALUES (:id, :parentTaskId, :tenantId, :status, :isReady, :blockingCount,
-                :openConstraintCount, :estimatedDurationMin, :score, :confidence, :priorityScore,
-                CAST(:tier AS VARCHAR), 0, :createdAt, :updatedAt, :deletedAt)
+        INSERT INTO task (id, parent_task_id, tenant_id, status,
+                          estimated_duration_min, score, confidence,
+                          priority_score, tier, scored_at, version, created_at, updated_at, deleted_at)
+        VALUES (:id, :parentTaskId, :tenantId, :status,
+                :estimatedDurationMin, :score, :confidence, :priorityScore,
+                CAST(:tier AS VARCHAR), :scoredAt, 0, :createdAt, :updatedAt, :deletedAt)
         ON CONFLICT (id) DO UPDATE SET
             parent_task_id = EXCLUDED.parent_task_id,
             tenant_id = EXCLUDED.tenant_id,
             status = EXCLUDED.status,
-            is_ready = EXCLUDED.is_ready,
-            blocking_count = EXCLUDED.blocking_count,
-            open_constraint_count = EXCLUDED.open_constraint_count,
             estimated_duration_min = EXCLUDED.estimated_duration_min, score = EXCLUDED.score,
             confidence = EXCLUDED.confidence, priority_score = EXCLUDED.priority_score,
-            tier = COALESCE(EXCLUDED.tier, task.tier),
+            tier = COALESCE(EXCLUDED.tier, task.tier), scored_at = EXCLUDED.scored_at,
             created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at,
             deleted_at = EXCLUDED.deleted_at, version = task.version + 1
         """, nativeQuery = true)
@@ -59,13 +57,11 @@ public interface SpringDataTaskJpaRepository extends JpaRepository<TaskEntity, U
                 @Param("parentTaskId") UUID parentTaskId,
                 @Param("tenantId") UUID tenantId,
                 @Param("status") String status,
-                @Param("isReady") boolean isReady,
-                @Param("blockingCount") int blockingCount,
-                @Param("openConstraintCount") int openConstraintCount,
                 @Param("estimatedDurationMin") Integer estimatedDurationMin,
                 @Param("score") Double score, @Param("confidence") Double confidence,
                 @Param("priorityScore") Double priorityScore,
                 @Param("tier") String tier,
+                @Param("scoredAt") LocalDateTime scoredAt,
                 @Param("createdAt") LocalDateTime createdAt,
                 @Param("updatedAt") LocalDateTime updatedAt, @Param("deletedAt") LocalDateTime deletedAt);
 
@@ -76,11 +72,11 @@ public interface SpringDataTaskJpaRepository extends JpaRepository<TaskEntity, U
      */
     @Modifying(clearAutomatically = true)
     @Query(value = """
-        INSERT INTO task (id, parent_task_id, tenant_id, status, is_ready, blocking_count,
-                          open_constraint_count, estimated_duration_min, score, tier, version,
+        INSERT INTO task (id, parent_task_id, tenant_id, status,
+                          estimated_duration_min, score, tier, version,
                           created_at, updated_at, deleted_at)
-        VALUES (:id, :parentTaskId, :tenantId, :status, :isReady, :blockingCount,
-                :openConstraintCount, :estimatedDurationMin, :score, CAST(:tier AS VARCHAR), 0,
+        VALUES (:id, :parentTaskId, :tenantId, :status,
+                :estimatedDurationMin, :score, CAST(:tier AS VARCHAR), 0,
                 :createdAt, :updatedAt, :deletedAt)
         ON CONFLICT (id) DO NOTHING
         """, nativeQuery = true)
@@ -88,9 +84,6 @@ public interface SpringDataTaskJpaRepository extends JpaRepository<TaskEntity, U
                        @Param("parentTaskId") UUID parentTaskId,
                        @Param("tenantId") UUID tenantId,
                        @Param("status") String status,
-                       @Param("isReady") boolean isReady,
-                       @Param("blockingCount") int blockingCount,
-                       @Param("openConstraintCount") int openConstraintCount,
                        @Param("estimatedDurationMin") Integer estimatedDurationMin,
                        @Param("score") Double score,
                        @Param("tier") String tier,

@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -260,6 +261,10 @@ public class TaskTraversalService {
             return List.of();
         }
 
+        Map<UUID, Task> tasksById = new HashMap<>();
+        for (Task task : taskRepository.findAllById(ids)) {
+            tasksById.put(task.getId(), task);
+        }
         Map<UUID, TaskReadinessSnapshot> readinessById =
                 taskReadinessRepository.findByIds(ids);
 
@@ -267,28 +272,15 @@ public class TaskTraversalService {
                 new ArrayList<>();
 
         for (UUID id : ids) {
+            Task task = tasksById.get(id);
+            TaskReadinessSnapshot readiness = readinessById.get(id);
 
-            Optional<Task> task =
-                    taskRepository.findById(id);
-
-            if (task.isEmpty()) {
-                // dangling edge / parent reference - preserve existing behavior
+            // Skip a dangling edge, and a task deleted between the two reads (no readiness row).
+            if (task == null || readiness == null) {
                 continue;
             }
 
-            TaskReadinessSnapshot readiness =
-                    readinessById.get(id);
-
-            if (readiness == null) {
-                throw new IllegalStateException(
-                        "No task_readiness row found for task "
-                                + id);
-            }
-
-            result.add(
-                    TaskResponse.from(
-                            task.get(),
-                            readiness));
+            result.add(TaskResponse.from(task, readiness));
         }
 
         return result;

@@ -1,7 +1,7 @@
 """
-pgvector-backed VectorStore. Only file that knows Postgres/pgvector
+pgvector-backed VectorIndex. Only file that knows Postgres/pgvector
 details -- a different backend would be a sibling implementing
-base.VectorStore.
+base.VectorIndex and base.VectorStore.
 
 Uses psycopg3 (async), not psycopg2, so DB calls don't block the event
 loop under FastAPI.
@@ -9,16 +9,36 @@ loop under FastAPI.
 
 import asyncio
 import json
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import LiteralString
+from uuid import UUID
 
-from psycopg import sql
+from psycopg import AsyncCursor, sql
+from psycopg.conninfo import conninfo_to_dict
+from psycopg.rows import TupleRow
 from psycopg_pool import AsyncConnectionPool
 
 from mind.config import VectorStoreSettings
-from mind.embeddings.base import SearchResult, VectorStore
+from mind.embeddings.base import SearchResult, VectorIndex, VectorStore
 from mind.embeddings.embeddings import embed_async
 
+# Defaults only -- a DSN override wins. See README.md "Connection resilience".
+_CONNECTION_DEFAULTS = {
+    "keepalives": 1,
+    "keepalives_idle": 30,
+    "keepalives_interval": 10,
+    "keepalives_count": 3,
+    "tcp_user_timeout": 10_000,
+}
 
-class PgVectorStore(VectorStore):
+logger = logging.getLogger(__name__)
+
+
+class PgVectorStore(VectorIndex):
+    """Owns the connection pool. Use for_tenant() for reads and writes."""
+
     def __init__(
         self,
         settings: VectorStoreSettings,
@@ -28,12 +48,18 @@ class PgVectorStore(VectorStore):
         pool_timeout: float = 30.0,
     ) -> None:
         self._settings = settings
+        dsn = str(settings.dsn.get_secret_value())
+        existing = conninfo_to_dict(dsn)
+        kwargs = {k: v for k, v in _CONNECTION_DEFAULTS.items() if k not in existing}
         self._pool = AsyncConnectionPool(
-            str(settings.dsn.get_secret_value()),
+            dsn,
             min_size=min_conn,
             max_size=max_conn,
             timeout=pool_timeout,
             open=False,
+            kwargs=kwargs,
+            # Swap a dead connection before handoff. See README.md "Connection resilience".
+            check=AsyncConnectionPool.check_connection,
         )
         self._ready = False
         self._ready_lock = asyncio.Lock()
@@ -60,6 +86,12 @@ class PgVectorStore(VectorStore):
     def _table(self) -> sql.Identifier:
         return sql.Identifier(self._settings.table)
 
+    @asynccontextmanager
+    async def _cursor(self) -> AsyncIterator[AsyncCursor[TupleRow]]:
+        await self._ensure_ready()
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            yield cur
+
     async def _check_schema_migrated(self) -> None:
         # Schema is created ahead of time by `alembic upgrade head`
         # (migrations/) -- fail fast with a clear message instead of a
@@ -73,60 +105,13 @@ class PgVectorStore(VectorStore):
                     "schema not migrated. Run `alembic upgrade head` (or `make migrate`)."
                 )
 
-    async def upsert(
-        self, task_id: str, vector: list[float], *, content_hash: str | None = None
-    ) -> None:
-        await self._ensure_ready()
-        async with self._pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute(
-                sql.SQL(
-                    """
-                    INSERT INTO {table} (task_id, embedding, content_hash)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (task_id) DO UPDATE SET
-                        embedding = EXCLUDED.embedding, content_hash = EXCLUDED.content_hash;
-                    """
-                ).format(table=self._table()),
-                (task_id, vector, content_hash),
-            )
+    def for_tenant(self, tenant_id: UUID) -> "PgTenantStore":
+        return PgTenantStore(self, tenant_id)
 
-    async def upsert_if_absent(
-        self, task_id: str, vector: list[float], *, content_hash: str | None = None
-    ) -> bool:
-        await self._ensure_ready()
-        async with self._pool.connection() as conn, conn.cursor() as cur:
+    async def tenant_of(self, task_id: str) -> UUID | None:
+        async with self._cursor() as cur:
             await cur.execute(
-                sql.SQL(
-                    """
-                    INSERT INTO {table} (task_id, embedding, content_hash)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (task_id) DO NOTHING;
-                    """
-                ).format(table=self._table()),
-                (task_id, vector, content_hash),
-            )
-            return cur.rowcount > 0
-
-    async def get_vector(self, task_id: str) -> list[float] | None:
-        await self._ensure_ready()
-        async with self._pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute(
-                sql.SQL("SELECT embedding FROM {table} WHERE task_id = %s;").format(
-                    table=self._table()
-                ),
-                (task_id,),
-            )
-            row = await cur.fetchone()
-            if row is None:
-                return None
-            # No registered adapter for `vector` -- comes back as text, e.g. "[0.1,0.2]" (valid JSON).
-            return json.loads(row[0])
-
-    async def get_content_hash(self, task_id: str) -> str | None:
-        await self._ensure_ready()
-        async with self._pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute(
-                sql.SQL("SELECT content_hash FROM {table} WHERE task_id = %s;").format(
+                sql.SQL("SELECT tenant_id FROM {table} WHERE task_id = %s;").format(
                     table=self._table()
                 ),
                 (task_id,),
@@ -134,63 +119,128 @@ class PgVectorStore(VectorStore):
             row = await cur.fetchone()
             return row[0] if row else None
 
-    async def mark_completed(self, task_id: str) -> bool:
-        await self._ensure_ready()
-        async with self._pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute(
-                sql.SQL("UPDATE {table} SET is_completed = TRUE WHERE task_id = %s;").format(
-                    table=self._table()
-                ),
-                (task_id,),
+    async def clear(self) -> None:
+        """Test teardown only. Every tenant."""
+        async with self._cursor() as cur:
+            await cur.execute(sql.SQL("TRUNCATE TABLE {table};").format(table=self._table()))
+
+
+class PgTenantStore(VectorStore):
+    """One tenant's rows: every statement carries `tenant_id = %s`."""
+
+    def __init__(self, index: PgVectorStore, tenant_id: UUID) -> None:
+        self._index = index
+        self._tenant_id = tenant_id
+
+    async def _execute(self, query: LiteralString, *params: object) -> int:
+        async with self._index._cursor() as cur:
+            await cur.execute(sql.SQL(query).format(table=self._index._table()), params)
+            return cur.rowcount
+
+    async def _fetch_one(self, query: LiteralString, *params: object) -> TupleRow | None:
+        async with self._index._cursor() as cur:
+            await cur.execute(sql.SQL(query).format(table=self._index._table()), params)
+            return await cur.fetchone()
+
+    async def upsert(
+        self, task_id: str, vector: list[float], *, content_hash: str | None = None
+    ) -> None:
+        # A row indexed before #841 has no tenant and takes this one.
+        # Another tenant's row is never overwritten.
+        written = await self._execute(
+            """
+            INSERT INTO {table} AS t (task_id, tenant_id, embedding, content_hash)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (task_id) DO UPDATE SET
+                tenant_id = EXCLUDED.tenant_id,
+                embedding = EXCLUDED.embedding,
+                content_hash = EXCLUDED.content_hash
+            WHERE t.tenant_id IS NULL OR t.tenant_id = EXCLUDED.tenant_id;
+            """,
+            task_id,
+            self._tenant_id,
+            vector,
+            content_hash,
+        )
+        if not written:
+            logger.warning(
+                "vector store: task %s is indexed under another tenant, not overwritten", task_id
             )
-            return cur.rowcount > 0
+
+    async def upsert_if_absent(
+        self, task_id: str, vector: list[float], *, content_hash: str | None = None
+    ) -> bool:
+        inserted = await self._execute(
+            """
+            INSERT INTO {table} (task_id, tenant_id, embedding, content_hash)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (task_id) DO NOTHING;
+            """,
+            task_id,
+            self._tenant_id,
+            vector,
+            content_hash,
+        )
+        return inserted > 0
+
+    async def get_vector(self, task_id: str) -> list[float] | None:
+        row = await self._fetch_one(
+            "SELECT embedding FROM {table} WHERE task_id = %s AND tenant_id = %s;",
+            task_id,
+            self._tenant_id,
+        )
+        # No registered adapter for `vector` -- comes back as text, e.g. "[0.1,0.2]" (valid JSON).
+        return json.loads(row[0]) if row else None
+
+    async def get_content_hash(self, task_id: str) -> str | None:
+        row = await self._fetch_one(
+            "SELECT content_hash FROM {table} WHERE task_id = %s AND tenant_id = %s;",
+            task_id,
+            self._tenant_id,
+        )
+        return row[0] if row else None
+
+    async def mark_completed(self, task_id: str) -> bool:
+        updated = await self._execute(
+            "UPDATE {table} SET is_completed = TRUE WHERE task_id = %s AND tenant_id = %s;",
+            task_id,
+            self._tenant_id,
+        )
+        return updated > 0
 
     async def mark_incomplete(self, task_id: str) -> bool:
-        await self._ensure_ready()
-        async with self._pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute(
-                sql.SQL("UPDATE {table} SET is_completed = FALSE WHERE task_id = %s;").format(
-                    table=self._table()
-                ),
-                (task_id,),
-            )
-            return cur.rowcount > 0
+        updated = await self._execute(
+            "UPDATE {table} SET is_completed = FALSE WHERE task_id = %s AND tenant_id = %s;",
+            task_id,
+            self._tenant_id,
+        )
+        return updated > 0
 
     async def delete(self, task_id: str) -> None:
-        await self._ensure_ready()
-        async with self._pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute(
-                sql.SQL("DELETE FROM {table} WHERE task_id = %s;").format(table=self._table()),
-                (task_id,),
-            )
-
-    async def clear(self) -> None:
-        """Test teardown only."""
-        await self._ensure_ready()
-        async with self._pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute(sql.SQL("TRUNCATE TABLE {table};").format(table=self._table()))
+        await self._execute(
+            "DELETE FROM {table} WHERE task_id = %s AND tenant_id = %s;",
+            task_id,
+            self._tenant_id,
+        )
 
     def _search_query(self, *, exclude_completed: bool, exclude_task_id: bool) -> sql.Composed:
         # ORDER BY the raw <=> expression -- pgvector can't match the HNSW
         # index to an alias. Conditions go in WHERE, not a post-hoc filter,
         # so a small k only ever counts qualifying rows.
-        conditions = []
+        conditions = [sql.SQL("tenant_id = %s")]
         if exclude_completed:
             conditions.append(sql.SQL("NOT is_completed"))
         if exclude_task_id:
             conditions.append(sql.SQL("task_id != %s"))
-        where_clause = (
-            sql.SQL("WHERE ") + sql.SQL(" AND ").join(conditions) if conditions else sql.SQL("")
-        )
         return sql.SQL(
             """
             SELECT task_id, 1 - (embedding <=> %s::vector) AS similarity, is_completed
             FROM {table}
-            {where_clause}
+            WHERE {conditions}
             ORDER BY embedding <=> %s::vector
             LIMIT %s;
             """
-        ).format(table=self._table(), where_clause=where_clause)
+        ).format(table=self._index._table(), conditions=sql.SQL(" AND ").join(conditions))
 
     async def search(
         self,
@@ -200,21 +250,17 @@ class PgVectorStore(VectorStore):
         exclude_completed: bool = False,
         exclude_task_id: str | None = None,
     ) -> list[SearchResult]:
-        await self._ensure_ready()
-        async with self._pool.connection() as conn, conn.cursor() as cur:
+        async with self._index._cursor() as cur:
             # set_config(), not SET LOCAL -- that can't take a bound param.
             await cur.execute(
                 "SELECT set_config('hnsw.ef_search', %s, true);",
-                (str(self._settings.search_effort),),
+                (str(self._index._settings.search_effort),),
             )
-            if exclude_completed or exclude_task_id is not None:
-                # "Excluding 1 task_id can never starve k" only holds while
-                # search_effort stays above k -- that's the default, but
-                # it's a runtime setting, not a guarantee. Keeps Postgres
-                # scanning past the ef_search window for k qualifying rows
-                # instead of stopping short (pgvector >=0.8).
-                await cur.execute("SELECT set_config('hnsw.iterative_scan', 'strict_order', true);")
-            params: list[object] = [query_vector]
+            # Always on: the tenant condition can leave fewer than k matching
+            # rows inside the ef_search window. Keeps Postgres scanning until
+            # it has k (pgvector >=0.8).
+            await cur.execute("SELECT set_config('hnsw.iterative_scan', 'strict_order', true);")
+            params: list[object] = [query_vector, self._tenant_id]
             if exclude_task_id is not None:
                 params.append(exclude_task_id)
             params.extend([query_vector, k])
