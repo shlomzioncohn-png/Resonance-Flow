@@ -14,6 +14,9 @@ import com.rnd.chain.repository.TaskStateHistoryRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
+
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -27,41 +30,21 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.BitSet;
 
 @Service
+@RequiredArgsConstructor
 public class TenantDependencyGraphService {
 
+    @NonNull
     private final TaskRepository taskRepository;
+    @NonNull
     private final TaskDependencyRepository taskDependencyRepository;
+    @NonNull
     private final TaskReadinessRepository taskReadinessRepository;
+    @NonNull
     private final TaskStateHistoryRepository taskStateHistoryRepository;
 
-    public TenantDependencyGraphService(
-            TaskRepository taskRepository,
-            TaskDependencyRepository taskDependencyRepository,
-            TaskReadinessRepository taskReadinessRepository,
-            TaskStateHistoryRepository taskStateHistoryRepository) {
-
-        this.taskRepository =
-                Objects.requireNonNull(
-                        taskRepository,
-                        "taskRepository must not be null");
-
-        this.taskDependencyRepository =
-                Objects.requireNonNull(
-                        taskDependencyRepository,
-                        "taskDependencyRepository must not be null");
-
-        this.taskReadinessRepository =
-                Objects.requireNonNull(
-                        taskReadinessRepository,
-                        "taskReadinessRepository must not be null");
-
-        this.taskStateHistoryRepository =
-                Objects.requireNonNull(
-                        taskStateHistoryRepository,
-                        "taskStateHistoryRepository must not be null");
-    }
 
     @Transactional(readOnly = true)
     public TenantDependencyGraphResponse getDependencyGraph(
@@ -156,18 +139,9 @@ public class TenantDependencyGraphService {
          * be ranked by their true impact.
          */
         Map<UUID, Integer> transitiveCountByTaskId =
-                new HashMap<>();
-
-        for (Task task : tasks) {
-            int count =
-                    countTransitiveDependents(
-                            task.getId(),
-                            dependentsByTaskId);
-
-            transitiveCountByTaskId.put(
-                    task.getId(),
-                    count);
-        }
+            calculateTransitiveDependentCounts(
+                    tasks,
+                    dependentsByTaskId);
 
         /*
          * Build all nodes.
@@ -279,6 +253,161 @@ public class TenantDependencyGraphService {
         }
 
         return dependentsByTaskId;
+    }
+    private Map<UUID, Integer> calculateTransitiveDependentCounts(
+        List<Task> tasks,
+        Map<UUID, List<UUID>> dependentsByTaskId) {
+
+        int taskCount = tasks.size();
+
+        Map<UUID, Integer> indexByTaskId =
+            new HashMap<>(taskCount);
+
+        for (int i = 0; i < taskCount; i++) {
+            indexByTaskId.put(
+                tasks.get(i).getId(),
+                i);
+        }
+
+        int[] indegree =
+            new int[taskCount];
+
+        for (Map.Entry<UUID, List<UUID>> entry
+            : dependentsByTaskId.entrySet()) {
+
+            for (UUID dependentId : entry.getValue()) {
+
+                Integer dependentIndex =
+                    indexByTaskId.get(dependentId);
+
+                if (dependentIndex != null) {
+                indegree[dependentIndex]++;
+                }
+            }
+        }
+
+        Deque<UUID> queue =
+            new ArrayDeque<>();
+
+        for (Task task : tasks) {
+
+            Integer index =
+                indexByTaskId.get(task.getId());
+
+            if (indegree[index] == 0) {
+                queue.addLast(task.getId());
+            }
+        }
+
+        List<UUID> topologicalOrder =
+            new ArrayList<>(taskCount);
+
+        while (!queue.isEmpty()) {
+
+            UUID current =
+                queue.removeFirst();
+
+            topologicalOrder.add(current);
+
+            for (UUID dependentId
+                : dependentsByTaskId.getOrDefault(
+                        current,
+                        List.of())) {
+
+                Integer dependentIndex =
+                    indexByTaskId.get(dependentId);
+
+                if (dependentIndex == null) {
+                continue;
+                }
+
+                indegree[dependentIndex]--;
+
+                if (indegree[dependentIndex] == 0) {
+                queue.addLast(dependentId);
+                }
+            }
+        }
+
+    /*
+     * Dependency graphs are expected to be acyclic.
+     * Fall back to the defensive DFS implementation if corrupted
+     * data contains a cycle.
+     */
+        if (topologicalOrder.size() != taskCount) {
+
+            Map<UUID, Integer> fallbackCounts =
+                new HashMap<>(taskCount);
+
+            for (Task task : tasks) {
+                fallbackCounts.put(
+                    task.getId(),
+                    countTransitiveDependents(
+                            task.getId(),
+                            dependentsByTaskId));
+        }
+
+            return fallbackCounts;
+        }
+
+        BitSet[] transitiveDependents =
+            new BitSet[taskCount];
+
+        for (int i = 0; i < taskCount; i++) {
+            transitiveDependents[i] =
+                new BitSet(taskCount);
+        }
+
+        Map<UUID, Integer> counts =
+            new HashMap<>(taskCount);
+
+    /*
+     * Reverse topological order guarantees that every direct
+     * dependent has already calculated its own transitive dependents.
+     */
+        for (int i = topologicalOrder.size() - 1;
+            i >= 0;
+            i--) {
+
+            UUID taskId =
+                topologicalOrder.get(i);
+
+            int taskIndex =
+                indexByTaskId.get(taskId);
+
+            BitSet reachable =
+                transitiveDependents[taskIndex];
+
+            for (UUID dependentId
+                : dependentsByTaskId.getOrDefault(
+                        taskId,
+                        List.of())) {
+
+                Integer dependentIndex =
+                    indexByTaskId.get(dependentId);
+
+                if (dependentIndex == null) {
+                continue;
+                }
+
+                reachable.set(dependentIndex);
+
+                reachable.or(
+                    transitiveDependents[
+                            dependentIndex]);
+            }
+
+        /*
+         * Defensive only: a valid DAG can never reach itself.
+         */
+            reachable.clear(taskIndex);
+
+            counts.put(
+                taskId,
+                reachable.cardinality());
+        }
+
+        return counts;
     }
 
     private int countTransitiveDependents(
