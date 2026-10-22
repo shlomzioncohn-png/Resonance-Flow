@@ -11,6 +11,8 @@ import com.rnd.chain.repository.TaskRepository;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import com.rnd.chain.dto.TaskReadinessSnapshot;
+import java.util.Map;
 
 import java.util.List;
 import java.util.Optional;
@@ -63,8 +65,8 @@ class DependencyEdgeServiceTenantLockTest {
                         graphLock,
                         taskCounterUpdater,
                         historyRecorder,
-                        taskReadinessRepository,
-                        taskRepository);
+                        taskReadinessRepository
+                        );
     }
 
     @Test
@@ -85,8 +87,14 @@ class DependencyEdgeServiceTenantLockTest {
                         .tenantId(tenantId)
                         .build();
 
-        when(taskRepository.findById(taskId))
-                .thenReturn(Optional.of(task));
+        when(taskReadinessRepository.findByIds(List.of(taskId)))
+            .thenReturn(Map.of(
+                taskId,
+                new TaskReadinessSnapshot(
+                        taskId,
+                        tenantId,
+                        0,
+                        0)));
 
         TaskDependency expected =
                 mock(TaskDependency.class);

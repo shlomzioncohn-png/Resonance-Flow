@@ -42,22 +42,20 @@ public class DependencyEdgeService {
     private final TaskCounterUpdater taskCounterUpdater;
     private final TaskStateHistoryRecorder historyRecorder;
     private final TaskReadinessRepository taskReadinessRepository;
-    private final TaskRepository taskRepository;
 
     public DependencyEdgeService(
             TaskDependencyRepository taskDependencyRepository,
             GraphLock graphLock,
             TaskCounterUpdater taskCounterUpdater,
             TaskStateHistoryRecorder historyRecorder,
-            TaskReadinessRepository taskReadinessRepository,
-            TaskRepository taskRepository) {
+            TaskReadinessRepository taskReadinessRepository
+            ) {
 
         this.taskDependencyRepository = taskDependencyRepository;
         this.graphLock = graphLock;
         this.taskCounterUpdater = taskCounterUpdater;
         this.historyRecorder = historyRecorder;
         this.taskReadinessRepository = taskReadinessRepository;
-        this.taskRepository = taskRepository;
     }
 
     /**
@@ -746,12 +744,14 @@ public class DependencyEdgeService {
      * shared legacy lock is used. The existing requireTask
      * inside the lock still throws TaskNotFoundException.
      */
-    private UUID tenantIdForTask(
-            UUID taskId) {
+    private UUID tenantIdForTask(UUID taskId) {
+        TaskReadinessSnapshot snapshot =
+            taskReadinessRepository
+                    .findByIds(List.of(taskId))
+                    .get(taskId);
 
-        return taskRepository
-                .findById(taskId)
-                .map(Task::getTenantId)
-                .orElse(null);
-    }
+        return snapshot != null
+            ? snapshot.tenantId()
+            : null;
+}
 }

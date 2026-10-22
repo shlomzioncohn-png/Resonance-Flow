@@ -86,8 +86,7 @@ class DependencyEdgeServiceTest {
                         lock,
                         counterUpdater,
                         TaskStateHistoryFixtures.newRecorder(),
-                        taskReadinessRepository,
-                        taskRepository);
+                        taskReadinessRepository);
     }
 
     @Test
@@ -1469,8 +1468,7 @@ class DependencyEdgeServiceTest {
                         lock,
                         counterUpdater,
                         TaskStateHistoryFixtures.newRecorder(),
-                        taskReadinessRepository,
-                        taskRepository);
+                        taskReadinessRepository);
 
         return new Fixture(
                 taskRepo,

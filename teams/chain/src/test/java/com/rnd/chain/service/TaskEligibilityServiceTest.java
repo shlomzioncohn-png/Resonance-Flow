@@ -97,8 +97,7 @@ class TaskEligibilityServiceTest {
                     lock,
                     counterUpdater,
                     historyRecorder,
-                    taskReadinessRepository,
-                    taskRepository);
+                    taskReadinessRepository);
 }
 
     @Test
@@ -577,8 +576,7 @@ class TaskEligibilityServiceTest {
                     lock,
                     counterUpdater,
                     historyRecorder,
-                    taskReadinessRepository,
-                    taskRepository);
+                    taskReadinessRepository);
 
         return new Fixture(
             taskRepo,
