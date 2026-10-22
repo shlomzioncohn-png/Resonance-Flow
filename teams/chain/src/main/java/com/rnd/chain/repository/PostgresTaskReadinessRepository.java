@@ -29,7 +29,7 @@ public class PostgresTaskReadinessRepository implements TaskReadinessRepository 
         }
 
         String sql = """
-                SELECT id, blocking_count, open_constraint_count
+                SELECT id, tenant_id, blocking_count, open_constraint_count
                 FROM task_readiness
                 WHERE id = ANY (?)
                 """;
@@ -48,6 +48,7 @@ public class PostgresTaskReadinessRepository implements TaskReadinessRepository 
                 },
                 (rs, rowNum) -> new TaskReadinessSnapshot(
                         rs.getObject("id", UUID.class),
+                        rs.getObject("tenant_id", UUID.class),
                         rs.getInt("blocking_count"),
                         rs.getInt("open_constraint_count")
                 )
