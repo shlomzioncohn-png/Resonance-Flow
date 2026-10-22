@@ -2,6 +2,7 @@
 {{- if $component.enabled }}
 {{- with $component.config }}
 {{- $config := deepCopy . }}
+{{- $_ := set $config.bridge.postgres "url" (printf "jdbc:postgresql://%s/%s" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "postgresql")) $config.bridge.postgres.database) }}
 {{- $_ := set $config.spring.kafka "bootstrap-servers" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $.Values.dependencies "name" "kafka")) }}
 
 {{- $_ := set $config.spring.kafka.properties "sasl.jaas.config" (include "resonance-flow.kafkaSaslJaasConfig" (dict "root" $ "password" "${kafka.password}")) }}

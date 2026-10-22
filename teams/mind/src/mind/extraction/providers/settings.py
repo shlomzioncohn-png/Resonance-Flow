@@ -29,22 +29,14 @@ The keys read here, one subtree per provider:
       gemini:
         api_key: ...
 
-The file reading below is duplicated from `mind.messaging.config` rather than
-imported out of it: extraction has no other reason to depend on messaging, and
-the private helpers there are not an interface. The two copies must stay
-identical, so if a third reader of these files appears, that is the moment to
-factor all three into one loader instead of copying a third time.
+The files themselves are read by `mind.config_file`, the one loader shared
+with `mind.config` and `mind.messaging.config`.
 """
 
-import os
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-import yaml
-
-_DEFAULT_CONFIG = "/etc/resonance-flow/config/config.yaml"
-_DEFAULT_SECRETS = "/etc/resonance-flow/secret/secrets.yaml"
+from mind import config_file
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-chat"
@@ -135,24 +127,6 @@ class GeminiSettings:
         )
 
 
-def _read_yaml(path: str) -> dict[str, Any]:
-    p = Path(path)
-    if not p.is_file():
-        return {}
-    loaded = yaml.safe_load(p.read_text(encoding="utf-8"))
-    return loaded if isinstance(loaded, dict) else {}
-
-
-def _deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
-    out = dict(base)
-    for key, value in over.items():
-        if isinstance(value, dict) and isinstance(out.get(key), dict):
-            out[key] = _deep_merge(out[key], value)
-        else:
-            out[key] = value
-    return out
-
-
 def _present(section: dict[str, Any], key: str) -> Any | None:
     """The value at `key`, or None when it is missing *or empty*.
 
@@ -182,19 +156,13 @@ def _llm_section() -> dict[str, Any]:
     a key, not this.
     """
 
-    merged = _deep_merge(
-        _read_yaml(os.environ.get("CONFIG_FILE_PATH", _DEFAULT_CONFIG)),
-        _read_yaml(os.environ.get("SECRETS_FILE_PATH", _DEFAULT_SECRETS)),
-    )
-    llm = merged.get("llm", {}) or {}
-    return llm if isinstance(llm, dict) else {}
+    return config_file.section(config_file.load_merged_lenient(), "llm")
 
 
 def _provider_section(provider: str) -> dict[str, Any]:
     """The `llm.<provider>` subtree: one provider's own settings."""
 
-    section = _llm_section().get(provider, {}) or {}
-    return section if isinstance(section, dict) else {}
+    return config_file.section(_llm_section(), provider)
 
 
 def configured_provider_name() -> str | None:

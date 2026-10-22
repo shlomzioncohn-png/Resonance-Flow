@@ -70,8 +70,9 @@ public class SchedulingPublishListener {
      * Called after commit for one taskId that changed during the just-committed transaction
      * (deduplicated by the caller - see {@code TaskEligibilityService}, so this runs at most once
      * per taskId per transaction regardless of how many times that task was touched in it).
+     * {@code isAvailable} is the task_readiness value captured in the originating transaction.
      */
-    public void onCommit(UUID taskId) {
+    public void onCommit(UUID taskId, boolean isAvailable) {
         Task task = taskRepository.findById(taskId).orElse(null);
         if (task == null) {
             // Soft-deleted or genuinely gone between commit and this callback running - nothing
@@ -82,14 +83,14 @@ public class SchedulingPublishListener {
                     + "nothing to publish", taskId);
             return;
         }
-        publishWithRetry(task);
+        publishWithRetry(task, isAvailable);
     }
 
-    private void publishWithRetry(Task task) {
+    private void publishWithRetry(Task task, boolean isAvailable) {
         long backoff = INITIAL_BACKOFF_MILLIS;
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                schedulingUpdateService.publishSchedulingUpdate(task);
+                schedulingUpdateService.publishSchedulingUpdate(task, isAvailable);
                 return;
             } catch (RuntimeException e) {
                 if (attempt == MAX_ATTEMPTS) {

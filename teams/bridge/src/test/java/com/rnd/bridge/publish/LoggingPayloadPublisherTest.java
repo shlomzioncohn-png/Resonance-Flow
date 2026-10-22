@@ -31,7 +31,6 @@ class LoggingPayloadPublisherTest {
                 "crm:D-1",
                 null,
                 null,
-                null,
                 null);
 
         assertDoesNotThrow(() -> publisher.publish(task));

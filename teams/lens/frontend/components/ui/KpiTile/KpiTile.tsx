@@ -8,9 +8,10 @@ import Card from '@mui/material/Card';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
+import { SparkLineChart } from '@mui/x-charts/SparkLineChart';
 import type { StatusTone } from '../StatusBadge';
 
-export interface KpiTrend {
+type KpiTrend = {
   /** Change vs the previous period, in percent: 8 means +8%, -3 means -3%. */
   delta: number;
   /**
@@ -18,7 +19,7 @@ export interface KpiTrend {
    * counts where less is better, e.g. blocked tasks.
    */
   goodDirection?: 'up' | 'down';
-}
+};
 
 /** Hides text visually but keeps it for screen readers. */
 const srOnly = {
@@ -61,56 +62,44 @@ function TrendIndicator({ delta, goodDirection = 'up' }: KpiTrend) {
   );
 }
 
-const SPARKLINE_WIDTH = 100;
 const SPARKLINE_HEIGHT = 32;
-/** Keeps the line's stroke from being clipped at the top and bottom edges. */
-const SPARKLINE_PADDING = 2;
 
-interface SparklineProps {
+type SparklineProps = {
   data: number[];
   color: string;
   label?: string;
-}
+};
 
 function Sparkline({ data, color, label }: SparklineProps) {
   if (data.length < 2) return null;
 
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 1;
-  const drawHeight = SPARKLINE_HEIGHT - SPARKLINE_PADDING * 2;
-  const points = data
-    .map((point, index) => {
-      const x = (index / (data.length - 1)) * SPARKLINE_WIDTH;
-      const y = SPARKLINE_PADDING + drawHeight - ((point - min) / range) * drawHeight;
-      return `${x},${y}`;
-    })
-    .join(' ');
-
-  return (
-    <svg
-      width="100%"
+  // With a label, the chart is a named group: keyboard users can Tab in and
+  // step through the points with the arrow keys (MUI's keyboard navigation).
+  // Without one the line is decorative: hidden from screen readers and taken
+  // out of the Tab order. (MUI's own `title` prop isn't used: it puts
+  // aria-label on a role="none" element, which axe flags.)
+  const chart = (
+    <SparkLineChart
+      data={data}
       height={SPARKLINE_HEIGHT}
-      viewBox={`0 0 ${SPARKLINE_WIDTH} ${SPARKLINE_HEIGHT}`}
-      preserveAspectRatio="none"
-      role={label ? 'img' : undefined}
-      aria-label={label}
-      aria-hidden={label ? undefined : true}
-    >
-      <polyline
-        points={points}
-        fill="none"
-        stroke={color}
-        strokeWidth={2}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        vectorEffect="non-scaling-stroke"
-      />
-    </svg>
+      color={color}
+      margin={2}
+      showTooltip
+      showHighlight
+      disableKeyboardNavigation={!label}
+    />
+  );
+
+  return label ? (
+    <Box role="group" aria-label={label}>
+      {chart}
+    </Box>
+  ) : (
+    <Box aria-hidden>{chart}</Box>
   );
 }
 
-export interface KpiTileProps {
+type KpiTileProps = {
   /** Raw count or pre-formatted text, e.g. 12, "1,284" or "3.2d". */
   value: number | string;
   label: string;
@@ -132,7 +121,7 @@ export interface KpiTileProps {
    * and hidden from screen readers.
    */
   sparklineLabel?: string;
-}
+};
 
 export default function KpiTile({
   value,

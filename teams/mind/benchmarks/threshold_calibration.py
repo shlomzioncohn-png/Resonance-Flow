@@ -15,6 +15,7 @@ from typing import NamedTuple
 from benchmarks.vector_store_test_table import create_vector_store_test_table
 from mind.config import VectorStoreSettings
 from mind.embeddings import embed, nearest_tasks, task_text
+from mind.embeddings.base import DEMO_TENANT_ID, VectorStore
 from mind.embeddings.pgvector_store import PgVectorStore
 
 _TASKS_PATH = Path(__file__).resolve().parent / "threshold_calibration_tasks.json"
@@ -131,7 +132,7 @@ async def _load_tasks() -> list[dict[str, str]]:
 
 
 async def _run_cases(
-    store: PgVectorStore, cases: list[tuple[str, str | None]], *, is_query: bool, n_tasks: int
+    store: VectorStore, cases: list[tuple[str, str | None]], *, is_query: bool, n_tasks: int
 ) -> list[CaseResult]:
     results = []
     for text, expected_task_id in cases:
@@ -153,7 +154,7 @@ async def _run_cases(
 
 
 async def _run_related_cases(
-    store: PgVectorStore, cases: list[tuple[str, str | None]], *, n_tasks: int
+    store: VectorStore, cases: list[tuple[str, str | None]], *, n_tasks: int
 ) -> list[CaseResult]:
     """Task-to-task, not text-to-task -- matches how find_related() queries."""
     results = []
@@ -212,10 +213,11 @@ async def main() -> None:
         table=_TABLE,
     )
     await create_vector_store_test_table(settings)
-    store = PgVectorStore(settings)
-    await store.open()
+    index = PgVectorStore(settings)
+    store = index.for_tenant(DEMO_TENANT_ID)
+    await index.open()
     try:
-        await store.clear()
+        await index.clear()
         for t in tasks:
             await store.upsert(t["task_id"], embed(task_text(t["title"], t["description"])))
 
@@ -223,8 +225,8 @@ async def main() -> None:
         dep_results = await _run_cases(store, DEPENDENCY_CASES, is_query=True, n_tasks=len(tasks))
         rel_results = await _run_related_cases(store, RELATED_CASES, n_tasks=len(tasks))
     finally:
-        await store.clear()
-        await store.close()
+        await index.clear()
+        await index.close()
 
     _print_table("Duplicate detection (#471, is_query=False)", dup_results)
     dup_threshold = _suggest_threshold(dup_results)

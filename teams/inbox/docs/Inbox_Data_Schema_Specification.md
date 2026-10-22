@@ -11,7 +11,7 @@
 | Migration tool | Flyway |
 | Document type | Technical specification (backend / data layer) |
 | Status | Draft — pending approval on open items (see final section) |
-| Entities | 11 |
+| Entities | 12 |
 | Audit trail | Included |
 | Open items | 3 |
 
@@ -300,6 +300,27 @@ If feedback also mutates a `TASKS` field directly, for example `status → in_re
 - Appointing a team lead writes up to three rows: the `TEAM_CREATED` / `TEAM_UPDATED` row itself, a `TEAM_MEMBER_ADDED` row if the lead was not already a member, and a `USER_UPDATED` row if the lead was promoted from `EMPLOYEE` to `TEAM_LEAD`.
 - Rows written before this behaviour was introduced have `old_values` NULL on updates too, and a narrower `TASKS` snapshot (`title`, `sourceType`, `sourceRef`, `status`).
 
+### 3.12 INSIGHTS
+
+*Personal AI insights shown to an employee on their own task screen — positive, constructive feedback on their work patterns, never a score or a managerial tracking tool. One row is one insight card.*
+
+| Field | Type | Required | FK / Constraints | Description |
+|---|---|---|---|---|
+| `id` | UUID | Yes | PK | Unique insight identifier. |
+| `tenant_id` | UUID | Yes | FK → `tenants.id` | Tenant the insight belongs to. |
+| `user_id` | UUID | Yes | FK → `users.id` | The employee the insight is about. Only this user can read it. |
+| `insight_type` | ENUM | Yes | `reinforcement / trend / improvement_opportunity` | Kind of insight. There is no `none` value: an analysis that found nothing is not stored. |
+| `insight_text` | TEXT | Yes | — | The insight sentence itself, without numbers. |
+| `recommendation_text` | TEXT | No | — | A practical recommendation; NULL when the insight does not warrant one. |
+| `evidence_text` | TEXT | Yes | — | The figures the insight rests on, e.g. "12 of 15 tasks were completed before the deadline". |
+| `period_from` | DATE | Yes | CHECK `period_from <= period_to` | First day of the analysed period. |
+| `period_to` | DATE | Yes | — | Last day of the analysed period. |
+| `created_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Creation timestamp. |
+
+- Insights are only created and read, never updated or deleted through the API, so there is no `updated_at`.
+- Only insights that passed verification against the data are stored; the verification result itself is not.
+- An insight is always created for the calling user (`X-Actor-Id`) — nobody can create or read another user's insights, managers included.
+
 ---
 
 ## 4. Schema Relationships
@@ -318,6 +339,8 @@ If feedback also mutates a `TASKS` field directly, for example `status → in_re
 | USERS | 1 → N | TASKS | `tasks.owner_id` (single owner) |
 | TASKS | 1 → N | ASSIGNMENTS | `assignments.task_id` (exactly one of `user_id`/`team_id` per row) |
 | TASKS | 1 → N | TASK_FEEDBACK | `task_feedback.task_id` |
+| TENANTS | 1 → N | INSIGHTS | `insights.tenant_id` |
+| USERS | 1 → N | INSIGHTS | `insights.user_id` |
 | CHAIN | calculates | TASKS | `tasks.is_available` |
 | CHAIN | owns | Dependency Graph | Chain-owned storage |
 | Relevant services write | — | AUDIT_LOG | `entity_type`, `entity_id`, `correlation_id` |
