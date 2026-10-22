@@ -22,11 +22,14 @@ app/
 │   ├── layout.tsx           Renders <AppShell>{children}</AppShell>
 │   ├── page.tsx              "/"                    dashboard placeholder
 │   ├── manager/
-│   │   ├── page.tsx           "/manager"
+│   │   ├── page.tsx           "/manager"             Manager Dashboard: top bottlenecks (compact graph)
+│   │   ├── projects/page.tsx  "/manager/projects"    all projects: filters, KPIs, project cards
+│   │   ├── projects/[projectId]/page.tsx "/manager/projects/:projectId" drill-down, not in nav
 │   │   ├── workload/page.tsx  "/manager/workload"    demo page (see below)
 │   │   ├── wip/page.tsx       "/manager/wip"
 │   │   ├── blocked/page.tsx   "/manager/blocked"
-│   │   └── bottlenecks/page.tsx "/manager/bottlenecks"
+│   │   ├── bottlenecks/page.tsx "/manager/bottlenecks" dependency graph; ?projectId= filter, ?taskId= open task
+│   │   └── users/page.tsx     "/manager/users"
 │   ├── employee/
 │   │   ├── page.tsx                     "/employee"                  My Workspace — time-boxed task recommendation
 │   │   ├── tasks/page.tsx               "/employee/tasks"            My Tasks (placeholder)

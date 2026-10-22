@@ -11,11 +11,11 @@ The GitHub Bridge Adapter is a structured ETL lane for the Resonance Flow platfo
 | Component | Package / File | Responsibility |
 |-----------|----------------|----------------|
 | `WebClientConfig` | `com.rnd.bridge.github.config.WebClientConfig` | Builds the reactive `WebClient` used to call the GitHub REST API. Adds `Authorization: Bearer {GITHUB_TOKEN}` only when a token is configured. |
-| `GitHubClient` | `com.rnd.bridge.github.service.GitHubClient` | Calls `/repos/{owner}/{repo}/issues` and `/repos/{owner}/{repo}/pulls`, maps each record through the appropriate mapper, validates the result and applies a 3-attempt exponential backoff retry on 5xx/429 responses. |
+| `GitHubClient` | `com.rnd.bridge.github.service.GitHubClient` | Calls `/repos/{owner}/{repo}/issues` and `/repos/{owner}/{repo}/pulls` with `per_page`/`page` pagination (page size: `github.page-size`, default 100). Filters pull requests out of the `/issues` stream via the `pull_request` field so each PR is published only once. Maps each record through the appropriate mapper, validates it, and applies a 3-attempt exponential backoff retry on 5xx/429 responses. |
 | `GitHubIssueMapper` | `com.rnd.bridge.github.mapper.GitHubIssueMapper` | Extends `AbstractTaskMapper<GitHubIssue>`, producing `Task` records with `SourceType.GITHUB_ISSUE`, `Tier.TACTICAL`, `RoleContext.DEVELOPER`. |
 | `GitHubPullRequestMapper` | `com.rnd.bridge.github.mapper.GitHubPullRequestMapper` | Extends `AbstractTaskMapper<GitHubIssue>`, producing `Task` records with `SourceType.GITHUB_PR`, `Tier.TACTICAL`, `RoleContext.MANAGER`. |
 | `TaskValidator` | `com.rnd.bridge.task.TaskValidator` | A Spring-managed instance bean (`@Component`) that fails fast on malformed `Task` objects before they leave the mapper or are published to Kafka. |
-| `GitHubKafkaProducer` | `com.rnd.bridge.github.service.GitHubKafkaProducer` | Publishes each validated `Task` to the configured Kafka topic using `sourceRef` as the record key and `JsonSerializer` for the value. |
+| `PayloadPublisher<Task>` | `com.rnd.bridge.core.PayloadPublisher` | Shared publisher - resolves to `KafkaPayloadPublisher` under the `kafka` profile (Protobuf `StructuredTaskEvent` to `bridge.structured.tasks` via `KafkaProtobufSerializer`), else `LoggingPayloadPublisher`. |
 | `GitHubBridgeController` | `com.rnd.bridge.github.controller.GitHubBridgeController` | REST endpoint `POST /api/bridge/github/sync` for on-demand synchronization. |
 | `GitHubSyncScheduler` | `com.rnd.bridge.github.scheduler.GitHubSyncScheduler` | Cron-based scheduler for nightly or periodic sync. Disabled by default. |
 | `GitHubSchedulerConfig` | `com.rnd.bridge.github.config.GitHubSchedulerConfig` | Enables Spring scheduling (`@EnableScheduling`) for the GitHub module without touching the main application class. |
@@ -23,10 +23,11 @@ The GitHub Bridge Adapter is a structured ETL lane for the Resonance Flow platfo
 ## Data Flow
 
 1. `GitHubBridgeController` or `GitHubSyncScheduler` invokes `GitHubClient`.
-2. `GitHubClient` emits two reactive streams: `fetchIssues(...)` and `fetchPullRequests(...)`.
-3. Each `GitHubIssue` DTO is mapped to a `Task` by `GitHubIssueMapper` or `GitHubPullRequestMapper`, passing `Instant.now()` as the `asOf` parameter.
-4. `TaskValidator` validates every `Task` immediately after mapping.
-5. `GitHubKafkaProducer` publishes all valid tasks to Kafka using `kafkaTemplate.send(topic, sourceRef, task)`.
+2. `GitHubClient` emits two reactive streams: `fetchIssues(...)` and `fetchPullRequests(...)`, each paginating until a short (non-full) page is returned.
+3. The `/issues` endpoint also returns pull requests (marked by a `pull_request` field); `fetchIssues` filters them out because `/pulls` already covers them.
+4. Each `GitHubIssue` DTO is mapped to a `Task` by `GitHubIssueMapper` or `GitHubPullRequestMapper`, passing `Instant.now()` as the `asOf` parameter.
+5. `TaskValidator` validates every `Task` immediately after mapping; a record that fails validation is logged and skipped without terminating the stream.
+6. The shared `PayloadPublisher<Task>` publishes all valid tasks to `bridge.structured.tasks`, blocking per record so one failure can't fail the batch.
 
 ## Canonical Task Mapping
 
@@ -59,10 +60,11 @@ All values are overridable through `application.yml`, command-line arguments or 
 | `GITHUB_TOKEN` | empty | Optional GitHub personal access token. Required only for higher rate limits or private repositories; if empty, the `Authorization` header is omitted. |
 | `GITHUB_TARGET_OWNER` | `KamaTechOrg` | Default owner for scheduled or parameterless sync. |
 | `GITHUB_TARGET_REPO` | `Resonance-Flow` | Default repository for scheduled or parameterless sync. |
+| `GITHUB_PAGE_SIZE` | `100` | `per_page` for the issues/pulls list endpoints (GitHub maximum: 100). |
 | `GITHUB_SYNC_CRON_ENABLED` | `false` | Enables the scheduled `GitHubSyncScheduler` when `true`. |
 | `GITHUB_SYNC_CRON_EXPRESSION` | `0 0 2 * * ?` | Cron expression for the scheduled sync (default: 02:00 daily). |
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka broker list. |
-| `spring.kafka.topic` | `bridge.test` in `application.yml`; producer default `bridge.github.tasks` if not configured | Kafka topic used by `GitHubKafkaProducer`. The recommended topic is `bridge.github.tasks`. |
+| `bridge.structured-tasks-topic` | `bridge.structured.tasks` | Kafka topic used by the shared `KafkaPayloadPublisher`. |
 
 ## API Endpoints
 
@@ -98,8 +100,7 @@ All values are overridable through `application.yml`, command-line arguments or 
 
 Unit and integration tests for this adapter include:
 
-- `GitHubClientTest`: Verifies issue/PR fetching, retry behavior and mapping delegation.
-- `GitHubKafkaProducerTest`: Verifies task validation, topic selection and Kafka template invocation.
+- `GitHubClientTest`: Verifies issue/PR fetching and mapping, multi-page pagination, filtering pull requests out of the `/issues` stream, and that an invalid record is skipped while valid ones still flow.
 
 ## Tech Stack
 
@@ -108,4 +109,4 @@ Unit and integration tests for this adapter include:
 - **Spring WebFlux / WebClient** for reactive GitHub REST API calls
 - **Spring Kafka** for event publishing
 - **Project Reactor (Mono / Flux)** for reactive stream processing
-- **Jackson** via `JsonSerializer` for Kafka value serialization
+- **Protobuf** (`StructuredTaskEvent` via `KafkaProtobufSerializer`) for Kafka value serialization

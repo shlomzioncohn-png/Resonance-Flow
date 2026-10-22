@@ -22,6 +22,9 @@ dependencies = [
     "confluent-kafka[protobuf,schemaregistry]>=2.5,<2.11",
     "protobuf>=5",
     "pyyaml",
+    # Bridge's object storage (src/mind/ingestion) -- the official MinIO SDK,
+    # the Python sibling of the io.minio client Bridge writes with.
+    "minio>=7.2,<8",
     # LLM provider calls (mind.extraction.providers); also what
     # fastapi.testclient.TestClient runs on in the tests.
     "httpx",

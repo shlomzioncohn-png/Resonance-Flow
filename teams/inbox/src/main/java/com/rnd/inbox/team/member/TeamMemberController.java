@@ -58,7 +58,8 @@ public class TeamMemberController {
                     content = @Content(schema = @Schema(implementation = TeamMemberResponseDto.class))),
             @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
             @ApiResponse(responseCode = "403",
-                    description = "Actor's role cannot manage team membership, or the user is outside the team's tenant"),
+                    description = "Actor's role cannot manage team membership, the team is outside the actor's own "
+                            + "tenant, or the user is outside the team's tenant"),
             @ApiResponse(responseCode = "404", description = "Team or user not found"),
             @ApiResponse(responseCode = "409", description = "User is already an active member of this team")
     })
@@ -76,7 +77,8 @@ public class TeamMemberController {
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Member removed"),
             @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
-            @ApiResponse(responseCode = "403", description = "Actor's role cannot manage team membership"),
+            @ApiResponse(responseCode = "403",
+                    description = "Actor's role cannot manage team membership, or the team is outside the actor's own tenant"),
             @ApiResponse(responseCode = "404", description = "Team not found, or user is not an active member")
     })
     @DeleteMapping("/{id}/members/{userId}")

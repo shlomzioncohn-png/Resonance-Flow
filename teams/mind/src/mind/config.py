@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, PostgresDsn, Secret
+from pydantic import BaseModel, ConfigDict, Field, PostgresDsn, Secret, SecretStr
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
@@ -18,6 +18,8 @@ _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 _DEFAULT_CONFIG_FILE = "/etc/resonance-flow/config/config.yaml"
 _DEFAULT_SECRETS_FILE = "/etc/resonance-flow/secret/secrets.yaml"
+# The chart mounts the MinIO credentials as one file each (dependencySecretVolumes).
+_DEFAULT_OBJECT_STORAGE_SECRETS_DIR = "/etc/resonance-flow/secrets/object-storage"
 
 
 def _read_yaml(path: str) -> dict[str, Any]:
@@ -55,6 +57,94 @@ class ASRSettings(BaseSettings):
     @property
     def download_dir(self) -> Path:
         return Path(self.model_cache_dir) / "whisper" / self.whisper_model
+
+
+class _ChartObjectStorageSource(PydanticBaseSettingsSource):
+    """MinIO from Relay's chart-mounted files: endpoint and bucket from
+    config.yaml's `object_storage`, each credential from its own mounted file.
+    Missing files give nothing, so a local run falls through to the defaults."""
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        raise NotImplementedError  # unused: __call__ is overridden directly
+
+    def __call__(self) -> dict[str, Any]:
+        config = _read_yaml(os.environ.get("CONFIG_FILE_PATH", _DEFAULT_CONFIG_FILE))
+        object_storage = (config or {}).get("object_storage") or {}
+        values = {k: object_storage[k] for k in ("endpoint", "bucket") if object_storage.get(k)}
+
+        secrets_dir = Path(
+            os.environ.get("OBJECT_STORAGE_SECRETS_DIR", _DEFAULT_OBJECT_STORAGE_SECRETS_DIR)
+        )
+        for field_name, filename in (
+            ("access_key", "object-storage.access-key"),
+            ("secret_key", "object-storage.secret-key"),
+        ):
+            path = secrets_dir / filename
+            if path.is_file():
+                values[field_name] = path.read_text().strip()  # mounted files end in a newline
+        return values
+
+
+class ObjectStorageSettings(BaseSettings):
+    """Standalone -- the bridge.raw.landed consumer (#349) reads Bridge's objects.
+
+    Sources, first wins: environment variables, .env, then the cluster's
+    mounted files (_ChartObjectStorageSource), then the defaults. The defaults
+    match Bridge's own local ones (teams/bridge application.yml); the
+    credentials have none, so a missing one fails at start-up.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="MIND_OBJECT_STORAGE__", env_file=_ENV_FILE, extra="ignore"
+    )
+
+    endpoint: str = "http://localhost:9000"
+    bucket: str = "bridge-raw"
+    access_key: str
+    secret_key: SecretStr  # never printed: repr, logs, tracebacks show '**********'
+    # Larger objects are skipped, not read: the process's memory is the limit.
+    max_object_bytes: int = Field(default=100 * 1024 * 1024, gt=0)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Earlier sources win; the chart's files only fill what env leaves unset.
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            _ChartObjectStorageSource(settings_cls),
+            file_secret_settings,
+        )
+
+
+class LandedConsumerSettings(BaseSettings):
+    """Standalone -- the bridge.raw.landed runner (#349) needs no database, so it
+    does not read `Settings`, which requires the vector-store DSN.
+
+    Read from the environment and .env like every other MIND_* setting, so an
+    override set next to the MinIO keys in .env is not silently ignored.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="MIND_LANDED_CONSUMER__", env_file=_ENV_FILE, extra="ignore"
+    )
+
+    # Its own group, not the one in ProtobufConsumer's docstring example. Until
+    # extraction is wired, a run marks items processed and commits their
+    # offsets with nothing extracted: a test run against the shared topic sets
+    # MIND_LANDED_CONSUMER__GROUP_ID to a group of its own.
+    group_id: str = "mind-landed-consumer"
+    # The same variable `Settings.log_level` reads.
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO", validation_alias="MIND_LOG_LEVEL"
+    )
 
 
 class MonitoringSettings(BaseSettings):

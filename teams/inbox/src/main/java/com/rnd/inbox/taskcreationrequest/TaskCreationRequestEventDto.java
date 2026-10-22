@@ -9,6 +9,7 @@ import com.rnd.inbox.task.security.TaskRoleContext;
 import com.rnd.inbox.task.model.TaskStatus;
 import com.rnd.inbox.task.model.TaskTier;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Max;
@@ -79,6 +80,17 @@ public class TaskCreationRequestEventDto {
 
     @Valid
     private List<AssigneeDto> assignees;
+
+    @DecimalMin("0.0")
+    @DecimalMax("1.0")
+    private Double effortEstimateConfidence;
+
+    @ValidUuid
+    private String suggestedOwnerUserId;
+
+    @DecimalMin("0.0")
+    @DecimalMax("1.0")
+    private Double suggestedOwnerConfidence;
 
     public String getEventId() {
         return eventId;
@@ -222,5 +234,34 @@ public class TaskCreationRequestEventDto {
 
     public void setAssignees(List<AssigneeDto> assignees) {
         this.assignees = assignees;
+    }
+
+    public Double getEffortEstimateConfidence() {
+        return effortEstimateConfidence;
+    }
+
+    public void setEffortEstimateConfidence(Double effortEstimateConfidence) {
+        this.effortEstimateConfidence = effortEstimateConfidence;
+    }
+
+    public String getSuggestedOwnerUserId() {
+        return suggestedOwnerUserId;
+    }
+
+    public void setSuggestedOwnerUserId(String suggestedOwnerUserId) {
+        this.suggestedOwnerUserId = suggestedOwnerUserId;
+    }
+
+    public Double getSuggestedOwnerConfidence() {
+        return suggestedOwnerConfidence;
+    }
+
+    public void setSuggestedOwnerConfidence(Double suggestedOwnerConfidence) {
+        this.suggestedOwnerConfidence = suggestedOwnerConfidence;
+    }
+
+    @AssertTrue(message = "requires suggestedOwnerUserId")
+    public boolean isSuggestedOwnerConfidenceBackedByOwner() {
+        return suggestedOwnerConfidence == null || suggestedOwnerUserId != null;
     }
 }

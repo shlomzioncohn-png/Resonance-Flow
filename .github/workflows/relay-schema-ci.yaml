@@ -116,6 +116,10 @@ jobs:
       - name: Check PR schema versions for compatibility
         run: bash teams/relay/ci/check-all-schemas.sh "${{ steps.base.outputs.sha }}"
 
+      # After the check, so it compares against the base's versions only.
+      - name: Register schema rows this PR adds
+        run: bash teams/relay/ci/register-added-schemas.sh "${{ steps.base.outputs.sha }}"
+
   chart-lint:
     needs: changes
     if: needs.changes.outputs.relevant == 'true'

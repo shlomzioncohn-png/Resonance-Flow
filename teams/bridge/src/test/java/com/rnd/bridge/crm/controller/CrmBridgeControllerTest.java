@@ -1,26 +1,18 @@
 package com.rnd.bridge.crm.controller;
 
-import com.rnd.bridge.core.IntakeResult;
-import com.rnd.bridge.core.error.ValidationException;
-import com.rnd.bridge.crm.CrmLane;
-import com.rnd.bridge.crm.repository.DealRepository;
-import com.rnd.bridge.crm.repository.DealSnapshot;
+import com.rnd.bridge.crm.CrmSourceResult;
+import com.rnd.bridge.crm.CrmSyncService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.time.Instant;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Stream;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -29,9 +21,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Tests the HTTP layer only, with CrmLane and DealRepository mocked.
- * CrmLaneIntegrationTest already covers a real run over the synthetic dataset;
- * repeating that through HTTP would add nothing.
+ * Tests the HTTP layer only, with {@link CrmSyncService} mocked. {@code CrmSyncServiceTest}
+ * already covers a real multi-source run; repeating that through HTTP would add nothing.
  */
 @WebMvcTest(CrmBridgeController.class)
 class CrmBridgeControllerTest {
@@ -40,37 +31,28 @@ class CrmBridgeControllerTest {
     private MockMvc mockMvc;
 
     @MockBean
-    private CrmLane crmLane;
-
-    @MockBean
-    private DealRepository dealRepository;
-
-    private static DealSnapshot snapshotAt(Instant asOf) {
-        return new DealSnapshot(asOf, List.of(), Map.of(), List.of(), 0);
-    }
+    private CrmSyncService crmSyncService;
 
     @Test
-    void postReturnsOkWithTheCountsFromTheLaneResult() throws Exception {
-        Instant asOf = Instant.parse("2026-08-24T09:00:00Z");
-        when(dealRepository.snapshot()).thenReturn(snapshotAt(asOf));
-        when(crmLane.run(any(Stream.class), eq(asOf)))
-                .thenReturn(new IntakeResult(32, 32, 0, List.of()));
+    void postReturnsOkWithTheCountsFromOneSuccessfulSourceBackwardCompatFieldsUnchanged() throws Exception {
+        when(crmSyncService.syncAll()).thenReturn(List.of(
+                new CrmSourceResult("hubspot", 32, 32, 0, List.of(), 0, null)));
 
         mockMvc.perform(post("/bridge/crm/sync"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.read").value(32))
                 .andExpect(jsonPath("$.published").value(32))
                 .andExpect(jsonPath("$.rejected").value(0))
-                .andExpect(jsonPath("$.skippedAtRead").value(0));
+                .andExpect(jsonPath("$.skippedAtRead").value(0))
+                .andExpect(jsonPath("$.sources.length()").value(1))
+                .andExpect(jsonPath("$.sources[0].source").value("hubspot"));
     }
 
     @Test
     void aRejectedRecordStillReturnsOkWithTheMessageAndNoStackTraceOrClassName() throws Exception {
-        Instant asOf = Instant.parse("2026-08-24T09:00:00Z");
-        when(dealRepository.snapshot()).thenReturn(snapshotAt(asOf));
-        when(crmLane.run(any(Stream.class), eq(asOf)))
-                .thenReturn(new IntakeResult(32, 31, 1,
-                        List.of(new ValidationException("Invalid Task.title = null: must not be null"))));
+        when(crmSyncService.syncAll()).thenReturn(List.of(
+                new CrmSourceResult("hubspot", 32, 31, 1,
+                        List.of("Invalid Task.title = null: must not be null"), 0, null)));
 
         mockMvc.perform(post("/bridge/crm/sync"))
                 .andExpect(status().isOk())
@@ -82,42 +64,44 @@ class CrmBridgeControllerTest {
     }
 
     @Test
-    void asOfComesFromTheSnapshotNotTheClock() throws Exception {
-        Instant configuredAsOf = Instant.parse("2020-01-01T00:00:00Z");
-        when(dealRepository.snapshot()).thenReturn(snapshotAt(configuredAsOf));
-        when(crmLane.run(any(Stream.class), any())).thenReturn(new IntakeResult(0, 0, 0, List.of()));
-
-        mockMvc.perform(post("/bridge/crm/sync"))
-                .andExpect(status().isOk());
-
-        verify(crmLane).run(any(Stream.class), eq(configuredAsOf));
-    }
-
-    @Test
-    void reportsSkippedAtReadFromTheSnapshot() throws Exception {
-        Instant asOf = Instant.parse("2026-08-24T09:00:00Z");
-        when(dealRepository.snapshot()).thenReturn(new DealSnapshot(asOf, List.of(), Map.of(), List.of(), 3));
-        when(crmLane.run(any(Stream.class), eq(asOf))).thenReturn(new IntakeResult(29, 29, 0, List.of()));
+    void reportsSkippedAtReadSummedAcrossSources() throws Exception {
+        when(crmSyncService.syncAll()).thenReturn(List.of(
+                new CrmSourceResult("hubspot", 29, 29, 0, List.of(), 3, null),
+                new CrmSourceResult("salesforce", 10, 10, 0, List.of(), 2, null)));
 
         mockMvc.perform(post("/bridge/crm/sync"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.skippedAtRead").value(3));
+                .andExpect(jsonPath("$.skippedAtRead").value(5))
+                .andExpect(jsonPath("$.read").value(39))
+                .andExpect(jsonPath("$.published").value(39));
     }
 
     @Test
-    void snapshotFailureReturnsAClearServiceUnavailableErrorNotAGenericFiveHundred() throws Exception {
-        // E.g. HubSpotDealRepository.snapshot() re-fetching a pipeline that now has an
-        // unrecognized stage label (see HubSpotDealRepositoryTest's
-        // secondSnapshotFailsEntirelyWhenTheRefetchedPipelineHasAnUnrecognizedStageLabel) - this
-        // test only needs a RuntimeException escaping dealRepository.snapshot() in general.
-        when(dealRepository.snapshot()).thenThrow(
-                new RuntimeException("HubSpot pipeline \"Sales Pipeline\" has a stage \"Some Brand New Custom Stage\" "
-                        + "with no known DealStage mapping"));
+    void oneSourceFailingStillReturnsOkWithThatSourcesErrorInSources() throws Exception {
+        when(crmSyncService.syncAll()).thenReturn(List.of(
+                new CrmSourceResult("hubspot", 0, 0, 0, List.of(), 0, "HubSpot unreachable"),
+                new CrmSourceResult("salesforce", 10, 10, 0, List.of(), 0, null)));
+
+        mockMvc.perform(post("/bridge/crm/sync"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.read").value(10))
+                .andExpect(jsonPath("$.published").value(10))
+                .andExpect(jsonPath("$.sources[0].source").value("hubspot"))
+                .andExpect(jsonPath("$.sources[0].error").value("HubSpot unreachable"))
+                .andExpect(jsonPath("$.sources[1].source").value("salesforce"))
+                .andExpect(jsonPath("$.sources[1].error").value(nullValue()));
+    }
+
+    @Test
+    void allSourcesFailingReturnsServiceUnavailableWithPerSourceErrorsInTheBody() throws Exception {
+        when(crmSyncService.syncAll()).thenReturn(List.of(
+                new CrmSourceResult("hubspot", 0, 0, 0, List.of(), 0, "HubSpot unreachable"),
+                new CrmSourceResult("salesforce", 0, 0, 0, List.of(), 0, "Salesforce unreachable")));
 
         mockMvc.perform(post("/bridge/crm/sync"))
                 .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.error").value(
-                        org.hamcrest.Matchers.containsString("Some Brand New Custom Stage")));
+                .andExpect(jsonPath("$.sources[0].error").value("HubSpot unreachable"))
+                .andExpect(jsonPath("$.sources[1].error").value("Salesforce unreachable"));
     }
 
     @Test
