@@ -92,7 +92,10 @@ def main() -> None:
 
     # The listener's side: its own loop, and the index it writes matched tasks
     # through, opened on that loop (a pool belongs to the loop that opened it).
-    listener_loop = asyncio.new_event_loop()
+    # SelectorEventLoop, not new_event_loop(): psycopg's async mode rejects
+    # Windows' default ProactorEventLoop (the #359 demo runs this on Windows).
+    # On Linux it is the default loop anyway.
+    listener_loop = asyncio.SelectorEventLoop()
     listener_index = PgVectorStore(vector_store)
     listener_loop.run_until_complete(listener_index.open())
     flow = TaskCreationFlow(
@@ -114,7 +117,7 @@ def main() -> None:
     ).start()
 
     # The sender's side: this thread's loop, and the index it searches for duplicates.
-    loop = asyncio.new_event_loop()
+    loop = asyncio.SelectorEventLoop()
     search_index = PgVectorStore(vector_store)
     loop.run_until_complete(search_index.open())
     extractor = BasicExtractor(provider, ExtractionConfig(classify=True))
