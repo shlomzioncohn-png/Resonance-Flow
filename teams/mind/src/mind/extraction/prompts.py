@@ -24,6 +24,19 @@ _PROMPT_DIR = Path(__file__).parent / "prompts"
 MAX_CONTENT_CHARS = 8000
 TRUNCATION_MARKER = "\n[... content truncated ...]"
 
+# A meeting is the exception (#690): its action items come in the closing
+# recap, so cutting its tail cuts exactly them. Live on AMI, cut at 8000 the
+# two meetings found 0/4 and 0/8 gold action items, sent whole 4/4 and 4/8.
+# Their transcripts are 26k and 35k characters; this leaves room for an hour.
+# About 15k tokens at most, under a cent a meeting at today's price.
+MAX_MEETING_CONTENT_CHARS = 60000
+
+
+def content_cap(source_type: SourceType) -> int:
+    """How much of an item's content is sent to the model."""
+
+    return MAX_MEETING_CONTENT_CHARS if source_type is SourceType.MEETING else MAX_CONTENT_CHARS
+
 # Placeholders are {{NAME}} and are filled by substitution, not by
 # str.format: the prompts contain JSON braces, and format() would choke on
 # them or, worse, silently reinterpret them.
@@ -37,12 +50,12 @@ def _load(name: str) -> str:
     return (_PROMPT_DIR / name).read_text(encoding="utf-8").strip()
 
 
-def truncate(content: str) -> str:
+def truncate(content: str, limit: int = MAX_CONTENT_CHARS) -> str:
     """Cap the content sent to a provider, marking where it was cut."""
 
-    if len(content) <= MAX_CONTENT_CHARS:
+    if len(content) <= limit:
         return content
-    return content[:MAX_CONTENT_CHARS] + TRUNCATION_MARKER
+    return content[:limit] + TRUNCATION_MARKER
 
 
 def _fill(template: str, values: dict[str, str]) -> str:
@@ -90,18 +103,19 @@ def extraction_prompt(source_type: SourceType, content: str) -> str:
     # action items come in the closing recap (#690). Here and not in
     # truncate(), which also runs on every repair round and on the model's
     # own answer: once per item, about the content.
-    if len(content) > MAX_CONTENT_CHARS:
+    cap = content_cap(source_type)
+    if len(content) > cap:
         logger.warning(
             "extraction: %s content of %d characters truncated to %d; the last %d are not sent",
             source_type.value,
             len(content),
-            MAX_CONTENT_CHARS,
-            len(content) - MAX_CONTENT_CHARS,
+            cap,
+            len(content) - cap,
         )
 
     return _fill(
         _load("extraction_user.md"),
-        {"SOURCE_TYPE": source_type.value, "CONTENT": truncate(content)},
+        {"SOURCE_TYPE": source_type.value, "CONTENT": truncate(content, cap)},
     )
 
 
@@ -122,7 +136,7 @@ def repair_prompt(
         _load("repair_user.md"),
         {
             "SOURCE_TYPE": source_type.value,
-            "CONTENT": truncate(content),
+            "CONTENT": truncate(content, content_cap(source_type)),
             "INVALID_OUTPUT": truncate(invalid_output),
             "ERROR": error,
         },

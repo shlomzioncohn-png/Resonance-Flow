@@ -807,18 +807,18 @@ and may not be in the index yet when its mention is resolved.
 
 ### Known gaps, left for follow-ups
 
-- **Long meetings are truncated.** `MAX_CONTENT_CHARS` (8000) cuts the tail,
-  and a meeting's action items cluster at the end ("let's wrap up"). The cut
-  is now logged as a warning, with how much was not sent, and grounding reads
-  only the text that was sent: a pointer past the cut was out of the model's
-  sight, so matching it there would be luck. To be
+- **Long content is truncated, meetings far later.** `MAX_CONTENT_CHARS`
+  (8000) still cuts every other source, where the tail is mostly quoted
+  history. A meeting gets `MAX_MEETING_CONTENT_CHARS` (60,000), because its
+  action items cluster in the closing recap: on AMI, cut at 8000 the two
+  meetings found 0/4 and 0/8 gold items, sent whole 4/4 and 4/8. Any cut is
+  logged as a warning with how much was not sent, and grounding reads only
+  the text that was sent. To be
   settled against the real AMI transcripts before the demo.
-- **Not yet measured on a real meeting.** #690 asks for a run on AMI
-  (IS1008b, 4 gold action items; IB4003, 8). The gold lists are in
-  `eval/real_slice/`; the transcripts are not on this machine (the corpus
-  download is blocked here). Measured instead: the #359 demo meeting (2/2),
-  the fixture meeting (4/4) and the 62 DEV persona tasks (see the PR). The
-  AMI run also settles the truncation cap for meetings, above.
+- **AMI was measured by hand, once.** The transcripts (from #784's loader)
+  are not in the repository, as the corpus is gitignored; the run and its
+  numbers are in the PR. A repeatable AMI eval belongs to R1's extraction
+  eval (#178), which can now read `ExtractionSuccess.tasks`.
 - **Urgency has no reference date.** `source_timestamp` is not in the prompt,
   so "by Friday" cannot be placed in time.
 - **An email body and its attachment are extracted separately**, and never

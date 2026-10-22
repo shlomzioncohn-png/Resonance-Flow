@@ -28,7 +28,7 @@ from mind.extraction.parsing import (
     read_rejected_answer,
 )
 from mind.extraction.prompts import (
-    MAX_CONTENT_CHARS,
+    content_cap,
     extraction_prompt,
     repair_prompt,
     system_prompt,
@@ -259,7 +259,7 @@ class BasicExtractor:
         # schema without it would fail every answer it received.
         system = system_prompt(self._config.classify)
         # What the model can see, and so all that grounding may accept.
-        seen = text[:MAX_CONTENT_CHARS]
+        seen = text[: content_cap(source_type)]
         schema = response_model(self._config.classify)
         user = extraction_prompt(source_type, text)
 

@@ -10,8 +10,10 @@ from mind.extraction.models import MAX_TASKS_PER_TEXT, response_model
 from mind.extraction.parsing import parse_response
 from mind.extraction.prompts import (
     MAX_CONTENT_CHARS,
+    MAX_MEETING_CONTENT_CHARS,
     TRUNCATION_MARKER,
     _fill,
+    content_cap,
     extraction_prompt,
     repair_prompt,
     system_prompt,
@@ -68,12 +70,12 @@ def test_truncation_is_logged_with_how_much_was_cut(caplog: pytest.LogCaptureFix
     content = "x" * (MAX_CONTENT_CHARS + 500)
 
     with caplog.at_level(logging.WARNING, logger="mind.extraction"):
-        extraction_prompt(SourceType.MEETING, content)
-        repair_prompt(SourceType.MEETING, content, "{}", "error")
+        extraction_prompt(SourceType.EMAIL, content)
+        repair_prompt(SourceType.EMAIL, content, "{}", "error")
 
     # Once, from the first prompt: a repair round re-sends the same content.
     assert caplog.text.count("truncated") == 1
-    assert f"MEETING content of {MAX_CONTENT_CHARS + 500} characters" in caplog.text
+    assert f"EMAIL content of {MAX_CONTENT_CHARS + 500} characters" in caplog.text
     assert "the last 500 are not sent" in caplog.text
 
 
@@ -428,3 +430,35 @@ def test_blocked_or_waiting_work_is_still_a_task() -> None:
     assert "Work that is blocked, waiting on someone, or due later is still a task" in (
         system_prompt()
     )
+
+
+# --- meetings get their own cap (#690) ------------------------------------
+
+
+def test_a_meeting_is_sent_whole_where_an_email_is_cut() -> None:
+    """AMI, live: cut at 8000 the two meetings found 0/4 and 0/8 gold action
+    items, sent whole 4/4 and 4/8. A meeting's tasks sit in its closing recap."""
+
+    transcript = "Project Manager: so, to recap. " * 1000  # about 31k characters
+
+    assert content_cap(SourceType.MEETING) == MAX_MEETING_CONTENT_CHARS
+    assert transcript in extraction_prompt(SourceType.MEETING, transcript)
+    assert TRUNCATION_MARKER in extraction_prompt(SourceType.EMAIL, transcript)
+
+
+def test_past_its_own_cap_a_meeting_is_cut_too() -> None:
+    too_long = "x" * (MAX_MEETING_CONTENT_CHARS + 10)
+
+    assert TRUNCATION_MARKER in extraction_prompt(SourceType.MEETING, too_long)
+    assert TRUNCATION_MARKER in repair_prompt(SourceType.MEETING, too_long, "{}", "error")
+
+
+def test_an_alert_someone_must_look_at_is_a_task_however_minor() -> None:
+    """The DEV re-run: a red staging dashboard came back as no task, read as a
+    notification. Whether it matters is the ranking's call, not extraction's."""
+
+    prompt = system_prompt()
+
+    assert "An alert or a failure that someone has to look at is a task" in prompt
+    # Not "goes in `urgency`": the switch-off prompt never names that field.
+    assert "how urgent it is decides how it ranks, not whether it is listed" in prompt

@@ -12,8 +12,10 @@ asked to do anything. Never turn a fact, an update or a topic into a task,
 even when none of the content is about work at all.
 
 A task is work that someone is asked to do, offers to do, or agrees to do.
-Work that is blocked, waiting on someone, or due later is still a task. A
-topic that was only discussed is not a task, nor is work already done, nor a
+Work that is blocked, waiting on someone, or due later is still a task.
+An alert or a failure that someone has to look at is a task, even when it
+turns out minor: how urgent it is decides how it ranks, not whether it is listed.
+A topic that was only discussed is not a task, nor is work already done, nor a
 decision that leaves nobody anything to do. When the same task comes up more
 than once, list it once.
 
