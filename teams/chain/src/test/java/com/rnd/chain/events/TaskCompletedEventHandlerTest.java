@@ -16,8 +16,9 @@ import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.SchedulingUpdateService;
 import com.rnd.chain.service.PriorityScoreService;
-import com.rnd.chain.service.TaskCounterUpdater;
+import com.rnd.chain.service.DependencyEdgeService;
 import com.rnd.chain.service.TaskEligibilityService;
+import com.rnd.chain.service.TaskStateHistoryRecorder;
 import com.rnd.inbox.event.TaskCompletedEvent;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.internals.RecordHeaders;
@@ -114,10 +115,15 @@ class TaskCompletedEventHandlerTest {
                                 taskRepo,
                                 scheduling));
 
-        TaskCounterUpdater counterUpdater =
-                new TaskCounterUpdater(
+        TaskStateHistoryRecorder recorder = TaskStateHistoryFixtures.newRecorder();
+
+        DependencyEdgeService edgeService =
+                new DependencyEdgeService(
                         taskRepo,
+                        dependencyRepo,
+                        PgRepos.graphLock(),
                         priorityScoreService,
+                        recorder,
                         taskReadinessRepository);
 
         TaskEligibilityService service =
@@ -125,9 +131,9 @@ class TaskCompletedEventHandlerTest {
                         taskRepo,
                         dependencyRepo,
                         PgRepos.graphLock(),
-                        counterUpdater,
+                        edgeService,
                         priorityScoreService,
-                        TaskStateHistoryFixtures.newRecorder(),
+                        recorder,
                         taskReadinessRepository);
 
         ChainEventProcessingTemplate template =

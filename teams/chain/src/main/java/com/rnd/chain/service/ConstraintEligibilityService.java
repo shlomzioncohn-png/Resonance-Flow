@@ -31,7 +31,7 @@ public class ConstraintEligibilityService {
     private final TaskRepository taskRepository;
     private final ConstraintRepository constraintRepository;
     private final ConstraintHistoryRepository constraintHistoryRepository;
-    private final TaskCounterUpdater taskCounterUpdater;
+    private final DependencyEdgeService dependencyEdgeService;
     private final TaskReadinessRepository taskReadinessRepository;
     private final TaskStateHistoryRecorder historyRecorder;
 
@@ -39,14 +39,14 @@ public class ConstraintEligibilityService {
             TaskRepository taskRepository,
             ConstraintRepository constraintRepository,
             ConstraintHistoryRepository constraintHistoryRepository,
-            TaskCounterUpdater taskCounterUpdater,
+            DependencyEdgeService dependencyEdgeService,
             TaskReadinessRepository taskReadinessRepository,
             TaskStateHistoryRecorder historyRecorder) {
 
         this.taskRepository = taskRepository;
         this.constraintRepository = constraintRepository;
         this.constraintHistoryRepository = constraintHistoryRepository;
-        this.taskCounterUpdater = taskCounterUpdater;
+        this.dependencyEdgeService = dependencyEdgeService;
         this.taskReadinessRepository = taskReadinessRepository;
         this.historyRecorder = historyRecorder;
     }
@@ -118,11 +118,9 @@ public class ConstraintEligibilityService {
          * Stored counter is still maintained during this migration stage.
          * Readiness/publish itself is based on before/after View snapshots.
          */
-        taskCounterUpdater.updateCounters(
+        dependencyEdgeService.updateCounters(
                 taskId,
-                task -> TaskCounterUpdater.withCounters(
-                        task,
-                        task.getBlockingCount(),
+                task -> task.withCounters(task.getBlockingCount(),
                         task.getOpenConstraintCount() + 1),
                 beforeReadiness,
                 afterReadiness);
@@ -224,11 +222,9 @@ public class ConstraintEligibilityService {
         int delta =
                 isOpenNow ? 1 : -1;
 
-        taskCounterUpdater.updateCounters(
+        dependencyEdgeService.updateCounters(
                 taskId,
-                task -> TaskCounterUpdater.withCounters(
-                        task,
-                        task.getBlockingCount(),
+                task -> task.withCounters(task.getBlockingCount(),
                         Math.max(
                                 0,
                                 task.getOpenConstraintCount() + delta)),

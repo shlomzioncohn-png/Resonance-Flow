@@ -62,30 +62,26 @@ class TaskStateHistoryWritingTest {
                         taskRepository,
                         new SchedulingUpdateService(event -> { })));
 
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(
-                taskRepository,
-                priorityScoreService,
-                taskReadinessRepository);
-
         TaskStateHistoryRecorder recorder =
                 new TaskStateHistoryRecorder(history, Clock.systemUTC());
-
-        service = new TaskEligibilityService(
-                taskRepository,
-                dependencyRepository,
-                lock,
-                counterUpdater,
-                priorityScoreService,
-                recorder,
-                taskReadinessRepository);
 
         edgeService = new DependencyEdgeService(
                 taskRepository,
                 dependencyRepository,
                 lock,
-                counterUpdater,
+                priorityScoreService,
                 recorder,
                 taskReadinessRepository);
+
+        service = new TaskEligibilityService(
+                taskRepository,
+                dependencyRepository,
+                lock,
+                edgeService,
+                priorityScoreService,
+                recorder,
+                taskReadinessRepository);
+
     }
 
     private UUID savedTask(TaskStatus status, LocalDateTime updatedAt) {

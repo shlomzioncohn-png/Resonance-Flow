@@ -69,17 +69,24 @@ class ConstraintEligibilityServiceTest {
         SchedulingUpdateService schedulingUpdateService =
                 new SchedulingUpdateService(publisher);
 
-        TaskCounterUpdater counterUpdater =
-                new TaskCounterUpdater(
-                        taskRepository,
-                        new PriorityScoreService(
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
                                 taskRepository,
                                 dependencyRepository,
                                 taskReadinessRepository,
                                 schedulingUpdateService,
                                 new SchedulingPublishListener(
                                 taskRepository,
-                                schedulingUpdateService)),
+                                schedulingUpdateService));
+
+        TaskStateHistoryRecorder recorder = TaskStateHistoryFixtures.newRecorder();
+        DependencyEdgeService edgeService =
+                new DependencyEdgeService(
+                        taskRepository,
+                        dependencyRepository,
+                        PgRepos.graphLock(),
+                        priorityScoreService,
+                        recorder,
                         taskReadinessRepository);
 
         constraintRepository = PgRepos.constraints();
@@ -90,7 +97,7 @@ class ConstraintEligibilityServiceTest {
                         taskRepository,
                         constraintRepository,
                         historyRepository,
-                        counterUpdater,
+                        edgeService,
                         taskReadinessRepository,
                         TaskStateHistoryFixtures.newRecorder());
     }
@@ -522,17 +529,23 @@ class ConstraintEligibilityServiceTest {
         SchedulingUpdateService scheduling =
                 new SchedulingUpdateService(event -> {});
 
-        TaskCounterUpdater counterUpdater =
-                new TaskCounterUpdater(
-                        taskRepo,
-                        new PriorityScoreService(
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
                                 taskRepo,
                                 dependencyRepo,
                                 taskReadinessRepository,
                                 scheduling,
                                 new SchedulingPublishListener(
                                 taskRepo,
-                                scheduling)),
+                                scheduling));
+
+        DependencyEdgeService edgeService =
+                new DependencyEdgeService(
+                        taskRepo,
+                        dependencyRepo,
+                        PgRepos.graphLock(),
+                        priorityScoreService,
+                        TaskStateHistoryFixtures.newRecorder(),
                         taskReadinessRepository);
 
         ConstraintEligibilityService constraintService =
@@ -540,7 +553,7 @@ class ConstraintEligibilityServiceTest {
                         taskRepo,
                         constraintRepo,
                         mock(ConstraintHistoryRepository.class),
-                        counterUpdater,
+                        edgeService,
                         taskReadinessRepository,
                         TaskStateHistoryFixtures.newRecorder());
 

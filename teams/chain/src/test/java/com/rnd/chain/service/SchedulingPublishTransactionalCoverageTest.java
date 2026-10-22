@@ -27,9 +27,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * method" from that silent runtime failure mode into an immediate, obvious test failure instead.
  *
  * <p>Covers every class issue #649 split {@code TaskEligibilityService} into that can reach
- * {@code TaskCounterUpdater.updateCounters}/{@code PriorityScoreService.recomputePriorityScoreAndPublish}
+ * {@code DependencyEdgeService.updateCounters}/{@code PriorityScoreService.recomputePriorityScoreAndPublish}
  * (directly or through another one of these): {@link TaskEligibilityService},
- * {@link DependencyEdgeService}, {@link ConstraintEligibilityService}, {@link TaskCounterUpdater},
+ * {@link DependencyEdgeService}, {@link ConstraintEligibilityService},
  * and {@link PriorityScoreService} itself (its own {@code onScoreProposed}). {@link DependencyGraphService} is deliberately excluded - it's pure
  * reads (getBlockers/getAncestors/getDescendants), nothing to publish.
  */
@@ -40,14 +40,12 @@ class SchedulingPublishTransactionalCoverageTest {
      * here, not given a pointless {@code @Transactional}. */
     private static final Map<Class<?>, Set<String>> EXEMPT_READ_ONLY_METHODS = Map.of(
             TaskEligibilityService.class, Set.of("getTaskEligibility"),
-            TaskCounterUpdater.class, Set.of("withCounters"),
             PriorityScoreService.class, Set.of("compute"));
 
     private static final List<Class<?>> COVERED_CLASSES = List.of(
             TaskEligibilityService.class,
             DependencyEdgeService.class,
             ConstraintEligibilityService.class,
-            TaskCounterUpdater.class,
             PriorityScoreService.class);
 
     @Test

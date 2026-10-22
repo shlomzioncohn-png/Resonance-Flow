@@ -81,33 +81,28 @@ class TaskEligibilityServiceTest {
                             taskRepository,
                             schedulingUpdateService));
 
-        TaskCounterUpdater counterUpdater =
-            new TaskCounterUpdater(
-                    taskRepository,
-                    priorityScoreService,
-                    taskReadinessRepository);
-
         TaskStateHistoryRecorder historyRecorder =
             TaskStateHistoryFixtures.newRecorder();
-
-        service =
-            new TaskEligibilityService(
-                    taskRepository,
-                    dependencyRepository,
-                    lock,
-                    counterUpdater,
-                    priorityScoreService,
-                    historyRecorder,
-                    taskReadinessRepository);
 
         edgeService =
             new DependencyEdgeService(
                     taskRepository,
                     dependencyRepository,
                     lock,
-                    counterUpdater,
+                    priorityScoreService,
                     historyRecorder,
                     taskReadinessRepository);
+
+        service =
+            new TaskEligibilityService(
+                    taskRepository,
+                    dependencyRepository,
+                    lock,
+                    edgeService,
+                    priorityScoreService,
+                    historyRecorder,
+                    taskReadinessRepository);
+
 }
 
     @Test
@@ -568,31 +563,25 @@ class TaskEligibilityServiceTest {
                             taskRepo,
                             scheduling));
 
-        TaskCounterUpdater counterUpdater =
-            new TaskCounterUpdater(
-                    taskRepo,
-                    priorityScoreService,
-                    taskReadinessRepository);
-
         TaskStateHistoryRecorder historyRecorder =
             TaskStateHistoryFixtures.newRecorder();
-
-        TaskEligibilityService eligibilityService =
-            new TaskEligibilityService(
-                    taskRepo,
-                    dependencyRepo,
-                    lock,
-                    counterUpdater,
-                    priorityScoreService,
-                    historyRecorder,
-                    taskReadinessRepository);
 
         DependencyEdgeService edgeService =
             new DependencyEdgeService(
                     taskRepo,
                     dependencyRepo,
                     lock,
-                    counterUpdater,
+                    priorityScoreService,
+                    historyRecorder,
+                    taskReadinessRepository);
+
+        TaskEligibilityService eligibilityService =
+            new TaskEligibilityService(
+                    taskRepo,
+                    dependencyRepo,
+                    lock,
+                    edgeService,
+                    priorityScoreService,
                     historyRecorder,
                     taskReadinessRepository);
 

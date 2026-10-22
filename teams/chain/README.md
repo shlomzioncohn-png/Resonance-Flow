@@ -8,7 +8,7 @@ The dependency/constraint update flow is split by domain (#649): `DependencyEdge
 (`addDependency`, `addDependencies`, `removeDependency`), `TaskEligibilityService`
 (`onTaskStatusChanged`, `recalculateTaskEligibility`, `getTaskEligibility`) and
 `ConstraintEligibilityService` (`onConstraintAdded`, `onConstraintStatusChanged`), sharing
-`TaskCounterUpdater`, `PriorityScoreService` and `GraphLock`, against the Postgres-backed repositories (the in-memory
+`PriorityScoreService` and `GraphLock`, against the Postgres-backed repositories (the in-memory
 repositories and `MockDataConfig` were removed on 2026-10-15; Postgres is the only persistence).
 `TaskEligibilityService` and `TaskTraversalService` are plain Spring beans wired by constructor
 injection. Chain also
@@ -282,7 +282,7 @@ template starts from those properties, so the same settings apply everywhere.
 Computed by `PriorityScoreService.compute` (a pure function, no repository access).
 `PriorityScoreService.recomputePriorityScoreAndPublish` gathers its inputs from the dependency graph and
 `task_readiness`, persists the result and queues a publish whenever either `priority_score` or
-`is_available` changes; `TaskCounterUpdater` and `TaskEligibilityService` call it.
+`is_available` changes; `DependencyEdgeService` and `TaskEligibilityService` call it.
 
 ### Formula
 
@@ -369,11 +369,11 @@ None of `TaskEligibilityService`/`DependencyEdgeService`/`ConstraintEligibilityS
   mutator that forgot `@Transactional`, which would otherwise desync Inbox's copy of
   `priority_score`/`is_available` permanently and silently). This is why every public mutator on
   `TaskEligibilityService`, `DependencyEdgeService`, `ConstraintEligibilityService`, and
-  `TaskCounterUpdater` and `PriorityScoreService` themselves are `@Transactional` (issue #649 split
+  `PriorityScoreService` itself is `@Transactional` (issue #649 split
   `TaskEligibilityService`'s original `addDependency`/`removeDependency`/`onScoreProposed` out
   into the first two of those; `onScoreProposed` now lives on `PriorityScoreService`), and why
   `SchedulingPublishTransactionalCoverageTest` exists: a
-  reflection-based guardrail covering all five classes that fails the build if a future public
+  reflection-based guardrail covering all four classes that fails the build if a future public
   mutator is added without `@Transactional`, since that failure mode is otherwise silent at
   runtime.
 
@@ -898,8 +898,8 @@ action in `TaskDependencyService` was **not** removed - see "Dependency graph pe
 Append-only table `task_state_history` (V9) for status changes and blocking transitions. This
 schema, `TaskStateHistoryEntry`/`TaskStateEventType` and `TaskStateHistoryRepository`
 (Postgres) landed in #773. Rows are written (#774) in the same transaction as the
-change, via `TaskStateHistoryRecorder` (independent of `TaskCounterUpdater`, which is slated for
-removal): `TaskEligibilityService` records status changes (`onTaskStatusChangedIfNewer`,
+change, via `TaskStateHistoryRecorder` (independent of the stored-counter code in
+`DependencyEdgeService`, which is slated for removal): `TaskEligibilityService` records status changes (`onTaskStatusChangedIfNewer`,
 `onTaskStatusChanged`, `onTaskCompleted`) and the blocking transitions of dependents it releases
 or re-blocks; `DependencyEdgeService` records the blocking transition of an edge add/remove.
 A stale/duplicate event, or one that leaves the status or the

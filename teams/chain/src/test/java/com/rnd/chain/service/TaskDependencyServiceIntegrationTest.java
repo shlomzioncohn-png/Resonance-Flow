@@ -81,25 +81,22 @@ class TaskDependencyServiceIntegrationTest {
                 new SchedulingUpdateService(
                         schedulingPublisher);
 
-        TaskCounterUpdater counterUpdater =
-                new TaskCounterUpdater(
-                        taskRepository,
-                        new PriorityScoreService(
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
                                 taskRepository,
                                 dependencyRepository,
                                 taskReadinessRepository,
                                 schedulingUpdateService,
                                 new SchedulingPublishListener(
                                 taskRepository,
-                                schedulingUpdateService)),
-                        taskReadinessRepository);
+                                schedulingUpdateService));
 
         DependencyEdgeService dependencyEdgeService =
                 new DependencyEdgeService(
                         taskRepository,
                         dependencyRepository,
                         PgRepos.graphLock(),
-                        counterUpdater,
+                        priorityScoreService,
                         TaskStateHistoryFixtures.newRecorder(),
                         taskReadinessRepository);
 

@@ -54,12 +54,10 @@ class TaskTierPersistenceTest {
                         new SchedulingUpdateService(event -> { }),
                         new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> { })));
 
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(
-                taskRepository,
-                priorityScoreService,
-                taskReadinessRepository);
         TaskStateHistoryRecorder recorder = new TaskStateHistoryRecorder(history, Clock.systemUTC());
-        service = new TaskEligibilityService(taskRepository, dependencyRepository, lock, counterUpdater, priorityScoreService, recorder,
+        DependencyEdgeService edgeService = new DependencyEdgeService(
+                taskRepository, dependencyRepository, lock, priorityScoreService, recorder, taskReadinessRepository);
+        service = new TaskEligibilityService(taskRepository, dependencyRepository, lock, edgeService, priorityScoreService, recorder,
                 taskReadinessRepository);
     }
 

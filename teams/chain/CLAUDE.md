@@ -149,7 +149,7 @@ the code with Lombok.
     also fails independently (`reason` round-trips as `{}` instead of `null`) - also pre-existing,
     also unrelated.
 - #649: TaskEligibilityService was split by domain - edges in `DependencyEdgeService`, constraints in
-  `ConstraintEligibilityService`, counter helpers in `TaskCounterUpdater`, priority-score recompute/publish
+  `ConstraintEligibilityService`, stored-counter maintenance (`updateCounters`, `adjustBlockingCount`) in `DependencyEdgeService` (`TaskCounterUpdater` was removed, #917 PR 1), priority-score recompute/publish
   in `PriorityScoreService` (`recomputePriorityScoreAndPublish`, `onScoreProposed`), the publish-after-commit
   queue in `SchedulingUpdateService` (`requestPublishAfterCommit`), and placeholder-task inserts in
   `DependencyEdgeService` (`insertPlaceholdersIfAbsent`) (issue #917, PR 1). The graph lock is the

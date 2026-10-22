@@ -43,7 +43,7 @@ public class TaskEligibilityService {
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
     private final GraphLock graphLock;
-    private final TaskCounterUpdater taskCounterUpdater;
+    private final DependencyEdgeService dependencyEdgeService;
     private final PriorityScoreService priorityScoreService;
     private final TaskStateHistoryRecorder historyRecorder;
     private final TaskReadinessRepository taskReadinessRepository;
@@ -61,11 +61,9 @@ public class TaskEligibilityService {
                                 List.of(taskId)),
                         taskId);
 
-        taskCounterUpdater.updateCounters(
+        dependencyEdgeService.updateCounters(
                 taskId,
-                task -> TaskCounterUpdater.withCounters(
-                        task,
-                        task.getBlockingCount(),
+                task -> task.withCounters(task.getBlockingCount(),
                         task.getOpenConstraintCount()),
                 readiness,
                 readiness);
@@ -508,9 +506,7 @@ public class TaskEligibilityService {
                                     task.getId(),
                                     task);
 
-                            return TaskCounterUpdater.withCounters(
-                                    task,
-                                    Math.max(
+                            return task.withCounters(Math.max(
                                             0,
                                             task.getBlockingCount()
                                                     + delta),
