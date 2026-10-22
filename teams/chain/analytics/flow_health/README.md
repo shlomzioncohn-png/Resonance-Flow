@@ -162,3 +162,42 @@ Clustering is one KMeans (random_state 42) over eight task features, standardise
 `tier` and `project_id` stay in `features_task.csv` but are not clustered. The code never reads the answer key; the
 tests do, as a sanity check. One of them (chronic blockers in the top decile) currently fails on dev and is recorded
 as an expected failure with its reason.
+
+## Detectors (`flow_health.detectors`)
+
+```bash
+python -m flow_health.features --data data/dev --out out/dev        # once: task features and clusters
+python -m flow_health.detectors --data data/dev --features out/dev --seed 42   # writes out/dev/flags.json
+```
+
+Three deterministic detectors; each returns a list of flags and the command writes all of them to one `flags.json`
+(`{"meta": {...}, "flags": [...]}`). Output is a recommendation only: nothing is written to Chain, and no task or
+dependency is changed. A flag has `flag_id`, `pattern`, `entity_type`, `entity_ids`, `score` (0-1, percentile rank inside
+its detector), `severity` (`low` / `medium` / `high`), `explanation` (a Hebrew sentence built from a template and the real
+numbers) and `evidence` (the numbers themselves). Merging the three lists into one ranked report is the next task.
+The detectors never read the answer files (checked by `tests/test_no_answer_leak.py`).
+
+| Detector | Looks at | Flagged when | Severity |
+|---|---|---|---|
+| `CHRONIC_BLOCKER` (a task) | `features_task`: unfinished tasks, or finished ones that took at least 3 tier medians | blocked time is at least 3x the median blocked time of its tier **and** it had at least 3 dependents at once. A long task nobody waits on is not flagged. A task with no known tier is compared with all tasks. | by the ratio: 3-4 low, 4-6 medium, 6 and up high |
+| `RECURRING_CYCLE` (an edge, or a pair of edges) | `dependency_history`: ADDED / REMOVED events of each `(task_id, depends_on_task_id)` | at least 3 switches (the first ADDED is not a switch) and a median gap between events of 1-10 days. An edge fixed once is not flagged. A **near-cycle** (two live edges of one task, one removed and back after at least a day) is flagged on the pair; edges already flagged alone are not repeated. | 8+ switches, or 5+ with even gaps (CV <= 0.3): high; 5+ medium; else low. A pair is always low. |
+| `SLOW_CHAIN` (a path) | every maximal path of 4-8 finished tasks in the dependency graph (`chain_paths.py`) | at least 3x the median closing time of paths **of the same length**, robust z (median / MAD, IQR when MAD is 0) at least 3.5, **and** no single link above 50% of the total time (such a path is a chronic blocker). Groups smaller than 8 are not judged. | by the ratio to the median: 3-4 low, 4-6 medium, 6 and up high |
+
+**Paths.** The graph holds finished tasks; an edge counts if it was active when its dependent finished and its target
+finished no later. A path starts at a task with no such dependency and ends at one nothing depends on. Paths longer
+than 8 tasks are left out whole, not cut. The time runs from the first task's first ACTIVE to the last task's DONE;
+the first hop is the first task's own work, so the hops add up to the total. Paths share tasks, so the flags of one
+slow stretch can overlap.
+
+**Thresholds** live in `src/flow_health/detectors/config.yaml` (`--config` points at another file); the file's comments
+say what each value means. The ones that decide most: `chronic_blocker.min_ratio_to_tier`, `min_dependents`;
+`recurring_cycle.min_transitions`, `min_median_gap_days`, `max_median_gap_days`; `slow_chain.min_ratio_to_median`,
+`min_robust_z`, `max_link_share`, `min_group_size`. They were set on the dev set (seed 42) only; the eval set was not opened.
+The only change from the starting values: `min_median_gap_days` is 1.0 instead of 2 (on dev every edge with 3 or more
+switches has a median gap of 1.8-3.0 days).
+
+**Result on dev:** 14 chronic blockers, 20 recurring-cycle edges, 1 slow chain, 0 near-cycle pairs (no task in dev has
+two live edges of which one flaps).
+
+**Limits.** Chronic blocker sees blocked time, not a task that is long without ever being blocked. The slow-chain
+baseline is the length group alone, with no tier or team pace, so groups of long paths are wide and few paths stand out.

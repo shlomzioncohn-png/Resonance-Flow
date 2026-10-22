@@ -7,8 +7,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from ..features import build_timeline
 from ..loaders import CsvLoader
 from . import chronic_blocker, recurring_cycle, slow_chain
+from .chain_paths import extract_paths
 from .common import PATTERNS, Flag, write_flags
 from .config import DetectorConfig, load_config
 
@@ -26,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
                                 description="Run the three detectors and write flags.json (recommendations only).")
     p.add_argument("--data", type=Path, required=True, help="the generator's CSV directory, e.g. data/dev")
     p.add_argument("--features", type=Path, required=True,
-                   help="output of `python -m flow_health.features`, e.g. out/dev")
+                   help="output of `python -m flow_health.features` (task features, clusters), e.g. out/dev")
     p.add_argument("--out", type=Path, default=None, help="flags file (default: <features>/flags.json)")
     p.add_argument("--config", type=Path, default=None, help="thresholds file (default: detectors/config.yaml)")
     p.add_argument("--seed", type=int, default=None, help="seed of the data set, recorded in the file for reference")
@@ -35,11 +37,12 @@ def main(argv: list[str] | None = None) -> int:
 
     ds = CsvLoader(args.data).load()
     tasks = pd.read_csv(args.features / "features_task.csv")
-    chains = pd.read_csv(args.features / "features_chain.csv")
     cluster_file = args.features / "clusters_task.csv"
     clusters = pd.read_csv(cluster_file) if cluster_file.is_file() else None
 
-    flags = run_detectors(tasks, ds.dependency_history, chains, load_config(args.config), clusters)
+    cfg = load_config(args.config)
+    chains = extract_paths(build_timeline(ds), cfg.slow_chain)
+    flags = run_detectors(tasks, ds.dependency_history, chains, cfg, clusters)
     out = args.out or args.features / "flags.json"
     write_flags(flags, out, {"seed": args.seed, "as_of": ds.as_of.isoformat(), "data": str(args.data),
                              "counts": {pattern: sum(f.pattern == pattern for f in flags) for pattern in PATTERNS}})
