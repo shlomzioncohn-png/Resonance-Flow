@@ -756,7 +756,16 @@ rewording count turns out to be high.
 
 ### `dependency_mentions` (moved here from #842)
 
-Each task names the work it depends on or blocks, in the content's own words
+**One direction.** A mention, and `has_dependencies`, mean "this task waits
+for that work" — never "that work waits for this task". #834 sends each
+resolved mention to Chain as this task's `depends_on_task_id`, so a mention of
+the work a task *blocks* would arrive as an edge pointing backwards, and two
+tasks naming each other as a cycle. The relation is not lost: the waiting task
+names its blocker. This narrows `has_dependencies` from #350's "depends on, is
+blocked by, or blocks": a task others wait for is now `false`. It is Inbox's
+field, so the change is called out in the PR.
+
+Each task names the work it depends on or is blocked by, in the content's own words
 ("the DB upgrade"), so that #834's resolver can look up the real `task_id`.
 It is defined in `system.md`, beside `has_dependencies`, because it is a field
 of every task, with the switch on or off.
@@ -813,8 +822,8 @@ and may not be in the index yet when its mention is resolved.
   action items cluster in the closing recap: on AMI, cut at 8000 the two
   meetings found 0/4 and 0/8 gold items, sent whole 4/4 and 4/8. Any cut is
   logged as a warning with how much was not sent, and grounding reads only
-  the text that was sent. To be
-  settled against the real AMI transcripts before the demo.
+  the text that was sent. A repair round shows the model its own rejected
+  answer under the same cap, so a long list of tasks is not cut either.
 - **AMI was measured by hand, once.** The transcripts (from #784's loader)
   are not in the repository, as the corpus is gitignored; the run and its
   numbers are in the PR. A repeatable AMI eval belongs to R1's extraction

@@ -462,3 +462,40 @@ def test_an_alert_someone_must_look_at_is_a_task_however_minor() -> None:
     assert "An alert or a failure that someone has to look at is a task" in prompt
     # Not "goes in `urgency`": the switch-off prompt never names that field.
     assert "how urgent it is decides how it ranks, not whether it is listed" in prompt
+
+
+def test_a_meetings_rejected_answer_goes_back_whole() -> None:
+    """Fifteen tasks with their classification run past 8000 characters, and
+    a repair told to return every task "unchanged" must be able to see them."""
+
+    long_answer = '{"tasks": [' + ", ".join(['{"title": "Book the lab"}'] * 400) + "]}"
+    assert len(long_answer) > MAX_CONTENT_CHARS
+
+    prompt = repair_prompt(SourceType.MEETING, "the meeting", long_answer, "tasks.3.title: ...")
+
+    assert long_answer in prompt
+
+
+# --- one direction: this task waits for that work --------------------------
+
+
+def test_a_dependency_is_only_what_this_task_waits_for() -> None:
+    """#834 publishes each mention to Chain as `depends_on_task_id`. A task
+    naming the work *it* blocks would reach Chain as an edge pointing back."""
+
+    prompt = system_prompt()
+
+    assert "cannot be finished until that work is done" in prompt
+    assert "A task that others are waiting for does not depend on them by that alone" in prompt
+    assert "Never name the work that waits for this task" in prompt
+    assert "or blocks" not in prompt
+
+
+def test_no_two_example_tasks_name_each_other() -> None:
+    """Mutual mentions are a cycle in Chain's graph: each waits for the other."""
+
+    for example in _examples():
+        names = {task["title"]: set(task["dependency_mentions"]) for task in example["tasks"]}
+        for title, mentions in names.items():
+            for other in mentions:
+                assert title not in names.get(other, set()), (title, other)

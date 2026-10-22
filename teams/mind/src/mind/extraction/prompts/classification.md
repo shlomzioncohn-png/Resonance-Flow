@@ -73,7 +73,7 @@ Examples. Each answer is the whole object, written exactly as you return it:
 
     "Before Thursday I need the recommendation on whether we enter the German
     market, the board is deciding."
-    {"tasks": [{"title": "Write the recommendation on entering the German market", "description": "The board decides on Thursday and is waiting for it.", "source_ref": null, "has_dependencies": true, "dependency_mentions": [], "tier": "STRATEGIC", "urgency": 4, "role_context": "CEO", "effort_estimate_minutes": null, "effort_estimate_basis": null}]}
+    {"tasks": [{"title": "Write the recommendation on entering the German market", "description": "The board decides on Thursday and is waiting for it.", "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "STRATEGIC", "urgency": 4, "role_context": "CEO", "effort_estimate_minutes": null, "effort_estimate_basis": null}]}
 
     "Can you line up next sprint and work out who picks up the migration?"
     {"tasks": [{"title": "Line up next sprint", "description": "Includes working out who picks up the migration.", "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "TACTICAL", "urgency": 2, "role_context": "MANAGER", "effort_estimate_minutes": null, "effort_estimate_basis": null}]}
@@ -91,7 +91,7 @@ Examples. Each answer is the whole object, written exactly as you return it:
 
     "Project Manager: Can you send the client the revised mock-ups by tomorrow?
     I will set up the review call with their team once they have them."
-    {"tasks": [{"title": "Send the client the revised mock-ups", "description": "Due tomorrow.", "source_ref": null, "has_dependencies": true, "dependency_mentions": ["Set up the review call with the client's team"], "tier": "OPERATIONAL", "urgency": 3, "role_context": null, "effort_estimate_minutes": null, "effort_estimate_basis": null}, {"title": "Set up the review call with the client's team", "description": "Once the client has the revised mock-ups.", "source_ref": null, "has_dependencies": true, "dependency_mentions": ["Send the client the revised mock-ups"], "tier": "OPERATIONAL", "urgency": 2, "role_context": null, "effort_estimate_minutes": 15, "effort_estimate_basis": "INFERRED"}]}
+    {"tasks": [{"title": "Send the client the revised mock-ups", "description": "Due tomorrow.", "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "OPERATIONAL", "urgency": 3, "role_context": null, "effort_estimate_minutes": null, "effort_estimate_basis": null}, {"title": "Set up the review call with the client's team", "description": "Once the client has the revised mock-ups.", "source_ref": null, "has_dependencies": true, "dependency_mentions": ["Send the client the revised mock-ups"], "tier": "OPERATIONAL", "urgency": 2, "role_context": null, "effort_estimate_minutes": 15, "effort_estimate_basis": "INFERRED"}]}
 
     "Thanks everyone, good discussion on the colour options. See you next week."
     {"tasks": []}
@@ -102,7 +102,8 @@ Examples. Each answer is the whole object, written exactly as you return it:
     the stated one. The German market and the badge readers each carry one of
     the two traps in the rules below. The meeting turn holds two tasks, one
     asked for and one offered, so the list has two entries; the call waits
-    for the mock-ups, so each names the other by its title. The last one
+    for the mock-ups, so it names them by their title, and the mock-ups,
+    which wait for nothing, name nothing. The last one
     discusses but asks nobody for anything, so the list is empty.
 
 Rules for `tier`, `urgency` and `role_context`:

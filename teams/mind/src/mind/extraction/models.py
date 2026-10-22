@@ -331,11 +331,14 @@ class ExtractedFields(BaseModel):
     # Not every source carries one, so None is a normal outcome.
     source_ref: str | None = None
 
-    # Whether the task looks like it depends on or blocks another task.
+    # Whether the task looks like it depends on, or is blocked by, other work.
+    # One direction since #690: a task others wait for is not dependent.
     # Resolving the actual targets belongs to R3, not to this stage.
     has_dependencies: bool
 
-    # Short phrases naming the tasks this one depends on or blocks, in the
+    # Short phrases naming the work this one depends on or is blocked by —
+    # never what waits for it: #834 sends each to Chain as this task's
+    # `depends_on_task_id`, so the other direction would arrive reversed. In the
     # content's own words: "the DB upgrade" (#690, was #842). Never in the
     # contract. They travel beside it to #834's resolver, which turns them into
     # task ids, so a phrase that cannot be resolved there must not leave here.

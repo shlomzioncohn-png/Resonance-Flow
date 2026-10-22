@@ -29,11 +29,11 @@ ANSWER = answer_of(
         "dependency_mentions": ["the chip budget"],
     },
     {
+        # Waits for nothing: the concept waits for it, and says so itself.
         "title": "Get the chip budget from finance",
         "description": "By Wednesday.",
         "source_ref": None,
-        "has_dependencies": True,
-        "dependency_mentions": ["the components concept"],
+        "has_dependencies": False,
     },
     {
         "title": "Work out the button layout",
@@ -61,10 +61,12 @@ def test_a_meeting_becomes_one_linked_proposal_per_action_item() -> None:
     concept, budget, layout, pricing = outcome.tasks
     assert outcome.item_key == "meetings/design-review"
 
-    # The pair that names each other: both linked, in the meeting's own words.
-    for task in (concept, budget):
-        assert task.fields.has_dependencies is True
-        assert all(mention.lower() in MEETING.lower() for mention in task.fields.dependency_mentions)
+    # One edge, pointing the way Chain reads it: the concept waits for the budget.
+    assert (concept.fields.has_dependencies, concept.fields.dependency_mentions) == (
+        True,
+        ["the chip budget"],
+    )
+    assert (budget.fields.has_dependencies, budget.fields.dependency_mentions) == (False, [])
 
     # The invented thread id is dropped and charged to that task alone.
     assert layout.fields.source_ref is None

@@ -37,6 +37,7 @@ def content_cap(source_type: SourceType) -> int:
 
     return MAX_MEETING_CONTENT_CHARS if source_type is SourceType.MEETING else MAX_CONTENT_CHARS
 
+
 # Placeholders are {{NAME}} and are filled by substitution, not by
 # str.format: the prompts contain JSON braces, and format() would choke on
 # them or, worse, silently reinterpret them.
@@ -132,12 +133,16 @@ def repair_prompt(
     produces the same broken answer a second time.
     """
 
+    # The rejected answer gets the content's cap too: a meeting's list of
+    # tasks runs past 8000 characters, and a repair asked to return every
+    # task unchanged cannot copy the ones it is not shown.
+    cap = content_cap(source_type)
     return _fill(
         _load("repair_user.md"),
         {
             "SOURCE_TYPE": source_type.value,
-            "CONTENT": truncate(content, content_cap(source_type)),
-            "INVALID_OUTPUT": truncate(invalid_output),
+            "CONTENT": truncate(content, cap),
+            "INVALID_OUTPUT": truncate(invalid_output, cap),
             "ERROR": error,
         },
     )

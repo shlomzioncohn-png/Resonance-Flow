@@ -42,15 +42,19 @@ Each task in the list has exactly these keys:
   one, do not assemble one out of parts, and do not put the source type here.
   Use null when the content carries no such pointer.
 - `has_dependencies` — boolean. True when the content indicates this task
-  depends on, is blocked by, or blocks other work.
+  depends on, or is blocked by, other work:
+  it cannot be finished until that work is done.
+  A task that others are waiting for does not depend on them by that alone,
+  so then this is false.
 - `dependency_mentions` — list of strings. One entry for each piece of work
-  this task depends on, is blocked by, or blocks. Name each piece of work the
-  way the content describes it, specific enough to tell it apart: what it is,
-  and whose it is or what it is for when the content says so ("the DB
-  upgrade", "Dana's pricing review"). Use only words the content uses. When
-  that work is another task in this same list, use that task's title. Never
-  an id and never a guess at one. Use `[]` when the content does not name
-  that work.
+  this task depends on or is blocked by.
+  Never name the work that waits for this task: when that work is a task here
+  too, it names this one. Name each piece of work the way the content
+  describes it, specific enough to tell it apart: what it is, and whose it is
+  or what it is for when the content says so ("the DB upgrade", "Dana's
+  pricing review"). Use only words the content uses. When that work is
+  another task in this same list, use that task's title. Never an id and
+  never a guess at one. Use `[]` when the content does not name that work.
 
 Rules:
 
