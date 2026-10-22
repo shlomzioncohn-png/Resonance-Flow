@@ -8,11 +8,15 @@ word, never the two strings as a whole: a string comparison is swayed by how
 long the name is, so "sales team" came out close to "Sales" while "team" is a
 word the name does not have at all.
 
-* A name is its words, lower-cased, split on spaces, "." and "_" -- so
-  "Dana  Cohen", "dana.cohen" and "dana_cohen" are the same name.
+* A name is its words, lower-cased, split on spaces, ".", "_" and "-" -- so
+  "Dana  Cohen", "dana.cohen" and "dana_cohen" are the same name, and so are
+  "Mary Ann" and "Mary-Ann".
 * Every word of the mention needs a partner among the words of the name: the
   same word, or one with a typo (`WORD_MATCH_MIN` and up). One word with no
   partner and the name does not match at all.
+* An initial ("C." in "Dana C.") is a partner for a word that starts with it,
+  but only when the mention has a whole word besides: a lone "D" would
+  otherwise be a partner for every name that starts with D.
 * The similarity of a mention is the average similarity of its words to their
   partners, so a typo lowers it.
 * If the mention covers every word of the name it is a full match and scores
@@ -42,7 +46,12 @@ WORD_MATCH_MIN = 0.71
 # be dropped. Not measured either.
 PARTIAL_SCORE = 0.7
 
-_WORD_BOUNDARY = re.compile(r"[\s._]+")
+# How well an initial stands in for the word it starts. Below 1.0 because "C"
+# is less than "Cohen", above `WORD_MATCH_MIN` so that it does count as a
+# partner. Not measured.
+INITIAL_SIMILARITY = 0.9
+
+_WORD_BOUNDARY = re.compile(r"[\s._-]+")
 
 
 def words(text: str | None) -> tuple[str, ...]:
@@ -53,8 +62,11 @@ def words(text: str | None) -> tuple[str, ...]:
     return tuple(w for w in _WORD_BOUNDARY.split(text.casefold()) if w)
 
 
-def _word_similarity(a: str, b: str) -> float:
-    return SequenceMatcher(None, a, b).ratio()
+def _word_similarity(a: str, b: str, *, initials: bool) -> float:
+    similarity = SequenceMatcher(None, a, b).ratio()
+    if initials and len(a) == 1 and len(b) > 1 and b.startswith(a):
+        return max(similarity, INITIAL_SIMILARITY)
+    return similarity
 
 
 def score_words(mention: tuple[str, ...], name: tuple[str, ...]) -> float:
@@ -63,11 +75,14 @@ def score_words(mention: tuple[str, ...], name: tuple[str, ...]) -> float:
     if not mention or not name:
         return 0.0
 
+    # An initial counts only next to a whole word (see the module docstring).
+    initials = any(len(word) > 1 for word in mention)
+
     similarities: list[float] = []
     covered: set[int] = set()  # which words of the name got a partner
     for word in mention:
         similarity, index = max(
-            ((_word_similarity(word, other), i) for i, other in enumerate(name)),
+            ((_word_similarity(word, other, initials=initials), i) for i, other in enumerate(name)),
             key=lambda pair: pair[0],
         )
         if similarity < WORD_MATCH_MIN:
@@ -81,8 +96,15 @@ def score_words(mention: tuple[str, ...], name: tuple[str, ...]) -> float:
     return score * PARTIAL_SCORE
 
 
+def best_score(mention_words: tuple[str, ...], names: Iterable[str | None]) -> float:
+    """The best score of a mention (already split into words) against any of the
+    names one candidate goes by. Split the mention once and call this for each
+    candidate, rather than `score_names`, which splits it every time."""
+
+    return max((score_words(mention_words, words(n)) for n in names), default=0.0)
+
+
 def score_names(mention: str, names: Iterable[str | None]) -> float:
     """The best score of `mention` against any of the names one candidate goes by."""
 
-    mention_words = words(mention)
-    return max((score_words(mention_words, words(n)) for n in names), default=0.0)
+    return best_score(words(mention), names)

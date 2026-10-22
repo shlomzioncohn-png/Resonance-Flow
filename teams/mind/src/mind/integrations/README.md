@@ -51,11 +51,15 @@ Word against word, never the whole strings: a string comparison is swayed by how
 long the name is, so "sales team" came out close to "Sales" although "team" is a
 word the name does not have. The rules are ours, written in code, not learned.
 
-1. A name is its words, lower-cased, split on spaces, `.` and `_`. So
-   `Dana  Cohen`, `dana.cohen` and `dana_cohen` are the same name.
+1. A name is its words, lower-cased, split on spaces, `.`, `_` and `-`. So
+   `Dana  Cohen`, `dana.cohen` and `dana_cohen` are the same name, and so are
+   `Mary Ann` and `Mary-Ann`.
 2. Every word of the mention needs a partner among the words of the name: the
    same word, or one with a typo (`difflib` on the two words, `WORD_MATCH_MIN`
    and up). One word with no partner and the name is ruled out (score 0).
+   An initial (`C.` in `Dana C.`) is a partner for a word that starts with it
+   (`INITIAL_SIMILARITY`, 0.9), but only when the mention has a whole word
+   besides, or a lone `D` would match every name that starts with D.
 3. The similarity of a mention is the average similarity of its words to their
    partners, so a typo lowers it.
 4. If the mention covers every word of the name it is a full match and scores
@@ -84,6 +88,8 @@ with the same score.
 | `Dena` | Dana Cohen | 0.52 (typo, partial) |
 | `Dan` | Dana Cohen | 0.60: **every Dana comes back** |
 | `Dani` | Daniel Katz | 0.56: close in spelling, so it comes back |
+| `Dana C.` | Dana Cohen | 0.95 (an initial); a Dana Carmi scores the same |
+| `Mary Ann` | Mary-Ann Cohen | 0.70 (partial) |
 | `Sale` | team Sales | 0.89 |
 | `Dana from finance`, `sales team` | Dana Cohen, team Sales | none: `from`, `finance` and `team` match no word |
 | `Dana` | Danny Levi | none |
@@ -153,7 +159,7 @@ values file; the Relay team has been asked.
 | 401 / 403 | ERROR (the actor is wrong on every call) | no |
 | any other HTTP error | WARNING | no |
 | body is not JSON, or not the page we read | WARNING (field names only) | no |
-| more than 100 pages, or more than `MAX_FETCH_SECONDS` | WARNING | no |
+| more than 100 pages, a page over 5 MB, or more than `MAX_FETCH_SECONDS` | WARNING | no |
 
 The time budget is checked while a page is arriving, not only between pages: the
 HTTP timeout is for each wait on its own, so a server that sends a little every
@@ -176,10 +182,38 @@ asking for the same tenant at once would only fetch it twice.
 
 ### Config
 
-`MIND_INBOX_DIRECTORY__*`, see `.env.example` and `config.InboxDirectorySettings`.
-Defaults of `TIMEOUT_SECONDS` (5), `MAX_FETCH_SECONDS` (15), `CACHE_TTL_SECONDS`
-(300) and `MIN_SCORE` (0.4) are starting points, not measured values. `WORD_MATCH_MIN`
-(0.71) and `PARTIAL_SCORE` (0.7) are constants in `name_matching.py`, not
-settings. `MIN_SCORE` must stay below `PARTIAL_SCORE`, or a lone first name would
-be dropped; a test checks it. In the cluster the variables must be set in the
-Helm values of the `mind` component.
+Like Mind's other connection settings (#481), the address and the actor come from
+the two files Relay's Helm chart mounts, read through `mind.config_file`:
+
+| Setting | File | Key |
+|---|---|---|
+| address of Inbox | `config.yaml` (`$CONFIG_FILE_PATH`) | `inbox.url`, an http(s) URL |
+| actor (`X-Actor-Id`) | `secrets.yaml` (`$SECRETS_FILE_PATH`) | `inbox.actor_id`, a UUID |
+
+```yaml
+# config.yaml
+inbox:
+  url: http://resonance-flow-inbox:80
+# secrets.yaml
+inbox:
+  actor_id: "00000000-0000-0000-0000-000000000003"
+```
+
+The actor is a secret because Inbox trusts `X-Actor-Id` without checking it.
+Unlike the vector store, both are read leniently: a missing file or key means
+"not set", and the client returns no candidates. The env vars
+`MIND_INBOX_DIRECTORY__BASE_URL` and `__ACTOR_ID` still work as a fallback for a
+local run; the files win when they set the key. An address that is not an http(s)
+URL stops the settings from loading, wherever it comes from.
+
+The tuning knobs come from env, `MIND_INBOX_DIRECTORY__*`, see `.env.example` and
+`config.InboxDirectorySettings`. Defaults of `TIMEOUT_SECONDS` (5),
+`MAX_FETCH_SECONDS` (15), `CACHE_TTL_SECONDS` (300) and `MIN_SCORE` (0.4) are
+starting points, not measured values. `WORD_MATCH_MIN` (0.71) and `PARTIAL_SCORE`
+(0.7) are constants in `name_matching.py`, not settings. `MIN_SCORE` must stay
+below `PARTIAL_SCORE`, or a lone first name would be dropped: the settings refuse to
+load otherwise.
+
+The Helm chart does not render these two keys yet: the Relay team was asked to add
+`inbox.url` to the config.yaml template and `inbox.actor_id` to the app Secret.
+Until then, in the cluster, the client is not configured.

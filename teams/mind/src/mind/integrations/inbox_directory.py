@@ -33,7 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from mind.config import InboxDirectorySettings
 from mind.contracts import AssigneeType
-from mind.integrations.name_matching import score_names
+from mind.integrations.name_matching import best_score, words
 
 logger = logging.getLogger("mind.integrations")
 
@@ -48,6 +48,9 @@ _ACTIVE = "ACTIVE"
 _PAGE_SIZE = 200
 # A stop so a response that never ends cannot loop forever: 100 pages of 200.
 _MAX_PAGES = 100
+# Far above a page of 200 rows (about 100 KB) and far below what could hurt: a
+# bound on what one answer may put in memory, whatever the time budget allows.
+_MAX_BODY_BYTES = 5 * 1024 * 1024
 
 
 # What we read of Inbox's responses. `extra="ignore"` here, unlike our own
@@ -140,7 +143,7 @@ def _user_names(user: _InboxUser) -> list[str | None]:
 
 
 def _keep_active[Row: (_InboxUser, _InboxTeam)](
-    rows: list[Row], tenant_id: UUID, what: str
+    rows: list[Row], tenant_id: UUID, what: str, warned: set[tuple[UUID, str]]
 ) -> tuple[Row, ...]:
     """The rows of `tenant_id` that are active.
 
@@ -148,11 +151,16 @@ def _keep_active[Row: (_InboxUser, _InboxTeam)](
     and none survive, that is logged: it is what a wrong status spelling or an
     actor that cannot see the tenant looks like, and without a line here both
     would pass as "nobody has that name". Only counts and statuses are logged,
-    never names.
+    never names. Once per tenant and kind in `warned`, not on every refresh of
+    the cache; it is logged again if the rows come back and then go.
     """
 
     kept = tuple(r for r in rows if r.tenant.id == tenant_id and r.status == _ACTIVE)
-    if rows and not kept:
+    key = (tenant_id, what)
+    if kept:
+        warned.discard(key)
+    elif rows and key not in warned:
+        warned.add(key)
         in_tenant = [r for r in rows if r.tenant.id == tenant_id]
         logger.warning(
             "Inbox returned %d %s but none are active in this tenant "
@@ -190,8 +198,9 @@ class InboxDirectory:
 
         if not self.configured:
             logger.warning(
-                "Inbox directory is not configured (MIND_INBOX_DIRECTORY__BASE_URL and "
-                "MIND_INBOX_DIRECTORY__ACTOR_ID): owner lookups will return no candidates"
+                "Inbox directory is not configured (inbox.url in config.yaml and inbox.actor_id "
+                "in secrets.yaml; locally MIND_INBOX_DIRECTORY__BASE_URL and __ACTOR_ID also "
+                "work): owner lookups will return no candidates"
             )
 
         # Only a client we created is a client we may close.
@@ -208,6 +217,8 @@ class InboxDirectory:
         # a Kafka consumer, and two threads asking for the same tenant at once
         # would only fetch it twice.
         self._cache: dict[UUID, _CachedLists] = {}
+        # Tenants (and kinds) whose "none are active" warning has been logged.
+        self._warned_empty: set[tuple[UUID, str]] = set()
 
     @property
     def configured(self) -> bool:
@@ -222,14 +233,18 @@ class InboxDirectory:
         when Inbox cannot be asked -- never an exception.
         """
 
+        mention_words = words(name)
+        if not mention_words:
+            return []
+
         loaded = self._load(tenant_id)
         if loaded is None:
             return []
         users, teams = loaded
 
         scored = [
-            *((AssigneeType.USER, u.id, score_names(name, _user_names(u))) for u in users),
-            *((AssigneeType.TEAM, t.id, score_names(name, [t.name])) for t in teams),
+            *((AssigneeType.USER, u.id, best_score(mention_words, _user_names(u))) for u in users),
+            *((AssigneeType.TEAM, t.id, best_score(mention_words, [t.name])) for t in teams),
         ]
         candidates = [
             DirectoryCandidate(assignee_type=kind, id=id_, score=score)
@@ -278,8 +293,8 @@ class InboxDirectory:
             if status in (httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN):
                 # Every call will fail the same way until someone fixes it.
                 logger.error(
-                    "Inbox refused the actor (%d): check MIND_INBOX_DIRECTORY__ACTOR_ID "
-                    "and its role. No owner candidates",
+                    "Inbox refused the actor (%d): check inbox.actor_id in secrets.yaml "
+                    "(locally MIND_INBOX_DIRECTORY__ACTOR_ID) and its role. No owner candidates",
                     status,
                 )
             else:
@@ -315,7 +330,7 @@ class InboxDirectory:
         """Every active user of `tenant_id` that the actor can see."""
 
         users = self._fetch_all(_USERS_PATH, _Page[_InboxUser], deadline)
-        return _keep_active(users, tenant_id, "users")
+        return _keep_active(users, tenant_id, "users", self._warned_empty)
 
     def _active_teams(
         self, tenant_id: UUID, deadline: float | None = None
@@ -323,7 +338,7 @@ class InboxDirectory:
         """Every active team of `tenant_id` that the actor can see."""
 
         teams = self._fetch_all(_TEAMS_PATH, _Page[_InboxTeam], deadline)
-        return _keep_active(teams, tenant_id, "teams")
+        return _keep_active(teams, tenant_id, "teams", self._warned_empty)
 
     def _fetch_all[Item: (_InboxUser, _InboxTeam)](
         self, path: str, page_type: type[_Page[Item]], deadline: float | None = None
@@ -377,8 +392,12 @@ class InboxDirectory:
         ) as response:
             response.raise_for_status()
             pieces: list[bytes] = []
+            size = 0
             for piece in response.iter_bytes():
                 self._check_deadline(path, deadline)
+                size += len(piece)
+                if size > _MAX_BODY_BYTES:
+                    raise _GaveUp(f"A page of {path} is larger than {_MAX_BODY_BYTES} bytes")
                 pieces.append(piece)
         return b"".join(pieces)
 

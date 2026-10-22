@@ -60,6 +60,12 @@ CASES = [
     pytest.param("Sale", ["Sales"], "TYPO_FULL", id="17-team-typo"),
     pytest.param("sales team", ["Sales"], "NONE", id="18-team-with-an-extra-word"),
     pytest.param("Dan", DANA, "TYPO_PARTIAL", id="19-shortened-first-name"),
+    pytest.param("Mary Ann", ["Mary-Ann Cohen"], "PARTIAL", id="20-hyphen-split-in-the-mention"),
+    pytest.param("mary-ann", ["Mary Ann"], "EXACT", id="21-hyphen-split-in-the-name"),
+    pytest.param("Dana C.", DANA, "TYPO_FULL", id="22-last-name-as-an-initial"),
+    pytest.param("Dana C", DANA, "TYPO_FULL", id="23-initial-without-the-dot"),
+    pytest.param("Dana C.", ["Dana Levi"], "NONE", id="24-an-initial-for-another-last-name"),
+    pytest.param("D", DANA, "NONE", id="25-a-lone-initial-matches-nobody"),
 ]
 
 
@@ -102,6 +108,7 @@ def test_a_person_with_no_names_or_a_mention_with_no_words_never_matches():
         ("Dana  Cohen", ("dana", "cohen")),
         ("dana.cohen", ("dana", "cohen")),
         ("Dana_Cohen", ("dana", "cohen")),
+        ("Mary-Ann", ("mary", "ann")),
         ("DANA", ("dana",)),
         ("", ()),
         (None, ()),

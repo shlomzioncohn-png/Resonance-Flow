@@ -13,7 +13,7 @@ is read from env vars/`.env`, under the `MIND_` prefix (`__` for nesting).
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Self
 from urllib.parse import quote
 from uuid import UUID
 
@@ -26,6 +26,7 @@ from pydantic import (
     Secret,
     SecretStr,
     field_validator,
+    model_validator,
 )
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
@@ -247,14 +248,40 @@ class MonitoringSettings(BaseSettings):
     summary_every_n_calls: int | None = Field(default=100, ge=0)
 
 
+class _InboxConfigFileKeys(PydanticBaseSettingsSource):
+    """The two connection settings of the Inbox directory, from the chart's files.
+
+        config.yaml    inbox.url        -> base_url
+        secrets.yaml   inbox.actor_id   -> actor_id
+
+    The actor id is a secret, not a setting: Inbox trusts `X-Actor-Id` without
+    checking it, so whoever knows this id acts as a SYSTEM_ADMIN.
+
+    Read leniently, unlike the vector store: Inbox lookups are optional. A missing
+    file or key means "not configured" and the client returns no candidates, where
+    a missing vector store has to stop the service.
+    """
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        raise NotImplementedError  # unused: __call__ is overridden directly
+
+    def __call__(self) -> dict[str, Any]:
+        inbox = config_file.section(config_file.load_merged_lenient(), "inbox")
+        keys = {"url": "base_url", "actor_id": "actor_id"}
+        return {name: inbox[key] for key, name in keys.items() if inbox.get(key) is not None}
+
+
 class InboxDirectorySettings(BaseSettings):
     """Standalone, like EmbeddingModelSettings -- looking up a name needs no DSN.
 
     How the Inbox directory client (integrations/inbox_directory.py) reaches
-    Inbox's Users/Teams endpoints. `base_url` and `actor_id` have no default on
-    purpose: the actor is a service user Inbox creates for Mind (#131), and a
-    guessed id would make every call look like a permissions problem. Left
-    unset, the client logs it and returns no candidates.
+    Inbox's Users/Teams endpoints. `base_url` and `actor_id` are connection
+    settings, so in the cluster they come from the files Relay's chart mounts
+    (see _InboxConfigFileKeys), and the env var is only a fallback for a local
+    run. They have no default on purpose: the actor is a service user Inbox
+    creates for Mind (#131), and a guessed id would make every call look like a
+    permissions problem. Left unset, the client logs it and returns no
+    candidates. The rest are tuning knobs and come from env, as elsewhere.
     """
 
     model_config = SettingsConfigDict(
@@ -292,6 +319,38 @@ class InboxDirectorySettings(BaseSettings):
         if isinstance(value, str):
             return value.strip() or None
         return value
+
+    @model_validator(mode="after")
+    def _min_score_stays_below_a_partial_match(self) -> Self:
+        # Imported here so that config does not import the matching at load time.
+        from mind.integrations.name_matching import PARTIAL_SCORE
+
+        if self.min_score >= PARTIAL_SCORE:
+            raise ValueError(
+                f"min_score must be below {PARTIAL_SCORE}, what a lone first name scores: "
+                f"at {self.min_score} every partial match would be dropped, and #132 "
+                "would never see two people with the same first name"
+            )
+        return self
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Earlier sources win: the chart's files before the env, which only
+        # fills in when the files do not set the key.
+        return (
+            init_settings,
+            _InboxConfigFileKeys(settings_cls),
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+        )
 
 
 class VectorStoreSettings(BaseModel):

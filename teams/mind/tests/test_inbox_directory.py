@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from mind.config import InboxDirectorySettings
@@ -27,6 +28,10 @@ def _no_inbox_directory_env(monkeypatch):
 
     for name in [n for n in os.environ if n.startswith("MIND_INBOX_DIRECTORY__")]:
         monkeypatch.delenv(name)
+    # And the chart's files: unset, the settings look at the chart's own mount
+    # paths, which a developer's machine does not have.
+    monkeypatch.delenv("CONFIG_FILE_PATH", raising=False)
+    monkeypatch.delenv("SECRETS_FILE_PATH", raising=False)
 
 
 def _settings(**overrides):
@@ -118,6 +123,89 @@ def test_an_exported_but_empty_address_or_actor_means_not_set(monkeypatch):
     assert not InboxDirectory(settings, client=_unreachable_client()).configured
 
 
+def test_a_min_score_that_would_drop_a_lone_first_name_stops_the_settings_loading():
+    with pytest.raises(ValidationError, match="min_score"):
+        InboxDirectorySettings(_env_file=None, min_score=0.7)
+    with pytest.raises(ValidationError, match="min_score"):
+        InboxDirectorySettings(_env_file=None, min_score=0.9)
+
+    assert InboxDirectorySettings(_env_file=None, min_score=0.69).min_score == 0.69
+
+
+def _chart_files(tmp_path, monkeypatch, config=None, secrets=None):
+    """Write config.yaml / secrets.yaml like the chart mounts them, and point at them."""
+
+    config_path, secrets_path = tmp_path / "config.yaml", tmp_path / "secrets.yaml"
+    if config is not None:
+        config_path.write_text(yaml.dump(config))
+    if secrets is not None:
+        secrets_path.write_text(yaml.dump(secrets))
+    monkeypatch.setenv("CONFIG_FILE_PATH", str(config_path))
+    monkeypatch.setenv("SECRETS_FILE_PATH", str(secrets_path))
+
+
+def test_the_address_comes_from_config_yaml_and_the_actor_from_secrets_yaml(
+    tmp_path, monkeypatch
+):
+    actor = uuid4()
+    _chart_files(
+        tmp_path,
+        monkeypatch,
+        config={"inbox": {"url": "http://inbox.chart"}},
+        secrets={"inbox": {"actor_id": str(actor)}},
+    )
+
+    settings = InboxDirectorySettings(_env_file=None)
+
+    assert str(settings.base_url) == "http://inbox.chart/"
+    assert settings.actor_id == actor
+    assert InboxDirectory(settings, client=_unreachable_client()).configured
+
+
+def test_the_chart_files_win_over_env_and_env_fills_what_they_leave_out(tmp_path, monkeypatch):
+    env_actor = uuid4()
+    _chart_files(tmp_path, monkeypatch, config={"inbox": {"url": "http://inbox.chart"}})
+    monkeypatch.setenv("MIND_INBOX_DIRECTORY__BASE_URL", "http://inbox.env")
+    monkeypatch.setenv("MIND_INBOX_DIRECTORY__ACTOR_ID", str(env_actor))
+
+    settings = InboxDirectorySettings(_env_file=None)
+
+    assert str(settings.base_url) == "http://inbox.chart/"  # the file wins
+    assert settings.actor_id == env_actor  # the file has none, so the env fills in
+
+
+def test_missing_chart_files_mean_not_set_and_do_not_stop_anything(tmp_path, monkeypatch):
+    _chart_files(tmp_path, monkeypatch)  # points at files that do not exist
+
+    settings = InboxDirectorySettings(_env_file=None)
+
+    assert settings.base_url is None
+    assert settings.actor_id is None
+
+
+def test_an_inbox_section_with_nothing_in_it_means_not_set(tmp_path, monkeypatch):
+    _chart_files(
+        tmp_path,
+        monkeypatch,
+        config={"inbox": {"url": None}},
+        secrets={"inbox": None},
+    )
+
+    settings = InboxDirectorySettings(_env_file=None)
+
+    assert settings.base_url is None
+    assert settings.actor_id is None
+
+
+def test_an_address_in_config_yaml_that_is_not_a_url_stops_the_settings_from_loading(
+    tmp_path, monkeypatch
+):
+    _chart_files(tmp_path, monkeypatch, config={"inbox": {"url": "inbox:8080"}})
+
+    with pytest.raises(ValidationError, match="base_url"):
+        InboxDirectorySettings(_env_file=None)
+
+
 def test_configured_needs_both_an_address_and_an_actor():
     assert InboxDirectory(_settings(), client=_unreachable_client()).configured
     assert not InboxDirectory(_settings(base_url=None), client=_unreachable_client()).configured
@@ -133,7 +221,9 @@ def test_unconfigured_client_warns_once_and_finds_nobody(caplog):
     assert first == []
     assert second == []
     assert len(caplog.records) == 1
-    assert "MIND_INBOX_DIRECTORY__ACTOR_ID" in caplog.records[0].getMessage()
+    message = caplog.records[0].getMessage()
+    assert "inbox.url" in message and "config.yaml" in message
+    assert "inbox.actor_id" in message and "secrets.yaml" in message
 
 
 def test_configured_client_does_not_warn(caplog):
@@ -362,7 +452,8 @@ def test_a_refused_actor_gives_no_candidates_and_an_error(status, caplog):
     assert len(records) == 1
     assert records[0].levelno == logging.ERROR
     assert f"refused the actor ({status})" in records[0].getMessage()
-    assert "MIND_INBOX_DIRECTORY__ACTOR_ID" in records[0].getMessage()
+    assert "inbox.actor_id" in records[0].getMessage()
+    assert "secrets.yaml" in records[0].getMessage()
 
 
 @pytest.mark.parametrize("status", [404, 500, 503])
@@ -758,3 +849,52 @@ def test_min_score_drops_a_weak_match_and_the_default_keeps_it():
     assert len(kept) == 1
     assert 0.5 < kept[0].score < 0.6
     assert dropped == []
+
+
+def test_the_none_are_active_warning_is_logged_once_not_on_every_refresh(caplog):
+    tenant, clock, requests = uuid4(), _Clock(), []
+    state = {"users": [_user(tenant, status="active")]}
+    directory = _cached_directory(clock, requests, state, cache_ttl_seconds=60)
+
+    with caplog.at_level(logging.WARNING, logger="mind.integrations"):
+        directory.find_candidates(tenant, "Dana")
+        clock.now += 61  # the cache is stale: Inbox is asked again
+        directory.find_candidates(tenant, "Dana")
+        clock.now += 61
+        directory.find_candidates(tenant, "Dana")
+
+    assert len(requests) == 6  # three refreshes of two lists
+    assert len(caplog.records) == 1
+
+
+def test_the_warning_comes_back_after_the_people_do(caplog):
+    tenant, clock, requests = uuid4(), _Clock(), []
+    state = {"users": [_user(tenant, status="active")]}
+    directory = _cached_directory(clock, requests, state, cache_ttl_seconds=60)
+
+    with caplog.at_level(logging.WARNING, logger="mind.integrations"):
+        directory.find_candidates(tenant, "Dana")
+        state["users"] = [_user(tenant)]
+        clock.now += 61
+        directory.find_candidates(tenant, "Dana")
+        state["users"] = [_user(tenant, status="active")]
+        clock.now += 61
+        directory.find_candidates(tenant, "Dana")
+
+    assert len(caplog.records) == 2
+
+
+def test_an_answer_larger_than_the_cap_is_a_failure_and_is_not_kept(monkeypatch, caplog):
+    tenant = uuid4()
+    monkeypatch.setattr("mind.integrations.inbox_directory._MAX_BODY_BYTES", 10)
+
+    def handler(request):
+        return httpx.Response(200, json=_page([_user(tenant)]))
+
+    directory = _directory(handler)
+    with caplog.at_level(logging.WARNING, logger="mind.integrations"):
+        result = directory.find_candidates(tenant, "Dana")
+
+    assert result == []
+    assert "is larger than 10 bytes" in caplog.text
+    assert directory._cache == {}
