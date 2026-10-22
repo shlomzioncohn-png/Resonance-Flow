@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
+from mind.extraction.models import MAX_TASKS_PER_TEXT
 from mind.extraction.providers.settings import (
+    DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_MODEL,
     DEFAULT_TIMEOUT_SECONDS,
     GEMINI_DEFAULT_MODEL,
@@ -212,3 +214,17 @@ def test_the_same_holds_for_gemini(_mounted: Path) -> None:
     assert settings.api_key == ""
     assert settings.configured is False
     assert settings.model == GEMINI_DEFAULT_MODEL
+
+
+# Measured on AMI IS1008b (2026-10-22): 11 tasks with classification and
+# mentions came back in 971 output tokens, about 88 a task. Rounded up for
+# longer descriptions.
+TOKENS_PER_TASK = 120
+
+
+def test_the_default_output_cap_holds_a_full_list_of_tasks() -> None:
+    """Gemini cuts an answer at the cap, and a cut answer is refused, not
+    repaired: a meeting past the cap would come back with no task at all.
+    Raising MAX_TASKS_PER_TEXT without this cap fails here first."""
+
+    assert DEFAULT_MAX_OUTPUT_TOKENS >= MAX_TASKS_PER_TEXT * TOKENS_PER_TASK

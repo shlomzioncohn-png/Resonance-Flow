@@ -15,12 +15,12 @@ The keys read here, one subtree per provider:
         base_url: https://api.deepseek.com
         model: deepseek-chat
         timeout_seconds: 60
-        max_output_tokens: 1024
+        max_output_tokens: 2048
       gemini:
         base_url: https://generativelanguage.googleapis.com
         model: gemini-3.6-flash
         timeout_seconds: 60
-        max_output_tokens: 1024
+        max_output_tokens: 2048
         thinking_budget: 0
     # secrets.yaml
     llm:
@@ -42,10 +42,12 @@ DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-chat"
 DEFAULT_TIMEOUT_SECONDS = 60.0
 
-# An extraction answer is four small fields. Capping the output keeps a
-# runaway generation from costing real money, and nothing we ask for comes
-# anywhere near this.
-DEFAULT_MAX_OUTPUT_TOKENS = 1024
+# An extraction answer is a list of up to MAX_TASKS_PER_TEXT tasks (#690), at
+# about 90 tokens each with classification and mentions: AMI IS1008b's 11
+# tasks took 971. At the cap the answer is cut mid-object and refused, so the
+# whole item fails; this leaves room for a full list. It still caps a runaway
+# generation, and only the tokens actually written are billed.
+DEFAULT_MAX_OUTPUT_TOKENS = 2048
 
 GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
 GEMINI_DEFAULT_API_VERSION = "v1beta"

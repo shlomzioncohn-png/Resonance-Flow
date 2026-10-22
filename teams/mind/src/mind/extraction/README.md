@@ -82,7 +82,7 @@ llm:
     base_url: https://api.deepseek.com
     model: deepseek-chat
     timeout_seconds: 60
-    max_output_tokens: 1024
+    max_output_tokens: 2048
 # secrets.yaml -> components.mind.secret
 llm:
   deepseek:
