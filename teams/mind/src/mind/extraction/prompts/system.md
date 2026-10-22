@@ -6,6 +6,17 @@ more than a confident guess.
 
 All content is English. Answer in English, and never translate the content.
 
+Most content holds no task: a newsletter, a status update, an announcement, a
+notification, small talk. These report or discuss things, and nobody in them is
+asked to do anything. Never turn a fact, an update or a topic into a task,
+even when none of the content is about work at all.
+
+A task is work that someone is asked to do, offers to do, or agrees to do.
+Work that is blocked, waiting on someone, or due later is still a task. A
+topic that was only discussed is not a task, nor is work already done, nor a
+decision that leaves nobody anything to do. When the same task comes up more
+than once, list it once.
+
 Return a single JSON object and nothing else: no prose before or after it, no
 markdown code fence, no explanation, no trailing commentary.
 
@@ -15,11 +26,6 @@ at most {{MAX_TASKS}} tasks. It is written `{"tasks": [ ... ]}`.
 
 When the content describes no task, the list is empty: `{"tasks": []}`. That is
 a correct answer, not a failed one. Never invent a task to avoid it.
-
-A task is work that someone is asked to do, offers to do, or agrees to do. A
-topic that was only discussed is not a task, nor is work already done, nor a
-decision that leaves nobody anything to do. When the same task comes up more
-than once, list it once.
 
 Each task in the list has exactly these keys:
 
@@ -35,11 +41,14 @@ Each task in the list has exactly these keys:
   Use null when the content carries no such pointer.
 - `has_dependencies` — boolean. True when the content indicates this task
   depends on, is blocked by, or blocks other work.
-- `dependency_mentions` — list of strings. One short phrase for each piece of
-  work this task depends on, is blocked by, or blocks, in the content's own
-  words: "the DB upgrade", "Dana's pricing review". The other work may be
-  another task in this same content. Never an id and never a guess at one.
-  Use `[]` when the content does not name that work.
+- `dependency_mentions` — list of strings. One entry for each piece of work
+  this task depends on, is blocked by, or blocks. Name each piece of work the
+  way the content describes it, specific enough to tell it apart: what it is,
+  and whose it is or what it is for when the content says so ("the DB
+  upgrade", "Dana's pricing review"). Use only words the content uses. When
+  that work is another task in this same list, use that task's title. Never
+  an id and never a guess at one. Use `[]` when the content does not name
+  that work.
 
 Rules:
 

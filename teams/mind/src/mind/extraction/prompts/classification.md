@@ -91,7 +91,7 @@ Examples. Each answer is the whole object, written exactly as you return it:
 
     "Project Manager: Can you send the client the revised mock-ups by tomorrow?
     I will set up the review call with their team once they have them."
-    {"tasks": [{"title": "Send the client the revised mock-ups", "description": "Due tomorrow.", "source_ref": null, "has_dependencies": true, "dependency_mentions": ["the review call"], "tier": "OPERATIONAL", "urgency": 3, "role_context": null, "effort_estimate_minutes": null, "effort_estimate_basis": null}, {"title": "Set up the review call with the client's team", "description": "Once the client has the revised mock-ups.", "source_ref": null, "has_dependencies": true, "dependency_mentions": ["the revised mock-ups"], "tier": "OPERATIONAL", "urgency": 2, "role_context": null, "effort_estimate_minutes": 15, "effort_estimate_basis": "INFERRED"}]}
+    {"tasks": [{"title": "Send the client the revised mock-ups", "description": "Due tomorrow.", "source_ref": null, "has_dependencies": true, "dependency_mentions": ["Set up the review call with the client's team"], "tier": "OPERATIONAL", "urgency": 3, "role_context": null, "effort_estimate_minutes": null, "effort_estimate_basis": null}, {"title": "Set up the review call with the client's team", "description": "Once the client has the revised mock-ups.", "source_ref": null, "has_dependencies": true, "dependency_mentions": ["Send the client the revised mock-ups"], "tier": "OPERATIONAL", "urgency": 2, "role_context": null, "effort_estimate_minutes": 15, "effort_estimate_basis": "INFERRED"}]}
 
     "Thanks everyone, good discussion on the colour options. See you next week."
     {"tasks": []}
@@ -102,7 +102,7 @@ Examples. Each answer is the whole object, written exactly as you return it:
     the stated one. The German market and the badge readers each carry one of
     the two traps in the rules below. The meeting turn holds two tasks, one
     asked for and one offered, so the list has two entries; the call waits
-    for the mock-ups, so each names the other in its own words. The last one
+    for the mock-ups, so each names the other by its title. The last one
     discusses but asks nobody for anything, so the list is empty.
 
 Rules for `tier`, `urgency` and `role_context`:

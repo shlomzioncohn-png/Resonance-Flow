@@ -82,14 +82,17 @@ def describe_validation_error(error: ValidationError) -> str:
     parts = []
     for detail in error.errors():
         location = ".".join(str(item) for item in detail["loc"]) or "(root)"
-        if detail["type"] == "too_long" and detail["loc"] == ("tasks",):
+        # Read with .get(): a KeyError here is neither a ValidationError nor
+        # a MalformedOutput, so it would end the run rather than the item.
+        actual = detail.get("ctx", {}).get("actual_length")
+        if detail["type"] == "too_long" and detail["loc"] == ("tasks",) and actual is not None:
             # Pydantic's "at most 15 items" names the limit and not what to
             # remove, and the repair prompt otherwise says to return every
             # task again: told only that, a model resends the same list.
             parts.append(
-                f"tasks: there are {detail['ctx']['actual_length']}, and at most "
-                f"{MAX_TASKS_PER_TEXT} are allowed; keep only the real tasks, work someone "
-                f"is asked to do, offers to do, or agrees to do, and leave out the rest"
+                f"tasks: there are {actual}, and at most {MAX_TASKS_PER_TEXT} are allowed; "
+                f"keep only the real tasks, work someone is asked to do, offers to do, or "
+                f"agrees to do, and leave out the rest"
             )
             continue
         parts.append(f"{location}: {detail['msg']}")

@@ -707,7 +707,10 @@ one object holding a list:
 
 `system.md` now also says what a task is: work someone is asked to do, offers
 to do, or agrees to do — not a topic only discussed, not work already done.
-Until #690 that never needed saying.
+Until #690 that never needed saying. It opens with that, before the format:
+most content holds no task, and a model that first reads "return a list of
+tasks" goes looking for something to put in it. Live, a newsletter, a deploy
+status and small talk each came back as `{"tasks": []}`.
 
 ### Which tasks pay for a repair round
 
@@ -767,10 +770,15 @@ Three steps, in this order, and the order is the point:
    one-item list. One empty mention used to stall #834's listener; none
    leaves here.
 2. **Grounded, against the content** (`grounding.ground_dependency_mentions`):
-   a mention stays only if at least half of its content words
-   (`MIN_MENTION_GROUNDING`) are in the text the model was sent. Shallower than
-   for `source_ref`, because a mention is a paraphrase, not an identifier.
-   "the security review" in a text that never mentions one is dropped.
+   a mention stays only if every one of its content words is in the text the
+   model was sent, except that one may be missing from a mention of three
+   words or more (`MIN_WORDS_TO_MISS_ONE`). Not a share: in a long meeting
+   "review" or "budget" is said somewhere, and half of a two-word mention
+   would ground almost anything. "the security review" in a text that never
+   says "security" is dropped. Closeness is not checked: the two words may
+   be far apart. A mention equal to another task's title in the same answer
+   is grounded by that task — the prompt asks for exactly that, and a title
+   is the model's own summary, whose words need not all have been said.
 3. **The rule:** a non-empty list after grounding means `has_dependencies` is
    true. A `false` beside a grounded mention is corrected and logged, not
    repaired: the mention is the evidence, the `false` the slip. `true` with an
@@ -779,7 +787,17 @@ Three steps, in this order, and the order is the point:
 The rule lives at grounding, not in the model, because the model never sees
 the content: applied there, an invented mention had already turned a `false`
 into a `true` before anything could tell it was invented, and
-`has_dependencies` is a contract field.
+`has_dependencies` is a contract field. So the guarantee holds on
+`ExtractionSuccess`, what `extract` returns, and not on a bare
+`ExtractedFields` parsed or built anywhere else.
+
+**What a mention says.** Enough to be found: the work as the content names
+it, with whose it is or what it is for when the content says so, and, for
+another task in the same list, that task's title. More words do not make a
+mention easier to keep — each one must be in the content — so made-up
+context costs the whole mention. One gap is #834's, not this stage's: when
+the other task comes from the same text, it is created at the same moment,
+and may not be in the index yet when its mention is resolved.
 - **Not in the contract.** `TaskCreationRequested` carries only
   `has_dependencies`. The mentions stay on `ExtractedTask.fields` and travel
   separately, through `flow.send(..., dependency_mentions=...)` in #359.
@@ -795,6 +813,12 @@ into a `true` before anything could tell it was invented, and
   only the text that was sent: a pointer past the cut was out of the model's
   sight, so matching it there would be luck. To be
   settled against the real AMI transcripts before the demo.
+- **Not yet measured on a real meeting.** #690 asks for a run on AMI
+  (IS1008b, 4 gold action items; IB4003, 8). The gold lists are in
+  `eval/real_slice/`; the transcripts are not on this machine (the corpus
+  download is blocked here). Measured instead: the #359 demo meeting (2/2),
+  the fixture meeting (4/4) and the 62 DEV persona tasks (see the PR). The
+  AMI run also settles the truncation cap for meetings, above.
 - **Urgency has no reference date.** `source_timestamp` is not in the prompt,
   so "by Friday" cannot be placed in time.
 - **An email body and its attachment are extracted separately**, and never

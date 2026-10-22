@@ -341,7 +341,9 @@ class ExtractedFields(BaseModel):
     # task ids, so a phrase that cannot be resolved there must not leave here.
     # Checked against the content, and the rule that a mention means a
     # dependency applied, by `grounding.ground_dependency_mentions`: the
-    # check needs the content, which this model never sees.
+    # check needs the content, which this model never sees. So the rule
+    # holds on what `extract` returns (`ExtractionSuccess`), not on a bare
+    # ExtractedFields parsed or built anywhere else.
     dependency_mentions: list[str] = []
 
     @field_validator("dependency_mentions", mode="before")

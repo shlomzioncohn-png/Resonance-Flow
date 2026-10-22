@@ -200,6 +200,7 @@ def _ground_and_score(
     source_type: SourceType,
     text: str,
     attempts: int,
+    sibling_titles: list[str],
 ) -> ExtractedTask:
     """Check one task's pointer and mentions against the content, then score it.
 
@@ -212,7 +213,7 @@ def _ground_and_score(
     """
 
     fields, invented_ref = ground_source_ref(fields, text)
-    fields = ground_dependency_mentions(fields, text)
+    fields = ground_dependency_mentions(fields, text, sibling_titles)
     return ExtractedTask(
         fields=fields,
         confidence=score_confidence(
@@ -331,6 +332,7 @@ class BasicExtractor:
                         source_type,
                         seen,
                         _rounds_needed(fields, earlier_valid, schema_attempts),
+                        [other.title for other in answer if other is not fields],
                     )
                     for fields in answer
                 ),

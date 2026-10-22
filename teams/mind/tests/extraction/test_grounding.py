@@ -184,10 +184,22 @@ def test_an_invented_mention_is_dropped_and_changes_nothing(
     assert "does not appear in the content" in caplog.text
 
 
-def test_a_reworded_mention_counts_when_most_of_its_words_are_there() -> None:
+def test_a_mention_of_three_words_or_more_may_miss_one() -> None:
+    """The model paraphrases: "updated" was never said, the rest was."""
+
     fields = ground_dependency_mentions(_linked(["the updated chip budget"]), MEETING_TEXT)
 
     assert fields.dependency_mentions == ["the updated chip budget"]
+
+
+@pytest.mark.parametrize("invented", ["the security budget", "the updated security budget"])
+def test_one_common_word_is_not_enough(invented: str) -> None:
+    """In a long meeting "budget" or "review" is said somewhere; that alone
+    must not ground a mention, or every invented one would pass."""
+
+    fields = ground_dependency_mentions(_linked([invented]), MEETING_TEXT)
+
+    assert (fields.dependency_mentions, fields.has_dependencies) == ([], False)
 
 
 def test_a_mention_with_no_content_words_names_nothing() -> None:
@@ -210,3 +222,18 @@ def test_a_true_the_model_wrote_itself_survives_its_mentions_being_dropped() -> 
     )
 
     assert (fields.dependency_mentions, fields.has_dependencies) == ([], True)
+
+
+def test_a_mention_that_is_another_tasks_title_is_grounded_by_that_task() -> None:
+    """The prompt asks for the sibling's title, and a title is the model's own
+    wording: "Lock the remarks" may not be said in so many words."""
+
+    text = "The remarks are not finalized and need to be locked by 07:30 for the run-through."
+    fields = ground_dependency_mentions(
+        _linked(["Lock the remarks for the quarterly results presentation"]),
+        text,
+        sibling_titles=["lock the remarks for the quarterly results presentation"],
+    )
+
+    assert fields.dependency_mentions == ["Lock the remarks for the quarterly results presentation"]
+    assert fields.has_dependencies is True

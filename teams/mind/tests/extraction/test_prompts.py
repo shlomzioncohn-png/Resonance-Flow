@@ -363,13 +363,28 @@ def test_the_mentions_are_defined_beside_has_dependencies_in_both_modes(classify
 
 
 def test_an_example_shows_one_task_naming_another_from_the_same_text() -> None:
-    linked = [example for example in _examples() if len(example["tasks"]) > 1]
+    """By its title: that is the task's name in Inbox, and what a search finds."""
 
-    assert any(
-        task["dependency_mentions"] and task["has_dependencies"]
+    linked = [example for example in _examples() if len(example["tasks"]) > 1]
+    pairs = [
+        (task, {other["title"] for other in example["tasks"] if other is not task})
         for example in linked
         for task in example["tasks"]
-    )
+        if task["dependency_mentions"]
+    ]
+
+    assert pairs
+    for task, sibling_titles in pairs:
+        assert task["has_dependencies"]
+        assert set(task["dependency_mentions"]) <= sibling_titles
+
+
+def test_a_mention_asks_for_context_from_the_content_only() -> None:
+    prompt = system_prompt()
+
+    assert "specific enough to tell it apart" in prompt
+    assert "Use only words the content uses" in prompt
+    assert "use that task's title" in prompt
 
 
 def test_the_repair_prompt_lists_no_keys_of_its_own() -> None:
@@ -389,3 +404,27 @@ def test_a_repair_may_drop_tasks_when_the_rejection_asks_for_it() -> None:
     prompt = repair_prompt(SourceType.MEETING, "text", "{}", "tasks: there are 17")
 
     assert "unless the rejection asks you to remove some" in prompt
+
+
+@pytest.mark.parametrize("classify", [False, True])
+def test_the_prompt_warns_first_that_most_content_holds_no_task(classify: bool) -> None:
+    """Said before the format, not after it: a model that reads "return a list
+    of tasks" first goes looking for something to put in it."""
+
+    prompt = system_prompt(classify)
+    warning = prompt.index("Most content holds no task")
+
+    assert warning < prompt.index("Return a single JSON object")
+    assert "even when none of the content is about work" in prompt
+    assert prompt.index("A task is work that someone is asked to do") < prompt.index(
+        "Return a single JSON object"
+    )
+
+
+def test_blocked_or_waiting_work_is_still_a_task() -> None:
+    """The DEV re-run: "the release is held until the platform team raises the
+    quota" came back as no task once the prompt warned against status text."""
+
+    assert "Work that is blocked, waiting on someone, or due later is still a task" in (
+        system_prompt()
+    )
