@@ -273,6 +273,29 @@ GET /v1/tasks/{task_id}/related
 
 `related: []` covers every "nothing to return" case alike -- an unindexed `task_id`, an index with nothing else in it, or no candidate clearing the threshold -- matching `find_related()`'s own contract (see above). Not a 404: Mind doesn't own the canonical task registry, so "unknown to Mind's index" isn't the same claim as "doesn't exist" -- a clean empty result, not an error, for all of them. `threshold` isn't exposed as a request param (R4's call); `k` could be added later as an optional query param without breaking anything.
 
+## Connection resilience
+
+`index_consumer_runner.py` treats any exception from a handler as fatal
+(`os._exit`, so a stuck/dead connection can't quietly retry forever against
+the same backend) -- so `PgVectorStore`'s pool can't hand out a connection
+it doesn't believe is live. Three mechanisms, each covering a gap the
+others don't:
+
+- `check=AsyncConnectionPool.check_connection` -- probes a connection
+  before handing it to a caller; a dead one is discarded and replaced
+  instead of reaching application code at all.
+- TCP keepalives (`keepalives_idle=30`, `keepalives_interval=10`,
+  `keepalives_count=3`) -- the only way an *idle* connection sitting in the
+  pool notices it was silently dropped (NAT/LB/firewall), since nothing
+  else touches it until the next checkout.
+- `tcp_user_timeout=10000` (10s) -- bounds how long a query sent on an
+  already-dead connection can hang waiting for a TCP retransmit that will
+  never be ACKed, instead of the OS default (minutes).
+
+All three are defaults only, set via the pool's `kwargs=`, and skipped per
+key if the configured DSN already sets that key -- an env-specific DSN
+override always wins.
+
 ## Known limitations (flag these in review)
 
 - Real-data coverage is just the 2-document FUNSD slice (PR #141) -- enough to validate pipeline shape, not recall quality.

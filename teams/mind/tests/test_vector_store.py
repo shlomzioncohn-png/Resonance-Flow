@@ -7,6 +7,7 @@ import uuid
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
+import psycopg
 import pytest
 from benchmarks.vector_store_test_table import create_vector_store_test_table
 from psycopg import sql
@@ -330,6 +331,37 @@ async def test_concurrent_search_and_upsert_calls_all_succeed(store):
     results = await asyncio.gather(*(store.search(v, k=3) for v in vectors))
     assert len(results) == 5
     assert all(isinstance(r, list) and len(r) >= 1 for r in results)
+
+
+async def test_check_discards_a_connection_whose_backend_was_terminated():
+    """check= must swap a dead connection before a caller sees it. Its own
+    pool, not the shared `store` fixture, so the kill can't leak into other tests."""
+    settings = VectorStoreSettings(
+        dsn=os.environ["MIND_VECTOR_STORE__DSN"], table="task_embeddings_test"
+    )
+    isolated_store = PgVectorStore(settings, min_conn=1, max_conn=1)
+    await isolated_store.open()
+    try:
+        async with isolated_store._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute("SELECT pg_backend_pid();")
+            (pid,) = await cur.fetchone()
+
+        admin_conn = await psycopg.AsyncConnection.connect(
+            os.environ["MIND_VECTOR_STORE__DSN"], autocommit=True
+        )
+        async with admin_conn:
+            # Two-arg form (PG14+) waits for the backend to exit -- the one-arg
+            # form returns immediately and raced check= on a busy runner.
+            await admin_conn.execute("SELECT pg_terminate_backend(%s, 5000);", (pid,))
+
+        task_id = f"test-{uuid.uuid4()}"
+        vec = embed("check= discards a killed connection before use")
+        await asyncio.wait_for(isolated_store.upsert(task_id, vec), timeout=10)
+
+        result_ids = [r.task_id for r in await isolated_store.search(vec, k=5)]
+        assert task_id in result_ids
+    finally:
+        await isolated_store.close()
 
 
 async def test_search_raises_when_database_is_unreachable():

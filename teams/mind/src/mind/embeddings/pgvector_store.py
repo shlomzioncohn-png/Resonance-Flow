@@ -11,11 +11,21 @@ import asyncio
 import json
 
 from psycopg import sql
+from psycopg.conninfo import conninfo_to_dict
 from psycopg_pool import AsyncConnectionPool
 
 from mind.config import VectorStoreSettings
 from mind.embeddings.base import SearchResult, VectorStore
 from mind.embeddings.embeddings import embed_async
+
+# Defaults only -- a DSN override wins. See README.md "Connection resilience".
+_CONNECTION_DEFAULTS = {
+    "keepalives": 1,
+    "keepalives_idle": 30,
+    "keepalives_interval": 10,
+    "keepalives_count": 3,
+    "tcp_user_timeout": 10_000,
+}
 
 
 class PgVectorStore(VectorStore):
@@ -28,12 +38,18 @@ class PgVectorStore(VectorStore):
         pool_timeout: float = 30.0,
     ) -> None:
         self._settings = settings
+        dsn = str(settings.dsn.get_secret_value())
+        existing = conninfo_to_dict(dsn)
+        kwargs = {k: v for k, v in _CONNECTION_DEFAULTS.items() if k not in existing}
         self._pool = AsyncConnectionPool(
-            str(settings.dsn.get_secret_value()),
+            dsn,
             min_size=min_conn,
             max_size=max_conn,
             timeout=pool_timeout,
             open=False,
+            kwargs=kwargs,
+            # Swap a dead connection before handoff. See README.md "Connection resilience".
+            check=AsyncConnectionPool.check_connection,
         )
         self._ready = False
         self._ready_lock = asyncio.Lock()
