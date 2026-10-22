@@ -103,15 +103,12 @@ class TaskTraversalServiceToResponsesTest {
     void toResponses_takesReadinessFromTheSnapshot_notFromTheCountersStoredOnTask() {
         Task base = TaskFixtures.newTask(b);
         Task storedAsBlocked = Task.builder()
-                .id(b)
-                .tenantId(base.getTenantId())
-                .status(base.getStatus())
-                .isReady(false)
-                .blockingCount(7)
-                .openConstraintCount(4)
-                .createdAt(base.getCreatedAt())
-                .updatedAt(base.getUpdatedAt())
-                .build();
+            .id(b)
+            .tenantId(base.getTenantId())
+            .status(base.getStatus())
+            .createdAt(base.getCreatedAt())
+            .updatedAt(base.getUpdatedAt())
+            .build();
         when(taskRepository.findAllById(any())).thenReturn(List.of(storedAsBlocked));
         when(readinessRepository.findByIds(any())).thenReturn(Map.of(b, snapshot(b, 0, 0)));
 

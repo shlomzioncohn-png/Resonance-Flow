@@ -351,22 +351,18 @@ class TenantDependencyGraphServiceTest {
                 taskCount - 1,
                 highestImpact.transitiveDependentsCount());
     }
-
     private Task task(
-            UUID taskId,
-            UUID tenantId) {
+        UUID taskId,
+        UUID tenantId) {
 
         return Task.builder()
-                .id(taskId)
-                .tenantId(tenantId)
-                .status(TaskStatus.ACTIVE)
-                .isReady(true)
-                .blockingCount(0)
-                .openConstraintCount(0)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .build();
-    }
+            .id(taskId)
+            .tenantId(tenantId)
+            .status(TaskStatus.ACTIVE)
+            .createdAt(LocalDateTime.now())
+            .updatedAt(LocalDateTime.now())
+            .build();
+    }   
 
     private Map<UUID, TaskReadinessSnapshot> readiness(
             List<Task> tasks) {
