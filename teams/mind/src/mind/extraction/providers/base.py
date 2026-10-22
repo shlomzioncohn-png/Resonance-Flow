@@ -16,21 +16,30 @@ class LLMError(Exception):
     `retryable` says whether the same call is worth making again. Timeouts
     and rate limits are; a rejected key or a malformed request is not, and
     retrying it only burns budget.
+
+    `environmental` says whether the cause is ours or the provider's rather
+    than the item's: every other item would fail the same way. The pipeline
+    stops on it and processes the item again later (#919), where a refusal of
+    the item's own content is skipped. A different question from `retryable`:
+    an exhausted key is not retried here, but it is not the item's fault.
     """
 
     retryable = False
+    environmental = False
 
 
 class LLMTimeout(LLMError):
     """The provider did not answer within the configured deadline."""
 
     retryable = True
+    environmental = True
 
 
 class LLMRateLimited(LLMError):
     """The provider refused the call because we are sending too fast."""
 
     retryable = True
+    environmental = True
 
     def __init__(self, message: str, retry_after_seconds: float | None = None) -> None:
         super().__init__(message)
@@ -41,12 +50,25 @@ class LLMUnavailable(LLMError):
     """The provider is reachable but failing (5xx, overloaded, maintenance)."""
 
     retryable = True
+    environmental = True
 
 
 class LLMRejected(LLMError):
-    """The provider refused the request itself (bad key, bad model, bad body)."""
+    """The provider refused this request: its body, or the content it carries
+    (400, 422, a blocked answer, a truncated one)."""
 
     retryable = False
+
+
+class LLMAccessDenied(LLMRejected):
+    """The provider refused the account, not the request: the key (401, 403),
+    the credit (402), or a model this key may not call (404).
+
+    Not retried, like any refusal -- the next call fails the same way until
+    somebody fixes the account -- but environmental: no item could pass.
+    """
+
+    environmental = True
 
 
 @dataclass(frozen=True)

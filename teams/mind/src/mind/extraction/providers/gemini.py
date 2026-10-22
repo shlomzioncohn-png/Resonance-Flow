@@ -29,10 +29,13 @@ Status mapping, and whether the extractor will try again:
     503 UNAVAILABLE ("high demand")        LLMUnavailable  retried
     5xx                                    LLMUnavailable  retried
     body is not the envelope we need       LLMUnavailable  retried
-    400 INVALID_ARGUMENT                   LLMRejected     not retried
-    401, 403 PERMISSION_DENIED             LLMRejected     not retried
-    404 (model not available to this key)  LLMRejected     not retried
+    401, 403 PERMISSION_DENIED             LLMAccessDenied not retried
+    404 (model not available to this key)  LLMAccessDenied not retried
+    400 INVALID_ARGUMENT, 422, other 4xx   LLMRejected     not retried
     the answer was blocked (safety)        LLMRejected     not retried
+
+Every row but the last two is `environmental`: no other item would pass
+either, so the pipeline stops rather than skipping the item (#919).
 
 503 and 404 are not hypothetical: on the free tier the newest models answer
 "currently experiencing high demand" routinely, and a key issued today cannot
@@ -46,6 +49,7 @@ from typing import Any, Self
 import httpx
 
 from mind.extraction.providers.base import (
+    LLMAccessDenied,
     LLMRateLimited,
     LLMRejected,
     LLMResponse,
@@ -65,7 +69,9 @@ _RETRY_DELAY = re.compile(r"^(?P<seconds>\d+(?:\.\d+)?)s$")
 # same prompt reproduces them, so they are refusals rather than failures.
 _BLOCKED_FINISH_REASONS = frozenset({"SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"})
 
-_REJECTING_STATUSES = frozenset({400, 401, 403, 404, 422})
+# The key, or a model this key may not call: the account's fault, not the item's.
+_ACCESS_STATUSES = frozenset({401, 403, 404})
+_REJECTING_STATUSES = frozenset({400, 422})
 
 
 class GeminiProvider:
@@ -175,9 +181,12 @@ class GeminiProvider:
             # case on the free tier rather than the rare one.
             raise LLMUnavailable(f"Gemini is unavailable ({status}): {detail}")
 
-        if status in _REJECTING_STATUSES:
+        if status in _ACCESS_STATUSES:
             # 404 usually means this key may not call this model at all, not
             # that the URL is wrong -- retrying cannot fix either one.
+            raise LLMAccessDenied(f"Gemini refused the account ({status}): {detail}")
+
+        if status in _REJECTING_STATUSES:
             raise LLMRejected(f"Gemini refused the request ({status}): {detail}")
 
         raise LLMRejected(f"unexpected Gemini status {status}: {detail}")

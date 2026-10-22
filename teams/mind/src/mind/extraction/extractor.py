@@ -87,6 +87,12 @@ class ExtractionFailure:
     schema_attempts: int
     provider_calls: int
 
+    # Whether the cause is the environment rather than the item: the provider
+    # down past its retries, rate limits, the key or the credit. The pipeline
+    # stops on it and comes back to the item (#919); an item-caused failure
+    # -- an answer that never fit the schema, a refused body -- is skipped.
+    environmental: bool
+
     # The last thing the model said, kept for whoever debugs this later.
     last_output: str | None = None
 
@@ -151,6 +157,7 @@ class BasicExtractor:
                         schema_attempts=schema_attempts,
                         provider_calls=provider_calls,
                         last_output=last_output,
+                        environmental=exc.environmental,
                     )
 
                 logger.warning("extraction: transient provider failure, retrying: %s", detail)
@@ -175,6 +182,7 @@ class BasicExtractor:
                         schema_attempts=schema_attempts,
                         provider_calls=provider_calls,
                         last_output=last_output,
+                        environmental=False,
                     )
 
                 logger.info("extraction: invalid output, repairing (%s)", detail)
@@ -282,6 +290,7 @@ class BasicExtractor:
         schema_attempts: int,
         provider_calls: int,
         last_output: str | None,
+        environmental: bool,
     ) -> ExtractionFailure:
         """Record a failed item and hand it back so the caller can move on."""
 
@@ -300,5 +309,6 @@ class BasicExtractor:
             detail=detail,
             schema_attempts=schema_attempts,
             provider_calls=provider_calls,
+            environmental=environmental,
             last_output=last_output,
         )

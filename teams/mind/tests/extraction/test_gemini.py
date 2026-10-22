@@ -18,6 +18,7 @@ import pytest
 from mind.contracts.base_enums import SourceType
 from mind.extraction.extractor import BasicExtractor, ExtractionFailure, ExtractionSuccess
 from mind.extraction.providers.base import (
+    LLMAccessDenied,
     LLMProvider,
     LLMRateLimited,
     LLMRejected,
@@ -481,3 +482,34 @@ def test_a_cap_tight_enough_to_cut_everything_is_still_a_refusal() -> None:
 
     with pytest.raises(LLMRejected):
         _provider(handler, max_output_tokens=1).complete("system", "user")
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+def test_a_refused_account_is_environmental(status: int) -> None:
+    """The key, or a model this key may not call: no other item would pass (#919)."""
+
+    handler, _ = _always({"error": {"code": status, "message": "nope"}}, status)
+
+    with pytest.raises(LLMAccessDenied) as raised:
+        _provider(handler).complete("system", "user")
+
+    assert raised.value.environmental is True
+
+
+@pytest.mark.parametrize("status", [400, 422])
+def test_a_refused_request_is_the_items_not_the_environments(status: int) -> None:
+    handler, _ = _always({"error": {"code": status, "message": "nope"}}, status)
+
+    with pytest.raises(LLMRejected) as raised:
+        _provider(handler).complete("system", "user")
+
+    assert raised.value.environmental is False
+
+
+def test_a_blocked_answer_is_the_items_not_the_environments() -> None:
+    handler, _ = _always(_envelope("", finish_reason="SAFETY"))
+
+    with pytest.raises(LLMRejected) as raised:
+        _provider(handler).complete("system", "user")
+
+    assert raised.value.environmental is False

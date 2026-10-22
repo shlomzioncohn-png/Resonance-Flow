@@ -8,11 +8,16 @@ the index for it, and ask Inbox to create it.
 
 Failures, the same two kinds as `landed_consumer.py`:
 
-- skip: an extraction that failed (the extractor logged it at ERROR and
-  returned it, it never raises) or a duplicate. The other items go on.
-- retry (raise): the index search or the publish failing. The message is not
-  marked processed, and comes again after the restart. Items sent before the
-  failure are sent again with the same correlation_id, and Inbox dedups them.
+- skip: an extraction the item itself failed -- an answer that never fit the
+  schema, a request or content the provider refused (400, a safety block) --
+  or a duplicate. The extractor logged the failure at ERROR. The other items
+  go on.
+- retry (raise): what the environment caused, so every other item would fail
+  too -- an extraction that failed on the provider (down or rate-limited past
+  its retries, the key, the credit: `ExtractionUnavailable`), the index
+  search, the publish. The message is not marked processed, and comes again
+  after the restart. Items sent before the failure are sent again with the
+  same correlation_id, and Inbox dedups them.
 
 `task_index` is the item's position in the event, not a count of the tasks
 sent: an item that failed this time and passes on redelivery must not shift
@@ -37,6 +42,14 @@ logger = logging.getLogger(__name__)
 
 #: One item through the extractor: `BasicExtractor.extract` with the item's fields.
 Extract = Callable[[ExtractionItem], ExtractionOutcome]
+
+
+class ExtractionUnavailable(Exception):
+    """Extraction cannot run here now: the provider is down, rate-limited, or
+    refuses the account (key, credit). Like `MediaUnavailable`, raised so the
+    process stops and the message comes again, rather than every item landed
+    meanwhile being marked processed with nothing extracted."""
+
 
 #: (title, description) -> the closest open task, if it clears the threshold:
 #: `find_duplicate` bound to the index.
@@ -88,6 +101,10 @@ class CreationPipeline:
             # and the consumer waits for the message anyway.
             outcome = self._extract(item)
             if isinstance(outcome, ExtractionFailure):
+                if outcome.environmental:
+                    raise ExtractionUnavailable(
+                        f"{event.correlation_id} {item.item_key}: {outcome.reason}: {outcome.detail}"
+                    )
                 continue
 
             request = to_task_creation_requested(

@@ -75,6 +75,11 @@ bridge.raw.landed ─► to_raw_object_event ─► classify_arrival ─► extr
    `correlation_id` and `revision`. `task_index` is the item's position in
    the event, not a count of tasks sent, so an item that fails now and
    passes on redelivery does not change the next item's `correlation_id`.
+   An extraction that failed because of the environment, not the item (the
+   provider down past its retries, the key, the credit), stops the message
+   with `ExtractionUnavailable` instead of skipping it: otherwise a spent
+   budget would mark the whole topic processed with no task created. See
+   "Skip or retry".
 
 ## Skip or retry
 
@@ -94,7 +99,10 @@ so each failure is one of two kinds:
 | OCR/ASR: our bug (BUG), or a reason with no decision yet | that file skipped (ERROR), the rest goes on |
 | OCR/ASR: the tool is missing here (`*_UNAVAILABLE`) | `MediaUnavailable` raised: the process stops, the message comes again |
 | MinIO unreachable, or any MinIO error but a missing key | raised, same |
-| extraction gives up on an item (bad output, provider error) | that item skipped (ERROR, by the extractor), the rest goes on |
+| extraction: the model's answer never fits the schema (`invalid_output`) | that item skipped (ERROR, by the extractor), the rest goes on |
+| extraction: the provider refuses the item's request or content (400, 422, a safety block, a truncated answer) | that item skipped (ERROR, by the extractor), the rest goes on |
+| extraction: the provider is down, times out or rate-limits past its retries (timeout, 429, 5xx) | `ExtractionUnavailable` raised: the process stops, the message comes again |
+| extraction: the provider refuses the account (401, 403 key; 402 credit; 404 model not available) | `ExtractionUnavailable` raised, same |
 | the extracted task is a duplicate | not sent, logged at INFO, the rest goes on |
 | the duplicate search or the publish to Inbox fails | raised, same |
 | any other error (a bug of ours) | raised, same: loud rather than lost |

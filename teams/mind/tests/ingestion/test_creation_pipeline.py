@@ -22,8 +22,14 @@ from mind.contracts import RawObjectEvent
 from mind.contracts.base_enums import SourceType
 from mind.embeddings.base import SearchResult
 from mind.extraction.extractor import BasicExtractor, ExtractionItem
-from mind.extraction.providers.base import LLMRejected
-from mind.ingestion.creation_pipeline import CreationPipeline
+from mind.extraction.providers.base import (
+    LLMAccessDenied,
+    LLMRateLimited,
+    LLMRejected,
+    LLMTimeout,
+    LLMUnavailable,
+)
+from mind.ingestion.creation_pipeline import CreationPipeline, ExtractionUnavailable
 from mind.ingestion.landed_consumer import LandedHandler
 from mind.ingestion.seen_revisions import InMemoryRevisionStore
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
@@ -229,7 +235,7 @@ async def test_task_created_for_the_request_is_matched_indexed_and_reported() ->
 async def test_a_failed_extraction_does_not_shift_the_next_items_number() -> None:
     # The first item fails now and may pass on redelivery: the second must
     # keep its correlation_id either way, or Inbox gets a second task.
-    parts = Parts(LLMRejected("bad key"), ANSWER)
+    parts = Parts(LLMRejected("400 invalid request"), ANSWER)
 
     sent = await parts.pipeline.handle(_event(), [_item("a.txt"), _item("b.txt")])
 
@@ -266,3 +272,64 @@ def test_the_sent_request_uses_the_extracted_classification() -> None:
     ((_, request, _),) = parts.producer.sent
     assert request.urgency == 4
     assert request.HasField("tier") and request.HasField("role_context")
+
+
+# --- whose fault a failed extraction is (#919 review) -------------------------
+#
+# The item's fault: skip it, the rest goes on. The environment's: raise, so the
+# message is not marked processed and comes again -- otherwise a spent budget
+# marks the whole topic processed with no task created.
+
+_DOWN = [LLMTimeout("t")] * 3  # the first call and its two transient retries
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        pytest.param(_DOWN, id="timeout past retries"),
+        pytest.param([LLMRateLimited("429")] * 3, id="429 past retries"),
+        pytest.param([LLMUnavailable("503")] * 3, id="5xx past retries"),
+        pytest.param([LLMAccessDenied("401 invalid key")], id="401 key"),
+        pytest.param([LLMAccessDenied("402 insufficient balance")], id="402 credit"),
+        pytest.param([LLMAccessDenied("403 forbidden")], id="403 permission"),
+    ],
+)
+def test_an_environmental_failure_stops_the_message_for_a_retry(
+    script: list[Exception],
+) -> None:
+    parts = Parts(*script)
+    handle, store = _landed_handler(parts)
+
+    with pytest.raises(ExtractionUnavailable):
+        handle(_message(), None)
+
+    assert parts.producer.sent == []
+    assert store.processed_revision(ITEM) is None  # comes again after the restart
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        pytest.param(["nope", "still nope", "nope again"], id="invalid_output"),
+        pytest.param([LLMRejected("400 invalid request")], id="400 request"),
+        pytest.param([LLMRejected("Gemini blocked the answer (SAFETY)")], id="content blocked"),
+    ],
+)
+def test_a_failure_of_the_item_itself_is_skipped(script: list[str | Exception]) -> None:
+    parts = Parts(*script)
+    handle, store = _landed_handler(parts)
+
+    handle(_message(), None)
+
+    assert parts.producer.sent == []
+    assert store.processed_revision(ITEM) == 0  # skipped: one item cannot stall the topic
+
+
+async def test_an_environmental_failure_stops_before_the_next_item() -> None:
+    # The second item would fail the same way; nothing more is tried or sent.
+    parts = Parts(LLMAccessDenied("402 insufficient balance"), ANSWER)
+
+    with pytest.raises(ExtractionUnavailable):
+        await parts.pipeline.handle(_event(), [_item("a.txt"), _item("b.txt")])
+
+    assert parts.producer.sent == []
