@@ -93,7 +93,7 @@ public class SlackSessionPublisher {
         RawObjectEvent event = RawObjectEvent.create(
                 transcript.sourceType(), transcript.tenantId(), asOf, scopeDecision, transcript.participants(),
                 transcript.occurredAt(), transcript.correlationId(), transcript.revision(), transcript.changeType(),
-                objects);
+                objects).withSourceRef(transcript.sourceRef());
 
         validator.validate(event);
         publisher.publish(event);

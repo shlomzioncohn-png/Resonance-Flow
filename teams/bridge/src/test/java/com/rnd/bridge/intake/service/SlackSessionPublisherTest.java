@@ -111,6 +111,38 @@ class SlackSessionPublisherTest {
     }
 
     @Test
+    void publishedEventCarriesSourceRefAsChatIdColonTs() {
+        ChatMessage message = new ChatMessage(
+                RawSourceType.SLACK, "kamatech", "chat-a", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi",
+                List.of(), "m1", null);
+        ChatGroupStateReconciler.RealtimeReconcileResult result = reconciler.reconcileNonThreadedMessage(message);
+
+        sessionPublisher.publishSession(result.groupState(), Instant.parse("2026-08-18T09:45:00Z"));
+
+        ArgumentCaptor<RawObjectEvent> captor = ArgumentCaptor.forClass(RawObjectEvent.class);
+        org.mockito.Mockito.verify(kafkaPublisher).publish(captor.capture());
+        assertThat(captor.getValue().sourceRef()).isEqualTo("chat-a:m1");
+    }
+
+    @Test
+    void publishedEventHasNullSourceRefWhenGroupWasEmptiedByDeletion() {
+        ChatMessage message = new ChatMessage(
+                RawSourceType.SLACK, "kamatech", "chat-a", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi",
+                List.of(), "m1", null);
+        reconciler.reconcileNonThreadedMessage(message);
+        ChatGroupStateReconciler.RemovalResult removal =
+                reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "m1");
+        assertThat(removal.groupState().messages()).isEmpty();
+
+        sessionPublisher.publishSession(removal.groupState(), Instant.parse("2026-08-18T09:45:00Z"));
+
+        ArgumentCaptor<RawObjectEvent> captor = ArgumentCaptor.forClass(RawObjectEvent.class);
+        org.mockito.Mockito.verify(kafkaPublisher).publish(captor.capture());
+        assertThat(captor.getValue().sourceRef()).isNull();
+        assertThat(captor.getValue().changeType()).isEqualTo(com.rnd.bridge.raw.model.ChangeType.DELETE_REVIEW);
+    }
+
+    @Test
     void neverConfirmsPublishedWhenKafkaPublishFails() {
         ChatMessage message = new ChatMessage(
                 RawSourceType.SLACK, "kamatech", "chat-a", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi",
