@@ -177,6 +177,7 @@
                         <include>chain-task-updated-event.proto</include>
                         <include>task-completed-event.proto</include>
                         <include>task-dependencies-proposed-event.proto</include>
+                        <include>chain-task-score-proposed-event.proto</include>
                         <include>scheduling-updated-event.proto</include>
                     </includes>
                 </configuration>

@@ -15,12 +15,12 @@ The keys read here, one subtree per provider:
         base_url: https://api.deepseek.com
         model: deepseek-chat
         timeout_seconds: 60
-        max_output_tokens: 1024
+        max_output_tokens: 2048
       gemini:
         base_url: https://generativelanguage.googleapis.com
         model: gemini-3.6-flash
         timeout_seconds: 60
-        max_output_tokens: 1024
+        max_output_tokens: 2048
         thinking_budget: 0
     # secrets.yaml
     llm:
@@ -29,31 +29,31 @@ The keys read here, one subtree per provider:
       gemini:
         api_key: ...
 
-The file reading below is duplicated from `mind.messaging.config` rather than
-imported out of it: extraction has no other reason to depend on messaging, and
-the private helpers there are not an interface. The two copies must stay
-identical, so if a third reader of these files appears, that is the moment to
-factor all three into one loader instead of copying a third time.
+The files themselves are read by `mind.config_file`, the one loader shared
+with `mind.config` and `mind.messaging.config`.
 """
 
-import os
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-import yaml
-
-_DEFAULT_CONFIG = "/etc/resonance-flow/config/config.yaml"
-_DEFAULT_SECRETS = "/etc/resonance-flow/secret/secrets.yaml"
+from mind import config_file
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-chat"
 DEFAULT_TIMEOUT_SECONDS = 60.0
 
-# An extraction answer is four small fields. Capping the output keeps a
-# runaway generation from costing real money, and nothing we ask for comes
-# anywhere near this.
-DEFAULT_MAX_OUTPUT_TOKENS = 1024
+# Output tokens one extracted task takes, with classification and mentions.
+# Measured on AMI IS1008b (2026-10-22): 11 tasks in 971 tokens, about 88 each;
+# rounded up for longer descriptions. tests/extraction ties the cap below to it.
+TOKENS_PER_TASK = 120
+
+# An extraction answer is a list of up to MAX_TASKS_PER_TEXT tasks (#690), at
+# TOKENS_PER_TASK each. At the cap the answer is cut mid-object and refused, so
+# the whole item fails; this leaves room for a full list. It still caps a
+# runaway generation, and only the tokens actually written are billed. A model
+# that ignores thinkingBudget 0 (gemini-3.8-flash) spends part of this cap on
+# thinking, so raise it when switching to one.
+DEFAULT_MAX_OUTPUT_TOKENS = 2048
 
 GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
 GEMINI_DEFAULT_API_VERSION = "v1beta"
@@ -135,24 +135,6 @@ class GeminiSettings:
         )
 
 
-def _read_yaml(path: str) -> dict[str, Any]:
-    p = Path(path)
-    if not p.is_file():
-        return {}
-    loaded = yaml.safe_load(p.read_text(encoding="utf-8"))
-    return loaded if isinstance(loaded, dict) else {}
-
-
-def _deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
-    out = dict(base)
-    for key, value in over.items():
-        if isinstance(value, dict) and isinstance(out.get(key), dict):
-            out[key] = _deep_merge(out[key], value)
-        else:
-            out[key] = value
-    return out
-
-
 def _present(section: dict[str, Any], key: str) -> Any | None:
     """The value at `key`, or None when it is missing *or empty*.
 
@@ -182,19 +164,13 @@ def _llm_section() -> dict[str, Any]:
     a key, not this.
     """
 
-    merged = _deep_merge(
-        _read_yaml(os.environ.get("CONFIG_FILE_PATH", _DEFAULT_CONFIG)),
-        _read_yaml(os.environ.get("SECRETS_FILE_PATH", _DEFAULT_SECRETS)),
-    )
-    llm = merged.get("llm", {}) or {}
-    return llm if isinstance(llm, dict) else {}
+    return config_file.section(config_file.load_merged_lenient(), "llm")
 
 
 def _provider_section(provider: str) -> dict[str, Any]:
     """The `llm.<provider>` subtree: one provider's own settings."""
 
-    section = _llm_section().get(provider, {}) or {}
-    return section if isinstance(section, dict) else {}
+    return config_file.section(_llm_section(), provider)
 
 
 def configured_provider_name() -> str | None:

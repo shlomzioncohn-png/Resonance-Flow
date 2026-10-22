@@ -3,6 +3,7 @@
 import base64
 import json
 import re
+import uuid
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -14,6 +15,7 @@ from demo_flow.feed import (
     build_items,
     contract_problems,
     feed,
+    main,
     mind_view,
 )
 
@@ -21,11 +23,14 @@ from mind.messaging import raw_object_event_pb2 as pb
 
 _ANCHOR = date(2026, 10, 19)  # a Monday, two weeks after the scenario's own
 _SHIFT = timedelta(weeks=2)
-_KEY = re.compile(r"^[A-Z_]+/demo-tenant/\d{4}-\d{2}-\d{2}/[^/]+$")
+_TENANT = str(common.DEFAULT_TENANT_ID)
+_KEY = re.compile(rf"^[A-Z_]+/{_TENANT}/\d{{4}}-\d{{2}}-\d{{2}}/[^/]+$")
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
 
-def _build(order: str = "natural") -> dict[str, FeedItem]:
+def _build(
+    order: str = "natural", tenant_id: uuid.UUID = common.DEFAULT_TENANT_ID
+) -> dict[str, FeedItem]:
     email = common.read_json(common.EMAIL)
     items = build_items(
         order,
@@ -35,6 +40,7 @@ def _build(order: str = "natural") -> dict[str, FeedItem]:
         slack_messages=common.read_json(common.SLACK_THREAD),
         email_record=email,
         attachments={a["filename"]: b"fake-jpeg-bytes" for a in email["attachments"]},
+        tenant_id=tenant_id,
     )
     return {item.name: item for item in items}
 
@@ -62,7 +68,7 @@ def test_meeting_is_what_the_zoom_media_lane_publishes():
     assert (report.role, report.modality) == (pb.ROLE_SOURCE_METADATA, pb.MODALITY_TEXT)
     assert report.content_type == "application/json"
     # MediaIntakeService: every object of a meeting is named after its correlation id.
-    prefix = f"ZOOM/demo-tenant/2026-10-19/{meeting.correlation_id}"
+    prefix = f"ZOOM/{_TENANT}/2026-10-19/{meeting.correlation_id}"
     assert (recording.object_key, report.object_key) == (f"{prefix}.m4a", f"{prefix}.json")
     assert _ts(meeting.ingested_at) == common.MEETING_INGESTED_AT + _SHIFT
 
@@ -97,7 +103,7 @@ def test_slack_is_one_transcript_of_sender_lines():
     [ref] = item.event.objects
     assert (ref.role, ref.modality) == (pb.ROLE_TRANSCRIPT, pb.MODALITY_TEXT)
     assert ref.content_type == "text/plain; charset=utf-8"
-    assert re.fullmatch(rf"SLACK/demo-tenant/2026-10-19/{_UUID}\.txt", ref.object_key)
+    assert re.fullmatch(rf"SLACK/{_TENANT}/2026-10-19/{_UUID}\.txt", ref.object_key)
     assert list(item.event.participants) == ["Lior", "Dana"]
     assert _ts(item.event.source_timestamp) == datetime(2026, 10, 19, 9, 40, tzinfo=UTC)
 
@@ -107,6 +113,8 @@ def test_email_body_is_the_fixture_record_with_its_attachment_inline():
     body, attachment = item.objects
     landed = json.loads(body.content)
     assert landed["date"] == "2026-10-19T11:15:00Z"
+    assert next(iter(landed)) == "tenantId"  # first, as in Bridge's fixture records
+    assert landed["tenantId"] == _TENANT
     assert landed["attachments"] == [
         {
             "filename": "supplier_form.jpg",
@@ -120,7 +128,7 @@ def test_email_body_is_the_fixture_record_with_its_attachment_inline():
     assert (attachment.role, attachment.modality) == (pb.ROLE_ATTACHMENT, pb.MODALITY_SCANNED_DOC)
     assert attachment.content_type == "image/jpeg"
     assert attachment.content == b"fake-jpeg-bytes"
-    assert re.fullmatch(rf"EMAIL/demo-tenant/2026-10-19/{_UUID}-supplier_form\.jpg", attachment.key)
+    assert re.fullmatch(rf"EMAIL/{_TENANT}/2026-10-19/{_UUID}-supplier_form\.jpg", attachment.key)
     assert list(item.event.participants) == ["lisa.grant@northwind.example"]
     assert _ts(item.event.source_timestamp) == datetime(2026, 10, 19, 11, 15, tzinfo=UTC)
 
@@ -160,6 +168,31 @@ def test_each_run_gets_fresh_correlation_ids_and_object_keys():
 @pytest.mark.parametrize("name", ["meeting", "slack", "email"])
 def test_every_event_passes_minds_contract_once_enum_prefixes_are_stripped(name):
     assert contract_problems(_build()[name]) == []
+
+
+def test_the_tenant_comes_from_one_place_and_reaches_every_event_object_and_tag():
+    tenant = uuid.UUID("3f2a9c1e-5b7d-4e8a-9c21-7d4e5f6a8b90")
+    for item in _build(tenant_id=tenant).values():
+        assert item.event.tenant_id == str(tenant)
+        for obj in item.objects:
+            assert obj.key.split("/")[1] == str(tenant)
+            assert obj.tags["tenant_id"] == str(tenant)
+
+
+def test_a_tenant_that_is_not_a_uuid_is_reported_as_a_contract_problem():
+    # Mind's consumer skips such an event, so the dry run must say so.
+    item = _build()["slack"]
+    item.event.tenant_id = "demo-tenant"
+    assert contract_problems(item) == ["RawObjectEvent.tenant_id is not a UUID: 'demo-tenant'"]
+
+
+def test_feed_refuses_a_tenant_id_that_is_not_a_uuid(monkeypatch, capsys):
+    with pytest.raises(SystemExit):
+        main(["--dry-run", "--tenant-id", "demo-tenant"])
+    assert "--tenant-id" in capsys.readouterr().err
+    monkeypatch.setenv("DEMO_TENANT_ID", "demo-tenant")
+    with pytest.raises(SystemExit):
+        main(["--dry-run"])
 
 
 def test_mind_view_strips_the_proto_enum_prefixes():

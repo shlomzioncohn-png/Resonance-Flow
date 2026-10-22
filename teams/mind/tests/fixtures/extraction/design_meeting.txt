@@ -1,0 +1,8 @@
+Project Manager: Okay, let's wrap up the functional design. The remote has to take voice commands, that came out of the marketing survey.
+Marketing Expert: Right. The survey also said people lose their remotes all the time, so a locator beep would sell.
+Project Manager: Good. Industrial Designer, can you prepare the components concept for the next meeting? Mainly whether voice recognition fits in the case.
+Industrial Designer: Sure, but I can't finish it until I know the chip budget.
+Project Manager: I'll get the chip budget from finance by Wednesday.
+User Interface Designer: I'll work out the button layout for the user interface concept.
+Marketing Expert: And I will check what the competitors charge, for the marketing concept.
+Project Manager: We talked about the colour, let's leave that open for now. The minutes of the last meeting are already on thread DES-2214.

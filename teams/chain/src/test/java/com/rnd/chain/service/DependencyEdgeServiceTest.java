@@ -1,5 +1,6 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
 import com.rnd.chain.testsupport.PgRepos;
 
@@ -52,6 +53,22 @@ class DependencyEdgeServiceTest {
     @Autowired
     private TaskReadinessRepository taskReadinessRepository;
 
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
+
     @BeforeEach
     void setUp() {
 
@@ -65,26 +82,27 @@ class DependencyEdgeServiceTest {
                 new RecordingSchedulingUpdatePublisher();
 
         SchedulingUpdateService schedulingUpdateService =
-                new SchedulingUpdateService(publisher);
+                new SchedulingUpdateService(publisher,taskReadinessRepository);
 
         GraphLock lock =
                 PgRepos.graphLock();
 
-        TaskCounterUpdater counterUpdater =
-                new TaskCounterUpdater(
-                        taskRepository,
-                        dependencyRepository,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
                                 taskRepository,
-                                schedulingUpdateService),
-                        taskReadinessRepository);
+                                dependencyRepository,
+                                taskReadinessRepository,
+                                schedulingUpdateService,
+                                new SchedulingPublishListener(
+                                taskRepository,
+                                schedulingUpdateService));
 
         service =
                 new DependencyEdgeService(
+                        taskRepository,
                         dependencyRepository,
                         lock,
-                        counterUpdater,
+                        priorityScoreService,
                         TaskStateHistoryFixtures.newRecorder(),
                         taskReadinessRepository);
     }
@@ -125,10 +143,10 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 1,
-                updated.getBlockingCount());
+                blockingCount(updated));
 
         assertFalse(
-                updated.isReady());
+                isReady(updated));
 
         assertEquals(
                 1,
@@ -181,10 +199,10 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 0,
-                updated.getBlockingCount());
+                blockingCount(updated));
 
         assertTrue(
-                updated.isReady());
+                isReady(updated));
 
         assertTrue(
                 publisher.getEvents().isEmpty());
@@ -231,7 +249,7 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 1,
-                updated.getBlockingCount());
+                blockingCount(updated));
     }
 
     @Test
@@ -333,10 +351,10 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 0,
-                updated.getBlockingCount());
+                blockingCount(updated));
 
         assertTrue(
-                updated.isReady());
+                isReady(updated));
 
         assertEquals(
                 1,
@@ -424,10 +442,10 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 1,
-                task.getBlockingCount());
+                blockingCount(task));
 
         assertFalse(
-                task.isReady());
+                isReady(task));
     }
 
     @Test
@@ -466,10 +484,10 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 2,
-                task.getBlockingCount());
+                blockingCount(task));
 
         assertFalse(
-                task.isReady());
+                isReady(task));
     }
 
     @Test
@@ -514,10 +532,9 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 1,
-                fixture.taskRepo()
+                blockingCount(fixture.taskRepo()
                         .findById(taskId)
-                        .orElseThrow()
-                        .getBlockingCount());
+                        .orElseThrow()));
     }
 
     @Test
@@ -565,10 +582,10 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 0,
-                task.getBlockingCount());
+                blockingCount(task));
 
         assertTrue(
-                task.isReady());
+                isReady(task));
     }
 
     @Test
@@ -757,10 +774,10 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 2,
-                task.getBlockingCount());
+                blockingCount(task));
 
         assertFalse(
-                task.isReady());
+                isReady(task));
     }
 
     @Test
@@ -815,10 +832,9 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 0,
-                fixture.taskRepo()
+                blockingCount(fixture.taskRepo()
                         .findById(taskB)
-                        .orElseThrow()
-                        .getBlockingCount());
+                        .orElseThrow()));
     }
 
     @Test
@@ -903,10 +919,9 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 1,
-                fixture.taskRepo()
+                blockingCount(fixture.taskRepo()
                         .findById(taskId)
-                        .orElseThrow()
-                        .getBlockingCount(),
+                        .orElseThrow()),
                 "a duplicate id within one batch must count as a single edge, not double the blockingCount");
     }
 
@@ -992,10 +1007,10 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 0,
-                task.getBlockingCount());
+                blockingCount(task));
 
         assertTrue(
-                task.isReady());
+                isReady(task));
     }
 
     @Test
@@ -1042,10 +1057,10 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 1,
-                task.getBlockingCount());
+                blockingCount(task));
 
         assertFalse(
-                task.isReady());
+                isReady(task));
     }
 
     @Test
@@ -1083,10 +1098,9 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 0,
-                fixture.taskRepo()
+                blockingCount(fixture.taskRepo()
                         .findById(taskId)
-                        .orElseThrow()
-                        .getBlockingCount());
+                        .orElseThrow()));
     }
 
     @Test
@@ -1127,10 +1141,9 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 0,
-                fixture.taskRepo()
+                blockingCount(fixture.taskRepo()
                         .findById(taskId)
-                        .orElseThrow()
-                        .getBlockingCount());
+                        .orElseThrow()));
     }
 
     @Test
@@ -1167,10 +1180,9 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 0,
-                fixture.taskRepo()
+                blockingCount(fixture.taskRepo()
                         .findById(taskId)
-                        .orElseThrow()
-                        .getBlockingCount());
+                        .orElseThrow()));
     }
 
     @Test
@@ -1229,7 +1241,6 @@ class DependencyEdgeServiceTest {
 
         Task dependsOnTask =
                 TaskTestFixtures.defaultTask(dependsOnTaskId)
-                        .isReady(true)
                         .tenantId(TaskTestFixtures.OTHER_TENANT_ID)
                         .build();
 
@@ -1265,7 +1276,6 @@ class DependencyEdgeServiceTest {
 
         Task task =
                 TaskTestFixtures.defaultTask(taskId)
-                        .isReady(true)
                         .tenantId(null)
                         .build();
 
@@ -1322,10 +1332,9 @@ class DependencyEdgeServiceTest {
 
         assertEquals(
                 1,
-                fixture.taskRepo()
+                blockingCount(fixture.taskRepo()
                         .findById(taskId)
-                        .orElseThrow()
-                        .getBlockingCount());
+                        .orElseThrow()));
     }
 
     @Test
@@ -1342,7 +1351,6 @@ class DependencyEdgeServiceTest {
 
         Task crossTenantTask =
                 TaskTestFixtures.defaultTask(crossTenantDep)
-                        .isReady(true)
                         .tenantId(TaskTestFixtures.OTHER_TENANT_ID)
                         .build();
 
@@ -1393,9 +1401,6 @@ class DependencyEdgeServiceTest {
                 .parentTaskId(null)
                 .tenantId(TaskTestFixtures.DEFAULT_TENANT_ID)
                 .status(status)
-                .isReady(ready)
-                .blockingCount(blockingCount)
-                .openConstraintCount(openConstraintCount)
                 .estimatedDurationMin(null)
                 .score(null)
                 .createdAt(now)
@@ -1447,26 +1452,27 @@ class DependencyEdgeServiceTest {
                 PgRepos.constraints();
 
         SchedulingUpdateService scheduling =
-                new SchedulingUpdateService(event -> {});
+                new SchedulingUpdateService(event -> {},taskReadinessRepository);
 
         GraphLock lock =
                 PgRepos.graphLock();
 
-        TaskCounterUpdater counterUpdater =
-                new TaskCounterUpdater(
-                        taskRepo,
-                        dependencyRepo,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
                                 taskRepo,
-                                scheduling),
-                        taskReadinessRepository);
+                                dependencyRepo,
+                                taskReadinessRepository,
+                                scheduling,
+                                new SchedulingPublishListener(
+                                taskRepo,
+                                scheduling));
 
         DependencyEdgeService edgeService =
                 new DependencyEdgeService(
+                        taskRepo,
                         dependencyRepo,
                         lock,
-                        counterUpdater,
+                        priorityScoreService,
                         TaskStateHistoryFixtures.newRecorder(),
                         taskReadinessRepository);
 
@@ -1500,9 +1506,6 @@ class DependencyEdgeServiceTest {
 
         return TaskTestFixtures.defaultTask(id)
                 .status(status)
-                .isReady(isReady)
-                .blockingCount(blockingCount)
-                .openConstraintCount(openConstraintCount)
                 .build();
     }
 }

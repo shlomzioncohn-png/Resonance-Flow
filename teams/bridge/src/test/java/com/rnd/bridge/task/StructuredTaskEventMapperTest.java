@@ -40,7 +40,7 @@ class StructuredTaskEventMapperTest {
     private static Task minimalTask() {
         return new Task(
                 VALID_TENANT_ID, null, "Title", null, null, null, null, null, null, null,
-                SourceType.GITHUB_ISSUE, "ref-1", null, null, null, null);
+                SourceType.GITHUB_ISSUE, "ref-1", null, null, null);
     }
 
     private static Task fullyPopulatedTask() {
@@ -48,7 +48,7 @@ class StructuredTaskEventMapperTest {
                 VALID_TENANT_ID, "project-1", "Full title", "Full description", TaskStatus.IN_PROGRESS,
                 3, 0.75, Tier.TACTICAL, ExtractionProvenance.ETL, RoleContext.DEVELOPER,
                 SourceType.JIRA_ISSUE, "ref-2", 45,
-                Instant.ofEpochSecond(1_700_000_000L, 123_456_789L), null, null);
+                Instant.ofEpochSecond(1_700_000_000L, 123_456_789L), null);
     }
 
     // ---- always-set fields ----
@@ -150,7 +150,7 @@ class StructuredTaskEventMapperTest {
     void urgency_zeroIsPreservedWhenActuallyZero_notTreatedAsUnset() {
         Task task = new Task(
                 VALID_TENANT_ID, null, "Title", null, null, 0, null, null, null, null,
-                SourceType.GITHUB_ISSUE, "ref-1", null, null, null, null);
+                SourceType.GITHUB_ISSUE, "ref-1", null, null, null);
 
         StructuredTaskEvent event = StructuredTaskEventMapper.from(task);
 
@@ -174,7 +174,7 @@ class StructuredTaskEventMapperTest {
     void effortEstimateMinutes_zeroIsPreservedWhenActuallyZero_notTreatedAsUnset() {
         Task task = new Task(
                 VALID_TENANT_ID, null, "Title", null, null, null, null, null, null, null,
-                SourceType.GITHUB_ISSUE, "ref-1", 0, null, null, null);
+                SourceType.GITHUB_ISSUE, "ref-1", 0, null, null);
 
         StructuredTaskEvent event = StructuredTaskEventMapper.from(task);
 
@@ -192,7 +192,7 @@ class StructuredTaskEventMapperTest {
         Instant deadline = Instant.ofEpochSecond(1_700_000_000L, 123_456_789L);
         Task task = new Task(
                 VALID_TENANT_ID, null, "Title", null, null, null, null, null, null, null,
-                SourceType.GITHUB_ISSUE, "ref-1", null, deadline, null, null);
+                SourceType.GITHUB_ISSUE, "ref-1", null, deadline, null);
 
         StructuredTaskEvent event = StructuredTaskEventMapper.from(task);
 
@@ -229,7 +229,7 @@ class StructuredTaskEventMapperTest {
     void confidence_zeroIsPreservedWhenActuallyZero_notTreatedAsUnset() {
         Task task = new Task(
                 VALID_TENANT_ID, null, "Title", null, null, null, 0.0, null, null, null,
-                SourceType.GITHUB_ISSUE, "ref-1", null, null, null, null);
+                SourceType.GITHUB_ISSUE, "ref-1", null, null, null);
 
         StructuredTaskEvent event = StructuredTaskEventMapper.from(task);
 
@@ -255,7 +255,7 @@ class StructuredTaskEventMapperTest {
     void failsFast_whenTenantIdIsNull() {
         Task task = new Task(
                 null, null, "Title", null, null, null, null, null, null, null,
-                SourceType.GITHUB_ISSUE, "ref-1", null, null, null, null);
+                SourceType.GITHUB_ISSUE, "ref-1", null, null, null);
 
         ValidationException ex = assertThrows(ValidationException.class, () -> StructuredTaskEventMapper.from(task));
         assertTrue(ex.getMessage().contains("organizationId"));
@@ -265,7 +265,7 @@ class StructuredTaskEventMapperTest {
     void failsFast_whenTenantIdIsBlank() {
         Task task = new Task(
                 "   ", null, "Title", null, null, null, null, null, null, null,
-                SourceType.GITHUB_ISSUE, "ref-1", null, null, null, null);
+                SourceType.GITHUB_ISSUE, "ref-1", null, null, null);
 
         assertThrows(ValidationException.class, () -> StructuredTaskEventMapper.from(task));
     }
@@ -274,7 +274,7 @@ class StructuredTaskEventMapperTest {
     void failsFast_whenTenantIdIsNotAValidUuid() {
         Task task = new Task(
                 "not-a-uuid", null, "Title", null, null, null, null, null, null, null,
-                SourceType.GITHUB_ISSUE, "ref-1", null, null, null, null);
+                SourceType.GITHUB_ISSUE, "ref-1", null, null, null);
 
         ValidationException ex = assertThrows(ValidationException.class, () -> StructuredTaskEventMapper.from(task));
         assertTrue(ex.getMessage().contains("organizationId"));
@@ -288,7 +288,7 @@ class StructuredTaskEventMapperTest {
         assertDoesNotThrow(() -> UUID.fromString("1-1-1-1-1"));
         Task task = new Task(
                 "1-1-1-1-1", null, "Title", null, null, null, null, null, null, null,
-                SourceType.GITHUB_ISSUE, "ref-1", null, null, null, null);
+                SourceType.GITHUB_ISSUE, "ref-1", null, null, null);
 
         ValidationException ex = assertThrows(ValidationException.class, () -> StructuredTaskEventMapper.from(task));
         assertTrue(ex.getMessage().contains("organizationId"));
@@ -300,7 +300,7 @@ class StructuredTaskEventMapperTest {
         // still rejected by Inbox's fixed-length regex.
         Task task = new Task(
                 "111111111-1111-1111-1111-111111111111", null, "Title", null, null, null, null, null,
-                null, null, SourceType.GITHUB_ISSUE, "ref-1", null, null, null, null);
+                null, null, SourceType.GITHUB_ISSUE, "ref-1", null, null, null);
 
         assertThrows(ValidationException.class, () -> StructuredTaskEventMapper.from(task));
     }
@@ -309,7 +309,7 @@ class StructuredTaskEventMapperTest {
     void tenantId_acceptsCanonicalLowercaseUuid() {
         Task task = new Task(
                 "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", null, "Title", null, null, null, null, null,
-                null, null, SourceType.GITHUB_ISSUE, "ref-1", null, null, null, null);
+                null, null, SourceType.GITHUB_ISSUE, "ref-1", null, null, null);
 
         assertEquals("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
                 StructuredTaskEventMapper.from(task).getTenantId());
@@ -319,7 +319,7 @@ class StructuredTaskEventMapperTest {
     void tenantId_acceptsCanonicalUppercaseUuid_matchingInboxsCaseInsensitiveRule() {
         Task task = new Task(
                 "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE", null, "Title", null, null, null, null, null,
-                null, null, SourceType.GITHUB_ISSUE, "ref-1", null, null, null, null);
+                null, null, SourceType.GITHUB_ISSUE, "ref-1", null, null, null);
 
         assertEquals("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
                 StructuredTaskEventMapper.from(task).getTenantId());
@@ -329,7 +329,7 @@ class StructuredTaskEventMapperTest {
     void failsFast_whenTitleIsNull() {
         Task task = new Task(
                 VALID_TENANT_ID, null, null, null, null, null, null, null, null, null,
-                SourceType.GITHUB_ISSUE, "ref-1", null, null, null, null);
+                SourceType.GITHUB_ISSUE, "ref-1", null, null, null);
 
         ValidationException ex = assertThrows(ValidationException.class, () -> StructuredTaskEventMapper.from(task));
         assertTrue(ex.getMessage().contains("title"));
@@ -339,7 +339,7 @@ class StructuredTaskEventMapperTest {
     void failsFast_whenTitleIsBlank() {
         Task task = new Task(
                 VALID_TENANT_ID, null, "   ", null, null, null, null, null, null, null,
-                SourceType.GITHUB_ISSUE, "ref-1", null, null, null, null);
+                SourceType.GITHUB_ISSUE, "ref-1", null, null, null);
 
         assertThrows(ValidationException.class, () -> StructuredTaskEventMapper.from(task));
     }
@@ -348,7 +348,7 @@ class StructuredTaskEventMapperTest {
     void failsFast_whenSourceRefIsNull() {
         Task task = new Task(
                 VALID_TENANT_ID, null, "Title", null, null, null, null, null, null, null,
-                SourceType.GITHUB_ISSUE, null, null, null, null, null);
+                SourceType.GITHUB_ISSUE, null, null, null, null);
 
         ValidationException ex = assertThrows(ValidationException.class, () -> StructuredTaskEventMapper.from(task));
         assertTrue(ex.getMessage().contains("sourceRef"));
@@ -358,7 +358,7 @@ class StructuredTaskEventMapperTest {
     void failsFast_whenSourceRefIsBlank() {
         Task task = new Task(
                 VALID_TENANT_ID, null, "Title", null, null, null, null, null, null, null,
-                SourceType.GITHUB_ISSUE, "   ", null, null, null, null);
+                SourceType.GITHUB_ISSUE, "   ", null, null, null);
 
         assertThrows(ValidationException.class, () -> StructuredTaskEventMapper.from(task));
     }
@@ -367,7 +367,7 @@ class StructuredTaskEventMapperTest {
     void failsFast_whenSourceTypeIsNull() {
         Task task = new Task(
                 VALID_TENANT_ID, null, "Title", null, null, null, null, null, null, null,
-                null, "ref-1", null, null, null, null);
+                null, "ref-1", null, null, null);
 
         ValidationException ex = assertThrows(ValidationException.class, () -> StructuredTaskEventMapper.from(task));
         assertTrue(ex.getMessage().contains("sourceType"));
@@ -404,8 +404,7 @@ class StructuredTaskEventMapperTest {
             Map.entry(SourceType.CALENDAR, com.rnd.inbox.event.SourceType.SOURCE_TYPE_CALENDAR));
 
     // Inbox-only values: MANUAL means "typed directly into the product, no adapter involved" -
-    // bypasses Bridge entirely. DRIVE has no Bridge lane today. ZOOM and BIGBLUEBUTTON (added by
-    // Inbox, #749): Bridge hands meetings off as RawObjectEvent, never as a structured Task.
+    // bypasses Bridge entirely. DRIVE, ZOOM and BIGBLUEBUTTON have no Bridge lane today.
     // See teams/bridge/CLAUDE.md §6.
     private static final Set<com.rnd.inbox.event.SourceType> SOURCE_TYPE_NOT_SENT_BY_BRIDGE = Set.of(
             com.rnd.inbox.event.SourceType.SOURCE_TYPE_MANUAL,
@@ -418,7 +417,7 @@ class StructuredTaskEventMapperTest {
     void everyBridgeSourceTypeValueMapsToItsExpectedProtoValue(SourceType bridgeValue) {
         Task task = new Task(
                 VALID_TENANT_ID, null, "Title", null, null, null, null, null, null, null,
-                bridgeValue, "ref-1", null, null, null, null);
+                bridgeValue, "ref-1", null, null, null);
 
         assertEquals(EXPECTED_SOURCE_TYPE.get(bridgeValue), StructuredTaskEventMapper.from(task).getSourceType());
     }
@@ -452,7 +451,7 @@ class StructuredTaskEventMapperTest {
     void everyBridgeTierValueMapsToItsExpectedProtoValue(Tier bridgeValue) {
         Task task = new Task(
                 VALID_TENANT_ID, null, "Title", null, null, null, null, bridgeValue, null, null,
-                SourceType.GITHUB_ISSUE, "ref-1", null, null, null, null);
+                SourceType.GITHUB_ISSUE, "ref-1", null, null, null);
 
         assertEquals(EXPECTED_TIER.get(bridgeValue), StructuredTaskEventMapper.from(task).getTier());
     }
@@ -487,7 +486,7 @@ class StructuredTaskEventMapperTest {
     void everyBridgeRoleContextValueMapsToItsExpectedProtoValue(RoleContext bridgeValue) {
         Task task = new Task(
                 VALID_TENANT_ID, null, "Title", null, null, null, null, null, null, bridgeValue,
-                SourceType.GITHUB_ISSUE, "ref-1", null, null, null, null);
+                SourceType.GITHUB_ISSUE, "ref-1", null, null, null);
 
         assertEquals(EXPECTED_ROLE_CONTEXT.get(bridgeValue), StructuredTaskEventMapper.from(task).getRoleContext());
     }
@@ -514,7 +513,6 @@ class StructuredTaskEventMapperTest {
             TaskStatus.IN_REVIEW, com.rnd.inbox.event.TaskStatus.TASK_STATUS_IN_REVIEW,
             TaskStatus.APPROVED, com.rnd.inbox.event.TaskStatus.TASK_STATUS_APPROVED,
             TaskStatus.IN_PROGRESS, com.rnd.inbox.event.TaskStatus.TASK_STATUS_IN_PROGRESS,
-            TaskStatus.SNOOZED, com.rnd.inbox.event.TaskStatus.TASK_STATUS_SNOOZED,
             TaskStatus.DONE, com.rnd.inbox.event.TaskStatus.TASK_STATUS_DONE,
             TaskStatus.REJECTED, com.rnd.inbox.event.TaskStatus.TASK_STATUS_REJECTED,
             TaskStatus.CANCELLED, com.rnd.inbox.event.TaskStatus.TASK_STATUS_CANCELLED);
@@ -524,7 +522,7 @@ class StructuredTaskEventMapperTest {
     void everyBridgeTaskStatusValueMapsToItsExpectedProtoValue(TaskStatus bridgeValue) {
         Task task = new Task(
                 VALID_TENANT_ID, null, "Title", null, bridgeValue, null, null, null, null, null,
-                SourceType.GITHUB_ISSUE, "ref-1", null, null, null, null);
+                SourceType.GITHUB_ISSUE, "ref-1", null, null, null);
 
         assertEquals(EXPECTED_STATUS.get(bridgeValue), StructuredTaskEventMapper.from(task).getStatus());
     }
@@ -534,6 +532,12 @@ class StructuredTaskEventMapperTest {
         assertEquals(EnumSet.allOf(TaskStatus.class), EXPECTED_STATUS.keySet());
     }
 
+    // Inbox-only value: the shared proto carries SNOOZED for products that pause tasks, but
+    // Bridge dropped Task.snoozedUntil/TaskStatus.SNOOZED per the Inbox status-simplification
+    // notice - no source platform maps to it, so nothing reaches it from Bridge.
+    private static final Set<com.rnd.inbox.event.TaskStatus> TASK_STATUS_NOT_SENT_BY_BRIDGE = Set.of(
+            com.rnd.inbox.event.TaskStatus.TASK_STATUS_SNOOZED);
+
     @Test
     void everyProtoTaskStatusValueIsReachableFromBridge() {
         assertEveryProtoValueReachableOrDocumented(
@@ -541,7 +545,7 @@ class StructuredTaskEventMapperTest {
                 com.rnd.inbox.event.TaskStatus.TASK_STATUS_UNSPECIFIED,
                 com.rnd.inbox.event.TaskStatus.UNRECOGNIZED,
                 EnumSet.copyOf(EXPECTED_STATUS.values()),
-                Set.of());
+                TASK_STATUS_NOT_SENT_BY_BRIDGE);
     }
 
     // ---- round-trip ----

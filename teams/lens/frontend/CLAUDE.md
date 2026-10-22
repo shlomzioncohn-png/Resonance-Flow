@@ -23,6 +23,8 @@ Do not implement or change authentication or authorization without an explicit t
 - Keep server and client components intentional; add `"use client"` only when needed.
 - Reuse shared components instead of duplicating layout or feedback states.
 - Keep changes focused and avoid unrelated refactors.
+- Use `type`, not `interface`, for props and other object shapes.
+- Keep types local to their file: do not `export` a type unless another file actually imports it.
 - Update `README.md` or the relevant document under `docs/` when documentation changes.
 - Do not add secrets, tokens, `.env` files, `node_modules`, or `.next` output to Git.
 

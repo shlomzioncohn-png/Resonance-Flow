@@ -17,9 +17,12 @@ from mind.embeddings import embed
 from mind.embeddings.embeddings import EMBEDDING_DIM
 from mind.embeddings.pgvector_store import PgVectorStore
 
+TENANT = uuid.UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+OTHER_TENANT = uuid.UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+
 
 @pytest.fixture(scope="module")
-async def store(migrated_db):
+async def index(migrated_db):
     """One store per module, not per test. Scoped here, not conftest.py,
     so DB-free test files never need a connection. Depends on
     migrated_db (conftest.py) so `alembic upgrade head` actually runs
@@ -37,11 +40,32 @@ async def store(migrated_db):
     await s.close()
 
 
+@pytest.fixture
+def store(index):
+    return index.for_tenant(TENANT)
+
+
+@pytest.fixture
+def other_store(index):
+    return index.for_tenant(OTHER_TENANT)
+
+
 @pytest.fixture(autouse=True)
-async def clean_store(store):
+async def clean_store(index):
     """Clear before every test -- leftover rows can out-rank new ones."""
-    await store.clear()
+    await index.clear()
     yield
+
+
+async def _insert_without_tenant(index, task_id, vector):
+    """A row as written before #841: no tenant_id."""
+    async with index._pool.connection() as conn:
+        await conn.execute(
+            sql.SQL("INSERT INTO {table} (task_id, embedding) VALUES (%s, %s);").format(
+                table=index._table()
+            ),
+            (task_id, vector),
+        )
 
 
 async def test_embed_is_independent():
@@ -256,24 +280,26 @@ async def test_search_exclude_task_id_does_not_let_self_consume_the_k_budget(sto
     assert [r.task_id for r in results] == [other_id]
 
 
-async def test_search_exclude_task_id_respects_k_starvation_at_low_search_effort(store):
+async def test_search_exclude_task_id_respects_k_starvation_at_low_search_effort(index, store):
     """The earlier "excluding 1 id can never starve k" reasoning only held
     for the default search_effort=400 -- it's a runtime setting, and can
     go as low as k itself. With search_effort==k, excluding the self row
     must still not come back short."""
-    settings = store._settings.model_copy(update={"search_effort": 1})
-    low_effort_store = PgVectorStore(settings)
+    settings = index._settings.model_copy(update={"search_effort": 1})
+    low_effort_index = PgVectorStore(settings)
     try:
         query_vec = embed("Ship the release notes for v2.3")
         self_id, other_id = f"test-{uuid.uuid4()}", f"test-{uuid.uuid4()}"
         await store.upsert(self_id, query_vec)
         await store.upsert(other_id, embed("Write up the v2.3 release notes"))
 
-        results = await low_effort_store.search(query_vec, k=1, exclude_task_id=self_id)
+        results = await low_effort_index.for_tenant(TENANT).search(
+            query_vec, k=1, exclude_task_id=self_id
+        )
 
         assert [r.task_id for r in results] == [other_id]
     finally:
-        await low_effort_store.close()
+        await low_effort_index.close()
 
 
 async def test_search_combines_exclude_completed_and_exclude_task_id(store):
@@ -332,18 +358,75 @@ async def test_concurrent_search_and_upsert_calls_all_succeed(store):
     assert all(isinstance(r, list) and len(r) >= 1 for r in results)
 
 
+async def test_search_never_returns_another_tenants_rows(store, other_store):
+    vec = embed("Ship the release notes for v2.3")
+    await store.upsert("task-mine", vec)
+    await other_store.upsert("task-theirs", vec)
+
+    results = await store.search(vec, k=5)
+
+    assert [r.task_id for r in results] == ["task-mine"]
+
+
+async def test_reads_and_writes_by_task_id_stay_inside_the_tenant(store, other_store):
+    vec = embed("Ship the release notes for v2.3")
+    await other_store.upsert("task-theirs", vec, content_hash="abc123")
+
+    assert await store.get_vector("task-theirs") is None
+    assert await store.get_content_hash("task-theirs") is None
+    assert await store.mark_completed("task-theirs") is False
+    await store.delete("task-theirs")
+    assert await other_store.get_vector("task-theirs") is not None
+
+
+async def test_upsert_does_not_take_over_another_tenants_row(store, other_store):
+    vec = embed("Ship the release notes for v2.3")
+    await other_store.upsert("task-1", vec)
+
+    await store.upsert("task-1", embed("Something else entirely"))
+
+    assert await other_store.get_vector("task-1") is not None
+    assert await store.get_vector("task-1") is None
+
+
+async def test_tenant_of_returns_the_tenant_a_task_is_indexed_under(index, store):
+    await store.upsert("task-1", embed("Ship the release notes"))
+
+    assert await index.tenant_of("task-1") == TENANT
+    assert await index.tenant_of("task-unknown") is None
+
+
+async def test_a_row_without_a_tenant_is_never_returned(index, store):
+    vec = embed("Ship the release notes for v2.3")
+    await _insert_without_tenant(index, "task-old", vec)
+
+    assert await store.search(vec, k=5) == []
+    assert await store.get_vector("task-old") is None
+    assert await index.tenant_of("task-old") is None
+
+
+async def test_upsert_gives_a_row_without_a_tenant_its_tenant(index, store):
+    vec = embed("Ship the release notes for v2.3")
+    await _insert_without_tenant(index, "task-old", vec)
+
+    await store.upsert("task-old", vec, content_hash="abc123")
+
+    assert await index.tenant_of("task-old") == TENANT
+    assert [r.task_id for r in await store.search(vec, k=5)] == ["task-old"]
+
+
 async def test_search_raises_when_database_is_unreachable():
     """An unreachable DB surfaces as an error, not a hang."""
     unreachable_settings = VectorStoreSettings(
         dsn="postgresql://doesnotexist:doesnotexist@127.0.0.1:1/doesnotexist?connect_timeout=2",
         table="task_embeddings_test",
     )
-    unreachable_store = PgVectorStore(unreachable_settings, pool_timeout=5)
+    unreachable_index = PgVectorStore(unreachable_settings, pool_timeout=5)
     try:
         with pytest.raises(PoolTimeout):
-            await unreachable_store.search([0.0] * EMBEDDING_DIM, k=1)
+            await unreachable_index.for_tenant(TENANT).search([0.0] * EMBEDDING_DIM, k=1)
     finally:
-        await unreachable_store.close()  # the pool opened before timing out
+        await unreachable_index.close()  # the pool opened before timing out
 
 
 async def test_open_raises_a_clear_error_when_the_table_is_not_migrated():
@@ -366,24 +449,28 @@ async def _fake_async_ctx(value):
     yield value
 
 
-async def test_search_issues_set_local_ef_search_before_the_select():
-    """Mocked cursor: search() sets hnsw.ef_search before the data query."""
-    store = PgVectorStore.__new__(PgVectorStore)  # skip __init__: no real pool needed
-    store._settings = VectorStoreSettings(
+def _mocked_index(mock_cursor):
+    index = PgVectorStore.__new__(PgVectorStore)  # skip __init__: no real pool needed
+    index._settings = VectorStoreSettings(
         dsn="postgresql://u:p@h:5432/d", table="task_embeddings_test", search_effort=400
     )
-    store._ready = True  # skip _ensure_ready(): no real connection needed
-
-    mock_cursor = AsyncMock()
-    mock_cursor.fetchall.return_value = [("task-1", 0.9, False)]
+    index._ready = True  # skip _ensure_ready(): no real connection needed
 
     mock_conn = MagicMock()
     mock_conn.cursor = MagicMock(side_effect=lambda: _fake_async_ctx(mock_cursor))
 
-    store._pool = MagicMock()
-    store._pool.connection = MagicMock(side_effect=lambda: _fake_async_ctx(mock_conn))
+    index._pool = MagicMock()
+    index._pool.connection = MagicMock(side_effect=lambda: _fake_async_ctx(mock_conn))
+    return index
 
-    results = await store.search([0.1, 0.2], k=5)
+
+async def test_search_issues_set_local_ef_search_before_the_select():
+    """Mocked cursor: search() sets hnsw.ef_search before the data query."""
+    mock_cursor = AsyncMock()
+    mock_cursor.fetchall.return_value = [("task-1", 0.9, False)]
+    index = _mocked_index(mock_cursor)
+
+    results = await index.for_tenant(TENANT).search([0.1, 0.2], k=5)
 
     assert len(results) == 1
     assert results[0].task_id == "task-1"
@@ -397,50 +484,68 @@ async def test_search_issues_set_local_ef_search_before_the_select():
     assert ef_search_calls, "search() never issued a statement mentioning hnsw.ef_search"
     # Bound param, not interpolated into the SQL text.
     ef_search_params = calls[ef_search_calls[0]].args[1]
-    assert str(store._settings.search_effort) in ef_search_params
+    assert str(index._settings.search_effort) in ef_search_params
     assert data_query_calls, "search() never issued the actual data SELECT"
     assert ef_search_calls[0] < data_query_calls[0], "ef_search must be set before the data query"
 
 
-async def test_search_query_can_use_the_hnsw_index(store):
+async def test_search_always_turns_on_iterative_scan():
+    """The tenant condition alone can leave k short without it (#841)."""
+    mock_cursor = AsyncMock()
+    mock_cursor.fetchall.return_value = []
+    index = _mocked_index(mock_cursor)
+
+    await index.for_tenant(TENANT).search([0.1, 0.2], k=5)
+
+    executed_sql = [str(call.args[0]) for call in mock_cursor.execute.call_args_list]
+    assert any("hnsw.iterative_scan" in sql for sql in executed_sql)
+
+
+async def test_search_query_can_use_the_hnsw_index(index, store):
     """ORDER BY must use the raw distance expression, or Postgres falls
     back to a full table scan instead of the HNSW index."""
-    async with store._pool.connection() as conn, conn.cursor() as cur:
+    async with index._pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("SET LOCAL enable_seqscan = off;")
+        # Else the tenant_id btree plus a sort wins on a near-empty table.
+        await cur.execute("SET LOCAL enable_sort = off;")
         await cur.execute(
             sql.SQL("EXPLAIN {}").format(
                 store._search_query(exclude_completed=False, exclude_task_id=False)
             ),
-            ([0.0] * EMBEDDING_DIM, [0.0] * EMBEDDING_DIM, 1),
+            ([0.0] * EMBEDDING_DIM, TENANT, [0.0] * EMBEDDING_DIM, 1),
         )
         plan = "\n".join(row[0] for row in await cur.fetchall())
-    assert "Index Scan" in plan, f"query plan did not use the index:\n{plan}"
+    assert "embedding_hnsw_idx" in plan, f"query plan did not use the HNSW index:\n{plan}"
 
 
-async def test_search_query_can_use_the_hnsw_index_with_exclude_completed(store):
+async def test_search_query_can_use_the_hnsw_index_with_exclude_completed(index, store):
     """WHERE NOT is_completed must not force a fall back to a full table
     scan either -- that's the whole point of filtering in the query."""
-    async with store._pool.connection() as conn, conn.cursor() as cur:
+    async with index._pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("SET LOCAL enable_seqscan = off;")
+        # Else the tenant_id btree plus a sort wins on a near-empty table.
+        await cur.execute("SET LOCAL enable_sort = off;")
         await cur.execute(
             sql.SQL("EXPLAIN {}").format(
                 store._search_query(exclude_completed=True, exclude_task_id=False)
             ),
-            ([0.0] * EMBEDDING_DIM, [0.0] * EMBEDDING_DIM, 1),
+            ([0.0] * EMBEDDING_DIM, TENANT, [0.0] * EMBEDDING_DIM, 1),
         )
         plan = "\n".join(row[0] for row in await cur.fetchall())
-    assert "Index Scan" in plan, f"query plan did not use the index:\n{plan}"
+    assert "embedding_hnsw_idx" in plan, f"query plan did not use the HNSW index:\n{plan}"
 
 
-async def test_search_query_can_use_the_hnsw_index_with_exclude_task_id(store):
+async def test_search_query_can_use_the_hnsw_index_with_exclude_task_id(index, store):
     """Same guarantee for #472's self-exclusion filter."""
-    async with store._pool.connection() as conn, conn.cursor() as cur:
+    async with index._pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("SET LOCAL enable_seqscan = off;")
+        # Else the tenant_id btree plus a sort wins on a near-empty table.
+        await cur.execute("SET LOCAL enable_sort = off;")
         await cur.execute(
             sql.SQL("EXPLAIN {}").format(
                 store._search_query(exclude_completed=False, exclude_task_id=True)
             ),
-            ([0.0] * EMBEDDING_DIM, "some-task-id", [0.0] * EMBEDDING_DIM, 1),
+            ([0.0] * EMBEDDING_DIM, TENANT, "some-task-id", [0.0] * EMBEDDING_DIM, 1),
         )
         plan = "\n".join(row[0] for row in await cur.fetchall())
-    assert "Index Scan" in plan, f"query plan did not use the index:\n{plan}"
+    assert "embedding_hnsw_idx" in plan, f"query plan did not use the HNSW index:\n{plan}"
