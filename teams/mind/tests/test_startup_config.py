@@ -80,6 +80,8 @@ def test_api_startup_fails_on_an_incomplete_kafka_config_before_any_thread(
     monkeypatch.setenv("SECRETS_FILE_PATH", str(tmp_path / "secrets.yaml"))
     monkeypatch.setattr(main, "PgVectorStore", _FakeStore)
     monkeypatch.setattr(score_publisher_runner, "BackgroundThreads", _no_threads)
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "level", root.level)  # restored after the test
 
     with (
         pytest.raises(ConfigFileError, match=r"kafka\.schema_registry_url is missing"),

@@ -55,6 +55,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     monitoring_settings()
     store = PgVectorStore(settings.vector_store)
     score_publisher: RunningScorePublisher | None = None
+    # Set before anything can fail, so a reader (#481's /health/live) never
+    # finds it missing: None means not running.
+    app.state.score_publisher = None
     try:
         await store.open()
         app.state.vector_store = store
@@ -70,6 +73,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             # In a worker thread: stop() waits a few seconds for the threads,
             # which must not block the event loop's other shutdown work.
             await asyncio.to_thread(score_publisher.stop)
+            app.state.score_publisher = None
         await store.close()
 
 

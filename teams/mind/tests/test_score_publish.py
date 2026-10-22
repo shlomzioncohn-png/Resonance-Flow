@@ -612,3 +612,23 @@ def test_the_rescore_worker_handles_the_queue_then_stops_when_asked(propagating,
 
     assert not worker.is_alive()
     assert [p.mind_score for p in sink.sent] == [0.5, 0.9]
+
+
+def test_the_rescore_worker_reports_progress_after_each_task(propagating, sink, model):
+    # BackgroundThreads counts the worker as recovered once it reports progress.
+    propagating.handle_task_created(_created())
+    model.base = 0.9
+    propagating.rescore(TASK_A)
+    stop = threading.Event()
+    done: list[str] = []
+
+    def progress() -> None:
+        done.append("task")
+        stop.set()
+
+    worker = threading.Thread(target=propagating.run_rescores, args=(stop, progress))
+    worker.start()
+    worker.join(timeout=3)
+
+    assert not worker.is_alive()
+    assert done == ["task"]

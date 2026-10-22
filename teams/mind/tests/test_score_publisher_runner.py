@@ -1,6 +1,7 @@
 """#920: the score publisher runs inside the API. It starts only when Kafka is
 configured, and the API's lifespan starts and stops it."""
 
+import logging
 import threading
 import time
 from types import SimpleNamespace
@@ -65,6 +66,9 @@ def _isolate_lifespan(monkeypatch, start) -> None:
         api_main, "get_settings", lambda: SimpleNamespace(vector_store=None, log_level="INFO")
     )
     monkeypatch.setattr(api_main, "start_score_publisher", start)
+    # The lifespan sets the root logger's level: put it back after the test.
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "level", root.level)
 
 
 def test_the_api_starts_without_kafka_and_serves_health(monkeypatch, tmp_path):
@@ -160,6 +164,7 @@ def test_with_kafka_the_three_threads_start(started):
         "score-publisher-rescore",
     ]
     assert running.healthy
+    assert running.retrying == []
 
 
 def test_each_topic_reaches_its_own_handler(started):

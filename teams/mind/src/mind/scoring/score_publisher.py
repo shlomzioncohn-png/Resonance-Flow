@@ -243,11 +243,16 @@ class ScorePublisher:
             self._pending.add(task_id)
         self._rescores.put(task_id)
 
-    def run_rescores(self, stop: threading.Event | None = None) -> None:
+    def run_rescores(
+        self,
+        stop: threading.Event | None = None,
+        progress: Callable[[], None] | None = None,
+    ) -> None:
         """The worker: re-score queued tasks, one at a time, until `stop` is set.
 
         Waits for the queue at most _STOP_CHECK_SECONDS at a time, so it notices
         `stop` even when no request comes. Without `stop`, it runs forever.
+        Calls `progress` after each task it is done with (BackgroundThreads).
         """
         while stop is None or not stop.is_set():
             try:
@@ -255,6 +260,8 @@ class ScorePublisher:
             except queue.Empty:
                 continue
             self._rescore_now(self._take(task_id))
+            if progress is not None:
+                progress()
 
     def drain_rescores(self) -> int:
         """Re-score every task queued so far, and return how many were sent."""
@@ -280,12 +287,12 @@ class ScorePublisher:
                 # The state is in memory: unknown since start-up until its next event.
                 logger.warning("score_publisher: task %s is unknown, not re-scored", task_id)
                 return False
+            inputs = _scoring_inputs_hash(state.task)
             try:
-                return self._score_and_send(
-                    state, _scoring_inputs_hash(state.task), only_if_changed=True
-                )
+                return self._score_and_send(state, inputs, only_if_changed=True)
             except Exception:
-                # Only a send failure gets here (_score_and_send skips the rest).
+                # Only a send failure gets here: _score_and_send logs and skips
+                # a task that cannot be scored.
                 # The id is already off the queue, and unlike a Kafka message
                 # nothing would deliver it again: queue it back before raising,
                 # so the worker picks it up when it runs again.

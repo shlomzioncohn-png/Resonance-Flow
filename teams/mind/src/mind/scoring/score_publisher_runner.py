@@ -28,7 +28,7 @@ from typing import Any
 from google.protobuf.message import Message
 
 from mind.messaging import ProtobufConsumer, ProtobufProducer
-from mind.messaging.background import BackgroundThreads, Target
+from mind.messaging.background import BackgroundThreads, Progress, Target
 from mind.messaging.config import MessagingSettings, load_settings
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
@@ -53,6 +53,11 @@ class RunningScorePublisher:
     @property
     def healthy(self) -> bool:
         return self.threads.healthy
+
+    @property
+    def retrying(self) -> list[str]:
+        """Threads failing and retrying: while one is, its scores aren't sent."""
+        return self.threads.retrying
 
     def stop(self) -> None:
         self.threads.stop()
@@ -97,11 +102,14 @@ def _consume(
     message_type: type[Message],
     handle: Callable[[Any], None],
 ) -> Target:
-    def run(stop: Event) -> None:
+    def run(stop: Event, progress: Progress) -> None:
         def _handler(event: object, msg: object) -> None:
             # No try/except: a Kafka error must end the loop with the offset
             # uncommitted. BackgroundThreads logs it and runs this again.
             handle(event)
+            # Handled (or skipped as one that can never be scored): the thread
+            # is moving again.
+            progress()
 
         consumer = ProtobufConsumer(group_id=_GROUP_ID, topics=[topic], settings=settings)
         consumer.run(message_type, _handler, idle_timeout=None, stop=stop)

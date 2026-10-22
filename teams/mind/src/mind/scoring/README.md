@@ -507,6 +507,18 @@ API and needs no entry of its own in Relay's chart.
   thread. That makes it safe for liveness (#481's `/health/live`): a broker
   that is down never restarts the API, nor loops a pod that starts without it.
   Recovery does not depend on it. It is `None` when Kafka isn't configured.
+- **A thread that keeps failing is visible, not silent.** A bad message at the
+  head of a topic, or a wrong setting, fails on every run, so it never
+  recovers and Chain gets no scores from that topic, while `healthy` stays
+  true. `app.state.score_publisher.retrying` names the threads that failed
+  and have not recovered since. A thread recovers by handling a message or
+  finishing a re-score, or by running 10 minutes with nothing to do and no
+  new failure; not by merely running a while, since a send to a broker that
+  is down blocks for up to 5 minutes before it fails. Each failure is logged
+  as a WARNING; once the wait between runs reaches 60 s, every retry is
+  logged at ERROR: `background: thread <name> keeps failing (<n> times in a
+  row); running it again every 60.0s`. So a short outage isn't an alert, and
+  a stuck thread is.
 - **MIND must run as one replica (`replicaCount: 1`) with one uvicorn worker.**
   The publisher keeps its state in memory: a second copy would split the
   topics between two states, and the stale-event and loop checks would break.
