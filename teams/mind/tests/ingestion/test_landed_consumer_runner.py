@@ -53,8 +53,8 @@ def test_the_stand_in_hand_off_logs_where_the_text_is_never_what_it_says(
 def test_the_consumer_group_is_its_own_and_can_be_overridden(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # Until extraction is wired, a run commits offsets with nothing extracted:
-    # a test run against the shared topic takes a group of its own.
+    # A run commits the offsets it read and sends Inbox real requests: a test
+    # run against the shared topic takes a group of its own.
     monkeypatch.delenv("MIND_LANDED_CONSUMER__GROUP_ID", raising=False)
     no_dotenv = tmp_path / "absent.env"
     assert LandedConsumerSettings(_env_file=no_dotenv).group_id == "mind-landed-consumer"
@@ -67,7 +67,7 @@ def test_the_runner_settings_read_dotenv_like_the_rest_and_need_no_database(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # Set beside the MinIO keys in .env, the override must not be ignored; and
-    # the runner must start without the vector-store DSN it never uses.
+    # these settings load without the vector-store DSN, which only `Settings` reads.
     for name in ("MIND_LANDED_CONSUMER__GROUP_ID", "MIND_LOG_LEVEL", "MIND_VECTOR_STORE__DSN"):
         monkeypatch.delenv(name, raising=False)
     dotenv = tmp_path / ".env"
