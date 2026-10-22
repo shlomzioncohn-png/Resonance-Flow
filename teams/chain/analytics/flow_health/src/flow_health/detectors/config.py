@@ -19,10 +19,23 @@ class ChronicBlockerConfig:
 
 
 @dataclass(frozen=True)
+class RecurringCycleConfig:
+    min_transitions: int = 3
+    min_median_gap_days: float = 1.0
+    max_median_gap_days: float = 10.0
+    medium_min_transitions: int = 5
+    high_min_transitions: int = 8
+    tight_cv: float = 0.3
+    pair_min_return_days: float = 1.0
+
+
+@dataclass(frozen=True)
 class DetectorConfig:
     chronic_blocker: ChronicBlockerConfig = ChronicBlockerConfig()
+    recurring_cycle: RecurringCycleConfig = RecurringCycleConfig()
 
 
 def load_config(path: Path | str | None = None) -> DetectorConfig:
     raw = yaml.safe_load(Path(path or DEFAULT_PATH).read_text(encoding="utf-8")) or {}
-    return DetectorConfig(chronic_blocker=ChronicBlockerConfig(**raw.get("chronic_blocker", {})))
+    return DetectorConfig(chronic_blocker=ChronicBlockerConfig(**raw.get("chronic_blocker", {})),
+                          recurring_cycle=RecurringCycleConfig(**raw.get("recurring_cycle", {})))

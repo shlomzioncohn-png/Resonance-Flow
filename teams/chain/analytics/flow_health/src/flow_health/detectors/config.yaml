@@ -6,3 +6,12 @@ chronic_blocker:
   late_age_ratio_to_tier: 3.0   # a finished task is a candidate only if its age was at least this many tier medians
   medium_from_ratio: 4.0        # low: [min, medium); medium: [medium, high); high: [high, ...)
   high_from_ratio: 6.0
+
+recurring_cycle:
+  min_transitions: 3            # ADDED<->REMOVED switches of one edge (the first ADDED is not a switch)
+  min_median_gap_days: 1.0      # opening value was 2; dev edges with >=3 switches have median gaps of 1.8-3.0 days
+  max_median_gap_days: 10.0
+  medium_min_transitions: 5     # severity: low below this
+  high_min_transitions: 8       # high from here, or from medium_min_transitions when the gaps are even (see tight_cv)
+  tight_cv: 0.3                 # coefficient of variation of the gaps (std / mean) at or below which gaps are "even"
+  pair_min_return_days: 1.0     # near-cycle: the removed edge must stay away at least this long before it returns
