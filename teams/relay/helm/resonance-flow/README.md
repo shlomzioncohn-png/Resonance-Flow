@@ -400,4 +400,6 @@ Secret's `kafka.sasl` uses the dev credentials in `values.yaml`. A cluster with 
 Kafka credentials must change them there, or recreate the Secret.
 
 Still open: the MinIO credentials (`object_storage.access_key` / `secret_key`, empty), the
-LLM key (`llm.api_key`, empty), and the LLM, OCR, and ASR providers (`local` for now).
+LLM key (the optional `resonance-flow-mind-llm` Secret is mounted at
+`/etc/resonance-flow/secrets/llm/`, but nothing creates it yet), `llm.provider` (empty), and
+the OCR and ASR providers (`local` for now).
