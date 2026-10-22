@@ -238,11 +238,13 @@ teams' kind CI; `helm template` needs
   and `minio.persistence` are off, so there's no PVC and no
   `kubelet_volume_stats_*` series to match. It starts working once either is
   turned on - no rule change needed.
-- **Default rules.** kube-prometheus-stack's own rules for components that
-  aren't scraped here (etcd, controller-manager, scheduler, kube-proxy, Windows)
-  are turned off in `teams/relay/argocd/apps/kube-prometheus-stack.yaml`. Its
-  other defaults (e.g. `KubePodCrashLooping`) stay on cluster-wide, with no
-  `team` label.
+- **Default rules.** kube-prometheus-stack only renders its rules for a
+  component it scrapes, so with `kubeEtcd`, `kubeScheduler`,
+  `kubeControllerManager` and `kubeProxy` off in
+  `teams/relay/argocd/apps/kube-prometheus-stack.yaml` (and Windows monitoring
+  off by default) their rules don't exist - turning a component on brings its
+  rules back. Its other defaults (e.g. `KubePodCrashLooping`) stay on
+  cluster-wide, with no `team` label.
 
 ### Viewing alerts in Grafana
 

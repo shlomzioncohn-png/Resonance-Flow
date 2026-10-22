@@ -100,9 +100,7 @@ team's sync.
   Traefik exposes its own metrics, per router. Kafka consumer-group lag comes
   from the chart's `kafka-exporter` subchart - see the chart's README.
 - **Alert rules.** The platform's PrometheusRules live in the `resonance-flow`
-  chart - see its [README](../helm/resonance-flow/README.md#alerting). Default
-  rules for components not scraped here (etcd, controller-manager, scheduler,
-  kube-proxy, Windows) are turned off in `defaultRules`.
+  chart - see its [README](../helm/resonance-flow/README.md#alerting).
 
 - **Grafana.** On, with the Prometheus and Alertmanager datasources the chart
   provisions. Its dashboard sidecar loads any ConfigMap labelled
