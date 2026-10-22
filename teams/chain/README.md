@@ -992,7 +992,6 @@ the JSON:
   (in-memory + `PostgresTaskStateHistoryRepository`); `TaskStateHistoryResponse` is the API-layer
   DTO, kept separate from the domain `TaskStateHistoryEntry`.
 
-
 ## Constraint history read endpoint (Issue #875)
 
 ```
@@ -1013,7 +1012,6 @@ Same parameters, defaults and `400` cases as the state-history endpoint above (`
   and the two new `getTaskEligibility_returnsReadinessView_*` tests in `TaskEligibilityServiceTest`.
 
 ## Dependency-flow health analytics (`analytics/flow_health/`)
-
 
 A separate Python project next to the Java service (not part of the Maven build or the Docker image)
 that will flag unhealthy dependency patterns from `dependency_history` and `task_state_history`.
