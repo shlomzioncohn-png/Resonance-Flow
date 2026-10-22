@@ -16,6 +16,7 @@ from pathlib import Path
 from benchmarks.vector_store_test_table import create_vector_store_test_table
 from mind.config import VectorStoreSettings
 from mind.embeddings import embed, embed_batch, find_related, task_text
+from mind.embeddings.base import DEMO_TENANT_ID, VectorStore
 from mind.embeddings.pgvector_store import PgVectorStore
 
 _TASKS_PATH = Path(__file__).resolve().parent / "threshold_calibration_tasks.json"
@@ -65,7 +66,7 @@ def _percentile(values: list[float], p: float) -> float:
     return values[idx]
 
 
-async def _measure(store: PgVectorStore, task_ids: list[str], n_queries: int) -> dict[str, float]:
+async def _measure(store: VectorStore, task_ids: list[str], n_queries: int) -> dict[str, float]:
     latencies = []
     for _ in range(n_queries):
         task_id = random.choice(task_ids)
@@ -88,10 +89,11 @@ async def main() -> None:
         table=_TABLE,
     )
     await create_vector_store_test_table(settings)
-    store = PgVectorStore(settings)
-    await store.open()
+    index = PgVectorStore(settings)
+    store = index.for_tenant(DEMO_TENANT_ID)
+    await index.open()
     try:
-        await store.clear()
+        await index.clear()
         real_tasks = json.loads(_TASKS_PATH.read_text(encoding="utf-8"))["tasks"]
         real_task_ids = [t["task_id"] for t in real_tasks]
         for t in real_tasks:
@@ -124,8 +126,8 @@ async def main() -> None:
             f"p95={at_scale['p95']:.2f}ms max={at_scale['max']:.2f}ms"
         )
     finally:
-        await store.clear()
-        await store.close()
+        await index.clear()
+        await index.close()
 
     results = {
         "current_real_order_of_magnitude": {"row_count": len(real_task_ids), **current_scale},
