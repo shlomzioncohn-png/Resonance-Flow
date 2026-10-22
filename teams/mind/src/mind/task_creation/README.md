@@ -164,16 +164,26 @@ runs the listener and the timer beside it, **in the same process**. The
 composition, in short:
 
 ```python
-listener_loop = asyncio.new_event_loop()
+loop = asyncio.new_event_loop()      # the listener calls run_until_complete on this, per message
 index = PgVectorStore(get_settings().vector_store)
-listener_loop.run_until_complete(index.open())   # on the loop that will use it
+loop.run_until_complete(index.open())   # on the loop that will use it
 
+producer = ProtobufProducer()
 pending = PendingRequests()          # one store, shared by everything below
+
+# #355: resolves dependency_mentions and publishes task.dependencies.proposed,
+# once, when task.created confirms the task exists. No retry -- see
+# dependencies/README.md. Shares this same producer and index -- no second
+# store or connection needed.
+sink = KafkaDependencySink(producer)
+publisher = DependencyPublisher(store=index, sink=sink)
+adapter = DependencyAdapter(publisher)
+
 flow = TaskCreationFlow(
-    producer=ProtobufProducer(),
+    producer=producer,
     index=index,
     pending=pending,
-    on_matched=publish_dependencies,  # #355: hears of each real task id, maybe twice
+    on_matched=adapter.on_task_created,        # #355: hears of each real task id, maybe twice
 )
 
 # A listener that has given up must take the process with it, so it is
@@ -181,21 +191,30 @@ flow = TaskCreationFlow(
 threading.excepthook = lambda args: os._exit(1)
 
 stop = threading.Event()
-threading.Thread(target=run_task_created_listener, args=(flow, listener_loop)).start()
+threading.Thread(target=run_task_created_listener, args=(flow, loop)).start()
 threading.Thread(target=run_overdue_timer, args=(flow, stop)).start()
 
 # ... and in the #349 pipeline, for each task extracted from a Bridge item:
 await flow.send(proposal, bridge_correlation_id=event.correlation_id, revision=event.revision)
 ```
 
+- **The listener and the timer each have their own loop and thread,
+  entirely independent of each other.** They do share `pending`
+  (`PendingRequests`), from two threads -- but that's `PendingRequests`'
+  own job: every method takes its own lock (see "Three threads, one
+  store" above), so this was already safe before either of them had a
+  loop of its own. Neither's *async* work depends on the other's anymore,
+  so neither can delay the other's handling. `on_task_created`
+  (`adapter.on_task_created`, via `on_matched`) does all of #355's work
+  inline, synchronously, as part of handling that one message — nothing is
+  scheduled to run afterward, so the listener's loop never needs to keep
+  running between messages; `loop.run_until_complete` per message is all it
+  takes.
 - **The listener has its own consumer group** (`mind-task-creation`). R3's
   index consumer reads `task.created` too, and within one group each message
   reaches one member — so sharing R3's group would split the messages between
   them, in silence: replies unmatched here, other teams' tasks never indexed
   there.
-- **The timer runs on its own thread and loop.** Requests go overdue when
-  Inbox is down, which is exactly when no `task.created` arrives, so the check
-  cannot ride on the listener.
 - **A failure in the listener is retried, then fatal.** `ProtobufConsumer.run`
   closes the consumer on an error, so the listener reconnects itself — waits
   doubling from 1 s to 60 s — and Kafka hands the uncommitted message to the

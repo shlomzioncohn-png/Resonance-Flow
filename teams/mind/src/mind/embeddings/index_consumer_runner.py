@@ -46,19 +46,21 @@ _TOPICS: list[tuple[str, type[Message], _Handler]] = [
 
 def _run_topic(topic: str, message_type: type[Message], handle: _Handler) -> None:
     loop = asyncio.new_event_loop()
-    store = PgVectorStore(get_settings().vector_store)
     try:
-        loop.run_until_complete(store.open())
+        store = PgVectorStore(get_settings().vector_store)
+        try:
+            loop.run_until_complete(store.open())
 
-        def _handler(event: object, msg: object) -> None:
-            # No try/except -- must propagate so the offset stays uncommitted.
-            # cast: run() already deserialized event into this exact type.
-            loop.run_until_complete(handle(store, cast(Message, event)))
+            def _handler(event: object, msg: object) -> None:
+                # No try/except -- must propagate so the offset stays uncommitted.
+                # cast: run() already deserialized event into this exact type.
+                loop.run_until_complete(handle(store, cast(Message, event)))
 
-        consumer = ProtobufConsumer(group_id=_GROUP_ID, topics=[topic])
-        consumer.run(message_type, _handler, idle_timeout=None)
+            consumer = ProtobufConsumer(group_id=_GROUP_ID, topics=[topic])
+            consumer.run(message_type, _handler, idle_timeout=None)
+        finally:
+            loop.run_until_complete(store.close())
     finally:
-        loop.run_until_complete(store.close())
         loop.close()
 
 

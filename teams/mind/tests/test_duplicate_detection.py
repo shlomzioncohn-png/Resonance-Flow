@@ -168,7 +168,9 @@ async def test_uses_symmetric_embedding_not_the_mention_vs_passage_case():
         await find_duplicate(store, "Title", "Description", threshold=0.9)
 
     mock_embed_async.assert_awaited_once_with("Title Description", is_query=False)
-    store.search.assert_awaited_once_with([0.0] * EMBEDDING_DIM, k=1, exclude_completed=True)
+    store.search.assert_awaited_once_with(
+        [0.0] * EMBEDDING_DIM, k=1, exclude_completed=True, exclude_task_id=None
+    )
 
 
 async def test_a_near_identical_task_in_another_tenant_is_not_a_duplicate(store, other_store):

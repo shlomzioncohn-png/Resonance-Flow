@@ -12,6 +12,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
+from typing import cast
 from uuid import UUID
 
 import pytest
@@ -41,7 +42,8 @@ def _no_embedding_model(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def loop() -> Iterator[asyncio.AbstractEventLoop]:
-    """The listener's own loop, as in R3's runner: the consumer calls a plain function."""
+    """As in production: `task_created_handler` calls `run_until_complete` on
+    this per message -- it doesn't need to be running between calls."""
 
     loop = asyncio.new_event_loop()
     yield loop
@@ -81,7 +83,7 @@ def _flow(store: FakeVectorIndex) -> TaskCreationFlow:
 
 def _sent(flow: TaskCreationFlow, loop: asyncio.AbstractEventLoop) -> UUID:
     proposal = TaskCreationRequested(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+        tenant_id=TENANT,
         title="Send the Q3 revenue report",
         description="Before Friday.",
         source_type=SourceType.SLACK,
@@ -89,7 +91,8 @@ def _sent(flow: TaskCreationFlow, loop: asyncio.AbstractEventLoop) -> UUID:
         has_dependencies=False,
         confidence=0.85,
     )
-    return loop.run_until_complete(flow.send(proposal, bridge_correlation_id=ITEM, revision=0))
+    coro = flow.send(proposal, bridge_correlation_id=ITEM, revision=0)
+    return loop.run_until_complete(coro)
 
 
 def _event() -> TaskCreatedEvent:
@@ -132,6 +135,25 @@ def test_a_failure_propagates_so_the_offset_is_not_committed(
         task_created_handler(flow, loop)(
             _event(), FakeMessage([("correlation_id", str(correlation_id).encode())])
         )
+
+
+class HangingFlow:
+    """on_task_created that never returns -- a stuck Kafka publish, say."""
+
+    async def on_task_created(self, event: object, headers: object) -> None:
+        await asyncio.Event().wait()
+
+
+def test_a_handler_that_hangs_times_out_instead_of_blocking_forever(
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    """Without a timeout, this would hang the test (and, in production, the
+    listener's reconnect/max_outage logic would never get a chance to run)."""
+
+    handle = task_created_handler(cast(TaskCreationFlow, HangingFlow()), loop, handler_timeout=0.05)
+
+    with pytest.raises(TimeoutError):
+        handle(_event(), FakeMessage(None))
 
 
 def test_its_consumer_group_is_not_r3s() -> None:
