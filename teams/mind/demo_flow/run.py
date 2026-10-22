@@ -268,6 +268,7 @@ class MindProcess:
     module: str
     process: subprocess.Popen[str] | None = None
     last_output: float = field(default_factory=time.monotonic)
+    restarts: int = 0
 
     def start(self, env: dict[str, str], log_dir: Path) -> None:
         self.process = subprocess.Popen(
@@ -280,7 +281,8 @@ class MindProcess:
             encoding="utf-8",
             errors="replace",
         )
-        log_file = (log_dir / f"{self.name}.log").open("w", encoding="utf-8")
+        # Appended: a restart's output goes on in the same file.
+        log_file = (log_dir / f"{self.name}.log").open("a", encoding="utf-8")
         threading.Thread(
             target=self._pump, args=(self.process.stdout, log_file), name=self.name, daemon=True
         ).start()
@@ -341,7 +343,20 @@ def expected_complete(observed: verify.Observed, expected: dict) -> bool:
     )
 
 
-def watch(processes: list[MindProcess], settle_s: float, timeout_s: float) -> verify.Observed:
+#: How often a Mind process that stopped on an error is started again, as the
+#: cluster's restart policy would (docker-compose.yml: restart: on-failure).
+#: Since #919 an LLM outage (503 after the retries, 429) stops the landed
+#: runner on purpose, so its message is redelivered rather than skipped.
+MAX_RESTARTS = 3
+
+
+def watch(
+    processes: list[MindProcess],
+    env: dict[str, str],
+    log_dir: Path,
+    settle_s: float,
+    timeout_s: float,
+) -> verify.Observed:
     expected = common.read_json(common.EXPECTED)
     last_change = time.monotonic()
     seen = 0
@@ -363,11 +378,23 @@ def watch(processes: list[MindProcess], settle_s: float, timeout_s: float) -> ve
             logger.info("everything expected.json predicts has come out")
             return True
         for process in processes:
-            if process.exit_code() is not None:
-                logger.error(
-                    "%s exited (code %s): stopping the wait", process.name, process.exit_code()
+            code = process.exit_code()
+            if code is None:
+                continue
+            if code != 0 and process.restarts < MAX_RESTARTS:
+                process.restarts += 1
+                logger.warning(
+                    "%s exited (code %s): starting it again, as the cluster would (%d/%d); "
+                    "its unfinished message is redelivered",
+                    process.name,
+                    code,
+                    process.restarts,
+                    MAX_RESTARTS,
                 )
-                return True
+                process.start(env, log_dir)
+                continue
+            logger.error("%s exited (code %s): stopping the wait", process.name, code)
+            return True
         quiet_since = max([last_change, *(p.last_output for p in processes)])
         if now - quiet_since >= settle_s:
             logger.info("nothing moved for %.0f s: taking what is there", settle_s)
@@ -417,7 +444,7 @@ def run(args: argparse.Namespace) -> int:
             raise DemoError("the feed failed")
 
         stage(6, "result")
-        observed = watch(processes, args.settle, args.timeout)
+        observed = watch(processes, env, log_dir, args.settle, args.timeout)
         manifest = common.read_json(common.RUNS_DIR / f"{run_id}.json")
         landed_log = (log_dir / f"{processes[0].name}.log").read_text(encoding="utf-8")
         checks = verify.evaluate(observed, manifest, common.read_json(common.EXPECTED), landed_log)

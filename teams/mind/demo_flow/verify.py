@@ -10,8 +10,8 @@ there is this run's.
     task.dependencies.proposed  Mind -> Chain   the dependency found between them
 
 Each request is traced back to its source item by correlation_id: Mind
-derives it from Bridge's correlation_id and the task's position
-(`correlation_id_for`), and the run manifest has Bridge's. Each request is
+derives it from Bridge's correlation_id and the task's number
+(`correlation_id_for`, `task_index_for`), and the run manifest has Bridge's. Each request is
 matched to T1-T3 by its title, the one field the model writes that names the
 work; a request no title matches is an unexpected task.
 
@@ -41,6 +41,7 @@ from typing import Any
 from uuid import UUID
 
 from demo_flow import common
+from mind.ingestion.creation_pipeline import TASK_SLOTS_PER_ITEM, task_index_for
 from mind.task_creation.correlation import correlation_id_for
 from mind.task_creation.reply import CORRELATION_HEADER
 
@@ -59,9 +60,6 @@ TITLE_WORDS: dict[str, tuple[str, ...]] = {
     "T2": ("cost sheet",),
     "T3": ("registration", "supplier form", "form"),
 }
-
-#: The highest task_index looked for per item: more than any item here yields.
-_MAX_TASKS_PER_ITEM = 8
 
 _WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
@@ -107,13 +105,19 @@ def match_expected(title: str) -> str | None:
 
 
 def _sources_by_correlation(manifest: dict[str, Any]) -> dict[str, str]:
-    """Every request correlation_id Mind could derive from this run's items -> item name."""
+    """Every request correlation_id Mind could derive from this run's items -> item name.
+
+    Since #690 one text yields several tasks: the pipeline numbers each by its
+    file's position in the event and its own in the list (`task_index_for`).
+    """
 
     sources = {}
     for item in manifest["items"]:
         bridge_id = UUID(item["correlation_id"])
-        for index in range(_MAX_TASKS_PER_ITEM):
-            sources[str(correlation_id_for(bridge_id, index))] = item["name"]
+        for file_position in range(len(item["event"].get("objects", []))):
+            for task_position in range(TASK_SLOTS_PER_ITEM):
+                index = task_index_for(file_position, task_position)
+                sources[str(correlation_id_for(bridge_id, index))] = item["name"]
     return sources
 
 

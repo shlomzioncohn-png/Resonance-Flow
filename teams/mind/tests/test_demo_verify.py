@@ -17,7 +17,13 @@ _MANIFEST = {
         {
             "name": name,
             "correlation_id": str(cid),
-            "event": {"objects": [{"object_key": f"{name.upper()}/demo/{cid}.txt"}]},
+            # The email carries two files, body and scanned form, like the feed's.
+            "event": {
+                "objects": [
+                    {"object_key": f"{name.upper()}/demo/{cid}.txt"},
+                    *([{"object_key": f"EMAIL/demo/{cid}-form.jpg"}] if name == "email" else []),
+                ]
+            },
         }
         for name, cid in _ITEMS.items()
     ],
@@ -102,6 +108,14 @@ def test_each_request_is_traced_to_the_item_it_came_from():
     sources = [task.source for task in trace(_complete_run(), _MANIFEST)]
 
     assert sources == ["meeting", "meeting", "email"]
+
+
+def test_a_task_from_the_emails_second_file_is_traced_to_the_email():
+    observed = _complete_run()
+    # Second file of the event, first task in it: task_index_for(1, 0) == 100.
+    observed.requested[2] = _request("email", 100, "Return the signed supplier form", "T3")
+
+    assert [task.source for task in trace(observed, _MANIFEST)] == ["meeting", "meeting", "email"]
 
 
 def test_the_slack_mention_sent_as_a_second_task_fails_the_duplicate_check():
