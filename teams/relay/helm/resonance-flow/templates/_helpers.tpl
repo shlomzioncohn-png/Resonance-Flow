@@ -82,16 +82,6 @@ Build and base64-encode a .dockerconfigjson value from imagePullSecret.* values
 {{- end }}
 
 {{/*
-Resolve one dependency entry's host: an explicit `host` wins (an external
-Postgres/Kafka/whatever, not one of our own subcharts); else, if the name
-matches one of our own components.*, it's that component's own Service,
-<fullname>-<name> (same pattern service.yaml uses) - not the Bitnami
-subchart pattern below, which would silently 404/DNS-fail (verified live:
-wait-for-schema-registry hung forever against "inbox-schema-registry",
-which is nothing - the real Service is "inbox-resonance-flow-schema-registry").
-Otherwise it's a Bitnami subchart's Service, <release-name>-<name>.
-*/}}
-{{/*
 Resolve a logical dependency name to the concrete provider name.
 */}}
 {{- define "resonance-flow.dependencyProviderName" -}}
@@ -101,6 +91,17 @@ Resolve a logical dependency name to the concrete provider name.
 {{- .name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Resolve one dependency entry's host: an explicit `host` wins (an external
+Postgres/Kafka/whatever, not one of our own subcharts); else, if the name
+matches one of our own components.*, it's that component's own Service,
+<fullname>-<name> (same pattern service.yaml uses) - not the Bitnami
+subchart pattern below, which would silently 404/DNS-fail (verified live:
+wait-for-schema-registry hung forever against "inbox-schema-registry",
+which is nothing - the real Service is "inbox-resonance-flow-schema-registry").
+Otherwise it's a Bitnami subchart's Service, <release-name>-<name>.
+*/}}
 {{- define "resonance-flow.dependencyHost" -}}
 {{- $dependencyName := include "resonance-flow.dependencyProviderName" (dict "root" .root "name" .dep.name) }}
 {{- if .dep.host }}
@@ -126,6 +127,7 @@ re-derive it separately from the wait-for-<dep> initContainer.
 {{- end }}
 {{- $addr }}
 {{- end }}
+
 
 {{/*
 One initContainer per {name, port, host?} dependency, blocking until host:port is
