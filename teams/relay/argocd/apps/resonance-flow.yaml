@@ -19,8 +19,9 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: resonance-flow
-  # Chain's DB credentials Secret is created by a PreSync hook Job, not rendered
-  # by this chart - so there's nothing here for ArgoCD to diff or prune.
+  # Each service's DB credentials Secret (bridge, chain, inbox, mind) is created by
+  # a PreSync hook Job, not rendered by this chart - so there's nothing here for
+  # ArgoCD to diff or prune.
   syncPolicy:
     automated:
       prune: true
