@@ -374,6 +374,7 @@ from `dependencies`, so they follow the release and namespace:
 | `kafka.bootstrap_servers` | top-level `dependencies` (`kafka`) | `host:9092` |
 | `kafka.schema_registry_url` | `dependencies` (`schema-registry`) | `http://host/apis/ccompat/v6` |
 | `kafka.producer.task_creation_requested_topic` | `components.mind.config.kafka` | `task.creation.requested` |
+| `inbox.url` | `components.mind.config.inbox` | `http://resonance-flow-inbox:80` |
 
 ### MIND's DB and app credentials (`components.mind`)
 
@@ -389,7 +390,9 @@ the cluster:
   password. It also includes `kafka.sasl` (user and password from `kafka.sasl.client` in
   `values.yaml`) only when `components.mind.kafkaSasl` is `true`. That is the default, for
   shared clusters. `values/values-mind.yaml` sets it to `false`, because CI's Kafka broker
-  runs PLAINTEXT and MIND fails the handshake if it sends SASL.
+  runs PLAINTEXT and MIND fails the handshake if it sends SASL. It also includes
+  `inbox.actor_id` from `components.mind.inboxActorId`, the Inbox user MIND acts as. It's
+  a Secret, not config: Inbox trusts that header without checking it.
 
 The hook creates the app Secret only when the DB Secret is newly created. If the DB Secret
 already exists but the app Secret is missing, create the app Secret by hand with the same
