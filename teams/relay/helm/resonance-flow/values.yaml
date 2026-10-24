@@ -433,11 +433,11 @@ components:
           consumerGroupId: chain-service
           topics:
             taskSchedulingUpdated: task.scheduling.updated # produced, consumed by Inbox
-            # Consumed, Protobuf (#467): task.created/updated from Inbox, proposals from Mind.
-            taskCreated: task.created
+            # Consumed, Protobuf (#467): task.updated/completed from Inbox, proposals from Mind.
             taskUpdated: task.updated
             taskCompleted: task.completed
             dependenciesProposed: task.dependencies.proposed
+            scoreProposed: task.score.proposed
             # taskDependenciesRemoved intentionally omitted: Chain confirmed (#385 follow-up)
             # removeDependency is REST-only (Lens BFF -> Chain), no Kafka topic behind it today -
             # task.dependencies.removed was proposed but is not active. May return once #133
