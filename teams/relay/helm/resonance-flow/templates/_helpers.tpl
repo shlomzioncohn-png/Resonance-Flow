@@ -128,6 +128,13 @@ re-derive it separately from the wait-for-<dep> initContainer.
 {{- $addr }}
 {{- end }}
 
+{{/*
+Schema Registry URL from a dependencies list: Apicurio's Confluent-compatible API,
+which the Confluent serdes expect. Takes {root, deps}.
+*/}}
+{{- define "resonance-flow.schemaRegistryUrl" -}}
+{{- printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" .root "deps" .deps "name" "schema-registry")) }}
+{{- end }}
 
 {{/*
 One initContainer per {name, port, host?} dependency, blocking until host:port is

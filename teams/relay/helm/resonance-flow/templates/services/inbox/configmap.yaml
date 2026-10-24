@@ -28,7 +28,7 @@ data:
     kafka:
       # The key KafkaConfig's @Value reads for every Protobuf serde, not spring.kafka.properties.
       schema-registry:
-        url: {{ printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) | quote }}
+        url: {{ include "resonance-flow.schemaRegistryUrl" (dict "root" $ "deps" $component.dependencies) | quote }}
     inbox:
       kafka:
         topics:
