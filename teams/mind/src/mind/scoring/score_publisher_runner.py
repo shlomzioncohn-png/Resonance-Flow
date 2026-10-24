@@ -6,6 +6,10 @@ Both threads share one ScorePublisher, so the "last published" state covers
 task.created and task.updated together. A third thread runs the publisher's
 rescore worker, which re-scores the tasks #474's propagation asks for.
 
+The model is `HierarchicalRankingModel` (#474), not the baseline directly --
+it replaces it here, in production, while the baseline itself stays what
+R1's harness scores unchanged for comparison.
+
 Usage:
     make run-score-publisher
     python -m mind.scoring.score_publisher_runner
@@ -23,8 +27,13 @@ from mind.config import get_settings
 from mind.messaging import ProtobufConsumer, ProtobufProducer
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
+from mind.scoring.ancestor_source import ChainAncestorSource
+from mind.scoring.chain_hierarchy_client import ChainHierarchyClient
+from mind.scoring.hierarchical_model import HierarchicalRankingModel
+from mind.scoring.inbox_task import InboxTask
 from mind.scoring.kafka_sink import KafkaScoreSink
 from mind.scoring.score_publisher import ScorePublisher
+from mind.scoring.segmented_model import SegmentedRankingModel
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +63,37 @@ def _die_on_thread_crash(args: threading.ExceptHookArgs) -> None:
     os._exit(1)
 
 
+class _PublisherRef:
+    """Forwards `cached_task` to a `ScorePublisher` this process has not
+    built yet. `ChainAncestorSource` needs it at construction time, but the
+    publisher is itself built from the model that holds that source --
+    `publisher` is filled in right after, once, and every call here happens
+    later still, from inside the model's own `score()`.
+    """
+
+    def __init__(self) -> None:
+        self.publisher: ScorePublisher | None = None
+
+    def cached_task(self, task_id: str) -> InboxTask | None:
+        assert self.publisher is not None
+        return self.publisher.cached_task(task_id)
+
+
 def main() -> None:
     logging.basicConfig(level=get_settings().log_level)
     threading.excepthook = _die_on_thread_crash
-    publisher = ScorePublisher(KafkaScoreSink(ProtobufProducer()))
+
+    chain_client = ChainHierarchyClient()
+    publisher_ref = _PublisherRef()
+    baseline = SegmentedRankingModel()
+    model = HierarchicalRankingModel(
+        ChainAncestorSource(chain_client, baseline, publisher_ref.cached_task),
+        baseline=baseline,
+    )
+    publisher = ScorePublisher(
+        KafkaScoreSink(ProtobufProducer()), model=model, children_client=chain_client
+    )
+    publisher_ref.publisher = publisher
 
     topics: list[tuple[str, type[Message], _Handler]] = [
         ("task.created", TaskCreatedEvent, publisher.handle_task_created),

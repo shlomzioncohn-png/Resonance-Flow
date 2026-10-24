@@ -2,8 +2,10 @@
 field the score depends on changes, and not re-published otherwise.
 No broker: the sink is an in-memory list."""
 
+import itertools
 import threading
 from datetime import UTC, datetime
+from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
@@ -15,6 +17,7 @@ from mind.contracts.task_score_proposed import TaskScoreProposed
 from mind.evaluation.interfaces import ScoreContext, ScoreFactors, ScoreResult
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent, TaskTier
 from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
+from mind.scoring.chain_hierarchy_client import ChainHierarchyClient
 from mind.scoring.inbox_task import to_scoring_task
 from mind.scoring.score_publisher import ScorePublisher
 from mind.scoring.segmented_model import SegmentedRankingModel
@@ -416,6 +419,156 @@ def test_rescore_from_inside_score_does_not_deadlock(sink):
     assert not worker.is_alive(), "rescore from inside score() deadlocked"
     assert publisher.drain_rescores() == 1
     assert [p.task_id for p in sink.sent] == [UUID(TASK_B), UUID(TASK_A), UUID(TASK_B)]
+
+
+def test_cached_task_returns_the_last_known_state(sink):
+    publisher = ScorePublisher(sink, clock=lambda: NOW)
+    publisher.handle_task_created(_created(TASK_A))
+
+    cached = publisher.cached_task(TASK_A)
+
+    assert cached is not None
+    assert cached.task_id == TASK_A
+
+
+def test_cached_task_is_none_for_an_unknown_task(sink):
+    publisher = ScorePublisher(sink, clock=lambda: NOW)
+
+    assert publisher.cached_task(TASK_A) is None
+
+
+def test_cached_task_from_inside_score_does_not_deadlock(sink):
+    """#474's ChainAncestorSource reads an ancestor's state via
+    publisher.cached_task(parent_id) from inside the child's own score() call
+    -- the same thread, already holding the lock cached_task() also takes.
+    A plain (non-reentrant) Lock deadlocks here; this is what catches that,
+    unlike test_rescore_from_inside_score_does_not_deadlock above, whose
+    model only calls rescore() (a different, separate lock)."""
+
+    class ReadsCachedTaskModel(StubModel):
+        def score(self, task, context):
+            if task.task_id == TASK_B:
+                publisher.cached_task(TASK_A)  # would deadlock with a plain Lock
+            return super().score(task, context)
+
+    publisher = ScorePublisher(sink, model=ReadsCachedTaskModel(), clock=lambda: NOW)
+    publisher.handle_task_created(_created(TASK_A))
+
+    worker = threading.Thread(target=publisher.handle_task_created, args=(_created(TASK_B),))
+    worker.start()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive(), "cached_task() from inside score() deadlocked"
+
+
+# --- the rescore cascade (#474): owned by the publisher, not the model -----
+
+
+@pytest.fixture
+def children() -> Mock:
+    return Mock(spec=ChainHierarchyClient)
+
+
+@pytest.fixture
+def cascading(sink: ListSink, model: StubModel, children: Mock) -> ScorePublisher:
+    return ScorePublisher(sink, model=model, clock=lambda: NOW, children_client=children)
+
+
+def test_the_first_score_of_a_task_always_cascades(cascading, children):
+    children.get_direct_children.return_value = []
+
+    cascading.handle_task_created(_created())
+
+    children.get_direct_children.assert_called_once_with(TASK_A)
+
+
+def test_cascade_fires_when_mind_score_changes_meaningfully(cascading, model, children):
+    children.get_direct_children.return_value = []
+    cascading.handle_task_created(_created())
+    children.get_direct_children.reset_mock()
+    model.base = 0.9
+
+    later = datetime(2026, 10, 13, 8, 10, tzinfo=UTC)
+    cascading.handle_task_updated(_updated(title="A different task entirely", updated_at=_timestamp(later)))
+
+    children.get_direct_children.assert_called_once_with(TASK_A)
+
+
+def test_cascade_does_not_fire_within_the_change_tolerance(cascading, model, children):
+    """A rescore whose mind_score moved by less than _CASCADE_CHANGE_TOLERANCE
+    must not cascade -- or even re-send, since both decisions share the same
+    comparison (#474 round-8 review)."""
+
+    children.get_direct_children.return_value = []
+    cascading.handle_task_created(_created())
+    children.get_direct_children.reset_mock()
+    model.base = 0.5 + 1e-6  # a real difference, but far below the tolerance
+
+    cascading.rescore(TASK_A)
+    cascading.drain_rescores()
+
+    children.get_direct_children.assert_not_called()
+
+
+def test_the_change_check_does_not_round_across_a_bucket_edge(cascading, model, children):
+    """#474 round-9 review: comparing round(new, 3) != round(old, 3) would
+    call 0.1235 -> 0.12351 "changed" (adjacent buckets, 0.00001 apart) even
+    though it is well inside the tolerance. abs(new - old) has no such
+    edge."""
+
+    children.get_direct_children.return_value = []
+    model.base = 0.1235
+    cascading.handle_task_created(_created())
+    children.get_direct_children.reset_mock()
+    model.base = 0.12351  # crosses a 3-decimal rounding boundary, but by 1e-5
+
+    cascading.rescore(TASK_A)
+    cascading.drain_rescores()
+
+    children.get_direct_children.assert_not_called()
+
+
+def test_cascade_is_a_no_op_without_a_children_client(propagating):
+    propagating.handle_task_created(_created())  # must not raise
+
+
+def test_a_non_http_error_fetching_children_does_not_escape(cascading, children):
+    """#474 round-9 review: only ChainHierarchyClient's own timeouts/HTTP
+    errors degrade to []. Anything else -- a bad URL setting, a bug -- must
+    not escape _cascade: on the rescore worker thread it would otherwise
+    kill the whole process via threading.excepthook, not just this cascade."""
+
+    children.get_direct_children.side_effect = ValueError("bad base_url setting")
+
+    cascading.handle_task_created(_created())  # must not raise
+
+
+def test_clock_noise_does_not_sustain_an_infinite_cascade(sink, children):
+    """#474 round-8: mind_score includes time pressure, which differs by a
+    tiny, non-zero amount on every call just because real time passed, not
+    because anything about the task changed. Two tasks that are each
+    other's ancestor must not re-trigger each other forever over that --
+    comparing at rounding precision is what makes the noise alone settle."""
+
+    ticks = itertools.cycle([1e-7, -1e-7])
+
+    class JitteryModel:
+        def score(self, task, context):
+            value = 0.5 + next(ticks)
+            return ScoreResult(
+                score=value, factors=ScoreFactors(contributions={"x": value}, base_score=value)
+            )
+
+    children.get_direct_children.side_effect = lambda tid: [TASK_B] if tid == TASK_A else [TASK_A]
+    publisher = ScorePublisher(sink, model=JitteryModel(), clock=lambda: NOW, children_client=children)
+    publisher.handle_task_created(_created(TASK_A))
+    publisher.handle_task_created(_created(TASK_B))
+    children.get_direct_children.reset_mock()
+
+    publisher.rescore(TASK_A)
+    publisher.drain_rescores()
+
+    children.get_direct_children.assert_not_called()
 
 
 # --- errors that would repeat on every redelivery ---------------------------
