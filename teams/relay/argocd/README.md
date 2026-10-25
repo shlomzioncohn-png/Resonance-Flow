@@ -106,6 +106,14 @@ team's sync.
   provisions. Its dashboard sidecar loads any ConfigMap labelled
   `grafana_dashboard: "1"` from any namespace - that's how the `resonance-flow`
   chart ships its alert dashboard.
+- **Grafana's Ingress.** Through Traefik, on its own host (no sub-path, so
+  probes, metrics and port-forward keep working at `/`). Like the
+  `resonance-flow` Ingress, its host and TLS live in
+  [`environments/shared.yaml`](../helm/resonance-flow/environments/shared.yaml),
+  under `grafana:`: the chart source loads that file through a third,
+  ref-only source (`ref: values`), with `valuesObject` winning over it. Off
+  until `grafana.ingress.host` is set - enabling it without one fails the
+  render. Turning it on also sets Grafana's `root_url` to `https://<host>/`.
 - **Grafana's admin login.** From the `grafana-admin` Secret (`admin-user`,
   `admin-password`), which the app's second source,
   `teams/relay/monitoring/grafana-admin-secret-hook.yaml`, creates in a
@@ -117,7 +125,8 @@ team's sync.
   Grafana chart's own random password would change on every refresh. To
   rotate it, delete the Secret and sync.
 
-Nothing here has an Ingress. Reach Prometheus, Alertmanager and Grafana with:
+Prometheus and Alertmanager have no Ingress, and Grafana's is off until its
+host is set. Reach them with:
 
 ```bash
 kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-prometheus 9090:9090

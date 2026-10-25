@@ -126,6 +126,8 @@ shared cluster turns it on in [`environments/shared.yaml`](environments/shared.y
 which ArgoCD loads after `values.yaml` and CI never loads. That file sets
 `ingress.host`, `ingress.className` (`traefik`, from
 [`apps/traefik.yaml`](../../argocd/apps/traefik.yaml)) and `ingress.tlsSecretName`.
+Its `grafana:` block isn't this chart's - it's Grafana's Ingress, read by the
+kube-prometheus-stack app (`teams/relay/argocd/README.md` "Monitoring").
 The chart doesn't install an ingress
 controller or issue the certificate; cert-manager is wired in through
 `ingress.annotations` (e.g. `cert-manager.io/cluster-issuer`). Traefik redirects
