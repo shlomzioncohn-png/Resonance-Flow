@@ -271,6 +271,41 @@ async def test_each_task_of_a_text_gets_its_own_request() -> None:
     assert [title for _, title, _ in parts.index.asked] == [TITLE, SECOND_TITLE]
 
 
+async def _matched_for_each_sent(parts: Parts, sent: list[UUID]) -> list[MatchedReply]:
+    """Inbox's task.created for every request sent, through the real flow."""
+
+    for number, correlation_id in enumerate(sent):
+        reply = TaskCreatedEvent(id=f"{TASK_ID[:-1]}{number}", tenant_id=TENANT, title=TITLE)
+        await parts.flow.on_task_created(reply, [("correlation_id", str(correlation_id).encode())])
+    return parts.matched
+
+
+async def test_a_tasks_dependency_mentions_reach_the_matched_reply() -> None:
+    # #359: extraction found them, but the pipeline did not hand them on, so
+    # #834's adapter (on_matched) always read an empty list and published nothing.
+    depends_on_the_second = {
+        **TASK,
+        "has_dependencies": True,
+        "dependency_mentions": [SECOND_TITLE],  # grounded by its sibling's title
+    }
+    parts = Parts(answer_of(depends_on_the_second, {**TASK, "title": SECOND_TITLE}))
+
+    sent = await parts.pipeline.handle(_event(), [_item()])
+    first, second = await _matched_for_each_sent(parts, sent)
+
+    assert first.request.dependency_mentions == (SECOND_TITLE,)
+    assert second.request.dependency_mentions == ()
+
+
+async def test_a_task_without_dependency_mentions_hands_on_none() -> None:
+    parts = Parts(ANSWER)
+
+    sent = await parts.pipeline.handle(_event(), [_item()])
+    (matched,) = await _matched_for_each_sent(parts, sent)
+
+    assert matched.request.dependency_mentions == ()
+
+
 async def test_each_item_owns_its_own_range_of_task_numbers() -> None:
     # Item 0 has two tasks, item 1 one: item 1's task is 100, not 2, so a
     # longer list for item 0 on redelivery cannot take item 1's number.

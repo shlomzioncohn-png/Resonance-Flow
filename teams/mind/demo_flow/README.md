@@ -125,14 +125,14 @@ make demo-feed ARGS="--dry-run"     # build + validate the three events; no infr
 2026-10-25, branch `michal-brecher/mind-demo-flow-359` merged with `main` at `4142843c`
 (#690 task lists, #834 dependency publisher, #841 tenant-scoped index, #920 score publisher
 in the API, #953/#994 canonical schemas, #968 one item per Bridge item), paid Gemini key,
-`gemini-3.6-flash`. Runs `20261025T142334Z-natural` and `20261025T143229Z-slack-first`. All
+`gemini-3.6-flash`. Runs `20261025T145408Z-natural` and `20261025T150200Z-slack-first`. All
 six stages run in both, from a git worktree too.
 
 | Criterion | natural | slack-first |
 |---|---|---|
 | three tasks come out, the expected ones | FAIL: 4 requested, 3 created | **PASS**: T1, T2, T3 |
 | Inbox created every task Mind requested | FAIL: the meeting's T1 | **PASS** |
-| T1 is one task, not 2 (meeting + Slack) | FAIL: 2 requests, one from each | **PASS**: sent from Slack; the meeting's 'Send Northwind the price quote' matched it (similarity 0.824) |
+| T1 is one task, not 2 (meeting + Slack) | FAIL: 2 requests, one from each | **PASS**: sent from Slack; the meeting's 'Send Northwind the price quote' matched it (similarity 0.932) |
 | T1 depends on T2 | FAIL: no message | FAIL: no message |
 | tasks carry the fields | FAIL: no owner, no deadline; T2 no `role_context` | FAIL: same |
 | every created task gets a score | **PASS** (3) | **PASS** (3) |
@@ -152,10 +152,14 @@ six stages run in both, from a git worktree too.
 
 T2 came out with the expected effort, 240 minutes (expected 180-300).
 
-**Not shown end to end yet: the T1 -> T2 dependency (#834).** The adapter is wired in this
-branch, but in neither run did the task carrying the dependency mention reach Inbox and come
-back: in natural the meeting's T1 was dropped by Inbox (finding 1), in slack-first it was
-merged into Slack's T1 and its mention went with it (finding 2).
+**Not shown end to end yet: the T1 -> T2 dependency (#834).** Two seams in Mind kept it from
+ever being published, both fixed in this branch (see "Fixed in this branch"): the runner did
+not pass #834's adapter, and the pipeline did not hand the extracted `dependency_mentions` to
+the flow, so the adapter would have read an empty list for every task. With both fixed, the
+mentions reach the adapter (`tests/ingestion/test_creation_pipeline.py`), but in neither run
+did the task carrying the mention reach Inbox and come back: in natural the meeting's T1 was
+dropped by Inbox (finding 1), in slack-first it was merged into Slack's T1 and its mention
+went with it (finding 2).
 
 ## What the feed sends
 
@@ -348,9 +352,12 @@ in Mind. Numbered by how much they block the demo.
 - **The landed runner could not open the vector store on Windows.** psycopg's async mode
   rejects Windows' default `ProactorEventLoop`; the runner now opens `SelectorEventLoop`s, as
   `tests/conftest.py` does. No change on Linux.
-- **No dependency was ever published end to end.** #834 merged `DependencyAdapter`, but the
-  landed runner (#919) still passed its placeholder no-op `on_matched`. It now passes the
-  adapter, as `dependencies/README.md` shows.
+- **No dependency was ever published end to end.** Two seams, both in the creation pipeline
+  (#919). #834 merged `DependencyAdapter`, but the landed runner still passed its placeholder
+  no-op `on_matched`; it now passes the adapter, as `dependencies/README.md` shows. And
+  `CreationPipeline.handle` sent each request without the task's `dependency_mentions`
+  (extraction's `ExtractedFields`, which travel beside the contract, not in it), so the
+  pending entry the adapter reads always held an empty list; it now passes them to `send()`.
 
 - **The duplicate check passed on a line that did not say which task was merged.** The
   log withheld the title, and the checker took any task of the item merged into T1 as

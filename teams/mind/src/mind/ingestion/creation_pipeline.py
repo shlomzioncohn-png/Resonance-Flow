@@ -100,6 +100,7 @@ class Sender(Protocol):
         bridge_correlation_id: UUID,
         revision: int,
         task_index: int = 0,
+        dependency_mentions: tuple[str, ...] = (),
     ) -> UUID: ...
 
 
@@ -132,7 +133,12 @@ class CreationPipeline:
                 bridge_source_ref=event.source_ref,
                 bridge_correlation_id=event.correlation_id,
             )
-            for task_position, request in enumerate(requests):
+            # One request per extracted task, in the same order. The task's
+            # dependency mentions are not in the contract: they travel beside
+            # the request to #834's resolver, which reads them off the pending
+            # entry once Inbox answers (models.ExtractedFields, #359).
+            tasks = zip(outcome.tasks, requests, strict=True)
+            for task_position, (task, request) in enumerate(tasks):
                 task_index = task_index_for(item_position, task_position)
                 match = await self._find_duplicate(
                     tenant_id, request.title, request.description or ""
@@ -157,6 +163,7 @@ class CreationPipeline:
                         bridge_correlation_id=event.correlation_id,
                         revision=event.revision,
                         task_index=task_index,
+                        dependency_mentions=tuple(task.fields.dependency_mentions),
                     )
                 )
         return sent
