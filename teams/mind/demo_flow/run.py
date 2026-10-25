@@ -48,7 +48,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO
+from typing import IO, TextIO
 
 from demo_flow import common, feed, verify
 
@@ -265,6 +265,25 @@ def migrate(env: dict[str, str]) -> None:
 # --------------------------------------------------------------------- Mind
 
 
+def echo(text: str, stream: TextIO | None = None) -> None:
+    """Print a Mind process's line here, whatever the console can show.
+
+    A Windows console's code page (cp1255, cp1252) cannot show every
+    character Mind prints (a progress bar's blocks, a dash): print() would
+    raise, killing the thread that also writes the line to the run's log and
+    drains the process's pipe. Such characters become '?' here; the log file,
+    UTF-8, keeps the line whole.
+    """
+
+    out = stream if stream is not None else sys.stdout
+    try:
+        out.write(text)
+    except UnicodeEncodeError:
+        encoding = out.encoding or "ascii"
+        out.write(text.encode(encoding, errors="replace").decode(encoding))
+    out.flush()
+
+
 @dataclass
 class MindProcess:
     """One of Mind's processes, its output echoed with a prefix and kept in a file."""
@@ -306,7 +325,7 @@ class MindProcess:
                 self.last_output = time.monotonic()
                 log_file.write(line)
                 log_file.flush()
-                print(f"[{self.name}] {line}", end="", flush=True)
+                echo(f"[{self.name}] {line}")
 
     def exit_code(self) -> int | None:
         return None if self.process is None else self.process.poll()
