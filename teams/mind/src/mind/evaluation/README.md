@@ -806,7 +806,7 @@ differences on a fixed reference, not to certify absolute extraction quality.
 ```bash
 python -m mind.evaluation.run_extraction_eval                   # the bundled hand-built fixture
 python -m mind.evaluation.run_extraction_eval --input pair.json
-python -m mind.evaluation.run_extraction_eval --threshold 0.6   # default: PLACEHOLDER_THRESHOLD (0.5)
+python -m mind.evaluation.run_extraction_eval --threshold 0.7   # default: LEXICAL_THRESHOLD (0.60)
 ```
 
 `pair.json` is `{"extracted": [...], "annotated": [...]}` — exactly those two keys,
@@ -817,9 +817,12 @@ stderr and exits with code 1. The full report is also written to
 `extraction_report.json` in the working directory (gitignored). With no `--input`, the
 fixture in `extraction_fixture.py` runs — three true positives, one false
 positive, one false negative, precision = recall = 0.75, worked out by hand in
-that file's docstring. The similarity the CLI uses is a pure-Python Jaccard placeholder
-(`placeholder_similarity`, paired with `PLACEHOLDER_THRESHOLD = 0.5`); the real backend (embeddings, or a `rapidfuzz` baseline)
-is not built yet — blocked on Ayala's answer (`extraction_eval_design.md` §4).
+that file's docstring. The similarity the CLI uses is the lexical backend
+(`similarity.lexical_similarity`, `rapidfuzz`'s `token_set_ratio`, with the locked
+`LEXICAL_THRESHOLD = 0.60`, `extraction_eval_design.md` §4.2/§6); the fixture scores
+the same with it. The Jaccard `placeholder_similarity` stays for the unit tests,
+whose expected counts are worked out for it. An embedding backend can replace the
+lexical one at the call site once Ayala exposes one.
 `metrics.extraction_precision_recall` is a stricter placeholder still (exact
 string match); it is not this eval.
 

@@ -604,8 +604,11 @@ owner-match diagnostic are still to build on top of it.
       grouping, micro/macro F1, the owner-match diagnostic.
 - [x] The eval-side contract for an extracted item (`ExtractedItem`) and the
       entry point that enforces it (`evaluate_extracted_items`) — #233 / PR #338.
-- [ ] Per-meeting grouping by `item_key`, micro-F1, and a separate failures line
-      (count + `reason`) in the run report — #178.
+- [x] Per-meeting grouping by `item_key`, micro-F1, and a separate failures line
+      (count + `reason`) in the run report — #178: `evaluate_meetings` →
+      `ExtractionSliceReport` (micro + macro, `None` for undefined per §3.5), and
+      `run_extraction_eval.slice_summary_lines`. The CLI still reads a single
+      pair; reading a slice from a file comes with the real run.
 - [ ] Wire the CI regression check to micro-F1 — #175.
 
 **Housekeeping:**
