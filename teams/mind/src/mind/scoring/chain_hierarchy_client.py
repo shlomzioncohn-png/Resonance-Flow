@@ -29,7 +29,12 @@ logger = logging.getLogger("mind.scoring")
 
 # Chain's in-cluster service, per teams/relay/helm/resonance-flow/values.yaml.
 DEFAULT_BASE_URL = "http://resonance-flow-chain:80"
-DEFAULT_TIMEOUT_SECONDS = 2.0
+# In-cluster, so a healthy Chain answers in low single-digit ms; this exists
+# to fail fast on a struggling one, not to accommodate a normal slow reply.
+# Up to two calls (ancestors, children) can happen per task under
+# ScorePublisher's lock -- round-9 review: at the old 2s this was up to 4s
+# of every other task's scoring blocked on one slow Chain.
+DEFAULT_TIMEOUT_SECONDS = 0.2
 
 
 class ChainHierarchySettings(BaseSettings):

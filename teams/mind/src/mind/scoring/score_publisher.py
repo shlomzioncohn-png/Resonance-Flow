@@ -25,10 +25,12 @@ task.updated had already been sent: the older score goes out again until the
 next update.
 
 A score can also change without any Inbox event: R3's hierarchical propagation
-(#474) changes a parent, and so its children's scores. `_score_and_send` asks
-Chain for the task's direct children and calls `rescore(child_id)` for each,
-but only after a send whose `mind_score` differs from the last one published
-by at least `_CASCADE_CHANGE_TOLERANCE` -- never exact equality, since
+(#474) changes a parent, and so its children's scores. After a send, the
+caller runs `_cascade` outside the lock (a network call must not hold up
+every other task's scoring), which asks Chain for the task's direct
+children and calls `rescore(child_id)` for each -- but only when that send's
+`mind_score` differed from the last one published by at least
+`_CASCADE_CHANGE_TOLERANCE` -- never exact equality, since
 `mind_score` includes time pressure, which drifts every call just because
 real time passed. A fixed tolerance on the difference (not rounding, which
 would flip a tiny move across a bucket edge into "changed") absorbs that
@@ -66,8 +68,11 @@ Two kinds of error, handled differently:
   already requires propagation to fall back to the baseline score when Chain's
   traversal API is unavailable.
 
-Known limitation: the lock is held while the model scores, so a model that calls
-the network (#474's traversal of Chain) holds up the other topic meanwhile.
+Known limitation: the lock is still held while the model scores, so
+`ChainAncestorSource`'s one call to Chain per task (#474) holds up the other
+topic meanwhile -- a short, bounded timeout (`ChainHierarchySettings`), not
+eliminated. `_cascade`'s own call moved outside the lock (round-9 review):
+it no longer adds a second timeout window on top.
 """
 
 from __future__ import annotations
@@ -239,7 +244,11 @@ class ScorePublisher:
             if state.published == inputs:
                 logger.debug("score_publisher: task %s unchanged, skipping", task.task_id)
                 return
-            self._score_and_send(state, inputs)
+            _sent, cascade_task_id = self._score_and_send(state, inputs)
+        # Outside the lock: the children lookup is a network call, and must
+        # not hold up every other task's scoring while it runs (round-9 review).
+        if cascade_task_id is not None:
+            self._cascade(cascade_task_id)
 
     def cached_task(self, task_id: str) -> InboxTask | None:
         """`task_id`'s last-known state, or None if Mind has not seen an
@@ -307,18 +316,26 @@ class ScorePublisher:
                 # The state is in memory: unknown since start-up until its next event.
                 logger.warning("score_publisher: task %s is unknown, not re-scored", task_id)
                 return False
-            return self._score_and_send(
+            sent, cascade_task_id = self._score_and_send(
                 state, _scoring_inputs_hash(state.task), only_if_changed=True
             )
+        # Outside the lock -- see _publish_if_changed.
+        if cascade_task_id is not None:
+            self._cascade(cascade_task_id)
+        return sent
 
     def _score_and_send(
         self, state: _TaskState, inputs: bytes, *, only_if_changed: bool = False
-    ) -> bool:
+    ) -> tuple[bool, str | None]:
         """Score `state.task`, publish it, and record it. Caller holds the lock.
 
-        Returns False, having sent nothing, when the task cannot be scored, or,
-        with `only_if_changed`, when its mind_score is unchanged within
-        `_CASCADE_CHANGE_TOLERANCE`.
+        Returns `(sent, cascade_task_id)`. `sent` is False, having sent
+        nothing, when the task cannot be scored, or, with `only_if_changed`,
+        when its mind_score is unchanged within `_CASCADE_CHANGE_TOLERANCE`.
+        `cascade_task_id` is this task's id when `_cascade` should run for
+        it, or None -- returned rather than called here, so the caller can
+        run it after releasing the lock (a network call must not hold up
+        every other task's scoring).
         """
         task_id = state.task.task_id
         # Aware, in UTC, like the deadlines the conversion builds.
@@ -331,7 +348,7 @@ class ScorePublisher:
             # base_score, a score outside 0..1, a model bug for this task):
             # skipped, so one broken task does not stop all scoring.
             logger.exception("score_publisher: task %s cannot be scored, skipping", task_id)
-            return False
+            return False, None
         previous_score = state.last_score
         changed = previous_score is None or (
             abs(payload.mind_score - previous_score) >= _CASCADE_CHANGE_TOLERANCE
@@ -339,23 +356,21 @@ class ScorePublisher:
         if only_if_changed and not changed:
             # Nothing for Chain to learn; also what ends a cycle of re-scores.
             logger.debug("score_publisher: task %s re-scored unchanged, not sent", task_id)
-            return False
+            return False, None
         # Outside the try: a Kafka error is transient, so it propagates and the
         # message is retried.
         self._sink.send(payload)
         # Recorded only after a successful send, so a failed one is retried.
         state.published = inputs
         state.last_score = payload.mind_score
-        if changed:
-            self._cascade(task_id)
-        return True
+        return True, (task_id if changed else None)
 
     def _cascade(self, task_id: str) -> None:
         """#474: tell each direct child its ancestor's share of the score may
         have moved, so it gets a chance to recompute its own mean. Only
         called after a send whose mind_score genuinely differed (see
-        `_score_and_send`) -- never unconditionally, and never from inside
-        the model's own `score()`.
+        `_score_and_send`), outside the lock -- never unconditionally, and
+        never from inside the model's own `score()`.
 
         Never raises: unlike `ChainHierarchyClient`'s own timeouts/HTTP
         errors (already degraded to []), anything else -- a bad URL

@@ -240,8 +240,10 @@ degrades to "no ancestors" (`get_ancestors` returns `[]`), never raised.
 With no ancestors, `ancestor_values` is exactly `[]`, so `base_score` is
 exactly `own_base` — the same number the baseline alone would have
 produced. A slow Chain fails the same way: the client's own timeout
-(`MIND_CHAIN__TIMEOUT_SECONDS`, default 2s) is short on purpose, so a slow
-traversal degrades to the baseline rather than stalling the scoring loop.
+(`MIND_CHAIN__TIMEOUT_SECONDS`, default 0.2s — round-9 review: at the old 2s
+default, two such calls under `ScorePublisher`'s lock could cost up to 4s of
+every other task's scoring) is short on purpose, so a slow traversal
+degrades to the baseline rather than stalling the scoring loop.
 An ancestor with no cached state yet (no Inbox event reached it since
 start-up) is left out of the average rather than counted as 0 — see *Known
 limitations* below.
@@ -293,19 +295,26 @@ cascade fire, and nothing proactively asks it to score sooner.
 task (`get_ancestors`, returning the whole chain in that one call — no
 further network calls per ancestor; each one's own value is a local
 re-score of its already-cached state), plus one more (`get_direct_children`)
-on a genuine change, cascading. Both go through one client, one short timeout,
+on a genuine change, cascading — but, as of round-9, that second call runs
+*after* `ScorePublisher`'s lock is released, not while scoring holds it (see
+*Known limitations* below). Both go through one client, one short timeout,
 no retry (a retry here would only make a slow Chain slower; the fallback
 already handles it). **Still not measured against a live Chain** — there is
 none in this dev environment to reach, and that is the number that matters
 for the under-300ms p95 commitment. What *was* measured, with
 `benchmarks/hierarchy_propagation_latency.py`: both calls run through the
 real `ChainHierarchyClient` against an `httpx.MockTransport` serving #473's
-seven constructed graphs — no socket, no real Chain. Mean 0.13ms, p95
-0.27ms, max 0.39ms per call, 64 calls total. That number is this code
+seven constructed graphs — no socket, no real Chain. Mean 0.43ms, p95
+0.59ms, max 1.24ms per call, 64 calls total. That number is this code
 path's *own* overhead (request construction, parsing a fake response) and
 shows Mind's side is not the bottleneck; it says nothing about real network
 round-trip time to Chain, which is the actual open question and which this
-cannot measure. Re-run `score()`'s wall-clock time with a real
+cannot measure. The same script also runs `HierarchicalRankingModel.score()`
+against `SegmentedRankingModel.score()` on the same leaf tasks, same mock
+transport, to isolate what the whole feature adds over the baseline alone
+(not just the raw Chain calls above, but also re-scoring every ancestor
+through the baseline): mean difference 0.61ms, p95 1.14ms, over the 15 leaf
+tasks across all seven fixtures. Re-run both numbers with a real
 `ChainHierarchyClient` once this is deployed where Chain is reachable, and
 report that — not this — against the commitment. The
 harness path (`FixtureAncestorSource`) makes no network call at all — an
@@ -589,16 +598,25 @@ reading a third of the set.
   only recovers if something else independently triggers a rescore (a real
   change to the task's own fields, or a cascade reaching it from one of its
   actual ancestors changing after Chain is back up).
-- **Calls to Chain happen while `ScorePublisher`'s lock is held.** Both
-  consumer threads and the rescore worker share one lock; a slow ancestor
-  lookup or cascade (`get_ancestors`/`get_direct_children`) blocks all of
-  them, not just the task being scored. In the worst case this could run
-  long enough to miss Kafka's poll interval. Not yet measured against a
-  live Chain to know whether this matters in practice — see *Hierarchical
-  propagation*'s own *Latency* section above. A real fix means moving the
-  network call outside the lock and re-validating `_TaskState` isn't stale
-  by the time it's re-acquired; not attempted here, to avoid introducing a
-  new race while fixing a documented one.
+- **`get_ancestors` still runs while `ScorePublisher`'s lock is held.**
+  Both consumer threads and the rescore worker share one lock, and scoring
+  a task needs its ancestors' values synchronously to compute `base_score`
+  — there is no way to move that call outside the lock without changing
+  what gets scored. A slow Chain here still blocks every other task's
+  scoring meanwhile, bounded by `MIND_CHAIN__TIMEOUT_SECONDS` (0.2s default,
+  round-9 review — down from an earlier 2s). `get_direct_children`, the
+  cascade's own call, was moved outside the lock in round-9:
+  `_score_and_send` now returns the cascade's target id instead of calling
+  `_cascade` itself, so both `_publish_if_changed` and `_rescore_now` run it
+  after releasing the lock. `tests/test_hierarchical_propagation.py`'s
+  `test_a_genuinely_slow_chain_fails_fast_not_at_the_old_2s_default` proves
+  the timeout itself is enforced (against a real local socket —
+  `httpx.MockTransport` does not enforce a client's configured timeout at
+  all), not that the lock is never held during a slow call; the one
+  remaining locked call is a smaller, now-bounded version of the same
+  documented risk, not a new one. Not yet measured against a live Chain to
+  know whether even the 0.2s bound matters in practice — see *Hierarchical
+  propagation*'s own *Latency* section above.
 
 ## Publishing the score to Chain (#357)
 

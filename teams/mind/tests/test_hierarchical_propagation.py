@@ -22,6 +22,9 @@ Three things are checked, deliberately apart:
 
 from __future__ import annotations
 
+import http.server
+import threading
+import time
 from datetime import UTC, datetime
 from unittest.mock import Mock
 
@@ -168,6 +171,54 @@ def test_a_timeout_degrades_to_no_ancestors() -> None:
         raise httpx.ConnectTimeout("Chain is slow")
 
     assert _client(handler).get_ancestors("leaf-1") == []
+
+
+def test_a_genuinely_slow_chain_fails_fast_not_at_the_old_2s_default() -> None:
+    """#474 round-9 review: httpx.MockTransport never actually enforces the
+    client's configured timeout (it runs the handler to completion, however
+    long that takes) -- only a real socket does. A real local server that
+    sleeps past the timeout is the only way to prove the client gives up
+    close to DEFAULT_TIMEOUT_SECONDS, not the old 2s (let alone the ~4s two
+    such calls used to cost under the lock before it moved outside)."""
+
+    class SlowHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            time.sleep(1.0)  # well past DEFAULT_TIMEOUT_SECONDS (0.2s)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"[]")
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass  # quiet: this is expected to "fail", not a real error
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), SlowHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        settings = ChainHierarchySettings(base_url=base_url)
+        # trust_env=False: a real socket, unlike every other test here, so
+        # it would otherwise pick up a dev machine's own SSL_CERT_FILE/proxy
+        # env vars -- irrelevant to a plain local http:// connection.
+        http_client = httpx.Client(
+            base_url=base_url, timeout=httpx.Timeout(settings.timeout_seconds), trust_env=False
+        )
+        client = ChainHierarchyClient(settings, http_client)
+        try:
+            start = time.perf_counter()
+            result = client.get_ancestors("leaf-1")
+            elapsed = time.perf_counter() - start
+        finally:
+            http_client.close()  # client.close() is a no-op: it doesn't own this one
+
+        assert result == []
+        # Generous upper bound for CI jitter -- still an order of magnitude
+        # under the old 2s-per-call (4s-per-task-under-the-lock) behavior.
+        assert elapsed < 1.0, f"took {elapsed:.3f}s -- timeout is not being enforced"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
 
 
 def test_connection_refused_degrades_to_no_ancestors() -> None:
