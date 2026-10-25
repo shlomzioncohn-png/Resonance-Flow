@@ -8,6 +8,7 @@ import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.ConstraintHistoryRepository;
 import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.TaskReadinessRepository;
+import com.rnd.chain.repository.TaskRepository;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,29 +28,32 @@ public class ConstraintEligibilityService {
     private static final Logger log =
             LoggerFactory.getLogger(ConstraintEligibilityService.class);
 
+    private final TaskRepository taskRepository;
     private final ConstraintRepository constraintRepository;
     private final ConstraintHistoryRepository constraintHistoryRepository;
-    private final TaskCounterUpdater taskCounterUpdater;
+    private final DependencyEdgeService dependencyEdgeService;
     private final TaskReadinessRepository taskReadinessRepository;
     private final TaskStateHistoryRecorder historyRecorder;
 
     public ConstraintEligibilityService(
+            TaskRepository taskRepository,
             ConstraintRepository constraintRepository,
             ConstraintHistoryRepository constraintHistoryRepository,
-            TaskCounterUpdater taskCounterUpdater,
+            DependencyEdgeService dependencyEdgeService,
             TaskReadinessRepository taskReadinessRepository,
             TaskStateHistoryRecorder historyRecorder) {
 
+        this.taskRepository = taskRepository;
         this.constraintRepository = constraintRepository;
         this.constraintHistoryRepository = constraintHistoryRepository;
-        this.taskCounterUpdater = taskCounterUpdater;
+        this.dependencyEdgeService = dependencyEdgeService;
         this.taskReadinessRepository = taskReadinessRepository;
         this.historyRecorder = historyRecorder;
     }
 
     /**
      * Persists {@code constraint} and, if it's genuinely new,
-     * maintains the stored openConstraintCount.
+     * recomputes the task's priority and records the readiness transition.
      *
      * The authoritative readiness before/after comes from task_readiness.
      *
@@ -76,7 +80,9 @@ public class ConstraintEligibilityService {
         /*
          * Validate that the task exists and isn't soft-deleted.
          */
-        taskCounterUpdater.requireTask(taskId);
+        taskRepository.findById(taskId)
+                .orElseThrow(
+                        () -> new TaskNotFoundException(taskId));
 
         /*
          * Must be read BEFORE writing the constraint,
@@ -109,15 +115,10 @@ public class ConstraintEligibilityService {
                 requireReadinessSnapshot(taskId);
 
         /*
-         * Stored counter is still maintained during this migration stage.
-         * Readiness/publish itself is based on before/after View snapshots.
+         * Readiness/publish is based on before/after View snapshots.
          */
-        taskCounterUpdater.updateCounters(
+        dependencyEdgeService.recomputePriority(
                 taskId,
-                task -> TaskCounterUpdater.withCounters(
-                        task,
-                        task.getBlockingCount(),
-                        task.getOpenConstraintCount() + 1),
                 beforeReadiness,
                 afterReadiness);
 
@@ -131,8 +132,7 @@ public class ConstraintEligibilityService {
      * Transitions {@code constraintId}'s status.
      *
      * If the transition crosses the PENDING/non-PENDING boundary,
-     * the stored openConstraintCount is maintained, while readiness,
-     * history and publishing rely on task_readiness.
+     * readiness, history and publishing rely on task_readiness.
      *
      * @throws NullPointerException if any argument is null
      * @throws IllegalStateException if no constraint with this id
@@ -161,7 +161,9 @@ public class ConstraintEligibilityService {
          * Validate the task and capture the authoritative state
          * before changing the constraint.
          */
-        taskCounterUpdater.requireTask(taskId);
+        taskRepository.findById(taskId)
+                .orElseThrow(
+                        () -> new TaskNotFoundException(taskId));
 
         TaskReadinessSnapshot beforeReadiness =
                 requireReadinessSnapshot(taskId);
@@ -213,17 +215,8 @@ public class ConstraintEligibilityService {
         TaskReadinessSnapshot afterReadiness =
                 requireReadinessSnapshot(taskId);
 
-        int delta =
-                isOpenNow ? 1 : -1;
-
-        taskCounterUpdater.updateCounters(
+        dependencyEdgeService.recomputePriority(
                 taskId,
-                task -> TaskCounterUpdater.withCounters(
-                        task,
-                        task.getBlockingCount(),
-                        Math.max(
-                                0,
-                                task.getOpenConstraintCount() + delta)),
                 beforeReadiness,
                 afterReadiness);
 

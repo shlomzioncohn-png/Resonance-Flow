@@ -34,6 +34,8 @@ metadata:
 data:
   config.yaml: |
     spring:
+      config:
+        import: "optional:configtree:/etc/resonance-flow/secrets/kafka-sasl/"
       kafka:
         # kafka is a top-level dependency (shared by every component), schema-registry is
         # declared on this component specifically - same split components.inbox.dependencies

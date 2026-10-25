@@ -1,5 +1,6 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.testsupport.PgRepos;
 import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
 
@@ -60,6 +61,22 @@ class ConstraintEligibilityServiceTest {
     @Autowired
     private TaskReadinessRepository taskReadinessRepository;
 
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
+
     @BeforeEach
     void setUp() {
         taskRepository = PgRepos.tasks(List.of());
@@ -67,16 +84,26 @@ class ConstraintEligibilityServiceTest {
         publisher = new RecordingSchedulingUpdatePublisher();
 
         SchedulingUpdateService schedulingUpdateService =
-                new SchedulingUpdateService(publisher);
+                new SchedulingUpdateService(publisher,taskReadinessRepository);
 
-        TaskCounterUpdater counterUpdater =
-                new TaskCounterUpdater(
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
+                                taskRepository,
+                                dependencyRepository,
+                                taskReadinessRepository,
+                                schedulingUpdateService,
+                                new SchedulingPublishListener(
+                                taskRepository,
+                                schedulingUpdateService));
+
+        TaskStateHistoryRecorder recorder = TaskStateHistoryFixtures.newRecorder();
+        DependencyEdgeService edgeService =
+                new DependencyEdgeService(
                         taskRepository,
                         dependencyRepository,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(
-                                taskRepository,
-                                schedulingUpdateService),
+                        PgRepos.graphLock(),
+                        priorityScoreService,
+                        recorder,
                         taskReadinessRepository);
 
         constraintRepository = PgRepos.constraints();
@@ -84,9 +111,10 @@ class ConstraintEligibilityServiceTest {
 
         service =
                 new ConstraintEligibilityService(
+                        taskRepository,
                         constraintRepository,
                         historyRepository,
-                        counterUpdater,
+                        edgeService,
                         taskReadinessRepository,
                         TaskStateHistoryFixtures.newRecorder());
     }
@@ -162,7 +190,7 @@ class ConstraintEligibilityServiceTest {
         ConstraintHistoryEntry entry = singleRecordedEntry();
         assertEquals(Constraint.ConstraintStatus.SATISFIED, entry.previousStatus());
         assertEquals(Constraint.ConstraintStatus.WAIVED, entry.newStatus());
-        assertEquals(0, taskRepository.findById(taskId).orElseThrow().getOpenConstraintCount());
+        assertEquals(0, openConstraintCount(taskRepository.findById(taskId).orElseThrow()));
     }
 
     @Test
@@ -232,10 +260,10 @@ class ConstraintEligibilityServiceTest {
 
         assertEquals(
                 1,
-                updated.getOpenConstraintCount());
+                openConstraintCount(updated));
 
         assertFalse(
-                updated.isReady());
+                isReady(updated));
 
         assertEquals(
                 1,
@@ -275,10 +303,10 @@ class ConstraintEligibilityServiceTest {
 
         assertEquals(
                 0,
-                updated.getOpenConstraintCount());
+                openConstraintCount(updated));
 
         assertTrue(
-                updated.isReady());
+                isReady(updated));
 
         assertEquals(
                 1,
@@ -317,10 +345,10 @@ class ConstraintEligibilityServiceTest {
 
         assertEquals(
                 1,
-                updated.getOpenConstraintCount());
+                openConstraintCount(updated));
 
         assertFalse(
-                updated.isReady());
+                isReady(updated));
 
         assertTrue(
                 publisher.getEvents().isEmpty());
@@ -356,10 +384,10 @@ class ConstraintEligibilityServiceTest {
 
         assertEquals(
                 1,
-                task.getOpenConstraintCount());
+                openConstraintCount(task));
 
         assertFalse(
-                task.isReady());
+                isReady(task));
     }
 
     @Test
@@ -399,10 +427,10 @@ class ConstraintEligibilityServiceTest {
 
         assertEquals(
                 0,
-                task.getOpenConstraintCount());
+                openConstraintCount(task));
 
         assertTrue(
-                task.isReady());
+                isReady(task));
     }
 
     @Test
@@ -442,10 +470,10 @@ class ConstraintEligibilityServiceTest {
 
         assertEquals(
                 1,
-                task.getOpenConstraintCount());
+                openConstraintCount(task));
 
         assertFalse(
-                task.isReady());
+                isReady(task));
     }
 
     private Task createTask(
@@ -462,9 +490,6 @@ class ConstraintEligibilityServiceTest {
                 .id(id)
                 .parentTaskId(null)
                 .status(status)
-                .isReady(ready)
-                .blockingCount(blockingCount)
-                .openConstraintCount(openConstraintCount)
                 .estimatedDurationMin(null)
                 .score(null)
                 .createdAt(now)
@@ -516,23 +541,33 @@ class ConstraintEligibilityServiceTest {
                 PgRepos.constraints();
 
         SchedulingUpdateService scheduling =
-                new SchedulingUpdateService(event -> {});
+                new SchedulingUpdateService(event -> {},taskReadinessRepository);
 
-        TaskCounterUpdater counterUpdater =
-                new TaskCounterUpdater(
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
+                                taskRepo,
+                                dependencyRepo,
+                                taskReadinessRepository,
+                                scheduling,
+                                new SchedulingPublishListener(
+                                taskRepo,
+                                scheduling));
+
+        DependencyEdgeService edgeService =
+                new DependencyEdgeService(
                         taskRepo,
                         dependencyRepo,
-                        new PriorityScoreService(),
-                        new SchedulingPublishListener(
-                                taskRepo,
-                                scheduling),
+                        PgRepos.graphLock(),
+                        priorityScoreService,
+                        TaskStateHistoryFixtures.newRecorder(),
                         taskReadinessRepository);
 
         ConstraintEligibilityService constraintService =
                 new ConstraintEligibilityService(
+                        taskRepo,
                         constraintRepo,
                         mock(ConstraintHistoryRepository.class),
-                        counterUpdater,
+                        edgeService,
                         taskReadinessRepository,
                         TaskStateHistoryFixtures.newRecorder());
 
@@ -566,9 +601,6 @@ class ConstraintEligibilityServiceTest {
 
         return TaskTestFixtures.defaultTask(id)
                 .status(status)
-                .isReady(isReady)
-                .blockingCount(blockingCount)
-                .openConstraintCount(openConstraintCount)
                 .build();
     }
 }

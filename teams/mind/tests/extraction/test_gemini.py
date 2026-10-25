@@ -14,10 +14,12 @@ import json
 
 import httpx
 import pytest
+from tests.extraction.fakes import answer_of, only
 
 from mind.contracts.base_enums import SourceType
 from mind.extraction.extractor import BasicExtractor, ExtractionFailure, ExtractionSuccess
 from mind.extraction.providers.base import (
+    LLMAccessDenied,
     LLMProvider,
     LLMRateLimited,
     LLMRejected,
@@ -27,7 +29,7 @@ from mind.extraction.providers.base import (
 from mind.extraction.providers.gemini import GeminiProvider
 from mind.extraction.providers.settings import GeminiSettings
 
-VALID_ANSWER = json.dumps(
+VALID_ANSWER = answer_of(
     {
         "title": "Send the Q3 report to finance",
         "description": "Finance asked for the Q3 report before the close.",
@@ -418,15 +420,15 @@ def test_the_extractor_drives_the_real_client_end_to_end() -> None:
     outcome = extractor.extract(SOURCE_TEXT, SourceType.EMAIL)
 
     assert isinstance(outcome, ExtractionSuccess)
-    assert outcome.fields.title == "Send the Q3 report to finance"
-    assert outcome.fields.source_ref == "MSG-4471"
+    assert only(outcome).fields.title == "Send the Q3 report to finance"
+    assert only(outcome).fields.source_ref == "MSG-4471"
     assert outcome.model == "gemini-3.6-flash"
     assert outcome.provider_calls == 1
 
 
 def test_the_repair_round_works_over_http() -> None:
     handler, seen = _scripted(
-        httpx.Response(200, json=_envelope('{"title": "no deps field"}')),
+        httpx.Response(200, json=_envelope(answer_of({"title": "no deps field"}))),
         httpx.Response(200, json=_envelope(VALID_ANSWER)),
     )
     extractor = BasicExtractor(_provider(handler), sleep=lambda _: None)
@@ -481,3 +483,34 @@ def test_a_cap_tight_enough_to_cut_everything_is_still_a_refusal() -> None:
 
     with pytest.raises(LLMRejected):
         _provider(handler, max_output_tokens=1).complete("system", "user")
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+def test_a_refused_account_is_environmental(status: int) -> None:
+    """The key, or a model this key may not call: no other item would pass (#919)."""
+
+    handler, _ = _always({"error": {"code": status, "message": "nope"}}, status)
+
+    with pytest.raises(LLMAccessDenied) as raised:
+        _provider(handler).complete("system", "user")
+
+    assert raised.value.environmental is True
+
+
+@pytest.mark.parametrize("status", [400, 422])
+def test_a_refused_request_is_the_items_not_the_environments(status: int) -> None:
+    handler, _ = _always({"error": {"code": status, "message": "nope"}}, status)
+
+    with pytest.raises(LLMRejected) as raised:
+        _provider(handler).complete("system", "user")
+
+    assert raised.value.environmental is False
+
+
+def test_a_blocked_answer_is_the_items_not_the_environments() -> None:
+    handler, _ = _always(_envelope("", finish_reason="SAFETY"))
+
+    with pytest.raises(LLMRejected) as raised:
+        _provider(handler).complete("system", "user")
+
+    assert raised.value.environmental is False

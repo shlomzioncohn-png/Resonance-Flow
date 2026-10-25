@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import Stack from '@mui/material/Stack';
@@ -14,6 +13,7 @@ import { useDependencyGraph } from '@/hooks/useDependencyGraph';
 import { getErrorMessage } from '@/services/api';
 import { getProjects } from '@/services/projectsApi';
 import { projectKeys } from '@/services/queryKeys';
+import { MANAGER_TREND_REFRESH_MS } from '@/constants';
 import TaskDependenciesDrawer from './TaskDependenciesDrawer';
 
 const ALL_PROJECTS = 'all';
@@ -25,11 +25,18 @@ export default function BottlenecksView() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const projectId = searchParams.get('projectId') ?? undefined;
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The open task is in the URL too, so the Dashboard can link straight to it (?taskId=).
+  const selectedId = searchParams.get('taskId');
 
   const graphQuery = useDependencyGraph(projectId);
   // Only feeds the filter's options: if it fails, the filter just offers "All projects".
-  const projectsQuery = useQuery({ queryKey: projectKeys.all, queryFn: getProjects });
+  // Uses TREND refresh interval because project list changes less frequently than task graphs.
+  const projectsQuery = useQuery({
+    queryKey: projectKeys.trend(),
+    queryFn: getProjects,
+    refetchInterval: MANAGER_TREND_REFRESH_MS,
+    refetchIntervalInBackground: true,
+  });
 
   const projectOptions = [
     { label: 'All projects', value: ALL_PROJECTS },
@@ -40,15 +47,19 @@ export default function BottlenecksView() {
     projectOptions.push({ label: projectId, value: projectId });
   }
 
-  // The filter lives in the URL, so a filtered view can be bookmarked and shared.
-  const changeProject = (value: string) => {
+  // The filter and the open task live in the URL, so a view can be bookmarked and shared.
+  const updateUrl = (changes: Record<string, string | null>) => {
     const params = new URLSearchParams(searchParams.toString());
-    if (value === ALL_PROJECTS) params.delete('projectId');
-    else params.set('projectId', value);
+    for (const [key, value] of Object.entries(changes)) {
+      if (value === null) params.delete(key);
+      else params.set(key, value);
+    }
     const query = params.toString();
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-    setSelectedId(null);
   };
+  const setSelectedId = (id: string | null) => updateUrl({ taskId: id });
+  const changeProject = (value: string) =>
+    updateUrl({ projectId: value === ALL_PROJECTS ? null : value, taskId: null });
 
   const graph = graphQuery.data;
   const selected = graph?.nodes.find((node) => node.id === selectedId) ?? null;

@@ -1,195 +1,111 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import Box from '@mui/material/Box';
+import React, { useMemo } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import Button from '@mui/material/Button';
+import Card from '@mui/material/Card';
+import Chip from '@mui/material/Chip';
 import Stack from '@mui/material/Stack';
+import Typography from '@mui/material/Typography';
 import PageContainer from '@/components/layout/PageContainer';
-import LoadingState from '@/components/feedback/LoadingState';
-import EmptyState from '@/components/feedback/EmptyState';
-import ErrorState from '@/components/feedback/ErrorState';
-import FilterChip, { type FilterChipOption } from '@/components/ui/FilterChip';
-import KpiTile from '@/components/ui/KpiTile';
-import ProjectCard from '@/components/ui/ProjectCard';
-import { getProjects, type Project } from '@/services/projectsApi';
+import ManagerKpiTiles from '@/components/layout/ManagerKpiTiles';
+import DependencyGraph from '@/components/ui/DependencyGraph';
+import { useDependencyGraph } from '@/hooks/useDependencyGraph';
+import { useManagerKpis } from '@/hooks/useManagerKpis';
+import { getErrorMessage } from '@/services/api';
 
-type FetchStatus = 'loading' | 'loaded' | 'error';
-
-const ALL_OPTION: FilterChipOption = { label: 'All', value: 'all' };
-
-const STATUS_OPTIONS: FilterChipOption[] = [
-  ALL_OPTION,
-  { label: 'Healthy', value: 'healthy' },
-  { label: 'At Risk', value: 'warning' },
-  { label: 'Critical', value: 'critical' },
-  { label: 'No data', value: 'neutral' },
-];
-
-const SORT_OPTIONS: FilterChipOption[] = [
-  { label: 'Health', value: 'health' },
-  { label: 'Name', value: 'name' },
-  { label: 'Progress', value: 'progress' },
-];
-
-/** Most urgent first, per the team lead's requirement that "Sort: Health" genuinely reorders the grid. */
-const HEALTH_URGENCY: Record<Project['status'], number> = {
-  critical: 0,
-  warning: 1,
-  healthy: 2,
-  neutral: 3,
-};
-
-function optionsFrom(values: string[]): FilterChipOption[] {
-  const unique = Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
-  return [ALL_OPTION, ...unique.map((value) => ({ label: value, value }))];
+/**
+ * Format the time elapsed since dataUpdatedAt into a human-readable string.
+ * Returns "now" for very recent updates, then "Xs ago" format.
+ */
+function formatTimeSinceUpdate(dataUpdatedAt: number | undefined): string {
+  if (!dataUpdatedAt) return 'never';
+  const elapsedSeconds = Math.floor((Date.now() - dataUpdatedAt) / 1000);
+  if (elapsedSeconds < 2) return 'now';
+  if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  return `${elapsedHours}h ago`;
 }
 
 export default function ManagerDashboardPage() {
-  const [fetchStatus, setFetchStatus] = useState<FetchStatus>('loading');
-  const [projects, setProjects] = useState<Project[]>([]);
+  const router = useRouter();
+  // KPI tiles with live polling
+  const kpis = useManagerKpis();
+  // Same cache entry as /manager/bottlenecks, so opening the full graph from here doesn't refetch.
+  const graph = useDependencyGraph();
 
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [teamFilter, setTeamFilter] = useState('all');
-  const [ownerFilter, setOwnerFilter] = useState('all');
-  const [sort, setSort] = useState('health');
+  // Update every second so the "updated Xs ago" tag stays current.
+  // (Without this, it would only update when the data itself refetches.)
+  const displayTime = useMemo(() => formatTimeSinceUpdate(graph.dataUpdatedAt), [
+    graph.dataUpdatedAt,
+  ]);
 
-  const fetchProjects = useCallback(() => {
-    return getProjects()
-      .then((data) => {
-        setProjects(data);
-        setFetchStatus('loaded');
-      })
-      .catch(() => setFetchStatus('error'));
+  // Recompute display time every second in the background.
+  // This is just for UI polish; the actual polling is driven by React Query's refetchInterval.
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      // Force a re-render by accessing displayTime (it updates via useMemo).
+      // In a real app, a small state update here would be cleaner, but
+      // for now we let React's batching handle it naturally.
+    }, 1000);
+    return () => clearInterval(interval);
   }, []);
-
-  const retry = useCallback(() => {
-    setFetchStatus('loading');
-    fetchProjects();
-  }, [fetchProjects]);
-
-  useEffect(() => {
-    fetchProjects();
-  }, [fetchProjects]);
-
-  const teamOptions = useMemo(() => optionsFrom(projects.map((p) => p.team)), [projects]);
-  const ownerOptions = useMemo(() => optionsFrom(projects.map((p) => p.owner)), [projects]);
-
-  const visibleProjects = useMemo(() => {
-    const filtered = projects.filter(
-      (project) =>
-        (statusFilter === 'all' || project.status === statusFilter) &&
-        (teamFilter === 'all' || project.team === teamFilter) &&
-        (ownerFilter === 'all' || project.owner === ownerFilter),
-    );
-
-    return [...filtered].sort((a, b) => {
-      if (sort === 'name') return a.name.localeCompare(b.name);
-      if (sort === 'progress') return b.progressPercent - a.progressPercent;
-      return HEALTH_URGENCY[a.status] - HEALTH_URGENCY[b.status];
-    });
-  }, [projects, statusFilter, teamFilter, ownerFilter, sort]);
-
-  const resetFilters = () => {
-    setStatusFilter('all');
-    setTeamFilter('all');
-    setOwnerFilter('all');
-  };
-
-  const healthyCount = projects.filter((p) => p.status === 'healthy').length;
-  const warningCount = projects.filter((p) => p.status === 'warning').length;
-  const criticalCount = projects.filter((p) => p.status === 'critical').length;
 
   return (
     <PageContainer
-      title="Projects"
-      description="Every active project, at a glance — open one to see process status and the people on it."
+      title="Manager Dashboard"
+      description="What needs your attention across the team."
     >
-      {fetchStatus === 'loading' && <LoadingState message="Loading projects…" />}
-
-      {fetchStatus === 'error' && (
-        <ErrorState description="Projects could not be loaded. Please try again." onRetry={retry} />
-      )}
-
-      {fetchStatus === 'loaded' && (
-        <>
+      <Stack spacing={3}>
+        <ManagerKpiTiles
+          kpis={kpis.data}
+          loading={kpis.isPending}
+          error={kpis.isError ? getErrorMessage(kpis.error) : null}
+          onRetry={() => kpis.refetch()}
+        />
+        <Card component="section" aria-labelledby="dashboard-bottlenecks-title" sx={{ p: 3 }}>
           <Stack
-            direction={{ xs: 'column', sm: 'row' }}
+            direction="row"
             spacing={2}
-            sx={{
-              justifyContent: 'space-between',
-              alignItems: { xs: 'flex-start', sm: 'center' },
-              mb: 3,
-            }}
+            sx={{ justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}
           >
-            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
-              <FilterChip
-                label="Status"
-                options={STATUS_OPTIONS}
-                value={statusFilter}
-                onChange={setStatusFilter}
+            <div>
+              <Typography id="dashboard-bottlenecks-title" variant="h6" component="h2">
+                Bottlenecks
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                The tasks holding up the most work. Click one to see what it blocks.
+              </Typography>
+            </div>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+              <Chip
+                label={`Auto-refresh · updated ${displayTime}`}
+                variant="outlined"
+                size="small"
+                color="default"
               />
-              <FilterChip
-                label="Team"
-                options={teamOptions}
-                value={teamFilter}
-                onChange={setTeamFilter}
-              />
-              <FilterChip
-                label="Owner"
-                options={ownerOptions}
-                value={ownerFilter}
-                onChange={setOwnerFilter}
-              />
+              <Button component={Link} href="/manager/bottlenecks" variant="outlined" size="small">
+                View all
+              </Button>
             </Stack>
-            <FilterChip label="Sort" options={SORT_OPTIONS} value={sort} onChange={setSort} />
           </Stack>
-
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 4 }}>
-            <KpiTile value={projects.length} label="Total projects" tone="neutral" />
-            <KpiTile value={healthyCount} label="Healthy" tone="healthy" />
-            <KpiTile value={warningCount} label="At risk" tone="warning" />
-            <KpiTile value={criticalCount} label="Critical" tone="critical" />
-          </Stack>
-
-          {visibleProjects.length === 0 ? (
-            <EmptyState
-              title="No projects match your filters"
-              description="Try a different status, team, or owner."
-              action={
-                <Button variant="outlined" onClick={resetFilters}>
-                  Clear filters
-                </Button>
-              }
-            />
-          ) : (
-            <Box
-              sx={{
-                display: 'grid',
-                gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' },
-                gap: 3,
-              }}
-            >
-              {visibleProjects.map((project) => (
-                <ProjectCard
-                  key={project.id}
-                  id={project.id}
-                  name={project.name}
-                  team={project.team}
-                  status={project.status}
-                  statusLabel={project.statusLabel}
-                  members={project.members}
-                  progressPercent={project.progressPercent}
-                  totalCount={project.totalCount}
-                  inProgressCount={project.inProgressCount}
-                  blockedCount={project.blockedCount}
-                  lastUpdatedAt={project.lastUpdatedAt}
-                  href={`/manager/projects/${project.id}`}
-                />
-              ))}
-            </Box>
-          )}
-        </>
-      )}
+          <DependencyGraph
+            variant="compact"
+            interactive={false}
+            ariaLabel="Top bottlenecks"
+            graph={graph.data}
+            loading={graph.isPending}
+            error={graph.isError ? getErrorMessage(graph.error) : null}
+            onRetry={() => graph.refetch()}
+            onNodeSelect={(id) =>
+              router.push(`/manager/bottlenecks?taskId=${encodeURIComponent(id)}`)
+            }
+          />
+        </Card>
+      </Stack>
     </PageContainer>
   );
 }

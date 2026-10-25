@@ -30,6 +30,17 @@ logger = logging.getLogger("mind.extraction")
 # summarising it, and that is worth a repair attempt.
 MAX_TITLE_LENGTH = 200
 
+# Past this a description is the content quoted back, not a summary of it
+# (#690). Dropped rather than repaired: the field is optional, and one long
+# description must not cost a repair round of a whole meeting. The prompt asks
+# for about half of this; that is what keeps the answer under the output cap,
+# since this check only runs once the answer is written.
+MAX_DESCRIPTION_LENGTH = 600
+
+# Named dependencies kept per task (#690). A task waiting on more than this
+# many named pieces of work is almost always a model listing every noun.
+MAX_MENTIONS_PER_TASK = 10
+
 # Strings an LLM emits when it means "nothing here". Normalised to None so
 # that a missing value looks missing to the confidence heuristic instead of
 # masquerading as evidence.
@@ -327,9 +338,81 @@ class ExtractedFields(BaseModel):
     # Not every source carries one, so None is a normal outcome.
     source_ref: str | None = None
 
-    # Whether the task looks like it depends on or blocks another task.
+    # Whether the task looks like it depends on, or is blocked by, other work.
+    # One direction since #690: a task others wait for is not dependent.
     # Resolving the actual targets belongs to R3, not to this stage.
     has_dependencies: bool
+
+    # Short phrases naming the work this one depends on or is blocked by —
+    # never what waits for it: #834 sends each to Chain as this task's
+    # `depends_on_task_id`, so the other direction would arrive reversed. In the
+    # content's own words: "the DB upgrade" (#690, was #842). Never in the
+    # contract. They travel beside it to #834's resolver, which turns them into
+    # task ids, so a phrase that cannot be resolved there must not leave here.
+    # Checked against the content, and the rule that a mention means a
+    # dependency applied, by `grounding.ground_dependency_mentions`: the
+    # check needs the content, which this model never sees. So the rule
+    # holds on what `extract` returns (`ExtractionSuccess`), not on a bare
+    # ExtractedFields parsed or built anywhere else.
+    dependency_mentions: list[str] = []
+
+    @field_validator("dependency_mentions", mode="before")
+    @classmethod
+    def only_usable_mentions_survive(cls, value: object) -> list[str]:
+        """Keep each phrase once, and drop what is not a phrase.
+
+        Optional, so nothing here raises: an unusable mention is dropped and
+        logged rather than sending the whole answer, every task of a meeting,
+        back for repair. One empty mention used to stall #834's listener.
+        """
+
+        if value is None:
+            return []
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, list):
+            logger.warning(
+                "extraction: dependency_mentions came back as %r, which is not a list; "
+                "recording it as empty",
+                value,
+            )
+            return []
+
+        kept: list[str] = []
+        # Case-blind: "The DB upgrade" is the same mention, and the resolver
+        # would only look it up twice.
+        seen: set[str] = set()
+        for item in value:
+            if not isinstance(item, str):
+                logger.warning("extraction: dependency mention %r is not a phrase; dropping it", item)
+                continue
+            phrase = item.strip()
+            if phrase.lower() in _NULL_PLACEHOLDERS or phrase.lower() in seen:
+                continue
+            # A mention names another task, so it is held to a title's length:
+            # past that it is the content echoed back, and the resolver would
+            # match it against everything.
+            if len(phrase) > MAX_TITLE_LENGTH:
+                logger.warning(
+                    "extraction: dependency mention %r is longer than %d characters; dropping it",
+                    phrase[:60] + "...",
+                    MAX_TITLE_LENGTH,
+                )
+                continue
+            seen.add(phrase.lower())
+            kept.append(phrase)
+
+        # Each mention costs #834 a vector search. Kept rather than repaired
+        # past the cap, as everything optional here is.
+        if len(kept) > MAX_MENTIONS_PER_TASK:
+            logger.warning(
+                "extraction: %d more dependency mention(s) than the %d kept; dropping %s",
+                len(kept) - MAX_MENTIONS_PER_TASK,
+                MAX_MENTIONS_PER_TASK,
+                kept[MAX_MENTIONS_PER_TASK:],
+            )
+            kept = kept[:MAX_MENTIONS_PER_TASK]
+        return kept
 
     @field_validator("description", "source_ref", mode="after")
     @classmethod
@@ -339,6 +422,20 @@ class ExtractedFields(BaseModel):
         if value is None:
             return None
         return None if value.strip().lower() in _NULL_PLACEHOLDERS else value
+
+    @field_validator("description", mode="after")
+    @classmethod
+    def a_runaway_description_is_dropped(cls, value: str | None) -> str | None:
+        """Too long to be a summary: logged and dropped, never repaired."""
+
+        if value is not None and len(value) > MAX_DESCRIPTION_LENGTH:
+            logger.warning(
+                "extraction: description of %d characters is longer than %d; dropping it",
+                len(value),
+                MAX_DESCRIPTION_LENGTH,
+            )
+            return None
+        return value
 
     @field_validator("title", mode="before")
     @classmethod
@@ -366,8 +463,8 @@ class ExtractedFields(BaseModel):
         if isinstance(value, str) and value.strip().lower() in _NULL_PLACEHOLDERS:
             raise ValueError(
                 f"{value!r} is a placeholder, not a title; summarise the task as an action, "
-                f"and if the content truly describes no task, say so rather than filling "
-                f"the field in"
+                f"and if this entry describes no task, leave it out of the list rather "
+                f"than filling the field in"
             )
         return value
 
@@ -378,6 +475,29 @@ class ExtractedFieldsWithClassification(ExtractedFields, ClassificationFields):
     either model changes here with it, which is what stops the switched-off
     and switched-on shapes from drifting apart.
     """
+
+
+# More than this from one text is a model listing every sentence, not a meeting
+# with that many commitments. Rejected and repaired rather than cut short:
+# keeping the first fifteen would drop the rest without anyone seeing it.
+MAX_TASKS_PER_TEXT = 15
+
+
+class ExtractedTasks[TaskT: ExtractedFields](BaseModel):
+    """The whole answer: every task the text describes (#690).
+
+    `TaskT` is the shape `response_model` chose, so each task in the list is
+    validated by exactly the rules a single task always was, switch on or off.
+
+    One invalid task fails the whole answer. Keeping the valid ones would
+    quietly drop the bad one, and the repair round can name it by its place in
+    the list (`tasks.1.title`). An empty list is a valid answer: a text with no
+    task in it is the normal case, not a failure.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tasks: list[TaskT] = Field(max_length=MAX_TASKS_PER_TEXT)
 
 
 def response_model(classify: bool) -> type[ExtractedFields]:

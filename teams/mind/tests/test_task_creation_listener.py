@@ -12,6 +12,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
+from typing import cast
 from uuid import UUID
 
 import pytest
@@ -28,7 +29,7 @@ from mind.task_creation.listener import (
     task_created_handler,
 )
 from mind.task_creation.pending import PendingRequests
-from tests.test_index_consumer import FakeVectorStore
+from tests.test_index_consumer import TENANT, FakeTenantStore, FakeVectorIndex
 
 ITEM = UUID("6f1c2e9a-3b4d-4c8e-9a1f-2d7e5b0c4a83")
 TASK_ID = "4d0c6f2a-8b1e-4c3d-9a7f-1e2b3c4d5e6f"
@@ -41,7 +42,8 @@ def _no_embedding_model(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def loop() -> Iterator[asyncio.AbstractEventLoop]:
-    """The listener's own loop, as in R3's runner: the consumer calls a plain function."""
+    """As in production: `task_created_handler` calls `run_until_complete` on
+    this per message -- it doesn't need to be running between calls."""
 
     loop = asyncio.new_event_loop()
     yield loop
@@ -63,20 +65,25 @@ class FakeMessage:
         return self._headers
 
 
-class BrokenStore(FakeVectorStore):
+class BrokenIndex(FakeVectorIndex):
+    def for_tenant(self, tenant_id: UUID) -> FakeTenantStore:
+        return BrokenStore(self, tenant_id)
+
+
+class BrokenStore(FakeTenantStore):
     async def upsert_if_absent(
         self, task_id: str, vector: list[float], *, content_hash: str | None = None
     ) -> bool:
         raise ConnectionError("database unavailable")
 
 
-def _flow(store: FakeVectorStore) -> TaskCreationFlow:
+def _flow(store: FakeVectorIndex) -> TaskCreationFlow:
     return TaskCreationFlow(producer=FakeProducer(), index=store, pending=PendingRequests())
 
 
 def _sent(flow: TaskCreationFlow, loop: asyncio.AbstractEventLoop) -> UUID:
     proposal = TaskCreationRequested(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+        tenant_id=TENANT,
         title="Send the Q3 revenue report",
         description="Before Friday.",
         source_type=SourceType.SLACK,
@@ -84,17 +91,20 @@ def _sent(flow: TaskCreationFlow, loop: asyncio.AbstractEventLoop) -> UUID:
         has_dependencies=False,
         confidence=0.85,
     )
-    return loop.run_until_complete(flow.send(proposal, bridge_correlation_id=ITEM, revision=0))
+    coro = flow.send(proposal, bridge_correlation_id=ITEM, revision=0)
+    return loop.run_until_complete(coro)
 
 
 def _event() -> TaskCreatedEvent:
-    return TaskCreatedEvent(id=TASK_ID, title="Send the Q3 revenue report", description="Before Friday.")
+    return TaskCreatedEvent(
+        id=TASK_ID, tenant_id=str(TENANT), title="Send the Q3 revenue report", description="Before Friday."
+    )
 
 
 def test_the_handler_passes_the_event_and_the_envelopes_headers(
     loop: asyncio.AbstractEventLoop,
 ) -> None:
-    store = FakeVectorStore()
+    store = FakeVectorIndex()
     flow = _flow(store)
     correlation_id = _sent(flow, loop)
 
@@ -106,7 +116,7 @@ def test_the_handler_passes_the_event_and_the_envelopes_headers(
 def test_a_message_with_no_headers_is_ignored(loop: asyncio.AbstractEventLoop) -> None:
     """Tasks created by anyone else; confluent-kafka returns None, not []."""
 
-    store = FakeVectorStore()
+    store = FakeVectorIndex()
     flow = _flow(store)
     _sent(flow, loop)
 
@@ -118,13 +128,32 @@ def test_a_message_with_no_headers_is_ignored(loop: asyncio.AbstractEventLoop) -
 def test_a_failure_propagates_so_the_offset_is_not_committed(
     loop: asyncio.AbstractEventLoop,
 ) -> None:
-    flow = _flow(BrokenStore())
+    flow = _flow(BrokenIndex())
     correlation_id = _sent(flow, loop)
 
     with pytest.raises(ConnectionError):
         task_created_handler(flow, loop)(
             _event(), FakeMessage([("correlation_id", str(correlation_id).encode())])
         )
+
+
+class HangingFlow:
+    """on_task_created that never returns -- a stuck Kafka publish, say."""
+
+    async def on_task_created(self, event: object, headers: object) -> None:
+        await asyncio.Event().wait()
+
+
+def test_a_handler_that_hangs_times_out_instead_of_blocking_forever(
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    """Without a timeout, this would hang the test (and, in production, the
+    listener's reconnect/max_outage logic would never get a chance to run)."""
+
+    handle = task_created_handler(cast(TaskCreationFlow, HangingFlow()), loop, handler_timeout=0.05)
+
+    with pytest.raises(TimeoutError):
+        handle(_event(), FakeMessage(None))
 
 
 def test_its_consumer_group_is_not_r3s() -> None:
@@ -233,7 +262,7 @@ def _listen(
         consumer.time = time_
     connections = iter(consumers)
     run_task_created_listener(
-        _flow(FakeVectorStore()),
+        _flow(FakeVectorIndex()),
         loop,
         consumer_factory=lambda: next(connections),
         sleep=time_.sleep,

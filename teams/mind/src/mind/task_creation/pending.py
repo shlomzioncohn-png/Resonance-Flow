@@ -18,6 +18,8 @@ class PendingRequest:
     bridge_correlation_id: UUID
     revision: int  # for a later update flow: a higher one means the content changed
     task_index: int
+    tenant_id: UUID
+    dependency_mentions: tuple[str, ...] = ()
     sent_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 

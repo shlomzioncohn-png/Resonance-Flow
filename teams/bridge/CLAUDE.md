@@ -686,3 +686,27 @@ surfaces `skippedAtRead` in `CrmSyncResponse`'s JSON body.
 `bridge.crm.hubspot.max-skipped-ratio` is **HubSpot-only for now** — Salesforce's per-record skip
 (§10) has no equivalent aggregate threshold yet. Out of scope for this task; flagged as a
 candidate for the same guard later.
+
+## 12. Shared AI infrastructure (`com.rnd.bridge.ai`, added 2026-10-20)
+
+Every model (LLM) call in Bridge goes through `LlmClients.forUsage("<usage>")` - see
+`src/main/java/com/rnd/bridge/ai/README.md` for the five-line usage example, the settings and the
+design (Registry + Decorator chain + Strategy per provider). Don't write another HTTP client for a
+model; add a usage instead.
+
+- Settings: `bridge.ai.*` - `providers` (each key once), `models` (the one shared list), optional
+  `usages` overrides. "usage", not "profile": Spring's `@Profile` already means something else here
+  (§5).
+- **Free only, by design** (`bridge.ai.free-only: true`): startup fails if any listed model isn't
+  `free: true`. The real guarantee is a Gemini key from a project with no billing.
+- PII redaction (email/phone/Israeli ID/card/IBAN) applies to the text sent to the model only -
+  never to what Bridge publishes (Mind reads `RawObjectEvent` unredacted, agreed with Mind's
+  team, who chose on 2026-10-19 to keep separate LLM implementations rather than share one).
+- **Free-tier budget:** Gemini's free tier allows ~20 requests/day per model per project, shared by
+  every usage on it - keep the usages' `daily-call-limit`s summing to at most that. Thinking is
+  off (`reasoning-effort: none`), replies capped (`max-output-tokens`). A 429 asking to wait
+  longer than 30s is a spent quota: not retried, and that model fails fast until the reset.
+- Media classification is the first user (usages `media-meeting`, `media-document`).
+  `BRIDGE_MEDIA_CLASSIFIER_API_KEY` still works as a fallback for `BRIDGE_AI_GEMINI_API_KEY`.
+- Not done yet: the Helm side (mounting the key into the cluster) - deliberately last, with relay,
+  once everything works locally. `EnrichmentService` (§9.3) is a natural next user.

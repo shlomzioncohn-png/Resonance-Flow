@@ -1,5 +1,6 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.dto.PageResponse;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStateHistoryEntry;
@@ -17,6 +18,8 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.util.Map;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -38,6 +41,25 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Tag("postgres")
 @SpringBootTest
 class TaskStateHistoryRollbackPostgresTest {
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.rnd.chain.repository.TaskReadinessRepository taskReadinessRepository;
+
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
 
     private static final LocalDateTime STORED_AT = LocalDateTime.of(2026, 1, 1, 12, 0);
 
@@ -62,6 +84,11 @@ class TaskStateHistoryRollbackPostgresTest {
                 public PageResponse<TaskStateHistoryEntry> findByTaskId(UUID taskId, Instant from, Instant to,
                                                                        int page, int size) {
                     return real.findByTaskId(taskId, from, to, page, size);
+                }
+                    @Override
+                public Map<UUID, Instant> findLatestBlockedSinceByTaskIds(
+                    List<UUID> taskIds) {
+                    return Map.of();
                 }
             };
         }
@@ -89,7 +116,7 @@ class TaskStateHistoryRollbackPostgresTest {
 
     private UUID savedActiveTask() {
         UUID id = UUID.randomUUID();
-        Task task = TaskCounterUpdater.copyOf(newTask(id)).status(TaskStatus.ACTIVE).updatedAt(STORED_AT).build();
+        Task task = newTask(id).toBuilder().status(TaskStatus.ACTIVE).updatedAt(STORED_AT).build();
         taskRepository.save(task);
         createdTaskIds.add(id);
         return id;
@@ -98,6 +125,7 @@ class TaskStateHistoryRollbackPostgresTest {
     private long historyRowCount(UUID taskId) {
         return historyRepository.findByTaskId(taskId, null, null, 0, 10).totalElements();
     }
+
 
     @AfterEach
     void cleanUp() {
@@ -115,7 +143,7 @@ class TaskStateHistoryRollbackPostgresTest {
         UUID id = savedActiveTask();
 
         eligibilityService.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING, STORED_AT.plusSeconds(10),
-                taskRepository.findById(id).orElseThrow().getTenantId());
+                taskRepository.findById(id).orElseThrow().getTenantId(), null);
 
         assertThat(taskRepository.findById(id).orElseThrow().getStatus()).isEqualTo(TaskStatus.PENDING);
         assertThat(historyRowCount(id)).isEqualTo(1);
@@ -127,7 +155,7 @@ class TaskStateHistoryRollbackPostgresTest {
         FailingHistoryConfig.FAIL.set(true);
 
         assertThatThrownBy(() -> eligibilityService.onTaskStatusChangedIfNewer(id, TaskStatus.PENDING,
-                STORED_AT.plusSeconds(10), taskRepository.findById(id).orElseThrow().getTenantId()))
+                STORED_AT.plusSeconds(10), taskRepository.findById(id).orElseThrow().getTenantId(), null))
                 .isInstanceOf(IllegalStateException.class);
 
         Task after = taskRepository.findById(id).orElseThrow();
@@ -146,7 +174,7 @@ class TaskStateHistoryRollbackPostgresTest {
                 .isInstanceOf(IllegalStateException.class);
 
         assertThat(dependencyRepository.findByTaskId(dependent)).isEmpty();
-        assertThat(taskRepository.findById(dependent).orElseThrow().getBlockingCount()).isZero();
+        assertThat(blockingCount(taskRepository.findById(dependent).orElseThrow())).isZero();
         assertThat(historyRowCount(dependent)).isZero();
     }
 
@@ -158,7 +186,7 @@ class TaskStateHistoryRollbackPostgresTest {
         edgeService.addDependency(dependent, blocker);
 
         assertThat(dependencyRepository.findByTaskId(dependent)).hasSize(1);
-        assertThat(taskRepository.findById(dependent).orElseThrow().getBlockingCount()).isEqualTo(1);
+        assertThat(blockingCount(taskRepository.findById(dependent).orElseThrow())).isEqualTo(1);
         assertThat(historyRowCount(dependent)).isEqualTo(1);
     }
 }

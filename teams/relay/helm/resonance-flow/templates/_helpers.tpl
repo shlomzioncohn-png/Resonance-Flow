@@ -229,17 +229,12 @@ code being deployed instead of drifting from a hand-run or CI-only step.
   {{- end }}
 {{- end }}
 {{/*
-Kafka SASL client JAAS config string, derived from kafka.sasl.client.users
-and kafka.sasl.client.passwords - the same values that seed the Kafka subchart's own
-auto-generated Secret (see charts/kafka/templates/secrets.yaml). Every component that
-talks to Kafka should render its credentials through this instead of duplicating the
-username/password as its own constant (the same kind of copy once let inbox's Postgres
-password drift from postgresql.auth.postgresPassword). Takes the root context ($),
-not a scoped one, since kafka.sasl.client.* lives at the top level of Values.
+Kafka SASL client JAAS config string. Takes the root context ($) and an
+optional .password (default "${client-passwords}").
 */}}
 {{- define "resonance-flow.kafkaSaslJaasConfig" -}}
 {{- $root := .root -}}
-{{- $password := .password | default (first $root.Values.kafka.sasl.client.passwords) -}}
+{{- $password := .password | default "${client-passwords}" -}}
 {{- printf "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";" (first $root.Values.kafka.sasl.client.users) $password }}
 {{- end }}
 {{/*

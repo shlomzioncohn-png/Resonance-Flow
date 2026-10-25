@@ -12,9 +12,9 @@ import java.util.UUID;
  * expected to be replaced once a real token exists — keeping the parsing in one place means that
  * replacement happens here, not in two places that have to be kept in sync by hand.
  */
-final class ActorHeaderExtractor {
+public final class ActorHeaderExtractor {
 
-    static final String ACTOR_HEADER = "X-Actor-Id";
+    public static final String ACTOR_HEADER = "X-Actor-Id";
 
     private ActorHeaderExtractor() {
     }

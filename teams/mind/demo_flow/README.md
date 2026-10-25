@@ -83,6 +83,7 @@ the full pipeline only gives the expected answer on a clean store. See
 | `--order natural\|slack-first` | `natural` | the order items arrive in |
 | `--gap SECONDS` | 90 (natural), 5 (slack-first) | wait between two items |
 | `--anchor YYYY-MM-DD` | this week's Monday | the Monday the scenario happens on |
+| `--tenant-id UUID` | `DEMO_TENANT_ID`, or `00000000-0000-0000-0000-000000000001` | the tenant every event is sent for. See [Tenant](#tenant) |
 | `--dry-run` | off | build and validate, print the events, send nothing |
 | `--minio-endpoint`, `--minio-bucket` | `MINIO_ENDPOINT`, `MINIO_BUCKET`, or `http://localhost:9000`, `bridge-raw` | |
 | `--bootstrap-servers` | `KAFKA_BOOTSTRAP_SERVERS` or `localhost:9092` | |
@@ -92,6 +93,25 @@ the full pipeline only gives the expected answer on a clean store. See
 The defaults and environment variable names are Bridge's own (`teams/bridge/.env.example`).
 MinIO credentials come from `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` (default
 `minioadmin`).
+
+### Tenant
+
+Every event, object key, object tag and email body uses one tenant, set in one place:
+`--tenant-id`, else `DEMO_TENANT_ID`, else `common.DEFAULT_TENANT_ID`. The scenario files
+carry no tenant of their own.
+
+It has to pass two checks:
+
+1. **Mind accepts only a UUID.** The consumer skips any other tenant at ERROR
+   (`ingestion/event_objects.py`, `tenant_uuid`), so nothing reaches extraction.
+2. **Inbox creates a task only for a tenant it already has.** `tasks.tenant_id` is a
+   foreign key to `tenants.id`.
+
+The default is Inbox's built-in "System" tenant, `00000000-0000-0000-0000-000000000001`
+(`teams/inbox/src/main/resources/db/migration/V15__add_system_admin.sql`), because it is the
+one tenant every Inbox database has, even an empty one. To run the demo under a tenant of
+its own, create it in Inbox first and pass its id. A value that is not a UUID stops the feed
+before anything is sent, and `--dry-run` reports it as a contract problem.
 
 ### Arrival order
 
@@ -192,12 +212,12 @@ Before sending anything, every run (dry or real) does three checks:
 ## What you see while it runs
 
 ```
-... demo_flow.feed INFO run 20261019T074840Z-slack-first: order=slack-first gap=5s scenario Monday=2026-10-19, 3 items
-... demo_flow.feed INFO [1/3] SLACK   landed     SLACK/demo-tenant/2026-10-19/<uuid>.txt (ROLE_TRANSCRIPT, MODALITY_TEXT, 213 bytes)
+... demo_flow.feed INFO run 20261019T074840Z-slack-first: order=slack-first gap=5s scenario Monday=2026-10-19 tenant=00000000-0000-0000-0000-000000000001, 3 items
+... demo_flow.feed INFO [1/3] SLACK   landed     SLACK/00000000-0000-0000-0000-000000000001/2026-10-19/<uuid>.txt (ROLE_TRANSCRIPT, MODALITY_TEXT, 213 bytes)
 ... demo_flow.feed INFO [1/3] SLACK   published  SOURCE_TYPE_SLACK key=<correlation-id>:0
 ... demo_flow.feed INFO waiting 5 s before the next item
-... demo_flow.feed INFO [2/3] MEETING landed     ZOOM/demo-tenant/2026-10-19/<correlation-id>.m4a (ROLE_RECORDING, MODALITY_AUDIO, 334,022 bytes)
-... demo_flow.feed INFO [2/3] MEETING landed     ZOOM/demo-tenant/2026-10-19/<correlation-id>.json (ROLE_SOURCE_METADATA, MODALITY_TEXT, 1,748 bytes)
+... demo_flow.feed INFO [2/3] MEETING landed     ZOOM/00000000-0000-0000-0000-000000000001/2026-10-19/<correlation-id>.m4a (ROLE_RECORDING, MODALITY_AUDIO, 334,022 bytes)
+... demo_flow.feed INFO [2/3] MEETING landed     ZOOM/00000000-0000-0000-0000-000000000001/2026-10-19/<correlation-id>.json (ROLE_SOURCE_METADATA, MODALITY_TEXT, 1,748 bytes)
 ...
 ... demo_flow.feed INFO expected (expected.json) for this run:
 ... demo_flow.feed INFO   T1 'Send Northwind the price quote' owner=Dana due Thursday 2026-10-22
@@ -272,6 +292,11 @@ the feed.
    matches a rerun's tasks against the previous run's stored tasks, so the second run yields
    0 tasks (see [Repeatability](#repeatability)). The planned fix is a reset that deletes the
    demo's data before a run, after the tenant fix in duplicate detection.
+10. **Bridge's media lane sends a tenant that is not a UUID (Bridge).**
+    `teams/bridge/.env.example` sets `BRIDGE_MEDIA_TENANT_ID=demo-tenant`, and Mind's consumer
+    skips every event whose tenant is not a UUID (see [Tenant](#tenant)). So a meeting or
+    scanned document that comes through Bridge itself, not through this feed, never reaches
+    extraction. The feed uses a UUID tenant and is not affected.
 
 ### Resolved by #823
 

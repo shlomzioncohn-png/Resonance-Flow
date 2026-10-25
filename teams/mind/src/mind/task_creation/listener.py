@@ -32,16 +32,20 @@ class _KafkaMessage(Protocol):
     def headers(self) -> Headers: ...
 
 
+#: Bounds one message's handling (a stuck Kafka publish inside on_matched,
+#: say): without it, a hang here never returns to the reconnect logic below.
+DEFAULT_HANDLER_TIMEOUT = 60.0
+
+
 def task_created_handler(
-    flow: TaskCreationFlow, loop: AbstractEventLoop
+    flow: TaskCreationFlow, loop: AbstractEventLoop, *, handler_timeout: float = DEFAULT_HANDLER_TIMEOUT
 ) -> Callable[[object, object], None]:
     """The function `ProtobufConsumer.run` calls with (event, message)."""
 
     def _handle(event: object, message: object) -> None:
         # The correlation_id is on the envelope: the message goes in for its headers.
-        loop.run_until_complete(
-            flow.on_task_created(cast(TaskCreatedEvent, event), cast(_KafkaMessage, message).headers())
-        )
+        coro = flow.on_task_created(cast(TaskCreatedEvent, event), cast(_KafkaMessage, message).headers())
+        loop.run_until_complete(asyncio.wait_for(coro, timeout=handler_timeout))
 
     return _handle
 
@@ -70,6 +74,7 @@ def run_task_created_listener(
     loop: AbstractEventLoop,
     *,
     max_outage: float = MAX_OUTAGE,
+    handler_timeout: float = DEFAULT_HANDLER_TIMEOUT,
     consumer_factory: Callable[[], _Consumer] | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
@@ -78,11 +83,16 @@ def run_task_created_listener(
 
     Reconnects after a failure; after `max_outage` seconds of failing, lets the
     error out for the process to exit and restart. The flow's vector store must
-    already be open on `loop`.
+    already be open on `loop`. A message whose handling runs past
+    `handler_timeout` (a stuck Kafka publish, say) raises `TimeoutError` into
+    this same reconnect logic rather than hanging it -- the loop itself keeps
+    running (`asyncio.wait_for` cancels the handler coroutine, not the loop),
+    though the thread actually blocked underneath (`asyncio.to_thread`) can't
+    be force-stopped and may still be running when the next message arrives.
     """
 
     make_consumer = consumer_factory or (lambda: ProtobufConsumer(group_id=GROUP_ID, topics=[TOPIC]))
-    handle = task_created_handler(flow, loop)
+    handle = task_created_handler(flow, loop, handler_timeout=handler_timeout)
     outage_began: float | None = None
     failures = 0
     handling_since: float | None = None  # when the message being handled arrived
@@ -140,7 +150,8 @@ def run_overdue_timer(
     """Check for overdue requests every `interval` seconds until `stop` is set. Blocks.
 
     A failed check is logged and the timer goes on. Waits on `stop`, so a
-    shutdown does not wait out the interval.
+    shutdown does not wait out the interval. Owns its own loop, independent
+    of the listener's, so neither's work delays the other.
     """
 
     loop = asyncio.new_event_loop()

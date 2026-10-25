@@ -53,6 +53,11 @@ public class ImageIoDocumentReader implements PagedDocumentReader {
         }
 
         @Override
+        public long pagePixels(int pageIndex) throws IOException {
+            return (long) reader.getWidth(pageIndex) * reader.getHeight(pageIndex);
+        }
+
+        @Override
         public BufferedImage renderPage(int pageIndex) throws IOException {
             return reader.read(pageIndex);
         }

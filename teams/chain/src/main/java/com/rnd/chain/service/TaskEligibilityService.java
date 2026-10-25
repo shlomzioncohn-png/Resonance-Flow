@@ -5,6 +5,7 @@ import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskEligibilityResponse;
 import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTier;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.repository.GraphLock;
@@ -12,18 +13,18 @@ import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.repository.TaskRepository;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.UnaryOperator;
 
 /**
  * Task status transitions and the readiness they imply; see {@link GraphLock} for the
@@ -31,11 +32,10 @@ import java.util.UUID;
  *
  * <p>{@code @Transactional} on the methods below provides atomicity and rollback.
  */
+@Slf4j
+@RequiredArgsConstructor
 @Service
 public class TaskEligibilityService {
-
-    private static final Logger log =
-            LoggerFactory.getLogger(TaskEligibilityService.class);
 
     /** How far before a DONE task.updated's own updated_at a task created from it is stamped. */
     static final Duration DONE_EVENT_UPDATED_AT_SKEW = Duration.ofSeconds(1);
@@ -43,25 +43,10 @@ public class TaskEligibilityService {
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
     private final GraphLock graphLock;
-    private final TaskCounterUpdater taskCounterUpdater;
+    private final DependencyEdgeService dependencyEdgeService;
+    private final PriorityScoreService priorityScoreService;
     private final TaskStateHistoryRecorder historyRecorder;
     private final TaskReadinessRepository taskReadinessRepository;
-
-    public TaskEligibilityService(
-            TaskRepository taskRepository,
-            TaskDependencyRepository taskDependencyRepository,
-            GraphLock graphLock,
-            TaskCounterUpdater taskCounterUpdater,
-            TaskStateHistoryRecorder historyRecorder,
-            TaskReadinessRepository taskReadinessRepository) {
-
-        this.taskRepository = taskRepository;
-        this.taskDependencyRepository = taskDependencyRepository;
-        this.graphLock = graphLock;
-        this.taskCounterUpdater = taskCounterUpdater;
-        this.historyRecorder = historyRecorder;
-        this.taskReadinessRepository = taskReadinessRepository;
-    }
 
     @Transactional
     public void recalculateTaskEligibility(UUID taskId) {
@@ -76,12 +61,8 @@ public class TaskEligibilityService {
                                 List.of(taskId)),
                         taskId);
 
-        taskCounterUpdater.updateCounters(
+        dependencyEdgeService.recomputePriority(
                 taskId,
-                task -> TaskCounterUpdater.withCounters(
-                        task,
-                        task.getBlockingCount(),
-                        task.getOpenConstraintCount()),
                 readiness,
                 readiness);
     }
@@ -98,11 +79,15 @@ public class TaskEligibilityService {
         Objects.requireNonNull(
                 newStatus,
                 "newStatus must not be null");
+        UUID lockTenantId =
+                tenantIdForTask(taskId);
 
-        graphLock.runExclusive(() -> {
+        graphLock.runExclusive(  lockTenantId,() -> {
 
             Task current =
-                    taskCounterUpdater.requireTask(taskId);
+                    taskRepository.findById(taskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(taskId));
 
             TaskStatus previousStatus =
                     current.getStatus();
@@ -137,13 +122,13 @@ public class TaskEligibilityService {
                                 dependentIds);
             }
 
-            TaskCounterUpdater.requireUpdated(
-                    taskRepository.update(
+            taskRepository.update(
                             taskId,
-                            task -> TaskCounterUpdater.copyOf(task)
+                            task -> task.toBuilder()
                                     .status(newStatus)
-                                    .build()),
-                    taskId);
+                                    .build())
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(taskId));
 
             historyRecorder.recordStatusChange(
                     taskId,
@@ -153,18 +138,16 @@ public class TaskEligibilityService {
             if (previousStatus != TaskStatus.DONE
                     && newStatus == TaskStatus.DONE) {
 
-                adjustDependentsBlockingCount(
+                recomputeDependents(
                         taskId,
-                        -1,
                         dependentIds,
                         beforeReadiness);
 
             } else if (previousStatus == TaskStatus.DONE
                     && newStatus != TaskStatus.DONE) {
 
-                adjustDependentsBlockingCount(
+                recomputeDependents(
                         taskId,
-                        1,
                         dependentIds,
                         beforeReadiness);
             }
@@ -178,13 +161,16 @@ public class TaskEligibilityService {
      *
      * @throws TenantReassignmentException if tenantId differs from
      * the already stored tenant
+     *
+     * <p>{@code tier} is stored under the same staleness check; null keeps the stored tier.
      */
     @Transactional
     public void onTaskStatusChangedIfNewer(
             UUID taskId,
             TaskStatus newStatus,
             LocalDateTime eventUpdatedAt,
-            UUID tenantId) {
+            UUID tenantId,
+            TaskTier tier) {
 
         Objects.requireNonNull(
                 taskId,
@@ -202,7 +188,7 @@ public class TaskEligibilityService {
                 tenantId,
                 "tenantId must not be null");
 
-        graphLock.runExclusive(() -> {
+        graphLock.runExclusive( tenantId,() -> {
 
             Task current =
                     taskRepository.findById(taskId)
@@ -215,7 +201,10 @@ public class TaskEligibilityService {
                                 taskId,
                                 tenantId,
                                 newStatus,
-                                eventUpdatedAt));
+                                eventUpdatedAt)
+                                .toBuilder()
+                                .tier(tier)
+                                .build());
 
                 return;
             }
@@ -286,15 +275,16 @@ public class TaskEligibilityService {
                     taskId,
                     newStatus);
 
-            TaskCounterUpdater.requireUpdated(
-                    taskRepository.update(
+            taskRepository.update(
                             taskId,
-                            task -> TaskCounterUpdater.copyOf(task)
+                            task -> task.toBuilder()
                                     .status(newStatus)
                                     .updatedAt(eventUpdatedAt)
                                     .tenantId(tenantId)
-                                    .build()),
-                    taskId);
+                                    .tier(tier != null ? tier : task.getTier())
+                                    .build())
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(taskId));
 
             historyRecorder.recordStatusChange(
                     taskId,
@@ -304,18 +294,16 @@ public class TaskEligibilityService {
             if (previousStatus != TaskStatus.DONE
                     && newStatus == TaskStatus.DONE) {
 
-                adjustDependentsBlockingCount(
+                recomputeDependents(
                         taskId,
-                        -1,
                         dependentIds,
                         beforeReadiness);
 
             } else if (previousStatus == TaskStatus.DONE
                     && newStatus != TaskStatus.DONE) {
 
-                adjustDependentsBlockingCount(
+                recomputeDependents(
                         taskId,
-                        1,
                         dependentIds,
                         beforeReadiness);
             }
@@ -347,7 +335,7 @@ public class TaskEligibilityService {
                 tenantId,
                 "tenantId must not be null");
 
-        graphLock.runExclusive(() -> {
+        graphLock.runExclusive( tenantId,() -> {
 
             Task current =
                     taskRepository.findById(taskId)
@@ -396,9 +384,6 @@ public class TaskEligibilityService {
                 .parentTaskId(null)
                 .tenantId(tenantId)
                 .status(status)
-                .isReady(true)
-                .blockingCount(0)
-                .openConstraintCount(0)
                 .estimatedDurationMin(null)
                 .score(null)
                 .createdAt(LocalDateTime.now())
@@ -427,11 +412,15 @@ public class TaskEligibilityService {
         Objects.requireNonNull(
                 kafkaTimestamp,
                 "kafkaTimestamp must not be null");
+        UUID lockTenantId =
+               tenantIdForTask(taskId);
 
-        graphLock.runExclusive(() -> {
+        graphLock.runExclusive(lockTenantId, () -> {
 
             Task current =
-                    taskCounterUpdater.requireTask(taskId);
+                    taskRepository.findById(taskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(taskId));
 
             if (current.getStatus() == TaskStatus.DONE) {
                 return;
@@ -465,34 +454,32 @@ public class TaskEligibilityService {
                     "Task {} completed",
                     taskId);
 
-            TaskCounterUpdater.requireUpdated(
-                    taskRepository.update(
+            taskRepository.update(
                             taskId,
-                            task -> TaskCounterUpdater.copyOf(task)
+                            task -> task.toBuilder()
                                     .status(TaskStatus.DONE)
-                                    .build()),
-                    taskId);
+                                    .build())
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(taskId));
 
             historyRecorder.recordStatusChange(
                     taskId,
                     current.getStatus(),
                     TaskStatus.DONE);
 
-            adjustDependentsBlockingCount(
+            recomputeDependents(
                     taskId,
-                    -1,
                     dependentIds,
                     beforeReadiness);
         });
     }
 
     /**
-     * Stored counters are still maintained for backwards compatibility,
-     * but readiness/history decisions are based on task_readiness.
+     * Readiness/history decisions are based on task_readiness; the dependents are
+     * locked and re-read so their priority can be recomputed.
      */
-    private void adjustDependentsBlockingCount(
+    private void recomputeDependents(
             UUID taskId,
-            int delta,
             List<UUID> dependentIds,
             Map<UUID, TaskReadinessSnapshot> beforeReadiness) {
 
@@ -500,26 +487,10 @@ public class TaskEligibilityService {
             return;
         }
 
-        Map<UUID, Task> previousById =
-                new HashMap<>();
-
-        List<Task> updated =
+        List<Task> locked =
                 taskRepository.updateAll(
                         dependentIds,
-                        task -> {
-
-                            previousById.put(
-                                    task.getId(),
-                                    task);
-
-                            return TaskCounterUpdater.withCounters(
-                                    task,
-                                    Math.max(
-                                            0,
-                                            task.getBlockingCount()
-                                                    + delta),
-                                    task.getOpenConstraintCount());
-                        });
+                        UnaryOperator.identity());
 
         /*
          * Read again from the View AFTER the blocker/status change.
@@ -529,7 +500,7 @@ public class TaskEligibilityService {
                 taskReadinessRepository.findByIds(
                         dependentIds);
 
-        for (Task task : updated) {
+        for (Task task : locked) {
 
             TaskReadinessSnapshot before =
                     requireReadinessSnapshot(
@@ -543,7 +514,7 @@ public class TaskEligibilityService {
 
             /*
              * History receives values calculated by the View,
-             * not the stored task.blocking_count.
+             * not the task table.
              */
             historyRecorder.recordBlockingTransition(
                     task.getId(),
@@ -552,9 +523,9 @@ public class TaskEligibilityService {
                     after.blockingCount()
                             + after.openConstraintCount());
 
-            taskCounterUpdater.recomputePriorityScoreAndPublish(
+            priorityScoreService.recomputePriorityScoreAndPublish(
                     task.getId(),
-                    previousById.get(task.getId()),
+                    task,
                     task,
                     before,
                     after);
@@ -569,7 +540,9 @@ public class TaskEligibilityService {
                 "taskId must not be null");
 
         Task task =
-                taskCounterUpdater.requireTask(taskId);
+                taskRepository.findById(taskId)
+                    .orElseThrow(
+                            () -> new TaskNotFoundException(taskId));
 
         TaskReadinessSnapshot readiness =
                 requireReadinessSnapshot(
@@ -600,4 +573,12 @@ public class TaskEligibilityService {
 
         return snapshot;
     }
+    private UUID tenantIdForTask(
+        UUID taskId) {
+
+        return taskRepository
+            .findById(taskId)
+            .map(Task::getTenantId)
+            .orElse(null);
+        }
 }

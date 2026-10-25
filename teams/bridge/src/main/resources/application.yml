@@ -194,6 +194,58 @@ bridge:
       # Local time zone the exporting phone was set to - WhatsApp export timestamps carry no
       # offset, so this must match the tenant, not be assumed to be UTC.
       zone-id: ${BRIDGE_WHATSAPP_ZONE_ID:Asia/Jerusalem}
+  # Shared AI infrastructure (com.rnd.bridge.ai, see its README.md) - every model call in Bridge
+  # goes through here. Providers hold each key once; models is the one list everyone picks
+  # from; usages optionally override the default per use. Startup fails on anything that points
+  # nowhere.
+  ai:
+    # true: Bridge refuses to start if any model below isn't marked free: true, so nothing can
+    # ever be billed. The real guarantee is a provider key with no billing attached.
+    free-only: true
+    default-model: gemini-flash
+    providers:
+      gemini:
+        base-url: ${BRIDGE_AI_GEMINI_BASE_URL:${BRIDGE_MEDIA_CLASSIFIER_BASE_URL:https://generativelanguage.googleapis.com/v1beta/openai}}
+        # Falls back to the old media-classifier variable, so an existing .env keeps working.
+        api-key: ${BRIDGE_AI_GEMINI_API_KEY:${BRIDGE_MEDIA_CLASSIFIER_API_KEY:}}
+        # With thinking off (reasoning-effort below) a call takes seconds; 30s still leaves room
+        # for image requests and a loaded free tier, while bounding a hung call (x3 attempts).
+        timeout: 30s
+    models:
+      gemini-flash:
+        provider: gemini
+        name: ${BRIDGE_AI_GEMINI_MODEL:${BRIDGE_MEDIA_CLASSIFIER_MODEL:gemini-3.6-flash}}
+        images: true
+        # Free tier only (a Google AI Studio key in a project with no billing).
+        free: true
+        # Thinking off: a short classification gains nothing from it, and with it on one call
+        # measured 145s locally (Mind measured 101s on vs ~1.4s off). Each call then costs one
+        # free-tier request in seconds, not minutes.
+        reasoning-effort: none
+        # Reply cap (max_tokens). The JSON a classification needs is ~100 tokens; a reply cut
+        # off here fails loudly ("cut off at max_tokens"), it is never parsed half-done.
+        max-output-tokens: 1024
+    defaults:
+      redact-pii: true
+      # Per usage per UTC day. Gemini's free tier allows 20 requests/day per model per project
+      # (measured 2026-10-20 - Google changes it, check https://ai.dev/rate-limit), shared by
+      # every usage on that model, so the usages' limits below must add up to at most that.
+      # Without this, one busy usage would spend the day's quota for all the others.
+      daily-call-limit: 10
+    usages:
+      media-meeting:
+        model: gemini-flash
+        daily-call-limit: 10
+      media-document:
+        model: gemini-flash
+        daily-call-limit: 10
+        # Documents are sent as images - regex redaction has nothing to act on.
+        redact-pii: false
+    monitoring:
+      # MODEL_CALL_SLOW / MODEL_CALL_EXPENSIVE thresholds (Mind uses 10s; an image request to
+      # the free tier can take longer, so 15s).
+      llm-max-duration: 15s
+      llm-max-cost-usd: 0.02
   media:
     # Meeting/doc/audio hand-off (Esther) - local folders to read test files from, one per
     # source, not committed; set your own in .env. Shares minio.* and
@@ -230,17 +282,18 @@ bridge:
         # was checked. Formats: whatever a PagedDocumentReader supports (images + PDF).
         max-pages-to-scan: 5
         pages-to-send: 2
-      model:
-        # Any OpenAI-compatible chat-completions endpoint - switching provider (DeepSeek,
-        # Groq, ...) is a change to these three settings only. Scanned docs need a model that
-        # accepts images.
-        base-url: ${BRIDGE_MEDIA_CLASSIFIER_BASE_URL:https://generativelanguage.googleapis.com/v1beta/openai}
-        name: ${BRIDGE_MEDIA_CLASSIFIER_MODEL:gemini-3.8-flash}
-        api-key: ${BRIDGE_MEDIA_CLASSIFIER_API_KEY:}
-        # Bump on every prompt change in ModelMediaClassifier, so results stay comparable.
-        prompt-version: v2
-        # Thinking models take ~20s per call - keep well above that.
-        timeout: 60s
+        # Hostile-file guards, checked before any parsing/rendering: a larger file is never
+        # opened; a page bigger than this (width x height once rendered, read from its header)
+        # is never rendered - a decompression bomb would otherwise exhaust the heap. 25 MP is
+        # far above any real scan (A4 at 300 DPI is ~8.7 MP).
+        max-file-size-bytes: 26214400
+        max-page-pixels: 25000000
+      # Bump on every prompt change in ModelMediaClassifier, so results stay comparable.
+      # v3: the text sent to the model is PII-redacted (bridge.ai), so the input changed.
+      # v4: content-is-data rule against prompt injection; transcript fenced in <transcript>.
+      prompt-version: v4
+      # Which model, which key, fallback and limits: bridge.ai.usages.media-meeting /
+      # media-document below (the shared AI infrastructure), not here.
     zoom:
       # Not consumed by MediaIntakeOrchestrator yet - see ZoomCloudRecordingClient's javadoc
       # for why (no meetingId source). "real" bean is a throw-stub like bridge.intake.*.mode's -
