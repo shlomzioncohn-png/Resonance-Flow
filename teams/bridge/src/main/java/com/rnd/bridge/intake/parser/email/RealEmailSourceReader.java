@@ -182,7 +182,12 @@ public class RealEmailSourceReader implements EmailSourceReader {
         String messageId = header(payload, "Message-ID");
         Instant occurredAt = Instant.ofEpochMilli(message.getInternalDate());
         String naturalId = "EMAIL|" + message.getId();
-        String correlationId = UUID.randomUUID().toString();
+        // Deterministic (type-3 name-based), not randomUUID() - a resend of the same Gmail
+        // message (retry of a partially-failed batch, or a resync) must mint the same
+        // correlationId every time, or Mind's dedupKey() (correlationId + ":" + revision, see
+        // RawObjectEvent) sees it as a brand-new logical item and duplicates it.
+        String correlationId = UUID.nameUUIDFromBytes(
+                (properties.tenantId() + "|" + naturalId).getBytes(StandardCharsets.UTF_8)).toString();
         List<String> participants = participants(payload, from);
 
         StringBuilder plainTextBody = new StringBuilder();

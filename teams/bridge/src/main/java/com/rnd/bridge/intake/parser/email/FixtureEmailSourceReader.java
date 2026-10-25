@@ -41,7 +41,9 @@ public class FixtureEmailSourceReader implements EmailSourceReader {
             String tenantId = node.get("tenantId").asText();
             Instant occurredAt = Instant.parse(date);
             String naturalId = "EMAIL|" + from + "|" + date;
-            String correlationId = UUID.randomUUID().toString();
+            // Deterministic, same as RealEmailSourceReader - see its comment for why.
+            String correlationId = UUID.nameUUIDFromBytes(
+                    (tenantId + "|" + naturalId).getBytes(StandardCharsets.UTF_8)).toString();
 
             JsonNode attachments = node.get("attachments");
             int attachmentCount = attachments == null ? 0 : attachments.size();
