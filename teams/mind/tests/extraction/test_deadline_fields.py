@@ -80,6 +80,22 @@ def test_the_end_of_a_period() -> None:
     assert deadline.period is PeriodEnd.MONTH
 
 
+def test_a_weeks_end_marked_next_week_is_next_weeks_end() -> None:
+    """Not a week early: next_week on a week's end says which week."""
+
+    deadline = _deadline(
+        {
+            "phrase": "by the end of next week",
+            "kind": "PERIOD_END",
+            "period": "WEEK",
+            "next_week": True,
+        }
+    )
+
+    assert deadline is not None
+    assert deadline.period is PeriodEnd.NEXT_WEEK
+
+
 def test_the_words_are_read_in_any_case() -> None:
     """`friday` is the right answer written wrong, as with `strategic`."""
 

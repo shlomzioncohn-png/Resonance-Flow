@@ -124,7 +124,7 @@ def resolve_weekday(
 # When the end of the working day has already passed on the day the text was
 # written, a deadline "today" goes to the last minute of it instead, so the task
 # is not born overdue.
-_LAST_MINUTE = time(23, 59)
+LAST_MINUTE = time(23, 59)
 
 
 def at_end_of_day(day: date, written_at: datetime, end_of_day: time) -> datetime:
@@ -133,7 +133,7 @@ def at_end_of_day(day: date, written_at: datetime, end_of_day: time) -> datetime
     # Only a deadline on the very day of writing can find its working day over.
     is_today = day == written_at.date()
     working_day_over = is_today and written_at.time() >= end_of_day
-    at = _LAST_MINUTE if working_day_over else end_of_day
+    at = LAST_MINUTE if working_day_over else end_of_day
     return datetime.combine(day, at, tzinfo=written_at.tzinfo)
 
 

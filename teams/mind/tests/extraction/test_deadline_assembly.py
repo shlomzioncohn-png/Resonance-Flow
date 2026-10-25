@@ -162,6 +162,38 @@ def test_a_period_end_time_already_gone_today_points_ahead(
     assert _resolved(stated, written) == expected
 
 
+@pytest.mark.parametrize(
+    ("stated", "expected"),
+    [
+        # Tonight, not twelve hours ago.
+        (
+            {
+                "phrase": "by midnight",
+                "kind": "PERIOD_END",
+                "period": "DAY",
+                "time_of_day": "00:00",
+            },
+            _utc(2026, 10, 22, 20, 59),
+        ),
+        # The end of tomorrow, not its first minute.
+        (
+            {
+                "phrase": "by midnight tomorrow",
+                "kind": "OFFSET",
+                "amount": 1,
+                "unit": "DAYS",
+                "time_of_day": "00:00",
+            },
+            _utc(2026, 10, 23, 20, 59),
+        ),
+    ],
+)
+def test_midnight_written_as_00_00_is_the_end_of_that_day(
+    stated: dict[str, object], expected: datetime
+) -> None:
+    assert _resolved(stated) == expected
+
+
 def test_a_time_today_already_gone_stays_missed() -> None:
     """ "by 12:30" written at 15:00 was missed; only a weekday has another week."""
 

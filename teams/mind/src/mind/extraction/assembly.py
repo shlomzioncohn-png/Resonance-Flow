@@ -29,6 +29,7 @@ from mind.contracts.base_enums import SourceType
 from mind.contracts.task_creation_requested import TaskCreationRequested
 from mind.extraction.confidence import effort_confidence
 from mind.extraction.deadline import (
+    LAST_MINUTE,
     OffsetUnit,
     PeriodEnd,
     at_end_of_day,
@@ -134,10 +135,17 @@ def resolve_deadline(
     if stated.time_of_day is not None and not _on_the_clock(stated):
         # A time the content names ("by 12:30", "by 09:00 tomorrow") replaces
         # the end of the working day, on whichever day the kind landed.
-        moment = datetime.combine(moment.date(), stated.time_of_day, tzinfo=local.tzinfo)
+        # Midnight as a deadline is the end of the day it names: "by midnight"
+        # written at noon is tonight, not twelve hours ago. The prompt asks for
+        # "23:59", and this holds when a model writes "00:00" anyway.
+        at = LAST_MINUTE if stated.time_of_day == _MIDNIGHT else stated.time_of_day
+        moment = datetime.combine(moment.date(), at, tzinfo=local.tzinfo)
         if moment <= local:
-            moment = _next_one_still_ahead(stated, moment, stated.time_of_day)
+            moment = _next_one_still_ahead(stated, moment, at)
     return moment.astimezone(UTC)
+
+
+_MIDNIGHT = time(0, 0)
 
 
 def _next_one_still_ahead(stated: StatedDeadline, passed: datetime, at: time) -> datetime:

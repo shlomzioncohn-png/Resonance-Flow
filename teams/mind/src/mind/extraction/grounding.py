@@ -1,27 +1,19 @@
 """Checking what the model claims against the content it read.
 
-`source_ref` is a pointer back to the original item — a message id, a ticket
-key, a URL. Bridge now sends one on `RawObjectEvent` (#31), but extraction
-does not receive the event yet, so here the only place it can come from is
-inside the content itself. That makes the rule here a
-definition rather than a restriction: a pointer that does not appear in the
-content was not found there, it was invented.
-
-Why it is worth a module of its own rather than a line in the scorer: the
-field is what a user later clicks to see "the original", so what goes into
-it is a boundary decision, not a scoring detail. The scorer is told what
-happened afterwards, and only reads.
+`source_ref` is a pointer the model says it read in the content — a message
+id, a ticket key, a URL. It is **not** what reaches Inbox: the `source_ref`
+sent there comes from Bridge's event (#31, #353), never from the model, as
+`assembly.source_ref_for_inbox` says. What the model wrote is still checked,
+because inventing a pointer says something about the answer: a pointer that
+does not appear in the content was not found there, it was invented, and
+`ground_source_ref` drops it and tells the scorer (`invented_source_ref`), which
+lowers the task's `confidence`.
 
 **What this does not do.** It closes fabrication — a model inventing a
-pointer that was never in the content. It does not close injection. The
-content is written by whoever sent it, so a sender can put a link in their
-own message and tell the model to use it; the value then genuinely is in the
-content and passes every check here. The only real answer to that is for
-`source_ref` to arrive from Bridge as event metadata instead of being read
-out of the body. #31 settled that: `RawObjectEvent.source_ref`. Once the
-consumer passes it through, it should replace this content-derived value.
-Until then, treat this field as content-derived: it says what the content
-claimed, not what is true.
+pointer that was never in the content. It does not close injection: a sender
+can put a link in their own message and tell the model to use it, and the value
+then genuinely is in the content. That no longer reaches Inbox, since Bridge's
+own `source_ref` is the one sent.
 
 This belongs between parsing and scoring because that is the one point where
 both the raw text and the extracted fields are in hand: the schema never sees

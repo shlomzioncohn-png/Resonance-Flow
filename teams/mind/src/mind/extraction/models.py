@@ -298,6 +298,12 @@ class StatedDeadline(BaseModel):
         days_ahead = self.amount * _DAYS_PER_UNIT[self.unit] if self.amount and self.unit else 0
         if days_ahead > MAX_DEADLINE_DAYS_AHEAD:
             raise ValueError(f"an offset lands more than {MAX_DEADLINE_DAYS_AHEAD} days ahead")
+        # "The end of next week" written as the week's end with next_week set,
+        # where NEXT_WEEK was asked for: the right answer in a neighbouring
+        # shape, the way `friday` is FRIDAY written wrong. Read as it was meant,
+        # rather than a week early.
+        if self.period is PeriodEnd.WEEK and self.next_week:
+            self.period = PeriodEnd.NEXT_WEEK
         return self
 
 
