@@ -59,9 +59,8 @@ def _log_items(event: RawObjectEvent, items: list[ExtractionItem]) -> None:
     # logs travel further than the content was meant to.
     for item in items:
         logger.info(
-            "landed: %s %s ready for extraction, %d chars",
+            "landed: %s ready for extraction, %d chars",
             event.correlation_id,
-            item.item_key,
             len(item.text),
         )
 

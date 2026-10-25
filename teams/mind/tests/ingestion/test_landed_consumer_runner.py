@@ -20,9 +20,7 @@ def test_the_stand_in_hand_off_logs_where_the_text_is_never_what_it_says(
     # Bridge may have classified the item HIGH sensitivity; logs travel further
     # than the content was meant to.
     caplog.set_level(logging.INFO)
-    item = ExtractionItem(
-        text=SECRET, source_type=SourceType.EMAIL, item_key="EMAIL/t/2026-10-19/body.eml"
-    )
+    item = ExtractionItem(text=SECRET, source_type=SourceType.EMAIL, item_key=str(ITEM))
     event = RawObjectEvent.model_validate(
         {
             "schema_version": "1.0",
@@ -47,7 +45,7 @@ def test_the_stand_in_hand_off_logs_where_the_text_is_never_what_it_says(
 
     _log_items(event, [item])
 
-    assert "body.eml" in caplog.text
+    assert str(ITEM) in caplog.text
     assert f"{len(SECRET)} chars" in caplog.text
     assert "salary" not in caplog.text
 
