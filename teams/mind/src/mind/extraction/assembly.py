@@ -20,7 +20,7 @@ says, and `resolve_deadline` turns it into a moment.
 """
 
 import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
 from mind.config import DeadlineSettings
@@ -131,9 +131,16 @@ def resolve_deadline(
         return None
     if stated.time_of_day is not None and not _on_the_clock(stated):
         # A time the content names ("by 12:30", "by 09:00 tomorrow") replaces
-        # the end of the working day, on whichever day the kind landed. Even
-        # one already passed today: the content said that time.
+        # the end of the working day, on whichever day the kind landed. A time
+        # already passed today stays passed ("by 12:30" written at 13:00 was
+        # missed), except on a weekday: "by Thursday 10:00" written on Thursday
+        # afternoon cannot mean a moment already gone, so it is next week's
+        # (decision 9's nearest occurrence, among those still ahead).
         moment = datetime.combine(moment.date(), stated.time_of_day, tzinfo=local.tzinfo)
+        if stated.kind is DeadlineKind.WEEKDAY and moment <= local:
+            moment = datetime.combine(
+                moment.date() + timedelta(days=7), stated.time_of_day, tzinfo=local.tzinfo
+            )
     return moment.astimezone(UTC)
 
 

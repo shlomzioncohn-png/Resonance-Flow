@@ -169,8 +169,10 @@ def resolve_period_end(
     elif period is PeriodEnd.MONTH:
         day = _end_of_month(today, working_days)
     else:
-        start = today if period is PeriodEnd.WEEK else _next_week_start(today, working_days)
-        day = _first_day_ending_a_week(start, working_days)
+        start = today
+        if period is PeriodEnd.NEXT_WEEK:
+            start = _week_boundary(today, range(1, 8), _BEFORE, working_days)
+        day = _week_boundary(start, range(7), _AFTER, working_days)
     return at_end_of_day(day, written_at, end_of_day)
 
 
@@ -182,21 +184,24 @@ def _end_of_month(today: date, working_days: frozenset[int]) -> date:
     return day if day >= today else last_day
 
 
-# A week has a last working day (followed by a day off) and a first one
-# (preceded by a day off). Searched at most a week ahead: a week with no day
-# off has neither, and is refused rather than looped over.
-def _first_day_ending_a_week(start: date, working_days: frozenset[int]) -> date:
-    for ahead in range(7):
-        day = start + timedelta(days=ahead)
-        if _works(day, working_days) and not _works(day + timedelta(days=1), working_days):
-            return day
-    raise ValueError("the working week has no day off; check the deadline settings")
+# A week has a last working day, the one with a day off AFTER it, and a first
+# one, with a day off BEFORE it.
+_AFTER = timedelta(days=1)
+_BEFORE = timedelta(days=-1)
 
 
-def _next_week_start(today: date, working_days: frozenset[int]) -> date:
-    for ahead in range(1, 8):
-        day = today + timedelta(days=ahead)
-        if _works(day, working_days) and not _works(day - timedelta(days=1), working_days):
+def _week_boundary(
+    start: date, ahead: range, neighbour: timedelta, working_days: frozenset[int]
+) -> date:
+    """The first working day, `ahead` days from `start`, whose `neighbour` is off.
+
+    Searched at most a week ahead: a week with no day off has no boundary,
+    and is refused rather than looped over.
+    """
+
+    for days in ahead:
+        day = start + timedelta(days=days)
+        if _works(day, working_days) and not _works(day + neighbour, working_days):
             return day
     raise ValueError("the working week has no day off; check the deadline settings")
 

@@ -8,7 +8,7 @@ and most tests script and read exactly one.
 """
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 
 from mind.config import DeadlineSettings
 from mind.extraction.extractor import ExtractedTask, ExtractionSuccess
@@ -16,9 +16,16 @@ from mind.extraction.providers.base import LLMResponse
 
 # What to_task_creation_requested needs to resolve a deadline (#960): when the
 # scripted text was written (Thursday 2026-10-22, 10:00 in Israel), and the
-# default locale, read from nothing in the environment or a .env file.
+# default locale. Every value is passed, since a value given here wins over
+# MIND_DEADLINE__* in the environment: a developer's own setting must not move
+# the hours these tests expect.
 WRITTEN_AT = datetime(2026, 10, 22, 7, 0, tzinfo=UTC)
-DEADLINE_SETTINGS = DeadlineSettings(_env_file=None)
+DEADLINE_SETTINGS = DeadlineSettings(
+    _env_file=None,
+    timezone="Asia/Jerusalem",
+    end_of_day=time(17, 0),
+    working_days=["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY"],
+)
 
 
 class ScriptedProvider:

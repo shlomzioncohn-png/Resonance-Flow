@@ -298,6 +298,14 @@ class DeadlineSettings(BaseSettings):
         # ever ends. Resolution refuses both too, but that would be mid-run.
         if not value or len(value) == len(Weekday):
             raise ValueError("needs at least one working day and one day off")
+        # One unbroken run of days, which may wrap past Sunday (Sunday to
+        # Thursday is one): a week ends on the working day before a day off,
+        # so with gaps (Monday, Wednesday, Friday) "the end of the week" would
+        # be Monday.
+        numbers = {day.number for day in value}
+        starts = [n for n in numbers if (n - 1) % 7 not in numbers]
+        if len(starts) != 1:
+            raise ValueError("working days must be consecutive, e.g. SUNDAY to THURSDAY")
         return value
 
     @property

@@ -110,6 +110,31 @@ def test_each_kind_reaches_a_moment_in_utc(stated: dict[str, object], expected: 
     assert resolved is not None and resolved.utcoffset() == UTC.utcoffset(None)
 
 
+THURSDAY_AFTERNOON = datetime(2026, 10, 22, 12, 0, tzinfo=UTC)  # 15:00 in Israel
+
+
+def test_a_weekday_time_already_gone_today_is_next_weeks() -> None:
+    """ "by Thursday 10:00" written on Thursday at 15:00 cannot mean five hours ago."""
+
+    stated = {
+        "phrase": "by Thursday 10:00",
+        "kind": "WEEKDAY",
+        "weekday": "THURSDAY",
+        "time_of_day": "10:00",
+    }
+
+    # The 29th is after the clocks go back: 10:00 in Israel is 08:00 UTC.
+    assert _resolved(stated, THURSDAY_AFTERNOON) == _utc(2026, 10, 29, 8)
+
+
+def test_a_time_today_already_gone_stays_missed() -> None:
+    """ "by 12:30" written at 15:00 was missed; only a weekday has another week."""
+
+    stated = {"phrase": "by 12:30", "kind": "PERIOD_END", "period": "DAY", "time_of_day": "12:30"}
+
+    assert _resolved(stated, THURSDAY_AFTERNOON) == _utc(2026, 10, 22, 9, 30)
+
+
 def test_today_is_the_writers_today_not_utcs() -> None:
     """01:30 on the 22nd in Israel is still the 21st in UTC (decision 3)."""
 

@@ -51,6 +51,14 @@ def test_a_tenant_abroad_is_a_change_of_settings(load) -> None:
     assert settings.weekday_numbers == frozenset({0, 1, 2, 3, 4})
 
 
+def test_a_week_that_wraps_past_sunday_is_one_run(load) -> None:
+    """Friday to Monday runs from Python's Sunday (6) into Monday (0): still one run."""
+
+    settings = load(working_days='["FRIDAY", "SATURDAY", "SUNDAY", "MONDAY"]')
+
+    assert settings.weekday_numbers == frozenset({4, 5, 6, 0})
+
+
 def test_day_names_are_read_in_any_case(load) -> None:
     settings = load(working_days='["sunday", "Monday", "TUESDAY", "wednesday", "thursday"]')
 
@@ -66,6 +74,8 @@ def test_day_names_are_read_in_any_case(load) -> None:
         # No working day: nothing to count. Every day a working day: no week
         # ever ends. Either way resolution has nothing to stand on.
         ({"working_days": "[]"}, "working_days"),
+        # Gaps: the week would "end" on Monday, the first day before a day off.
+        ({"working_days": '["MONDAY", "WEDNESDAY", "FRIDAY"]'}, "working_days"),
         (
             {
                 "working_days": '["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", '

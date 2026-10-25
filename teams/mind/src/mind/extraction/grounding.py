@@ -44,6 +44,7 @@ a follow-up, not a change to make while fixing this.
 import logging
 import re
 from collections.abc import Iterable
+from functools import lru_cache
 
 from mind.extraction.confidence import content_words
 from mind.extraction.models import ClassificationFields, ExtractedFields
@@ -122,6 +123,35 @@ def ground_source_ref(
 # calibrated; the persona set has no labelled mentions to tune on.
 MIN_WORDS_TO_MISS_ONE = 3
 
+# Whole numbers, so "72" is not found inside "720".
+_NUMBER = re.compile(r"[0-9]+")
+
+
+def _numbers(text: str) -> set[int]:
+    # As values, so the 9 of "by 9:00" is the 09 of a text that writes 09:00.
+    return {int(digits) for digits in _NUMBER.findall(text)}
+
+
+@lru_cache(maxsize=1)
+def _said(raw_text: str) -> tuple[frozenset[str], frozenset[int]]:
+    """The content's words and numbers, read once per text.
+
+    Every task of an item is checked against the same text, twice (mentions,
+    deadline): a meeting of fifteen tasks read its 100k characters thirty
+    times. One entry, so only the text being checked is kept.
+    """
+
+    return frozenset(content_words(raw_text)), frozenset(_numbers(raw_text))
+
+
+def _words_said(words: list[str], said: frozenset[str]) -> bool:
+    """The rule for a paraphrase: every content word said, except that one may
+    be missing from MIN_WORDS_TO_MISS_ONE words up. Shared by mentions and the
+    deadline's phrase, so tightening it changes both."""
+
+    missing = sum(1 for word in words if word not in said)
+    return missing <= (1 if len(words) >= MIN_WORDS_TO_MISS_ONE else 0)
+
 
 def ground_dependency_mentions(
     fields: ExtractedFields,
@@ -154,14 +184,12 @@ def ground_dependency_mentions(
     show other work without naming it.
     """
 
-    said = set(content_words(raw_text))
+    said, _ = _said(raw_text)
     siblings = {title.strip().lower() for title in sibling_titles}
     kept = []
     for mention in fields.dependency_mentions:
         words = content_words(mention)
-        missing = sum(1 for word in words if word not in said)
-        allowed = 1 if len(words) >= MIN_WORDS_TO_MISS_ONE else 0
-        if mention.strip().lower() in siblings or (words and missing <= allowed):
+        if mention.strip().lower() in siblings or (words and _words_said(words, said)):
             kept.append(mention)
         else:
             logger.warning(
@@ -185,15 +213,6 @@ def ground_dependency_mentions(
     )
 
 
-# Whole numbers, so "72" is not found inside "720".
-_NUMBER = re.compile(r"[0-9]+")
-
-
-def _numbers(text: str) -> set[int]:
-    # As values, so the 9 of "by 9:00" is the 09 of a text that writes 09:00.
-    return {int(digits) for digits in _NUMBER.findall(text)}
-
-
 def ground_deadline(fields: ExtractedFields, raw_text: str) -> ExtractedFields:
     """Keep the deadline only if the content says its phrase.
 
@@ -215,12 +234,9 @@ def ground_deadline(fields: ExtractedFields, raw_text: str) -> ExtractedFields:
     phrase = fields.deadline.phrase
     words = content_words(phrase)
     numbers = _numbers(phrase)
-    said = set(content_words(raw_text))
-    missing_words = sum(1 for word in words if word not in said)
-    allowed = 1 if len(words) >= MIN_WORDS_TO_MISS_ONE else 0
-    numbers_said = numbers <= _numbers(raw_text)
+    said, said_numbers = _said(raw_text)
 
-    if (words or numbers) and missing_words <= allowed and numbers_said:
+    if (words or numbers) and _words_said(words, said) and numbers <= said_numbers:
         return fields
     logger.warning(
         "extraction: deadline phrase (%d words, %d numbers) does not appear in the content; "

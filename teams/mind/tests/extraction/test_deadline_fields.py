@@ -106,7 +106,12 @@ def test_a_declined_deadline_is_null(declined: object) -> None:
         {"phrase": "by the end", "kind": "PERIOD_END"},
         # Values no calendar or clock has.
         {"phrase": "by Funday", "kind": "WEEKDAY", "weekday": "FUNDAY"},
-        {"phrase": "Friday 25:00", "kind": "WEEKDAY", "weekday": "FRIDAY", "time_of_day": "25:00"},
+        # Beyond what a calendar can count: these raised OverflowError out of
+        # assembly and the message came back for ever.
+        {"phrase": "within 100000000 days", "kind": "OFFSET", "amount": 100000000, "unit": "DAYS"},
+        {"phrase": "in 1001 weeks", "kind": "OFFSET", "amount": 1001, "unit": "WEEKS"},
+        {"phrase": "May 1, 10000000000", "kind": "DATE", "month": 5, "day": 1, "year": 10**10},
+        {"phrase": "May 1, 1850", "kind": "DATE", "month": 5, "day": 1, "year": 1850},
         {"phrase": "by month 13", "kind": "DATE", "month": 13, "day": 1},
         {"phrase": "in 0 days", "kind": "OFFSET", "amount": 0, "unit": "DAYS"},
         # No phrase: nothing to check the answer against.
@@ -126,6 +131,28 @@ def test_a_deadline_that_cannot_be_used_becomes_null_and_is_logged(
         assert _deadline(unusable) is None
 
     assert "deadline" in caplog.text
+
+
+@pytest.mark.parametrize("unreadable", ["5pm", "25:00", "noon", 17])
+def test_an_unreadable_time_costs_only_the_time(
+    unreadable: object, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The day the model read is still right: Friday survives, at the end of
+    the working day, instead of the whole deadline being lost."""
+
+    with caplog.at_level(logging.WARNING, logger="mind.extraction"):
+        deadline = _deadline(
+            {
+                "phrase": "by Friday 5pm",
+                "kind": "WEEKDAY",
+                "weekday": "FRIDAY",
+                "time_of_day": unreadable,
+            }
+        )
+
+    assert deadline is not None
+    assert (deadline.weekday, deadline.time_of_day) == (Weekday.FRIDAY, None)
+    assert "time_of_day" in caplog.text
 
 
 def test_an_unusable_deadline_costs_nothing_else() -> None:

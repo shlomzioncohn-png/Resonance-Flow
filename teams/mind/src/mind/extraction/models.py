@@ -202,6 +202,13 @@ _DEADLINE_NEEDS: dict[DeadlineKind, tuple[str, ...]] = {
 # longer "phrase" is a sentence, not the words the deadline was read from.
 MAX_DEADLINE_PHRASE_LENGTH = 100
 
+# Bounds that keep resolution inside what a calendar can count: without them
+# "within 100000000 days" or a year of 10**10 raised OverflowError out of
+# assembly and the item's message was redelivered for ever. Far wider than
+# any real deadline (1000 weeks is nineteen years), so they only stop nonsense.
+MAX_OFFSET_AMOUNT = 1000
+DEADLINE_YEARS = range(2000, 2201)
+
 
 class StatedDeadline(BaseModel):
     """What the content says about when the task is due (#960), as written.
@@ -220,12 +227,12 @@ class StatedDeadline(BaseModel):
     # DATE. The year only when the content writes one.
     month: int | None = Field(default=None, ge=1, le=12)
     day: int | None = Field(default=None, ge=1, le=31)
-    year: int | None = None
+    year: int | None = Field(default=None, ge=DEADLINE_YEARS.start, le=DEADLINE_YEARS.stop - 1)
     # Any kind that lands on a day, only when the content names a time:
     # "by 12:30" (today), "by 09:00 tomorrow". Ignored on a clock offset.
     time_of_day: time | None = None
     # OFFSET
-    amount: int | None = Field(default=None, gt=0)
+    amount: int | None = Field(default=None, gt=0, le=MAX_OFFSET_AMOUNT)
     unit: OffsetUnit | None = None
     # WEEKDAY
     weekday: Weekday | None = None
@@ -237,6 +244,36 @@ class StatedDeadline(BaseModel):
     @classmethod
     def words_in_any_case(cls, value: object) -> object:
         return value.strip().upper() if isinstance(value, str) else value
+
+    @field_validator("time_of_day", mode="wrap")
+    @classmethod
+    def an_unreadable_time_costs_only_the_time(
+        cls, value: object, handler: ValidatorFunctionWrapHandler
+    ) -> time | None:
+        """ "5pm" where "17:00" was asked: the day the model read is still
+        right, so it keeps the end of the working day instead of losing the
+        whole deadline. Logged by type only: the value is the content's.
+
+        Only a written time is read: pydantic would take the number 17 as
+        seventeen seconds past midnight, where the model meant 17:00.
+        """
+
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            problems = [type(value).__name__]
+        else:
+            try:
+                result: time = handler(value)
+            except ValidationError as error:
+                problems = [d["type"] for d in error.errors(include_input=False, include_url=False)]
+            else:
+                return result
+        logger.warning(
+            "extraction: deadline time_of_day cannot be read (%s); keeping the deadline without it",
+            problems,
+        )
+        return None
 
     @model_validator(mode="after")
     def the_kind_has_what_it_needs(self) -> Self:
