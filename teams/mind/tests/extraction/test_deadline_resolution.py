@@ -329,3 +329,12 @@ def test_a_week_without_an_end_is_refused(working_days: frozenset[int]) -> None:
 
     with pytest.raises(ValueError, match="working"):
         _period_end(PeriodEnd.WEEK, WRITTEN_AT, working_days)
+
+
+def test_the_end_of_the_day_is_today() -> None:
+    """ "Today", "end of day": the day of writing, with the after-hours rule."""
+
+    assert _period_end(PeriodEnd.DAY, WRITTEN_AT) == _in_israel(2026, 10, 22, 17)
+    assert _period_end(PeriodEnd.DAY, _in_israel(2026, 10, 22, 18)) == _in_israel(
+        2026, 10, 22, 23, 59
+    )

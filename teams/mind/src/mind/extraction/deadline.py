@@ -138,6 +138,8 @@ def _at_end_of_day(day: date, written_at: datetime, end_of_day: time) -> datetim
 class PeriodEnd(StrEnum):
     """ "By the end of ..." Internal: it never reaches Inbox."""
 
+    # "Today", "end of day". Tomorrow is an offset of one day.
+    DAY = "DAY"
     WEEK = "WEEK"
     # "Next week" as a deadline: by the end of it.
     NEXT_WEEK = "NEXT_WEEK"
@@ -151,7 +153,7 @@ def resolve_period_end(
     end_of_day: time,
     working_days: frozenset[int],
 ) -> datetime:
-    """The moment "by the end of the week / next week / the month" points to.
+    """The moment "by the end of the day / week / next week / month" points to.
 
     A period ends on its last working day. A week whose last working day has
     passed (written on a Friday in Israel) means the coming week; a month whose
@@ -160,7 +162,9 @@ def resolve_period_end(
 
     _check_working_week(working_days)
     today = written_at.date()
-    if period is PeriodEnd.MONTH:
+    if period is PeriodEnd.DAY:
+        day = today
+    elif period is PeriodEnd.MONTH:
         day = _end_of_month(today, working_days)
     else:
         start = today if period is PeriodEnd.WEEK else _next_week_start(today, working_days)
