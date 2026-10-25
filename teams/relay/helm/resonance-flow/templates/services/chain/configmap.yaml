@@ -28,7 +28,7 @@ data:
     # handlers' @KafkaListener placeholders). No serializers: the app owns its wire format.
     chain:
       kafka:
-        schema-registry-url: {{ printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) | quote }}
+        schema-registry-url: {{ include "resonance-flow.schemaRegistryUrl" (dict "root" $ "deps" $component.dependencies) | quote }}
         consumer-group-id: {{ $cfg.kafka.consumerGroupId | quote }}
         topics:
           # Looked up by KafkaSchedulingUpdatePublisher.TOPIC_KEY.
