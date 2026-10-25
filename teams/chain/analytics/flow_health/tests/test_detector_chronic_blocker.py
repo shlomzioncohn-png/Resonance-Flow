@@ -3,7 +3,7 @@ import pandas as pd
 from flow_health.detectors.chronic_blocker import detect
 from flow_health.detectors.config import ChronicBlockerConfig, load_config
 
-CFG = ChronicBlockerConfig()
+CFG = ChronicBlockerConfig(min_active_ratio=8.0, min_dependents=1)   # fixed example values, independent of the tuned defaults
 COLUMNS = ["task_id", "tier", "is_open", "days_active", "active_ratio_to_tier_project", "days_blocked_total",
            "n_dependents_max"]
 
@@ -20,7 +20,7 @@ def _by_id(flags):
 
 
 def test_load_config_matches_the_dataclass_defaults():
-    assert load_config().chronic_blocker == CFG
+    assert load_config().chronic_blocker == ChronicBlockerConfig()
 
 
 def test_worked_on_far_beyond_the_usual_with_a_dependent_is_flagged_with_the_right_severity():

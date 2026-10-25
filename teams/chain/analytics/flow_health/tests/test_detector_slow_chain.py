@@ -3,7 +3,7 @@ import pandas as pd
 from flow_health.detectors.config import SlowChainConfig, load_config
 from flow_health.detectors.slow_chain import detect
 
-CFG = SlowChainConfig()
+CFG = SlowChainConfig(min_ratio_to_median=2.0)   # fixed example values, independent of the tuned defaults
 PATH_COLUMNS = ["sink_task_id", "task_ids", "chain_length", "end_to_end_days", "max_hop_share"]
 HEALTHY_LINK_RATIOS = (0.8, 1.0, 1.2)
 
@@ -30,7 +30,7 @@ def _ids(flags):
 
 
 def test_load_config_matches_the_dataclass_defaults():
-    assert load_config().slow_chain == CFG
+    assert load_config().slow_chain == SlowChainConfig()
 
 
 def test_a_path_whose_links_are_all_far_slower_than_usual_is_flagged_with_the_right_severity():
