@@ -30,6 +30,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -59,6 +61,7 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(prefix = "bridge.intake.email", name = "mode", havingValue = "real")
 public class RealEmailSourceReader implements EmailSourceReader {
 
+    private static final Logger log = LoggerFactory.getLogger(RealEmailSourceReader.class);
     private static final Pattern ANGLE_BRACKET_EMAIL = Pattern.compile("<([^>]+)>");
 
     private final GoogleCredentialsProvider credentialsProvider;
@@ -81,11 +84,16 @@ public class RealEmailSourceReader implements EmailSourceReader {
     @Override
     public EmailReadResult read(ReadCursor cursor) {
         String historyId = cursor == null ? null : cursor.token();
+        log.info("Email read starting: storedToken={}", historyId != null ? "present" : "absent");
         if (historyId == null) {
-            return readFull();
+            EmailReadResult result = readFull();
+            logResult("full", result);
+            return result;
         }
         try {
-            return readIncremental(historyId);
+            EmailReadResult result = readIncremental(historyId);
+            logResult("incremental", result);
+            return result;
         } catch (GoogleJsonResponseException e) {
             if (e.getStatusCode() == 404) {
                 // Expired/unknown historyId - the only way back is a full sync from scratch,
@@ -94,12 +102,20 @@ public class RealEmailSourceReader implements EmailSourceReader {
                 System.getLogger(RealEmailSourceReader.class.getName()).log(
                         System.Logger.Level.WARNING,
                         "Gmail historyId " + historyId + " expired or unknown (404) - falling back to full resync");
-                return readFull();
+                log.info("Email incremental read got 404 on stored historyId - falling back to full resync");
+                EmailReadResult result = readFull();
+                logResult("full (post-404 fallback)", result);
+                return result;
             }
             throw new UncheckedIOException("Failed to list Gmail history from " + historyId, e);
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to list Gmail history from " + historyId, e);
         }
+    }
+
+    private void logResult(String path, EmailReadResult result) {
+        log.info("Email read via {} path complete: records={}, nextToken={}",
+                path, result.records().size(), result.nextHistoryId() != null ? "present" : "null");
     }
 
     private EmailReadResult readFull() {

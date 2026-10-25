@@ -25,6 +25,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -51,6 +53,8 @@ import org.springframework.stereotype.Component;
 @Component
 @ConditionalOnProperty(prefix = "bridge.intake.drive", name = "mode", havingValue = "real")
 public class RealDriveSourceReader implements DriveSourceReader {
+
+    private static final Logger log = LoggerFactory.getLogger(RealDriveSourceReader.class);
 
     /** Default export target for native Google files - cheapest, most directly usable by
      * downstream text processing (Mind); trades away preserved formatting. */
@@ -88,16 +92,24 @@ public class RealDriveSourceReader implements DriveSourceReader {
     @Override
     public DriveReadResult read(ReadCursor cursor) {
         String token = cursor == null ? null : cursor.token();
+        log.info("Drive read starting: storedToken={}", token != null ? "present" : "absent");
         try {
             if (token == null) {
-                return readBaseline();
+                DriveReadResult result = readBaseline();
+                logResult("baseline", result);
+                return result;
             }
-            return readChanges(token);
+            DriveReadResult result = readChanges(token);
+            logResult("changes", result);
+            return result;
         } catch (GoogleJsonResponseException e) {
             if (e.getStatusCode() == 410 && token != null) {
                 // Expired startPageToken - the only way back is a full baseline resync.
+                log.info("Drive changes read got 410 on stored startPageToken - falling back to baseline resync");
                 try {
-                    return readBaseline();
+                    DriveReadResult result = readBaseline();
+                    logResult("baseline (post-410 fallback)", result);
+                    return result;
                 } catch (IOException retryFailure) {
                     throw new UncheckedIOException("Failed to list Drive files", retryFailure);
                 }
@@ -106,6 +118,11 @@ public class RealDriveSourceReader implements DriveSourceReader {
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to list Drive files", e);
         }
+    }
+
+    private void logResult(String path, DriveReadResult result) {
+        log.info("Drive read via {} path complete: records={}, nextToken={}",
+                path, result.records().size(), result.nextToken() != null ? "present" : "null");
     }
 
     private DriveReadResult readBaseline() throws IOException {

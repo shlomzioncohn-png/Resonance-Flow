@@ -21,6 +21,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -29,6 +31,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/bridge/intake")
 public class UnstructuredIntakeController {
+
+    private static final Logger log = LoggerFactory.getLogger(UnstructuredIntakeController.class);
 
     // Single-tenant today, like every other default in this lane (WhatsAppImportProperties,
     // SlackApiProperties, ScopingProperties) - revisit if/when this lane serves more than one
@@ -174,6 +178,10 @@ public class UnstructuredIntakeController {
             // token with nothing.
             if (r.rejected() == 0 && read.token() != null) {
                 cursorStore.save(sourceType, TENANT_ID, buildCursor.apply(asOf, read.token()));
+                log.info("{} cursor saved: tokenPresent=yes, rejected={}", sourceType, r.rejected());
+            } else {
+                log.info("{} cursor save skipped: rejected={}, tokenPresent={}",
+                        sourceType, r.rejected(), read.token() != null ? "yes" : "no");
             }
             result.set(r);
         });

@@ -98,13 +98,19 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
     @Override
     public CalendarReadResult read(ReadCursor cursor) {
         String syncToken = cursor == null ? null : cursor.token();
+        log.info("Calendar read starting: storedToken={}", syncToken != null ? "present" : "absent");
         try {
-            return readPages(syncToken);
+            CalendarReadResult result = readPages(syncToken);
+            logResult(syncToken == null ? "full" : "incremental", result);
+            return result;
         } catch (GoogleJsonResponseException e) {
             if (e.getStatusCode() == 410 && syncToken != null) {
                 // Expired syncToken - the only way back is a full sync from scratch.
+                log.info("Calendar incremental read got 410 on stored syncToken - falling back to full resync");
                 try {
-                    return readPages(null);
+                    CalendarReadResult result = readPages(null);
+                    logResult("full (post-410 fallback)", result);
+                    return result;
                 } catch (IOException retryFailure) {
                     throw new UncheckedIOException(
                             "Failed to list Calendar events for calendar " + properties.calendarId(), retryFailure);
@@ -116,6 +122,11 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
             throw new UncheckedIOException(
                     "Failed to list Calendar events for calendar " + properties.calendarId(), e);
         }
+    }
+
+    private void logResult(String path, CalendarReadResult result) {
+        log.info("Calendar read via {} path complete: records={}, nextToken={}",
+                path, result.records().size(), result.nextSyncToken() != null ? "present" : "null");
     }
 
     private CalendarReadResult readPages(String syncToken) throws IOException {
