@@ -49,6 +49,11 @@ def test_ratios_divide_by_the_median_of_the_whole_tier_open_tasks_included(three
     assert f["blocked_ratio_to_tier"].tolist() == pytest.approx([0, block_b / median_of_blocked, block_c / median_of_blocked])
 
 
+def test_active_ratio_divides_work_time_by_the_median_of_tasks_that_were_worked_on(three):
+    f = _features(three)  # ACTIVE days: A 3, B 4, C never ACTIVE -> median of the worked-on tasks is 3.5
+    assert f["active_ratio_to_tier"].tolist() == pytest.approx([3 / 3.5, 4 / 3.5, 0.0])
+
+
 def test_a_missing_tier_is_its_own_group_with_its_own_median():
     ds = _dataset(tasks=[("A", ts(1)), ("B", ts(2)), ("C", ts(3))], states=[], deps=[])
     ds.task_meta.loc[ds.task_meta["task_id"].isin(["B", "C"]), "tier"] = None

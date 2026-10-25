@@ -13,7 +13,7 @@ _DAY = 86400.0
 TASK_COLUMNS = [
     "task_id", "project_id", "tier", "is_open", "age_days", "days_pending", "days_active", "days_blocked_total",
     "n_block_events", "blocked_p50", "blocked_p90", "blocked_max", "n_dependents_now", "n_dependents_max",
-    "dependents_per_30d", "age_ratio_to_tier", "blocked_ratio_to_tier",
+    "dependents_per_30d", "age_ratio_to_tier", "blocked_ratio_to_tier", "active_ratio_to_tier",
 ]
 MIN_AGE_DAYS_FOR_RATE = 1.0  # a task younger than a day is treated as one day old when computing a rate
 
@@ -84,4 +84,7 @@ def task_features(ds: Dataset, tl: Timeline) -> pd.DataFrame:
     tasks["blocked_ratio_to_tier"] = _ratio_to_tier(
         tasks["days_blocked_total"], tasks["tier"], fallback=positive.median() if len(positive) else np.nan,
         only_positive=True)
+    active = tasks.loc[tasks["days_active"] > 0, "days_active"]
+    tasks["active_ratio_to_tier"] = _ratio_to_tier(
+        tasks["days_active"], tasks["tier"], fallback=active.median() if len(active) else np.nan, only_positive=True)
     return tasks.reset_index()[TASK_COLUMNS].sort_values("task_id", kind="stable").reset_index(drop=True)
