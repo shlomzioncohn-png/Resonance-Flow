@@ -109,7 +109,7 @@ def test_a_declined_deadline_is_null(declined: object) -> None:
         # Beyond what a calendar can count: these raised OverflowError out of
         # assembly and the message came back for ever.
         {"phrase": "within 100000000 days", "kind": "OFFSET", "amount": 100000000, "unit": "DAYS"},
-        {"phrase": "in 1001 weeks", "kind": "OFFSET", "amount": 1001, "unit": "WEEKS"},
+        {"phrase": "in 1100 weeks", "kind": "OFFSET", "amount": 1100, "unit": "WEEKS"},
         {"phrase": "May 1, 10000000000", "kind": "DATE", "month": 5, "day": 1, "year": 10**10},
         {"phrase": "May 1, 1850", "kind": "DATE", "month": 5, "day": 1, "year": 1850},
         {"phrase": "by month 13", "kind": "DATE", "month": 13, "day": 1},
@@ -133,7 +133,32 @@ def test_a_deadline_that_cannot_be_used_becomes_null_and_is_logged(
     assert "deadline" in caplog.text
 
 
-@pytest.mark.parametrize("unreadable", ["5pm", "25:00", "noon", 17])
+def test_an_offset_is_bounded_by_how_far_it_lands_not_by_its_count() -> None:
+    """A day in minutes is an ordinary deadline; it is the horizon that is capped."""
+
+    deadline = _deadline(
+        {"phrase": "within 1440 minutes", "kind": "OFFSET", "amount": 1440, "unit": "MINUTES"}
+    )
+
+    assert deadline is not None
+    assert deadline.amount == 1440
+
+
+def test_spacing_around_a_time_is_forgiven() -> None:
+    deadline = _deadline(
+        {
+            "phrase": "by Friday 14:00",
+            "kind": "WEEKDAY",
+            "weekday": "FRIDAY",
+            "time_of_day": " 14:00 ",
+        }
+    )
+
+    assert deadline is not None
+    assert deadline.time_of_day == time(14, 0)
+
+
+@pytest.mark.parametrize("unreadable", ["5pm", "25:00", "noon", 17, "17:00Z", "17:00+03:00"])
 def test_an_unreadable_time_costs_only_the_time(
     unreadable: object, caplog: pytest.LogCaptureFixture
 ) -> None:

@@ -19,8 +19,9 @@ answer and when the text was written: the model reports what the content
 says, and `resolve_deadline` turns it into a moment.
 """
 
+import calendar
 import logging
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from uuid import UUID
 
 from mind.config import DeadlineSettings
@@ -29,6 +30,7 @@ from mind.contracts.task_creation_requested import TaskCreationRequested
 from mind.extraction.confidence import effort_confidence
 from mind.extraction.deadline import (
     OffsetUnit,
+    PeriodEnd,
     at_end_of_day,
     complete_year,
     resolve_offset,
@@ -131,17 +133,32 @@ def resolve_deadline(
         return None
     if stated.time_of_day is not None and not _on_the_clock(stated):
         # A time the content names ("by 12:30", "by 09:00 tomorrow") replaces
-        # the end of the working day, on whichever day the kind landed. A time
-        # already passed today stays passed ("by 12:30" written at 13:00 was
-        # missed), except on a weekday: "by Thursday 10:00" written on Thursday
-        # afternoon cannot mean a moment already gone, so it is next week's
-        # (decision 9's nearest occurrence, among those still ahead).
+        # the end of the working day, on whichever day the kind landed.
         moment = datetime.combine(moment.date(), stated.time_of_day, tzinfo=local.tzinfo)
-        if stated.kind is DeadlineKind.WEEKDAY and moment <= local:
-            moment = datetime.combine(
-                moment.date() + timedelta(days=7), stated.time_of_day, tzinfo=local.tzinfo
-            )
+        if moment <= local:
+            moment = _next_one_still_ahead(stated, moment, stated.time_of_day)
     return moment.astimezone(UTC)
+
+
+def _next_one_still_ahead(stated: StatedDeadline, passed: datetime, at: time) -> datetime:
+    """Where a named time already gone today points instead, if anywhere.
+
+    Only a kind that comes round again moves: "by Thursday 10:00" or "by the
+    end of the week, 12:00" written on Thursday afternoon cannot mean a moment
+    already gone, so it is next week's (decision 9, among those still ahead);
+    "by the end of the month, 12:00" on its last working day after noon is the
+    month's last day, like decision 10. A day that does not come round stays
+    missed: "by 12:30" written at 15:00, or an explicit date.
+    """
+
+    period = stated.period if stated.kind is DeadlineKind.PERIOD_END else None
+    if stated.kind is DeadlineKind.WEEKDAY or period is PeriodEnd.WEEK:
+        return datetime.combine(passed.date() + timedelta(days=7), at, tzinfo=passed.tzinfo)
+    if period is PeriodEnd.MONTH:
+        last_day = passed.date().replace(day=calendar.monthrange(passed.year, passed.month)[1])
+        if last_day > passed.date():
+            return datetime.combine(last_day, at, tzinfo=passed.tzinfo)
+    return passed
 
 
 def _on_the_clock(stated: StatedDeadline) -> bool:

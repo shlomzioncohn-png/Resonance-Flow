@@ -44,7 +44,7 @@ a follow-up, not a change to make while fixing this.
 import logging
 import re
 from collections.abc import Iterable
-from functools import lru_cache
+from dataclasses import dataclass
 
 from mind.extraction.confidence import content_words
 from mind.extraction.models import ClassificationFields, ExtractedFields
@@ -132,16 +132,22 @@ def _numbers(text: str) -> set[int]:
     return {int(digits) for digits in _NUMBER.findall(text)}
 
 
-@lru_cache(maxsize=1)
-def _said(raw_text: str) -> tuple[frozenset[str], frozenset[int]]:
-    """The content's words and numbers, read once per text.
+@dataclass(frozen=True)
+class Said:
+    """The content's words and numbers, read once per item.
 
     Every task of an item is checked against the same text, twice (mentions,
-    deadline): a meeting of fifteen tasks read its 100k characters thirty
-    times. One entry, so only the text being checked is kept.
+    deadline): a meeting of fifteen tasks used to read its 100k characters
+    thirty times. The extractor reads it once and hands this to each task's
+    checks; it lives as long as that one item's extraction, no longer.
     """
 
-    return frozenset(content_words(raw_text)), frozenset(_numbers(raw_text))
+    words: frozenset[str]
+    numbers: frozenset[int]
+
+
+def said_in(raw_text: str) -> Said:
+    return Said(frozenset(content_words(raw_text)), frozenset(_numbers(raw_text)))
 
 
 def _words_said(words: list[str], said: frozenset[str]) -> bool:
@@ -157,6 +163,7 @@ def ground_dependency_mentions(
     fields: ExtractedFields,
     raw_text: str,
     sibling_titles: Iterable[str] = (),
+    said: Said | None = None,
 ) -> ExtractedFields:
     """Keep the mentions the content names, then let only those flip the flag.
 
@@ -184,12 +191,12 @@ def ground_dependency_mentions(
     show other work without naming it.
     """
 
-    said, _ = _said(raw_text)
+    words_said = (said or said_in(raw_text)).words
     siblings = {title.strip().lower() for title in sibling_titles}
     kept = []
     for mention in fields.dependency_mentions:
         words = content_words(mention)
-        if mention.strip().lower() in siblings or (words and _words_said(words, said)):
+        if mention.strip().lower() in siblings or (words and _words_said(words, words_said)):
             kept.append(mention)
         else:
             logger.warning(
@@ -213,7 +220,9 @@ def ground_dependency_mentions(
     )
 
 
-def ground_deadline(fields: ExtractedFields, raw_text: str) -> ExtractedFields:
+def ground_deadline(
+    fields: ExtractedFields, raw_text: str, said: Said | None = None
+) -> ExtractedFields:
     """Keep the deadline only if the content says its phrase.
 
     The words follow the rule for a mention (MIN_WORDS_TO_MISS_ONE). The
@@ -234,9 +243,9 @@ def ground_deadline(fields: ExtractedFields, raw_text: str) -> ExtractedFields:
     phrase = fields.deadline.phrase
     words = content_words(phrase)
     numbers = _numbers(phrase)
-    said, said_numbers = _said(raw_text)
+    said = said or said_in(raw_text)
 
-    if (words or numbers) and _words_said(words, said) and numbers <= said_numbers:
+    if (words or numbers) and _words_said(words, said.words) and numbers <= said.numbers:
         return fields
     logger.warning(
         "extraction: deadline phrase (%d words, %d numbers) does not appear in the content; "

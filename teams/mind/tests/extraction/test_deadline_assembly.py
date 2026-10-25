@@ -127,6 +127,41 @@ def test_a_weekday_time_already_gone_today_is_next_weeks() -> None:
     assert _resolved(stated, THURSDAY_AFTERNOON) == _utc(2026, 10, 29, 8)
 
 
+@pytest.mark.parametrize(
+    ("stated", "expected"),
+    [
+        # The week comes round again: next week's Thursday, November 5, at 12:00.
+        (
+            {
+                "phrase": "by the end of the week, 12:00",
+                "kind": "PERIOD_END",
+                "period": "WEEK",
+                "time_of_day": "12:00",
+            },
+            _utc(2026, 11, 5, 10),
+        ),
+        # The month is not over yet: its last day, Saturday the 31st, at 12:00.
+        (
+            {
+                "phrase": "by the end of the month, 12:00",
+                "kind": "PERIOD_END",
+                "period": "MONTH",
+                "time_of_day": "12:00",
+            },
+            _utc(2026, 10, 31, 10),
+        ),
+    ],
+)
+def test_a_period_end_time_already_gone_today_points_ahead(
+    stated: dict[str, object], expected: datetime
+) -> None:
+    """Written on the Thursday that ends both the week and October's working days."""
+
+    written = datetime(2026, 10, 29, 13, 0, tzinfo=UTC)  # 15:00 in Israel, winter time
+
+    assert _resolved(stated, written) == expected
+
+
 def test_a_time_today_already_gone_stays_missed() -> None:
     """ "by 12:30" written at 15:00 was missed; only a weekday has another week."""
 

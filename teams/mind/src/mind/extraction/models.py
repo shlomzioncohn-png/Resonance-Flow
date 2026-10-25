@@ -204,9 +204,19 @@ MAX_DEADLINE_PHRASE_LENGTH = 100
 
 # Bounds that keep resolution inside what a calendar can count: without them
 # "within 100000000 days" or a year of 10**10 raised OverflowError out of
-# assembly and the item's message was redelivered for ever. Far wider than
-# any real deadline (1000 weeks is nineteen years), so they only stop nonsense.
-MAX_OFFSET_AMOUNT = 1000
+# assembly and the item's message was redelivered for ever. An offset is
+# bounded by how far ahead it lands, not by its count, so "within 1440
+# minutes" (a day) passes where "in 30000 days" does not. Twenty years is far
+# past any real deadline; the bound only stops nonsense.
+MAX_DEADLINE_DAYS_AHEAD = 20 * 365
+_DAYS_PER_UNIT: dict[OffsetUnit, float] = {
+    OffsetUnit.MINUTES: 1 / (24 * 60),
+    OffsetUnit.HOURS: 1 / 24,
+    OffsetUnit.DAYS: 1,
+    OffsetUnit.WEEKS: 7,
+    # Five working days take at most seven on the calendar.
+    OffsetUnit.WORKING_DAYS: 7 / 5,
+}
 DEADLINE_YEARS = range(2000, 2201)
 
 
@@ -232,7 +242,7 @@ class StatedDeadline(BaseModel):
     # "by 12:30" (today), "by 09:00 tomorrow". Ignored on a clock offset.
     time_of_day: time | None = None
     # OFFSET
-    amount: int | None = Field(default=None, gt=0, le=MAX_OFFSET_AMOUNT)
+    amount: int | None = Field(default=None, gt=0)
     unit: OffsetUnit | None = None
     # WEEKDAY
     weekday: Weekday | None = None
@@ -254,8 +264,11 @@ class StatedDeadline(BaseModel):
         right, so it keeps the end of the working day instead of losing the
         whole deadline. Logged by type only: the value is the content's.
 
-        Only a written time is read: pydantic would take the number 17 as
-        seventeen seconds past midnight, where the model meant 17:00.
+        Only a written local time is read. Not a number: pydantic would take
+        17 as seventeen seconds past midnight, where the model meant 17:00.
+        Not a time with a zone ("17:00Z"): the day it lands on is the writer's,
+        and putting that zone on a local day would move it without anyone
+        seeing. Spacing around it is forgiven, as on every other field.
         """
 
         if value is None:
@@ -264,11 +277,13 @@ class StatedDeadline(BaseModel):
             problems = [type(value).__name__]
         else:
             try:
-                result: time = handler(value)
+                result: time = handler(value.strip())
             except ValidationError as error:
                 problems = [d["type"] for d in error.errors(include_input=False, include_url=False)]
             else:
-                return result
+                if result.tzinfo is None:
+                    return result
+                problems = ["time_with_zone"]
         logger.warning(
             "extraction: deadline time_of_day cannot be read (%s); keeping the deadline without it",
             problems,
@@ -280,6 +295,9 @@ class StatedDeadline(BaseModel):
         missing = [name for name in _DEADLINE_NEEDS[self.kind] if getattr(self, name) is None]
         if missing:
             raise ValueError(f"a {self.kind.value} deadline needs {', '.join(missing)}")
+        days_ahead = self.amount * _DAYS_PER_UNIT[self.unit] if self.amount and self.unit else 0
+        if days_ahead > MAX_DEADLINE_DAYS_AHEAD:
+            raise ValueError(f"an offset lands more than {MAX_DEADLINE_DAYS_AHEAD} days ahead")
         return self
 
 
