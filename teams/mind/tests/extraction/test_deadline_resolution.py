@@ -9,7 +9,14 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from mind.extraction.deadline import OffsetUnit, complete_year, resolve_offset, resolve_weekday
+from mind.extraction.deadline import (
+    OffsetUnit,
+    PeriodEnd,
+    complete_year,
+    resolve_offset,
+    resolve_period_end,
+    resolve_weekday,
+)
 
 WRITTEN_ON = date(2026, 10, 22)  # a Thursday
 
@@ -230,3 +237,95 @@ def test_the_last_minute_rule_is_for_today_only() -> None:
     assert _weekday(THURSDAY, next_week=True, written_at=evening) == datetime(
         2026, 10, 29, 17, 0, tzinfo=ISRAEL
     )
+
+
+def _period_end(
+    period: PeriodEnd,
+    written_at: datetime,
+    working_days: frozenset[int] = SUNDAY_TO_THURSDAY,
+) -> datetime:
+    return resolve_period_end(period, written_at, end_of_day=END_OF_DAY, working_days=working_days)
+
+
+def _in_israel(year: int, month: int, day: int, hour: int = 10, minute: int = 0) -> datetime:
+    return datetime(year, month, day, hour, minute, tzinfo=ISRAEL)
+
+
+@pytest.mark.parametrize(
+    ("written_at", "expected"),
+    [
+        # Thursday is the last working day of an Israeli week.
+        (_in_israel(2026, 10, 22), _in_israel(2026, 10, 22, 17)),
+        # From Sunday, the end of this week is Thursday.
+        (_in_israel(2026, 10, 25), _in_israel(2026, 10, 29, 17)),
+        # On Friday the week is over; the writer means the coming one (decision 7).
+        (_in_israel(2026, 10, 23), _in_israel(2026, 10, 29, 17)),
+    ],
+)
+def test_the_end_of_the_week_is_its_last_working_day(
+    written_at: datetime, expected: datetime
+) -> None:
+    assert _period_end(PeriodEnd.WEEK, written_at) == expected
+
+
+def test_the_end_of_the_week_written_after_hours_on_its_last_day_is_tonight() -> None:
+    assert _period_end(PeriodEnd.WEEK, _in_israel(2026, 10, 22, 18)) == _in_israel(
+        2026, 10, 22, 23, 59
+    )
+
+
+def test_the_end_of_the_week_follows_the_configured_week() -> None:
+    """From the same Thursday: Friday where the week runs Monday to Friday."""
+
+    written_at = _in_israel(2026, 10, 22)
+
+    assert _period_end(PeriodEnd.WEEK, written_at, MONDAY_TO_FRIDAY) == _in_israel(2026, 10, 23, 17)
+
+
+@pytest.mark.parametrize(
+    ("written_at", "expected"),
+    [
+        (_in_israel(2026, 10, 22), _in_israel(2026, 10, 29, 17)),
+        # Friday and Saturday sit between weeks: "next week" starts on Sunday.
+        (_in_israel(2026, 10, 23), _in_israel(2026, 10, 29, 17)),
+        # From Sunday, next week is the one after.
+        (_in_israel(2026, 10, 25), _in_israel(2026, 11, 5, 17)),
+    ],
+)
+def test_next_week_ends_on_the_last_working_day_of_the_coming_week(
+    written_at: datetime, expected: datetime
+) -> None:
+    assert _period_end(PeriodEnd.NEXT_WEEK, written_at) == expected
+
+
+@pytest.mark.parametrize(
+    ("written_at", "expected"),
+    [
+        # October 31, 2026 is a Saturday: the last working day is Thursday the 29th.
+        (_in_israel(2026, 10, 22), _in_israel(2026, 10, 29, 17)),
+        # On that Thursday after hours: tonight (decision 10).
+        (_in_israel(2026, 10, 29, 18), _in_israel(2026, 10, 29, 23, 59)),
+        # After the last working day the month is not over yet: its last day.
+        (_in_israel(2026, 10, 30), _in_israel(2026, 10, 31, 17)),
+        # September 30 is a Wednesday; the persona set's "end-of-month" gold is 17:00 that day.
+        (_in_israel(2026, 9, 7), _in_israel(2026, 9, 30, 17)),
+    ],
+)
+def test_the_end_of_the_month_is_its_last_working_day(
+    written_at: datetime, expected: datetime
+) -> None:
+    assert _period_end(PeriodEnd.MONTH, written_at) == expected
+
+
+def test_the_end_of_the_month_follows_the_configured_week() -> None:
+    assert _period_end(PeriodEnd.MONTH, _in_israel(2026, 10, 22), MONDAY_TO_FRIDAY) == (
+        _in_israel(2026, 10, 30, 17)
+    )
+
+
+@pytest.mark.parametrize("working_days", [frozenset(), frozenset(range(7))])
+def test_a_week_without_an_end_is_refused(working_days: frozenset[int]) -> None:
+    """No working day, or no day off: neither week has a last working day."""
+
+    with pytest.raises(ValueError, match="working"):
+        _period_end(PeriodEnd.WEEK, WRITTEN_AT, working_days)

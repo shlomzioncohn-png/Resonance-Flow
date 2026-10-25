@@ -6,6 +6,7 @@ the local date the text was written on. Counting days is where models slip,
 and here it is plain code that a test can pin.
 """
 
+import calendar
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 
@@ -115,12 +116,80 @@ def _at_end_of_day(day: date, written_at: datetime, end_of_day: time) -> datetim
     return datetime.combine(day, at, tzinfo=written_at.tzinfo)
 
 
-def _working_days_after(start: date, count: int, working_days: frozenset[int]) -> date:
-    # With no working day in the week the count never goes down and the loop
-    # never ends. That is a settings mistake, so it raises rather than turning
-    # into a null deadline nobody would notice.
+class PeriodEnd(StrEnum):
+    """ "By the end of ..." Internal: it never reaches Inbox."""
+
+    WEEK = "WEEK"
+    # "Next week" as a deadline: by the end of it.
+    NEXT_WEEK = "NEXT_WEEK"
+    MONTH = "MONTH"
+
+
+def resolve_period_end(
+    period: PeriodEnd,
+    written_at: datetime,
+    *,
+    end_of_day: time,
+    working_days: frozenset[int],
+) -> datetime:
+    """The moment "by the end of the week / next week / the month" points to.
+
+    A period ends on its last working day. A week whose last working day has
+    passed (written on a Friday in Israel) means the coming week; a month whose
+    last working day has passed is not over yet, so it ends on its last day.
+    """
+
+    _check_working_week(working_days)
+    today = written_at.date()
+    if period is PeriodEnd.MONTH:
+        day = _end_of_month(today, working_days)
+    else:
+        start = today if period is PeriodEnd.WEEK else _next_week_start(today, working_days)
+        day = _first_day_ending_a_week(start, working_days)
+    return _at_end_of_day(day, written_at, end_of_day)
+
+
+def _end_of_month(today: date, working_days: frozenset[int]) -> date:
+    last_day = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+    day = last_day
+    while day.weekday() not in working_days:
+        day -= timedelta(days=1)
+    return day if day >= today else last_day
+
+
+# A week has a last working day (followed by a day off) and a first one
+# (preceded by a day off). Searched at most a week ahead: a week with no day
+# off has neither, and is refused rather than looped over.
+def _first_day_ending_a_week(start: date, working_days: frozenset[int]) -> date:
+    for ahead in range(7):
+        day = start + timedelta(days=ahead)
+        if _works(day, working_days) and not _works(day + timedelta(days=1), working_days):
+            return day
+    raise ValueError("the working week has no day off; check the deadline settings")
+
+
+def _next_week_start(today: date, working_days: frozenset[int]) -> date:
+    for ahead in range(1, 8):
+        day = today + timedelta(days=ahead)
+        if _works(day, working_days) and not _works(day - timedelta(days=1), working_days):
+            return day
+    raise ValueError("the working week has no day off; check the deadline settings")
+
+
+def _works(day: date, working_days: frozenset[int]) -> bool:
+    return day.weekday() in working_days
+
+
+def _check_working_week(working_days: frozenset[int]) -> None:
+    # With no working day the searches here find nothing and the working-day
+    # count never goes down. That is a settings mistake, so it raises rather
+    # than turning into a null deadline nobody would notice.
     if not working_days:
         raise ValueError("the working week has no working day; check the deadline settings")
+
+
+def _working_days_after(start: date, count: int, working_days: frozenset[int]) -> date:
+    _check_working_week(working_days)
     day = start
     while count:
         day += timedelta(days=1)
