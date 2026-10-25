@@ -11,10 +11,11 @@ DEFAULT_PATH = Path(__file__).with_name("config.yaml")
 
 @dataclass(frozen=True)
 class ChronicBlockerConfig:
-    min_active_ratio: float = 4.0
-    min_dependents: int = 2
-    medium_from_ratio: float = 8.0
-    high_from_ratio: float = 16.0
+    ratio_column: str = "active_ratio_to_tier_project"
+    min_active_ratio: float = 8.0
+    min_dependents: int = 1
+    medium_from_ratio: float = 16.0
+    high_from_ratio: float = 32.0
 
 
 @dataclass(frozen=True)
@@ -33,14 +34,14 @@ class SlowChainConfig:
     min_length: int = 4
     max_length: int = 8
     min_group_size: int = 8
-    min_ratio_to_median: float = 3.0
+    min_ratio_to_median: float = 2.0
     min_robust_z: float = 3.5
     max_link_share: float = 0.5
     medium_from_ratio: float = 4.0
     high_from_ratio: float = 8.0
     max_overlap: float = 0.5
     max_paths: int = 1_000_000
-    link_ratio_column: str = "active_ratio_to_tier"
+    link_ratio_column: str = "active_ratio_to_tier_project"
 
 
 @dataclass(frozen=True)

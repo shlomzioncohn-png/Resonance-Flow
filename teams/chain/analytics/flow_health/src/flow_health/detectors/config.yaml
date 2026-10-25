@@ -1,10 +1,11 @@
 # Starting thresholds of the detectors. Tuned on the dev set (seed 42) only; the eval set is not opened before task 4.
 
 chronic_blocker:
-  min_active_ratio: 4.0         # days the task was ACTIVE / median ACTIVE days of its tier (feature active_ratio_to_tier)
-  min_dependents: 2             # the most dependents the task ever had at the same time
-  medium_from_ratio: 8.0        # low: [min, medium); medium: [medium, high); high: [high, ...)
-  high_from_ratio: 16.0
+  ratio_column: active_ratio_to_tier_project   # task feature: work time against the usual of the task's tier inside its project
+  min_active_ratio: 8.0         # value of that feature from which a task is flagged
+  min_dependents: 1             # the most dependents the task ever had at the same time
+  medium_from_ratio: 16.0       # low: [min, medium); medium: [medium, high); high: [high, ...)
+  high_from_ratio: 32.0
 
 recurring_cycle:
   min_transitions: 3            # ADDED<->REMOVED switches of one edge (the first ADDED is not a switch)
@@ -20,9 +21,9 @@ slow_chain:
   max_length: 8
   max_paths: 1000000            # guard against a graph with an exploding number of paths
   max_overlap: 0.5              # of two overlapping flags on one stretch, the weaker is dropped if they share more than this
-  link_ratio_column: active_ratio_to_tier   # per-task feature: work time against the usual of the task's tier
+  link_ratio_column: active_ratio_to_tier_project   # per-task feature: work time against the usual of the task's tier inside its project
   min_group_size: 8             # fewer paths of one length: no baseline, nothing is flagged
-  min_ratio_to_median: 3.0      # median link ratio of the path / median of that value over paths of the same length
+  min_ratio_to_median: 2.0      # median link ratio of the path / median of that value over paths of the same length
   min_robust_z: 3.5             # 0.6745 * (x - median) / MAD, within the same length
   max_link_share: 0.5           # no single link may account for more than this share of the total time
   medium_from_ratio: 4.0        # severity bands on the ratio to the group median

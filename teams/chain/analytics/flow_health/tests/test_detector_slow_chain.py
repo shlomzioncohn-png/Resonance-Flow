@@ -21,7 +21,7 @@ def _frames(*chains, length=5):
     built = [_chain(f"h{i}", length, HEALTHY_LINK_RATIOS[i % 3]) for i in range(12)]
     built += [_chain(*c) for c in chains]
     paths = pd.DataFrame([p for p, _ in built], columns=PATH_COLUMNS)
-    tasks = pd.DataFrame([row for _, rows in built for row in rows], columns=["task_id", "active_ratio_to_tier"])
+    tasks = pd.DataFrame([row for _, rows in built for row in rows], columns=["task_id", "active_ratio_to_tier_project"])
     return paths, tasks
 
 
@@ -43,7 +43,7 @@ def test_a_path_whose_links_are_all_far_slower_than_usual_is_flagged_with_the_ri
 def test_decoys_are_not_flagged():
     flags = detect(*_frames(
         ("one_link", 5, 5.0, 0.6),   # one link carries 60% of the time: a chronic blocker, not a slow chain
-        ("just_below", 5, 2.9),      # 2.9 group medians
+        ("just_below", 5, 1.9),      # 1.9 group medians
         ("short", 3, 9.0),           # shorter than the analysed range
         ("long_alone", 8, 9.0),      # no other path of its length to compare with
     ), CFG)
@@ -54,7 +54,7 @@ def test_a_group_where_every_path_is_slow_flags_none_because_length_alone_is_not
     paths, tasks = _frames(length=8)
     slow = [_chain(f"s{i}", 8, 5.0 + (i % 3) * 0.2) for i in range(12)]
     paths = pd.DataFrame([p for p, _ in slow], columns=PATH_COLUMNS)
-    tasks = pd.DataFrame([row for _, rows in slow for row in rows], columns=["task_id", "active_ratio_to_tier"])
+    tasks = pd.DataFrame([row for _, rows in slow for row in rows], columns=["task_id", "active_ratio_to_tier_project"])
     assert detect(paths, tasks, CFG) == []
 
 
@@ -79,14 +79,14 @@ def test_overlapping_windows_of_one_slow_stretch_give_one_flag_the_strongest():
     slow_ids = [f"x-{i}" for i in range(6)]
     extra = pd.DataFrame([("x-4", ";".join(slow_ids[:5]), 5, 30.0, 0.3), ("x-5", ";".join(slow_ids[1:6]), 5, 30.0, 0.3)],
                          columns=PATH_COLUMNS)
-    ratios = pd.DataFrame({"task_id": slow_ids, "active_ratio_to_tier": [6.0, 6.0, 6.0, 6.0, 6.0, 4.0]})
+    ratios = pd.DataFrame({"task_id": slow_ids, "active_ratio_to_tier_project": [6.0, 6.0, 6.0, 6.0, 6.0, 4.0]})
     flags = detect(pd.concat([paths, extra], ignore_index=True), pd.concat([tasks, ratios], ignore_index=True), CFG)
     assert len(flags) == 1 and flags[0].entity_ids == slow_ids[:5]
 
 
 def test_a_task_with_an_unknown_ratio_does_not_break_the_median():
     paths, tasks = _frames(("slow", 5, 5.0))
-    tasks.loc[tasks["task_id"] == "slow-2", "active_ratio_to_tier"] = float("nan")
+    tasks.loc[tasks["task_id"] == "slow-2", "active_ratio_to_tier_project"] = float("nan")
     assert len(detect(paths, tasks, CFG)) == 1
 
 
@@ -95,7 +95,7 @@ def test_a_group_where_most_paths_have_the_same_value_falls_back_to_the_iqr():
     slow = _chain("slow", 5, 6.0)
     built = healthy + [slow]
     paths = pd.DataFrame([p for p, _ in built], columns=PATH_COLUMNS)
-    tasks = pd.DataFrame([row for _, rows in built for row in rows], columns=["task_id", "active_ratio_to_tier"])
+    tasks = pd.DataFrame([row for _, rows in built for row in rows], columns=["task_id", "active_ratio_to_tier_project"])
     assert [f.entity_ids[0] for f in detect(paths, tasks, CFG)] == ["slow-0"]
 
 
@@ -107,4 +107,4 @@ def test_score_is_a_percentile_and_two_runs_give_the_same_output():
 
 
 def test_no_paths_no_flags():
-    assert detect(pd.DataFrame(columns=PATH_COLUMNS), pd.DataFrame(columns=["task_id", "active_ratio_to_tier"]), CFG) == []
+    assert detect(pd.DataFrame(columns=PATH_COLUMNS), pd.DataFrame(columns=["task_id", "active_ratio_to_tier_project"]), CFG) == []
