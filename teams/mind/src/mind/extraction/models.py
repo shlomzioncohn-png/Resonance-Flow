@@ -221,7 +221,8 @@ class StatedDeadline(BaseModel):
     month: int | None = Field(default=None, ge=1, le=12)
     day: int | None = Field(default=None, ge=1, le=31)
     year: int | None = None
-    # DATE and WEEKDAY, only when the content names a time: "17:00".
+    # Any kind that lands on a day, only when the content names a time:
+    # "by 12:30" (today), "by 09:00 tomorrow". Ignored on a clock offset.
     time_of_day: time | None = None
     # OFFSET
     amount: int | None = Field(default=None, gt=0)

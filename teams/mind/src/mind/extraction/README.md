@@ -82,7 +82,7 @@ llm:
     base_url: https://api.deepseek.com
     model: deepseek-chat
     timeout_seconds: 60
-    max_output_tokens: 2048
+    max_output_tokens: 2400
 # secrets.yaml -> components.mind.secret
 llm:
   deepseek:
@@ -715,7 +715,7 @@ a timeout after its retries — loses all of them together, where per-task calls
 would have lost one. Chosen because one call is cheaper and the model sees the
 whole context (a recap names what was asked earlier). What guards it: the
 output cap sized for a full list (`TOKENS_PER_TASK`, `DEFAULT_MAX_OUTPUT_TOKENS`
-2048), descriptions held to about 300 characters by the prompt and dropped past
+2400), descriptions held to about 300 characters by the prompt and dropped past
 `MAX_DESCRIPTION_LENGTH` (600), and at most 10 mentions of a title's length. An
 empty meeting with an `ExtractionFailure` is this, not a parsing bug.
 

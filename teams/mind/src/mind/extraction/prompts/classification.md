@@ -71,22 +71,25 @@ may be null.
   weekday, and never turn one unit into another. Every object has `phrase`,
   the content's own words for the deadline copied exactly ("by Friday",
   "within 72 hours"), and `kind`, exactly one of the four below with the keys
-  it lists. Leave out the keys a kind does not list.
+  it lists. Leave out the keys a kind does not list. Any kind may also have
+  `time_of_day` ("14:00", 24-hour) when the content names a time; midnight is
+  "23:59".
   - `"DATE"` — a calendar date: `month` (1 to 12) and `day` (1 to 31), plus
-    `year` only when the content writes one and `time_of_day` ("14:00") only
-    when it names a time. "By November 3", "on the 20th of October at 10:00".
+    `year` only when the content writes one. "By November 3", "on the 20th of
+    October at 10:00".
   - `"OFFSET"` — an amount of time from now: `amount` (integer above 0) and
     `unit`, exactly one of `"MINUTES"`, `"HOURS"`, `"DAYS"`, `"WEEKS"`,
     `"WORKING_DAYS"`. Write the amount and unit the content uses: "two weeks"
     is 2 `"WEEKS"`, not 14 `"DAYS"`. Use `"WORKING_DAYS"` only when the content
-    says working or business days. "Tomorrow" is 1 `"DAYS"`.
+    says working or business days. "Tomorrow" is 1 `"DAYS"`, and "by 09:00
+    tomorrow" is 1 `"DAYS"` with `time_of_day` "09:00".
   - `"WEEKDAY"` — a day of the week: `weekday`, exactly one of `"MONDAY"`,
     `"TUESDAY"`, `"WEDNESDAY"`, `"THURSDAY"`, `"FRIDAY"`, `"SATURDAY"`,
-    `"SUNDAY"`; `next_week` true only for "next Friday"; `time_of_day` only
-    when the content names a time.
+    `"SUNDAY"`; `next_week` true only for "next Friday".
   - `"PERIOD_END"` — the end of a period: `period`, exactly one of `"DAY"`
     ("today", "end of day"), `"WEEK"`, `"NEXT_WEEK"` ("next week"),
-    `"MONTH"`.
+    `"MONTH"`. A time with no day ("by 12:30", "before the 10:00 call") is
+    today: `"DAY"` with that `time_of_day`.
 
 Examples. Each answer is the whole object, written exactly as you return it:
 
@@ -104,9 +107,9 @@ Examples. Each answer is the whole object, written exactly as you return it:
     "Please fix the typo on the login page."
     {"tasks": [{"title": "Fix the typo on the login page", "description": null, "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "OPERATIONAL", "urgency": 1, "role_context": null, "effort_estimate_minutes": 10, "effort_estimate_basis": "INFERRED", "deadline": null}]}
 
-    "Could you review my pull request today? It should take about half an
-    hour."
-    {"tasks": [{"title": "Review the pull request", "description": null, "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "OPERATIONAL", "urgency": 3, "role_context": "DEVELOPER", "effort_estimate_minutes": 30, "effort_estimate_basis": "STATED", "deadline": {"phrase": "today", "kind": "PERIOD_END", "period": "DAY"}}]}
+    "Could you review my pull request by 15:00 today? It should take about
+    half an hour."
+    {"tasks": [{"title": "Review the pull request", "description": null, "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "OPERATIONAL", "urgency": 3, "role_context": "DEVELOPER", "effort_estimate_minutes": 30, "effort_estimate_basis": "STATED", "deadline": {"phrase": "by 15:00 today", "kind": "PERIOD_END", "period": "DAY", "time_of_day": "15:00"}}]}
 
     "The badge readers at the warehouse gate stopped working about two hours
     ago, can someone go check them?"
@@ -135,7 +138,7 @@ Examples. Each answer is the whole object, written exactly as you return it:
     for the mock-ups, so it names them by their title, and the mock-ups,
     which wait for nothing, name nothing. The German market, the pull request
     and the mock-ups each show a deadline as the content wrote it: a weekday,
-    the end of today, one day from now. The Q3 numbers are due on a date; the
+    a time today, one day from now. The Q3 numbers are due on a date; the
     board meeting on the 12th is another event's date, not theirs. The feature
     flags say there is no rush, so their deadline is null. The last one
     discusses but asks nobody for anything, so the list is empty.

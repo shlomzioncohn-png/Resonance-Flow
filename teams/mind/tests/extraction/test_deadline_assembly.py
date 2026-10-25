@@ -74,6 +74,33 @@ def _resolved(stated: dict[str, object], written_at: datetime = WRITTEN_AT) -> d
             {"phrase": "end of the month", "kind": "PERIOD_END", "period": "MONTH"},
             _utc(2026, 10, 29, 15),
         ),
+        # A time with no day is today at that time: the DEV run's commonest miss.
+        (
+            {"phrase": "by 12:30", "kind": "PERIOD_END", "period": "DAY", "time_of_day": "12:30"},
+            _utc(2026, 10, 22, 9, 30),
+        ),
+        # A named time on a day offset replaces the end of the working day.
+        (
+            {
+                "phrase": "by 09:00 tomorrow",
+                "kind": "OFFSET",
+                "amount": 1,
+                "unit": "DAYS",
+                "time_of_day": "09:00",
+            },
+            _utc(2026, 10, 23, 6),
+        ),
+        # On a clock offset a time means nothing more: 3 hours is 3 hours.
+        (
+            {
+                "phrase": "within 3 hours",
+                "kind": "OFFSET",
+                "amount": 3,
+                "unit": "HOURS",
+                "time_of_day": "17:00",
+            },
+            _utc(2026, 10, 22, 10),
+        ),
     ],
 )
 def test_each_kind_reaches_a_moment_in_utc(stated: dict[str, object], expected: datetime) -> None:

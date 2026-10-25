@@ -28,6 +28,7 @@ from mind.contracts.base_enums import SourceType
 from mind.contracts.task_creation_requested import TaskCreationRequested
 from mind.extraction.confidence import effort_confidence
 from mind.extraction.deadline import (
+    OffsetUnit,
     at_end_of_day,
     complete_year,
     resolve_offset,
@@ -116,8 +117,6 @@ def resolve_deadline(
             moment = resolve_weekday(
                 stated.weekday.number, stated.next_week, local, end_of_day=end_of_day
             )
-            if stated.time_of_day is not None:
-                moment = datetime.combine(moment.date(), stated.time_of_day, tzinfo=local.tzinfo)
         case DeadlineKind.PERIOD_END if stated.period:
             moment = resolve_period_end(
                 stated.period, local, end_of_day=end_of_day, working_days=working_days
@@ -130,7 +129,20 @@ def resolve_deadline(
             "extraction: the %s deadline names no moment; recording it as null", stated.kind.value
         )
         return None
+    if stated.time_of_day is not None and not _on_the_clock(stated):
+        # A time the content names ("by 12:30", "by 09:00 tomorrow") replaces
+        # the end of the working day, on whichever day the kind landed. Even
+        # one already passed today: the content said that time.
+        moment = datetime.combine(moment.date(), stated.time_of_day, tzinfo=local.tzinfo)
     return moment.astimezone(UTC)
+
+
+def _on_the_clock(stated: StatedDeadline) -> bool:
+    # "Within 3 hours" is already an exact moment; a time beside it adds nothing.
+    return stated.kind is DeadlineKind.OFFSET and stated.unit in (
+        OffsetUnit.MINUTES,
+        OffsetUnit.HOURS,
+    )
 
 
 def _on_date(
@@ -145,8 +157,6 @@ def _on_date(
             on = None
     if on is None:
         return None
-    if stated.time_of_day is not None:
-        return datetime.combine(on, stated.time_of_day, tzinfo=local.tzinfo)
     return at_end_of_day(on, local, settings.end_of_day)
 
 
