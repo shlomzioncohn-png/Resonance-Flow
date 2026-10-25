@@ -3,6 +3,7 @@ field the score depends on changes, and not re-published otherwise.
 No broker: the sink is an in-memory list."""
 
 import threading
+import time
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -511,8 +512,8 @@ def test_a_conversion_error_other_than_a_bad_id_is_skipped(publisher, sink, monk
 
 
 def test_a_kafka_error_in_the_rescore_worker_propagates(model):
-    # Only scoring errors are skipped; a send failure must reach the worker
-    # thread so the process restarts and nothing is silently lost.
+    # Only scoring errors are skipped; a send failure must reach the worker's
+    # thread, so BackgroundThreads waits and runs it again.
     class FailsOnSecond(ListSink):
         def send(self, payload):
             if self.sent:
@@ -526,6 +527,30 @@ def test_a_kafka_error_in_the_rescore_worker_propagates(model):
 
     with pytest.raises(RuntimeError, match="broker down"):
         publisher.drain_rescores()
+
+
+def test_a_rescore_whose_send_fails_is_queued_back(model):
+    # Unlike a Kafka message, nothing would deliver the request again: the
+    # worker must find it in the queue when it runs again, once Kafka is back.
+    class FailsOnceAfterTheFirst(ListSink):
+        failed = False
+
+        def send(self, payload):
+            if self.sent and not self.failed:
+                self.failed = True
+                raise RuntimeError("broker down")
+            super().send(payload)
+
+    sink = FailsOnceAfterTheFirst()
+    publisher = ScorePublisher(sink, model=model, clock=lambda: NOW)
+    publisher.handle_task_created(_created())
+    model.base = 0.9
+    publisher.rescore(TASK_A)
+    with pytest.raises(RuntimeError):
+        publisher.drain_rescores()
+
+    assert publisher.drain_rescores() == 1  # the worker, run again
+    assert [p.mind_score for p in sink.sent] == [0.5, 0.9]
 
 
 # --- bounding re-scores -----------------------------------------------------
@@ -564,3 +589,46 @@ def test_a_request_after_the_task_was_taken_is_queued_again(propagating, model):
     propagating.rescore(TASK_A)
 
     assert propagating.drain_rescores() == 1
+
+
+# --- stopping the rescore worker (#920) -------------------------------------
+
+
+def test_the_rescore_worker_handles_the_queue_then_stops_when_asked(propagating, sink, model):
+    # In the API the worker runs in a thread and must end on shutdown, even
+    # while it waits on an empty queue.
+    propagating.handle_task_created(_created())
+    model.base = 0.9
+    propagating.rescore(TASK_A)
+    stop = threading.Event()
+
+    worker = threading.Thread(target=propagating.run_rescores, args=(stop,))
+    worker.start()
+    deadline = time.monotonic() + 2
+    while len(sink.sent) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    stop.set()
+    worker.join(timeout=3)
+
+    assert not worker.is_alive()
+    assert [p.mind_score for p in sink.sent] == [0.5, 0.9]
+
+
+def test_the_rescore_worker_reports_progress_after_each_task(propagating, sink, model):
+    # BackgroundThreads counts the worker as recovered once it reports progress.
+    propagating.handle_task_created(_created())
+    model.base = 0.9
+    propagating.rescore(TASK_A)
+    stop = threading.Event()
+    done: list[str] = []
+
+    def progress() -> None:
+        done.append("task")
+        stop.set()
+
+    worker = threading.Thread(target=propagating.run_rescores, args=(stop, progress))
+    worker.start()
+    worker.join(timeout=3)
+
+    assert not worker.is_alive()
+    assert done == ["task"]
