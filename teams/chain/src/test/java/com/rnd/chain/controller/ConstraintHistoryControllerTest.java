@@ -8,6 +8,8 @@ import com.rnd.chain.exception.GlobalExceptionHandler;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.service.ConstraintHistoryService;
+import com.rnd.chain.tenant.TaskOwnershipService;
+import com.rnd.chain.tenant.TenantContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -41,6 +43,12 @@ class ConstraintHistoryControllerTest {
 
     @MockBean
     private ConstraintHistoryService service;
+
+    @MockBean
+    private TenantContext tenantContext;
+
+    @MockBean
+    private TaskOwnershipService taskOwnershipService;
 
     private PageResponse<ConstraintHistoryEntry> pageOf(ConstraintHistoryEntry... entries) {
         return new PageResponse<>(List.of(entries), 0, 20, entries.length, entries.length == 0 ? 0 : 1);

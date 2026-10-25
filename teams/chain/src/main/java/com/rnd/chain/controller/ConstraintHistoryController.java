@@ -2,6 +2,8 @@ package com.rnd.chain.controller;
 
 import com.rnd.chain.dto.PageResponse;
 import com.rnd.chain.service.ConstraintHistoryService;
+import com.rnd.chain.tenant.TaskOwnershipService;
+import com.rnd.chain.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +23,8 @@ import java.util.UUID;
 public class ConstraintHistoryController {
 
     private final ConstraintHistoryService constraintHistoryService;
+    private final TenantContext tenantContext;
+    private final TaskOwnershipService taskOwnershipService;
 
     /** {@code from} is inclusive, {@code to} exclusive, both ISO-8601 instants; omitted means open. */
     @GetMapping("/{taskId}/constraints/history")
@@ -31,6 +35,7 @@ public class ConstraintHistoryController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         return ResponseEntity.ok(
                 constraintHistoryService.getHistory(taskId, from, to, page, size)
                         .map(ConstraintHistoryResponse::from));

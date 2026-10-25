@@ -12,6 +12,8 @@ import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.service.DependencyGraphService;
 import com.rnd.chain.service.TaskDependencyService;
 import com.rnd.chain.service.TaskTraversalService;
+import com.rnd.chain.tenant.TaskOwnershipService;
+import com.rnd.chain.tenant.TenantContext;
 import com.rnd.chain.exception.GlobalExceptionHandler;
 import org.springframework.context.annotation.Import;
 
@@ -54,6 +56,12 @@ class ChainControllerTest {
 
     @MockBean
     private DependencyGraphService dependencyGraphService;
+
+    @MockBean
+    private TenantContext tenantContext;
+
+    @MockBean
+    private TaskOwnershipService taskOwnershipService;
 
     @Test
     void getDirectDependencies_returnsOkWithTheServiceResult() throws Exception {

@@ -8,7 +8,10 @@ import com.rnd.chain.dto.TaskTraceResponse;
 import com.rnd.chain.service.DependencyGraphService;
 import com.rnd.chain.service.TaskDependencyService;
 import com.rnd.chain.service.TaskTraversalService;
+import com.rnd.chain.tenant.TaskOwnershipService;
+import com.rnd.chain.tenant.TenantContext;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,26 +24,20 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/tasks")
+@RequiredArgsConstructor
 public class ChainController {
 
     private final TaskTraversalService taskTraversalService;
     private final TaskDependencyService taskDependencyService;
     private final DependencyGraphService dependencyGraphService;
-
-    public ChainController(
-            TaskTraversalService taskTraversalService,
-            TaskDependencyService taskDependencyService,
-            DependencyGraphService dependencyGraphService) {
-
-        this.taskTraversalService = taskTraversalService;
-        this.taskDependencyService = taskDependencyService;
-        this.dependencyGraphService = dependencyGraphService;
-    }
+    private final TenantContext tenantContext;
+    private final TaskOwnershipService taskOwnershipService;
 
     @GetMapping("/{taskId}/dependencies")
     public ResponseEntity<List<TaskResponse>> getDirectDependencies(
             @PathVariable UUID taskId) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         return ResponseEntity.ok(
                 taskTraversalService.getDirectDependencies(taskId));
     }
@@ -49,6 +46,7 @@ public class ChainController {
     public ResponseEntity<List<TaskResponse>> getAllDependencies(
             @PathVariable UUID taskId) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         return ResponseEntity.ok(
                 taskTraversalService.getAllDependencies(taskId));
     }
@@ -59,6 +57,7 @@ public class ChainController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         PageResponse<DependencyHistoryEntry> entries =
                 taskDependencyService.getHistory(
                         taskId,
@@ -73,6 +72,7 @@ public class ChainController {
     public ResponseEntity<List<TaskResponse>> getDirectDependents(
             @PathVariable UUID taskId) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         return ResponseEntity.ok(
                 taskTraversalService.getDirectDependents(taskId));
     }
@@ -81,6 +81,7 @@ public class ChainController {
     public ResponseEntity<List<TaskResponse>> getAllDependents(
             @PathVariable UUID taskId) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         return ResponseEntity.ok(
                 taskTraversalService.getAllDependents(taskId));
     }
@@ -89,6 +90,7 @@ public class ChainController {
     public ResponseEntity<List<TaskResponse>> getAncestors(
             @PathVariable UUID taskId) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         return ResponseEntity.ok(
                 taskTraversalService.getAncestors(taskId));
     }
@@ -97,6 +99,7 @@ public class ChainController {
     public ResponseEntity<List<TaskResponse>> getDirectChildren(
             @PathVariable UUID taskId) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         return ResponseEntity.ok(
                 taskTraversalService.getDirectChildren(taskId));
     }
@@ -105,6 +108,7 @@ public class ChainController {
     public ResponseEntity<List<TaskResponse>> getAllDescendants(
             @PathVariable UUID taskId) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         return ResponseEntity.ok(
                 taskTraversalService.getAllDescendants(taskId));
     }
@@ -113,6 +117,7 @@ public class ChainController {
     public ResponseEntity<TaskTraceResponse> getTrace(
             @PathVariable UUID taskId) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         return ResponseEntity.ok(
                 taskTraversalService.getTrace(taskId));
     }
@@ -121,6 +126,7 @@ public class ChainController {
     public ResponseEntity<TaskAvailability> getBlockers(
             @PathVariable UUID taskId) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         return ResponseEntity.ok(
                 dependencyGraphService.getBlockers(taskId));
     }
