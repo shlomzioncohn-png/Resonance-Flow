@@ -32,7 +32,7 @@ class DependencyEdgeServiceTenantLockTest {
     private TaskRepository taskRepository;
     private TaskDependencyRepository taskDependencyRepository;
     private GraphLock graphLock;
-    private PriorityScoreService priorityScoreService;
+    private TaskCounterUpdater taskCounterUpdater;
     private TaskStateHistoryRecorder historyRecorder;
     private TaskReadinessRepository taskReadinessRepository;
 
@@ -50,8 +50,8 @@ class DependencyEdgeServiceTenantLockTest {
         graphLock =
                 mock(GraphLock.class);
 
-        priorityScoreService =
-                mock(PriorityScoreService.class);
+        taskCounterUpdater =
+                mock(TaskCounterUpdater.class);
 
         historyRecorder =
                 mock(TaskStateHistoryRecorder.class);
@@ -61,12 +61,12 @@ class DependencyEdgeServiceTenantLockTest {
 
         service =
                 new DependencyEdgeService(
-                        taskRepository,
                         taskDependencyRepository,
                         graphLock,
-                        priorityScoreService,
+                        taskCounterUpdater,
                         historyRecorder,
-                        taskReadinessRepository);
+                        taskReadinessRepository
+                        );
     }
 
     @Test
@@ -170,6 +170,10 @@ class DependencyEdgeServiceTenantLockTest {
                 .findByTaskIdUnderExternalLock(
                         dependsOnTaskId))
                 .thenReturn(List.of());
+
+        when(taskCounterUpdater.requireTask(taskId))
+                .thenThrow(
+                        new TaskNotFoundException(taskId));
 
         when(graphLock.runExclusive(
                 eq(null),
