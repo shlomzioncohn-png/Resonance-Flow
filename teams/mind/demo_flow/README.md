@@ -74,7 +74,7 @@ naming what is missing.
 |---|---|
 | 1 preflight | Docker, the LLM key, tesseract, the embedding model |
 | 2 stack | `docker compose down -v`, then up (`stack/docker-compose.yml`): Redpanda, Apicurio registry, MinIO, Inbox built from `teams/inbox`, pgvector. Empty on every run |
-| 3 topics, schemas, migrations | the topics every party reads; every schema registered by **Relay's own scripts** (`stack/seed-schemas.sh` runs `teams/relay/ci/seed-registry.sh`), as in the cluster; Mind's vector-store migrations |
+| 3 topics, schemas, migrations | the topics every party reads; every schema registered by **Relay's own scripts** (`stack/seed-schemas.sh` builds Relay's `schema-canonicalize` jar and runs `teams/relay/ci/seed-registry.sh`, so every schema is registered in its canonical form, as in the cluster; the first run fetches the jar's Maven dependencies into the `mind-demo-m2` volume, which later runs keep); Mind's vector-store migrations |
 | 4 Mind | the landed runner (`mind.ingestion.landed_consumer_runner`) and Mind's API on port 8800, which runs the score publisher (#920), as processes on this machine, their output prefixed `[mind-landed]` / `[mind-api]` |
 | 5 feed | `demo_flow.feed` lands the three items and publishes their events, in the order asked for |
 | 6 result | `verify.py` reads `task.creation.requested`, `task.created`, `task.score.proposed` and `task.dependencies.proposed` until everything expected has come out or nothing has moved for 120 s, then prints one line per criterion |
@@ -122,16 +122,17 @@ make demo-feed ARGS="--dry-run"     # build + validate the three events; no infr
 
 ## Latest results
 
-2026-10-25, branch `michal-brecher/mind-demo-flow-359` merged with `main` at `a832fd2d`
+2026-10-25, branch `michal-brecher/mind-demo-flow-359` merged with `main` at `4142843c`
 (#690 task lists, #834 dependency publisher, #841 tenant-scoped index, #920 score publisher
-in the API), paid Gemini key, `gemini-3.6-flash`. Runs `20261025T131916Z-natural` and
-`20261025T132819Z-slack-first`. All six stages run in both, from a git worktree too.
+in the API, #953/#994 canonical schemas, #968 one item per Bridge item), paid Gemini key,
+`gemini-3.6-flash`. Runs `20261025T142334Z-natural` and `20261025T143229Z-slack-first`. All
+six stages run in both, from a git worktree too.
 
 | Criterion | natural | slack-first |
 |---|---|---|
 | three tasks come out, the expected ones | FAIL: 4 requested, 3 created | **PASS**: T1, T2, T3 |
 | Inbox created every task Mind requested | FAIL: the meeting's T1 | **PASS** |
-| T1 is one task, not 2 (meeting + Slack) | FAIL: 2 requests, one from each | **PASS**: sent from Slack; the meeting's 'Send Northwind the price quote' matched it (similarity 0.880) |
+| T1 is one task, not 2 (meeting + Slack) | FAIL: 2 requests, one from each | **PASS**: sent from Slack; the meeting's 'Send Northwind the price quote' matched it (similarity 0.824) |
 | T1 depends on T2 | FAIL: no message | FAIL: no message |
 | tasks carry the fields | FAIL: no owner, no deadline; T2 no `role_context` | FAIL: same |
 | every created task gets a score | **PASS** (3) | **PASS** (3) |
@@ -143,7 +144,7 @@ in the API), paid Gemini key, `gemini-3.6-flash`. Runs `20261025T131916Z-natural
 | landed | three items, five objects in MinIO, three events on `bridge.raw.landed` | the feed (as Bridge) |
 | transcribed | 67.5 s of audio in 14 s (`rtf=0.205`), 776 chars | R4's ASR, Whisper `base.en` |
 | OCR | the scanned form in 1.6 s, 540 chars | R4's OCR, tesseract |
-| extracted | the meeting: **T2 and T1** (#690); Slack: T1; the email body and the form: T3 | extraction (#690), classification and effort (#350-#352) |
+| extracted | the meeting: **T2 and T1** (#690); Slack: T1; the email, its body and the form read as one item (#968, 1,050 chars): T3 | extraction (#690), classification and effort (#350-#352) |
 | deduplicated | slack-first: the meeting's T1 matched Slack's (0.957), not sent | R3's duplicate detection (#471, #841) |
 | created | `task.creation.requested` to Inbox, `task.created` back, 1.4-5.4 s each | Mind's creation flow (#353, #919), Inbox |
 | scored | `task.score.proposed` for each created task | the score publisher (#357; since #920 inside Mind's API) |
@@ -309,17 +310,18 @@ in Mind. Numbered by how much they block the demo.
 
 ### Open, other
 
-5. **Two tasks from one event are not checked against each other (Mind).** The email's body
-   and its scanned form both yield T3; the duplicate check only sees tasks Inbox has already
-   confirmed, so both are sent. Finding 1 hides it today (Inbox keeps the first); it comes
-   back when finding 1 is fixed. The ingestion README's "Duplicates close together".
+5. **Two tasks close together are not checked against each other (Mind).** The duplicate
+   check only sees tasks Inbox has already confirmed, so two mentions of one task that
+   reach it seconds apart are both sent. Since #968 an email's body and attachment are one
+   item and yield one T3, so the demo no longer shows it within one event; it remains for
+   items landed close together. The ingestion README's "Duplicates close together".
 6. **T2 never gets a `role_context` (R2, classification).** In both runs the model returned
    tier, urgency and effort for "Finish the updated cost sheet" but no `role_context`.
    Repeatable on this scenario.
 7. **The email body is the fixture JSON with the scan inline as base64 (Bridge).** 762,183
    characters of body for a 571 KB scan; in Gmail mode BODY is Gmail's whole `Message`
-   instead. Since #690 extraction truncates it to 8,000 characters, so it no longer reaches
-   the LLM whole, but what it sends is mostly base64.
+   instead. Since #968 Mind reads the body as Bridge lands it (`ingestion/email_body.py`):
+   the email reaches extraction as 1,050 characters, body and form together.
 8. **A retry redoes the media work (Mind, known).** After an LLM outage stops the runner, the
    redelivered meeting is transcribed again: 43-50 CPU seconds per restart, three times in
    one run on the free tier.

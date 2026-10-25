@@ -55,13 +55,15 @@ services:
 
   schema-seed:
     # One-shot, run by run.py: registers every schema with Relay's scripts
-    # (seed-schemas.sh says why and how). Not started by `up`.
-    image: alpine:3.20
+    # (seed-schemas.sh says why and how). Not started by `up`. The image
+    # Relay's _canonicalize.sh runs the canonicalize jar in.
+    image: maven:3.9.9-eclipse-temurin-21
     profiles: ["seed"]
-    command: ["sh", "/stack/seed-schemas.sh"]
+    command: ["bash", "/stack/seed-schemas.sh"]
     volumes:
       - ../../../..:/repo:ro
       - .:/stack:ro
+      - mind-demo-m2:/root/.m2
     depends_on:
       schema-registry:
         condition: service_started
@@ -139,3 +141,10 @@ services:
       interval: 5s
       timeout: 3s
       retries: 24
+
+volumes:
+  # The canonicalize jar's Maven dependencies (schema-seed). External, so the
+  # `down -v` before every run keeps it: they are fetched on the first run only.
+  # run.py creates it.
+  mind-demo-m2:
+    external: true

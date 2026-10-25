@@ -221,6 +221,8 @@ def _wait_for_inbox(timeout_s: float = 240.0) -> None:
 def register_schemas() -> None:
     """Every subject in Relay's list, registered by Relay's scripts (stack/seed-schemas.sh)."""
 
+    # Kept across runs (docker-compose.yml): creating it again is a no-op.
+    _run(["docker", "volume", "create", "mind-demo-m2"], what="creating the Maven cache volume")
     output = _run(_compose("run", "--rm", "schema-seed"), what="registering the schemas")
     registered = [line for line in output.splitlines() if line.startswith("Registered ")]
     logger.info(
