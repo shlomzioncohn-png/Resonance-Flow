@@ -33,6 +33,9 @@ is a paraphrase of other work, not an identifier. That function is also where
 a grounded mention turns `has_dependencies` true, because only here is the
 content in hand to tell a real mention from an invented one.
 
+**The deadline's phrase (#960)** is checked by `ground_deadline`, the same
+way as a mention and then by its numbers too.
+
 `confidence.title_grounding` does the same kind of overlap check for the
 title, but for scoring rather than for dropping. Folding the two together is
 a follow-up, not a change to make while fixing this.
@@ -43,7 +46,7 @@ import re
 from collections.abc import Iterable
 
 from mind.extraction.confidence import content_words
-from mind.extraction.models import ExtractedFields
+from mind.extraction.models import ClassificationFields, ExtractedFields
 
 logger = logging.getLogger("mind.extraction")
 
@@ -180,3 +183,49 @@ def ground_dependency_mentions(
     return fields.model_copy(
         update={"dependency_mentions": kept, "has_dependencies": has_dependencies}
     )
+
+
+# Whole numbers, so "72" is not found inside "720".
+_NUMBER = re.compile(r"[0-9]+")
+
+
+def _numbers(text: str) -> set[int]:
+    # As values, so the 9 of "by 9:00" is the 09 of a text that writes 09:00.
+    return {int(digits) for digits in _NUMBER.findall(text)}
+
+
+def ground_deadline(fields: ExtractedFields, raw_text: str) -> ExtractedFields:
+    """Keep the deadline only if the content says its phrase.
+
+    The words follow the rule for a mention (MIN_WORDS_TO_MISS_ONE). The
+    numbers are checked on their own and none may be missing: the word check
+    drops anything shorter than three characters, which is most of a deadline
+    ("72", "20", "14:00"), and the number is the answer. A phrase with no word
+    and no number ("by then") points at nothing and is dropped too.
+
+    It catches an invented deadline, not a misattributed one: the "March" of
+    another event the content mentions is really there and passes.
+
+    The log names no phrase: it is the content's own words.
+    """
+
+    if not isinstance(fields, ClassificationFields) or fields.deadline is None:
+        return fields
+
+    phrase = fields.deadline.phrase
+    words = content_words(phrase)
+    numbers = _numbers(phrase)
+    said = set(content_words(raw_text))
+    missing_words = sum(1 for word in words if word not in said)
+    allowed = 1 if len(words) >= MIN_WORDS_TO_MISS_ONE else 0
+    numbers_said = numbers <= _numbers(raw_text)
+
+    if (words or numbers) and missing_words <= allowed and numbers_said:
+        return fields
+    logger.warning(
+        "extraction: deadline phrase (%d words, %d numbers) does not appear in the content; "
+        "recording the deadline as null",
+        len(words),
+        len(numbers),
+    )
+    return fields.model_copy(update={"deadline": None})

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from mind.contracts.base_enums import SourceType
 from mind.extraction.confidence import ConfidenceBreakdown, score_confidence
 from mind.extraction.config import ExtractionConfig
-from mind.extraction.grounding import ground_dependency_mentions, ground_source_ref
+from mind.extraction.grounding import ground_deadline, ground_dependency_mentions, ground_source_ref
 from mind.extraction.models import MAX_TASKS_PER_TEXT, ExtractedFields, response_model
 from mind.extraction.parsing import (
     MalformedOutput,
@@ -202,7 +202,7 @@ def _ground_and_score(
     attempts: int,
     sibling_titles: list[str],
 ) -> ExtractedTask:
-    """Check one task's pointer and mentions against the content, then score it.
+    """Check one task's pointer, mentions and deadline against the content, then score it.
 
     The content is untrusted, so a pointer or a mention it did not contain
     does not travel. Done here because this is the one place holding both
@@ -214,6 +214,7 @@ def _ground_and_score(
 
     fields, invented_ref = ground_source_ref(fields, text)
     fields = ground_dependency_mentions(fields, text, sibling_titles)
+    fields = ground_deadline(fields, text)
     return ExtractedTask(
         fields=fields,
         confidence=score_confidence(
