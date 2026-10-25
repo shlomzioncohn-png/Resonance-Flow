@@ -101,6 +101,12 @@ bridge:
       url: ${SCHEMA_REGISTRY_URL:http://localhost:8081}
   manual-sync:
     enabled: false
+  # Deployment-wide tenant for lanes whose sources carry no tenant (GitHub, Jira).
+  # Inbox's tasks.tenant_id is NOT NULL; same env var as crm.organization-id per
+  # Daniel's guidance - one CRM_ORGANIZATION_ID value serves every lane. Blank means
+  # "not configured": mappers fall back to null (the documented contract gap for
+  # local runs through LoggingPayloadPublisher).
+  organization-id: ${CRM_ORGANIZATION_ID:}
   crm:
     dataset: classpath:crm/synthetic-deals.json
     # Inbox's tasks.tenant_id is NOT NULL, but HubSpot (and this
