@@ -815,6 +815,27 @@ def test_a_first_name_alone_is_a_partial_match_for_someone_with_a_last_name():
     assert _found(found) == [(AssigneeType.USER, user["id"], 0.7)]
 
 
+def test_two_people_named_dana_tie_even_when_one_holds_the_username_dana():
+    # Review of PR 926: a one-word username must not make her the clear winner.
+    tenant = uuid4()
+    cohen = _user(tenant, display_name="Dana Cohen", username="dana")
+    levi = _user(tenant, display_name="Dana Levi", username="dana.levi")
+
+    found = _inbox([cohen, levi]).find_candidates(tenant, "Dana")
+
+    assert [round(c.score, 2) for c in found] == [0.7, 0.7]
+    assert {str(c.id) for c in found} == {cohen["id"], levi["id"]}
+
+
+def test_a_close_one_word_username_does_not_beat_the_real_name():
+    tenant = uuid4()
+    fuss = _user(tenant, display_name="Michal Fuss", username="michalf")
+
+    found = _inbox([fuss]).find_candidates(tenant, "Michal")
+
+    assert _found(found) == [(AssigneeType.USER, fuss["id"], 0.7)]
+
+
 def test_a_user_is_found_by_username():
     tenant = uuid4()
     user = _user(tenant, display_name="DC", username="dana.cohen")

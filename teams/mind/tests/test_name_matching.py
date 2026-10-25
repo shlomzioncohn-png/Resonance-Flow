@@ -83,6 +83,33 @@ def test_a_lone_first_name_scores_below_the_full_name():
     assert score_names("Dana", DANA) < score_names("Dana Cohen", DANA)
 
 
+def test_a_one_word_username_does_not_make_a_first_name_a_full_match():
+    # The review case: Dana Cohen holds the username "dana".
+    cohen = ["Dana Cohen", "dana"]
+    levi = ["Dana Levi", "dana.levi"]
+
+    assert score_names("Dana", cohen) == pytest.approx(PARTIAL_SCORE)
+    assert score_names("Dana", levi) == pytest.approx(PARTIAL_SCORE)
+    assert score_names("Dana", cohen) == score_names("Dana", levi)
+
+
+def test_a_one_word_username_that_is_close_to_the_mention_is_still_only_partial():
+    # "michalf" is 0.92 like "michal", but the person is Michal Fuss.
+    score = score_names("Michal", ["Michal Fuss", "michalf"])
+
+    assert score == pytest.approx(PARTIAL_SCORE)
+
+
+def test_a_person_known_by_one_word_only_is_still_an_exact_match():
+    assert score_names("Dana", ["Dana"]) == 1.0
+    assert score_names("Dana", ["Dana", "dana"]) == 1.0
+
+
+def test_the_full_name_still_matches_in_full_through_the_username():
+    assert score_names("dana.cohen", ["Dana Cohen", "dana"]) == 1.0
+    assert score_names("Dana Cohen", ["DC", "dana.cohen"]) == 1.0
+
+
 def test_a_typo_scores_below_the_exact_name():
     assert score_names("Dena Cohen", DANA) < score_names("Dana Cohen", DANA)
 

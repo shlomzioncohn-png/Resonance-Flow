@@ -69,7 +69,11 @@ word the name does not have. The rules are ours, written in code, not learned.
 5. A user is compared by display name, first and last name together, and
    username (the best of them counts); a team by its name. A first name is never
    offered alone next to a last name, or it would be an exact match for every
-   Dana.
+   Dana. Whether a match is full or partial is judged against the user's most
+   complete name, not the field that matched: if a Dana Cohen holds the username
+   `dana`, `Dana` is still only a partial match (0.70) for her, the same as for a
+   Dana Levi, so the two tie. Otherwise the first Dana to take the username would
+   beat every other Dana, and #132 would see a clear winner where there is none.
 6. Below `MIN_SCORE` a candidate is dropped. A name that passes rule 2 scores at
    least `WORD_MATCH_MIN` x `PARTIAL_SCORE` (about 0.5), so `MIN_SCORE` (0.4) is a
    floor under the rule, not the rule itself.

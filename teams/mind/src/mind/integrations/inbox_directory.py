@@ -136,6 +136,9 @@ def _user_names(user: _InboxUser) -> list[str | None]:
     The full name is the first and last name together. A first name is never
     offered on its own next to a last name: "Dana" would then be an exact match
     for every Dana, and an exact match is what tells #132 it can stop looking.
+    Nor does a username or display name of one word make "Dana" a full match for
+    someone who is also known by a longer name: whether a match is full is judged
+    against the longest of these names (see `name_matching.best_score`).
     """
 
     full_name = " ".join(part for part in (user.first_name, user.last_name) if part)
