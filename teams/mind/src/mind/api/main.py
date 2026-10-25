@@ -9,6 +9,7 @@ returns.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -28,6 +29,7 @@ from mind.contracts.errors import register_error_handlers
 from mind.contracts.health import HealthResponse
 from mind.embeddings.pgvector_store import PgVectorStore
 from mind.observability.tracking import monitoring_settings
+from mind.scoring.score_publisher_runner import RunningScorePublisher, start_score_publisher
 
 
 @asynccontextmanager
@@ -38,6 +40,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     Marks the app ready (`app.state.ready`, read by /health) only once all
     of start-up has succeeded, and not ready again as shutdown begins.
+
+    Also starts the score publisher (#920) in background threads when Kafka
+    is configured, and stops them on shutdown.
     """
     # First, so a missing or broken config stops start-up before anything
     # else runs (#481); then apply its service.log_level, which the
@@ -49,13 +54,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # stops the app: the defaults are used instead (see monitoring_settings).
     monitoring_settings()
     store = PgVectorStore(settings.vector_store)
+    score_publisher: RunningScorePublisher | None = None
+    # Set before anything can fail, so a reader (#481's /health/live) never
+    # finds it missing: None means not running.
+    app.state.score_publisher = None
     try:
         await store.open()
         app.state.vector_store = store
+        # Scores Inbox's tasks and publishes them to Chain. None when Kafka is
+        # not configured (locally, in tests).
+        score_publisher = start_score_publisher()
+        app.state.score_publisher = score_publisher
         app.state.ready = True
         yield
     finally:
         app.state.ready = False
+        if score_publisher is not None:
+            # In a worker thread: stop() waits a few seconds for the threads,
+            # which must not block the event loop's other shutdown work.
+            await asyncio.to_thread(score_publisher.stop)
+            app.state.score_publisher = None
         await store.close()
 
 

@@ -224,7 +224,15 @@ components:
     service: *defaultService
     resources: *defaultResources
     <<: *defaultHealthProbes
-    env: {}
+    env:
+      # Required so BridgeTaskKafkaConfig's Protobuf producer (and the
+      # KafkaPayloadPublisher bean) activate - without it everything falls
+      # back to LoggingPayloadPublisher and nothing reaches Inbox.
+      SPRING_PROFILES_ACTIVE: "kafka"
+      # Deployment must --set a real Inbox tenant UUID (blank fails CrmLaneConfig's
+      # kafka-profile startup check by design). Feeds both bridge.crm.organization-id
+      # and bridge.organization-id (GitHub/Jira) via application.yml.
+      CRM_ORGANIZATION_ID: ""
     objectStorage:
       bucket: "bridge-raw"
     config:
@@ -235,9 +243,6 @@ components:
             - "configtree:/etc/resonance-flow/secrets/kafka/"
             - "configtree:/etc/resonance-flow/secrets/bridge-db/"
         kafka:
-          # GitHub currently publishes to bridge.github.tasks.
-          # Issue #275 will decide whether to use the shared topic instead.
-          topic: "bridge.github.tasks"
           properties:
             security.protocol: "SASL_PLAINTEXT"
             sasl.mechanism: "PLAIN"
@@ -310,10 +315,6 @@ components:
       - name: bridge-db-credentials
         mountPath: /etc/resonance-flow/secrets/bridge-db
         readOnly: true
-    volumes:
-      - name: bridge-db-credentials
-        secret:
-          secretName: resonance-flow-bridge-db-credentials
     dependencySecretVolumes:
       - name: object-storage-credentials
         dependencyName: object-storage
@@ -323,6 +324,9 @@ components:
           - key: root-password
             path: minio.secret-key
     volumes:
+      - name: bridge-db-credentials
+        secret:
+          secretName: resonance-flow-bridge-db-credentials
       - name: kafka-credentials
         secret:
           secretName: resonance-flow-kafka-sasl-credentials
@@ -332,6 +336,8 @@ components:
     dependencies:
       - name: object-storage
         port: 9000
+      - name: schema-registry
+        port: 8080
       - name: postgresql
         port: 5432
   lens-frontend:
@@ -417,9 +423,9 @@ components:
     <<: *defaultHealthProbes
     # Password comes from the chain-db-credentials Secret, mounted as a file below -
     # not a literal here, not an env var; created once by the chain db-credentials
-    # hook Job, not rendered as a chart resource. secretName must match the fullname-prefixed name
-    # templates/services/chain/configmap.yaml renders (fullname resolves to the
-    # fixed "resonance-flow" release name this chart is always installed as).
+    # hook Job, not rendered as a chart resource. secretName must match the
+    # "<fullname>-chain-db-credentials" name that hook creates (_db-credentials-hook.tpl;
+    # fullname is the fixed "resonance-flow").
     volumeMounts:
       - name: chain-db-credentials
         mountPath: /etc/resonance-flow/secrets/chain-db

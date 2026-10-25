@@ -10,10 +10,8 @@ from mind.extraction.models import MAX_TASKS_PER_TEXT, response_model
 from mind.extraction.parsing import parse_response
 from mind.extraction.prompts import (
     MAX_CONTENT_CHARS,
-    MAX_MEETING_CONTENT_CHARS,
     TRUNCATION_MARKER,
     _fill,
-    content_cap,
     extraction_prompt,
     repair_prompt,
     system_prompt,
@@ -432,25 +430,45 @@ def test_blocked_or_waiting_work_is_still_a_task() -> None:
     )
 
 
-# --- meetings get their own cap (#690) ------------------------------------
+# --- one cap for every source (#690, #349) ---------------------------------
 
 
-def test_a_meeting_is_sent_whole_where_an_email_is_cut() -> None:
+def test_a_meeting_is_sent_whole() -> None:
     """AMI, live: cut at 8000 the two meetings found 0/4 and 0/8 gold action
     items, sent whole 4/4 and 4/8. A meeting's tasks sit in its closing recap."""
 
     transcript = "Project Manager: so, to recap. " * 1000  # about 31k characters
 
-    assert content_cap(SourceType.MEETING) == MAX_MEETING_CONTENT_CHARS
     assert transcript in extraction_prompt(SourceType.MEETING, transcript)
-    assert TRUNCATION_MARKER in extraction_prompt(SourceType.EMAIL, transcript)
 
 
-def test_past_its_own_cap_a_meeting_is_cut_too() -> None:
-    too_long = "x" * (MAX_MEETING_CONTENT_CHARS + 10)
+def test_an_email_is_sent_whole_with_its_attachment() -> None:
+    """A Bridge item is one text, its files joined (#349). The attachment
+    comes after the body, so a cut there loses the attachment, not a tail."""
 
-    assert TRUNCATION_MARKER in extraction_prompt(SourceType.MEETING, too_long)
-    assert TRUNCATION_MARKER in repair_prompt(SourceType.MEETING, too_long, "{}", "error")
+    item = "[Body]\nPlease sign the form.\n\n[Attachment: form.jpg, scanned]\n" + "x" * 30_000
+
+    assert item in extraction_prompt(SourceType.EMAIL, item)
+
+
+@pytest.mark.parametrize("source_type", [SourceType.EMAIL, SourceType.MEETING])
+def test_past_the_cap_every_source_is_cut(source_type: SourceType) -> None:
+    too_long = "x" * (MAX_CONTENT_CHARS + 10)
+
+    assert TRUNCATION_MARKER in extraction_prompt(source_type, too_long)
+    assert TRUNCATION_MARKER in repair_prompt(source_type, too_long, "{}", "error")
+
+
+def test_the_parts_of_one_item_are_read_as_one() -> None:
+    """A Bridge item is one text, its files joined under headings (#349): the
+    deadline in the body and the work in the attached form make one task."""
+
+    prompt = system_prompt()
+
+    assert "Content can come in parts, each under a heading" in prompt
+    assert "a task may take its details from more than one part" in prompt
+    assert "a task that two parts raise is one task" in prompt
+    assert "never take a task, a title or a `source_ref` from the heading" in prompt
 
 
 def test_an_alert_someone_must_look_at_is_a_task_however_minor() -> None:
@@ -469,7 +487,6 @@ def test_a_meetings_rejected_answer_goes_back_whole() -> None:
     a repair told to return every task "unchanged" must be able to see them."""
 
     long_answer = '{"tasks": [' + ", ".join(['{"title": "Book the lab"}'] * 400) + "]}"
-    assert len(long_answer) > MAX_CONTENT_CHARS
 
     prompt = repair_prompt(SourceType.MEETING, "the meeting", long_answer, "tasks.3.title: ...")
 
