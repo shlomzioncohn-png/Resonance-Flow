@@ -503,6 +503,37 @@ run against the recorded baseline instead of a re-run.
   (expected start of week 7, 2026-10-04), then recorded here with the model
   commit and the persona-set version.
 
+### 2026-10-25: segmented baseline recorded
+
+- **Record:** [`eval/baselines/baseline_score_2026-10-25.json`](../../../eval/baselines/baseline_score_2026-10-25.json)
+- **Model:** `SegmentedRankingModel` (#354), `--model segmented`, model commit
+  `b16bfecc`.
+- **Persona set:** `eval/personas` + `eval/hierarchy`, commit `f07b5e71`,
+  **42 scenarios**, not the 30 the 2026-09-23 entry expected: #535 added 6 hard
+  scenarios and #507 added the 6 in `hierarchy_decides/`.
+
+| Slice | Top-1 |
+|---|---|
+| **Combined (42)** | **78.6% (33/42)** |
+| Original set, all but `hierarchy_decides` (36) | 86.1% (31/36) |
+| `cross_tier` (16) | 87.5% (14/16) |
+| `same_tier` (20) | 85.0% (17/20) |
+| `hierarchy_decides` (6) | 33.3% (2/6) |
+| CEO / Developer / Field Engineer (7 each) | 85.7% (6/7) |
+| Higher Manager / Manager / Salesperson (7 each) | 71.4% (5/7) |
+
+- **`hierarchy_decides`, as designed:** it misses all four scenarios the
+  hierarchy decides (`manager_restructuring_team_signoff`,
+  `salesperson_core_target_proposal`, `higher_manager_migration_budget`,
+  `ceo_expansion_partnership`) and gets both controls. The baseline does not
+  read `parent_task_id`, so it has nothing to decide these with.
+- **Original-set misses:** all 5 are from #535's hard scenarios:
+  `higher_manager_approved_vision_memo`, `manager_idle_new_hires`,
+  `developer_inflated_p0`, `field_engineer_released_controller`,
+  `salesperson_dead_rfp`.
+- **Next:** #487 scores the stretch model on the same set and diffs it against
+  this record (`load_baseline_record` + `diff_reports`).
+
 ## Real data slice
 
 The Foundation Gate requires the harness to run on a small slice of a **real**
