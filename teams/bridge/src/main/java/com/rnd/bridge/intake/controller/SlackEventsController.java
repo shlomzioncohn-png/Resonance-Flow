@@ -165,11 +165,22 @@ public class SlackEventsController {
     }
 
     private boolean reconcileAndPublish(ChatMessage message) {
-        if (message.threadId() != null) {
+        if (isThreadReply(message)) {
             // Threaded groups keep today's immediate merge+publish semantics - unaffected by the
             // non-thread delayed-publish design (see class javadoc), and never scheduled.
             return publishGroups(reconciler.group(List.of(message)));
         }
+        // A thread root that already has replies carries thread_ts == its own ts on Slack's
+        // message_changed payload (SlackEventMessageParser just passes that through - see its
+        // javadoc), so isThreadReply(message) is false here even though message.threadId() is
+        // non-null. Stripping it back to null before handing off is what lets this message take
+        // the branch below instead of the one above: reconcileNonThreadedMessage's own
+        // threadRouted case (see its javadoc) is exactly the designed handler for "this id
+        // resolves to an existing thread group" and is what actually reaches the channel group
+        // via findChannelGroupIfDifferentFromThread/scheduleOrReschedule - routing a root edit
+        // into reconciler.group(List.of(message)) above instead would update only the thread
+        // group and never touch/reschedule the channel group's own still-living copy of the root.
+        ChatMessage nonThreadMessage = withoutSelfThreadId(message);
         // Only newly-arrived attachments are landed here, never published - the transcript stays
         // pending in GroupState for SlackSessionScheduler's inactivity timer to publish, together
         // with every attachment landed during the session (see SlackSessionPublisher). Unless
@@ -177,7 +188,8 @@ public class SlackEventsController {
         // edit - its event carries no threadId of its own, see
         // ChatGroupStateReconciler.resolveCurrentGroupId) - that case is routed by the resolved
         // group's kind, not by event shape, and publishes immediately like any other thread group.
-        ChatGroupStateReconciler.RealtimeReconcileResult result = reconciler.reconcileNonThreadedMessage(message);
+        ChatGroupStateReconciler.RealtimeReconcileResult result =
+                reconciler.reconcileNonThreadedMessage(nonThreadMessage);
         if (result.threadRouted()) {
             // Channel-group step first, uncaught - see reconcileAndPublishDeletion's javadoc for
             // the full ordering rationale (docs/plans/slack-superseded-fix.md §2b): a root edit
@@ -202,6 +214,35 @@ public class SlackEventsController {
             sessionScheduler.scheduleOrReschedule(result.groupState());
         }
         return allLanded;
+    }
+
+    /**
+     * False for a thread root whose Slack payload sets {@code thread_ts == ts} on itself (every
+     * real reply, and a thread_broadcast reply, always has threadId() distinct from its own
+     * id() - only a root-with-replies' own message carries them equal). See
+     * {@link #withoutSelfThreadId} for why this distinction, not a plain null check, is what
+     * decides routing here.
+     */
+    private static boolean isThreadReply(ChatMessage message) {
+        return message.threadId() != null && !message.threadId().equals(message.id());
+    }
+
+    /**
+     * Strips threadId back to null for exactly the case {@link #isThreadReply} excludes: a
+     * thread root whose own message_changed payload carries {@code thread_ts == ts}. Without
+     * this, reconciler.reconcileNonThreadedMessage would reject the message outright (it only
+     * accepts threadId() == null - see its javadoc) instead of reaching its own threadRouted
+     * case, which is the one place that still merges into AND reschedules the channel group's
+     * own still-living copy of the root (see findChannelGroupIfDifferentFromThread). Every other
+     * message is returned unchanged.
+     */
+    private static ChatMessage withoutSelfThreadId(ChatMessage message) {
+        if (isThreadReply(message) || message.threadId() == null) {
+            return message;
+        }
+        return new ChatMessage(
+                message.sourceType(), message.tenantId(), message.chatId(), message.sender(),
+                message.timestamp(), message.text(), message.attachments(), message.id(), null);
     }
 
     /**

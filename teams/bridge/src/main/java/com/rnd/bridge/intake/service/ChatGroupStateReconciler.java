@@ -328,11 +328,22 @@ public class ChatGroupStateReconciler {
             // (see docs/plans/slack-superseded-fix.md §2) - reuses mergeIntoGroupState, the same
             // primitive the ordinary edit path below uses, so a Slack retry of this same event is
             // just as idempotent here (contentUnchanged branch) as it already is there.
+            // confirmedUnchanged is consulted (unlike the thrown-away AtomicBoolean this used to
+            // pass) so a message_changed that didn't actually change the root's text (e.g. Slack
+            // only bumping reply_count when a reply is added) returns null here instead of the
+            // merged-but-identical GroupState - the caller (SlackEventsController) only calls
+            // scheduleOrReschedule when this is non-null, and scheduling an already-published,
+            // byte-for-byte-unchanged group would arm a pointless correction-delay republish of
+            // content that was never actually edited.
             GroupState channelGroupState = findChannelGroupIfDifferentFromThread(
                             sourceType, tenantId, message.id(), threadGroupId)
-                    .map(channelGroupId -> mergeIntoGroupState(
-                            sourceType, tenantId, channelGroupId, MISSING_GROUP_SENTINEL, List.of(message),
-                            new AtomicBoolean()))
+                    .map(channelGroupId -> {
+                        AtomicBoolean confirmedUnchanged = new AtomicBoolean(false);
+                        GroupState merged = mergeIntoGroupState(
+                                sourceType, tenantId, channelGroupId, MISSING_GROUP_SENTINEL, List.of(message),
+                                confirmedUnchanged);
+                        return confirmedUnchanged.get() ? null : merged;
+                    })
                     .orElse(null);
             return new RealtimeReconcileResult(threadState, records, false, true, channelGroupState);
         }

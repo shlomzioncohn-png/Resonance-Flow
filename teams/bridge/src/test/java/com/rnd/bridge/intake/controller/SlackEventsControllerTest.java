@@ -372,6 +372,48 @@ class SlackEventsControllerTest {
         verify(sessionScheduler).scheduleOrReschedule(groupState);
     }
 
+    /**
+     * Theory B's bug and its fix: a thread root that already has replies carries
+     * {@code thread_ts == ts} on its own message_changed payload (SlackEventMessageParser just
+     * passes that through), so {@code message.threadId()} comes back non-null here even though
+     * this is the root, not a reply. Before the fix this took the threadId!=null branch straight
+     * into reconciler.group(...), updating only the thread group and never reaching the channel
+     * group. The fix (SlackEventsController.isThreadReply/withoutSelfThreadId) must still route
+     * this into reconcileNonThreadedMessage - with threadId stripped back to null, since that
+     * method rejects a non-null threadId outright - so its threadRouted case (the one place that
+     * also merges into and reschedules the channel group) is reached.
+     */
+    @Test
+    void rootMessageChangedWithSelfThreadIdStripsThreadIdAndRoutesThroughReconcileNonThreadedMessage() throws Exception {
+        String body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"subtype\":\"message_changed\","
+                + "\"channel\":\"chat-a\",\"ts\":\"1000.9\","
+                + "\"message\":{\"type\":\"message\",\"user\":\"U1\",\"ts\":\"1000.0\",\"thread_ts\":\"1000.0\","
+                + "\"text\":\"root edited\"},"
+                + "\"previous_message\":{\"type\":\"message\",\"user\":\"U1\",\"ts\":\"1000.0\",\"thread_ts\":\"1000.0\","
+                + "\"text\":\"root\"}}}";
+        when(verifier.isValid("1000", "v0=valid", body)).thenReturn(true);
+        GroupState threadGroupState = new GroupState(
+                "1000.0", RawSourceType.SLACK, "kamatech", "chat-a", "1000.0", "corr-1", List.of(), false, 1, null);
+        GroupState channelGroupState = groupState();
+        SourceRecord transcript = attachmentRecord();
+        when(reconciler.reconcileNonThreadedMessage(any())).thenReturn(
+                new ChatGroupStateReconciler.RealtimeReconcileResult(
+                        threadGroupState, List.of(transcript), false, true, channelGroupState));
+        when(slackLane.run(any(Stream.class), any())).thenReturn(new IntakeResult(1, 1, 0, List.of()));
+
+        ResponseEntity<?> response = controllerWithRealParser.handle("1000", "v0=valid", requestWithBody(body));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        ArgumentCaptor<ChatMessage> captor = ArgumentCaptor.forClass(ChatMessage.class);
+        verify(reconciler).reconcileNonThreadedMessage(captor.capture());
+        assertThat(captor.getValue().id()).isEqualTo("1000.0");
+        assertThat(captor.getValue().text()).isEqualTo("root edited");
+        assertThat(captor.getValue().threadId()).isNull();
+        verify(reconciler, never()).group(any());
+        verify(slackLane).run(any(Stream.class), any());
+        verify(sessionScheduler).scheduleOrReschedule(channelGroupState);
+    }
+
     @Test
     void threadReplyMessageChangedEndToEndGoesThroughTheImmediatePublishPathWithTheOriginalReplyId() throws Exception {
         String body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"subtype\":\"message_changed\","
