@@ -10,6 +10,25 @@ import calendar
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 
+
+class Weekday(StrEnum):
+    """A day of the week by name, where people read and write one (settings,
+    later the model's answer). `number` is Python's, which the functions here
+    take: Monday is 0, Sunday is 6."""
+
+    MONDAY = "MONDAY"
+    TUESDAY = "TUESDAY"
+    WEDNESDAY = "WEDNESDAY"
+    THURSDAY = "THURSDAY"
+    FRIDAY = "FRIDAY"
+    SATURDAY = "SATURDAY"
+    SUNDAY = "SUNDAY"
+
+    @property
+    def number(self) -> int:
+        return calendar.Day[self.value].value
+
+
 # A date written without a year is read as already passed only this far back;
 # anything earlier is next year's. A message that creates a task looks forward:
 # a date missed recently is a real reminder ("the invoice was due September
