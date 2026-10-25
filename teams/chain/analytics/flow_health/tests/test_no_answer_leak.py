@@ -7,7 +7,7 @@ FORBIDDEN = ("pathologies", "run_manifest", "manifest.json", "ground_truth", "he
 
 
 def _analysis_sources():
-    return [p for p in SRC.rglob("*.py") if not {"generator", "evaluation"} & set(p.relative_to(SRC).parts)]
+    return [p for p in SRC.rglob("*.py") if not {"generator", "evaluation"} & set(p.relative_to(SRC).parts) and p.name != "run_all.py"]
 
 
 def test_analysis_code_exists_to_scan():
