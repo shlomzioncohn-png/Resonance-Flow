@@ -24,6 +24,9 @@ from uuid import UUID
 
 from mind.config import LandedConsumerSettings, get_settings
 from mind.contracts import RawObjectEvent
+from mind.dependencies.adapter import DependencyAdapter
+from mind.dependencies.kafka_sink import KafkaDependencySink
+from mind.dependencies.publisher import DependencyPublisher
 from mind.embeddings.base import SearchResult
 from mind.embeddings.duplicate_detection import find_duplicate
 from mind.embeddings.pgvector_store import PgVectorStore
@@ -40,7 +43,6 @@ from mind.multimodal import asr
 from mind.task_creation.flow import TaskCreationFlow
 from mind.task_creation.listener import run_overdue_timer, run_task_created_listener
 from mind.task_creation.pending import PendingRequests
-from mind.task_creation.reply import MatchedReply
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +63,6 @@ def _log_items(event: RawObjectEvent, items: list[ExtractionItem]) -> None:
             event.correlation_id,
             len(item.text),
         )
-
-
-async def _no_dependencies_yet(matched: MatchedReply) -> None:
-    """Stands in for #834's `DependencyAdapter.on_task_created` until it is merged."""
 
 
 def _die_on_thread_crash(args: threading.ExceptHookArgs) -> None:
@@ -91,14 +89,23 @@ def main() -> None:
 
     # The listener's side: its own loop, and the index it writes matched tasks
     # through, opened on that loop (a pool belongs to the loop that opened it).
-    listener_loop = asyncio.new_event_loop()
+    # SelectorEventLoop, not new_event_loop(): psycopg's async mode rejects
+    # Windows' default ProactorEventLoop (the #359 demo runs this on Windows).
+    # On Linux it is the default loop anyway.
+    listener_loop = asyncio.SelectorEventLoop()
     listener_index = PgVectorStore(vector_store)
     listener_loop.run_until_complete(listener_index.open())
+    # #355: each matched task's dependency mentions, resolved against the same
+    # index and published to task.dependencies.proposed. on_matched runs on
+    # the listener's loop, so it uses the listener's index (dependencies/README.md).
+    dependencies = DependencyAdapter(
+        DependencyPublisher(listener_index, KafkaDependencySink(producer))
+    )
     flow = TaskCreationFlow(
         producer=producer,
         index=listener_index,
         pending=PendingRequests(),
-        on_matched=_no_dependencies_yet,
+        on_matched=dependencies.on_task_created,
     )
     stop = threading.Event()
     # Daemon: the listener blocks in Kafka's poll and ends with the process.
@@ -113,7 +120,7 @@ def main() -> None:
     ).start()
 
     # The sender's side: this thread's loop, and the index it searches for duplicates.
-    loop = asyncio.new_event_loop()
+    loop = asyncio.SelectorEventLoop()
     search_index = PgVectorStore(vector_store)
     loop.run_until_complete(search_index.open())
     extractor = BasicExtractor(provider, ExtractionConfig(classify=True))
