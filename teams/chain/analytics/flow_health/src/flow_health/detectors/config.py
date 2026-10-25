@@ -11,11 +11,10 @@ DEFAULT_PATH = Path(__file__).with_name("config.yaml")
 
 @dataclass(frozen=True)
 class ChronicBlockerConfig:
-    min_ratio_to_tier: float = 3.0
-    min_dependents: int = 3
-    late_age_ratio_to_tier: float = 3.0
-    medium_from_ratio: float = 4.0
-    high_from_ratio: float = 6.0
+    min_active_ratio: float = 4.0
+    min_dependents: int = 2
+    medium_from_ratio: float = 8.0
+    high_from_ratio: float = 16.0
 
 
 @dataclass(frozen=True)

@@ -1,4 +1,4 @@
-"""Detector 1: a task that stays blocked far longer than its tier's norm while many tasks wait behind it."""
+"""Detector 1: a task that is worked on far longer than its tier's norm while other tasks wait behind it."""
 from __future__ import annotations
 
 import pandas as pd
@@ -7,7 +7,6 @@ from .common import Flag, make_flag_id, percentile_scores, tier_phrase
 from .config import ChronicBlockerConfig
 
 PATTERN = "CHRONIC_BLOCKER"
-_UNKNOWN = "UNKNOWN"
 
 
 def _severity(ratio: float, cfg: ChronicBlockerConfig) -> str:
@@ -16,45 +15,35 @@ def _severity(ratio: float, cfg: ChronicBlockerConfig) -> str:
     return "medium" if ratio >= cfg.medium_from_ratio else "low"
 
 
-def _ratio_to_median(tasks: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
-    """Blocked days / median blocked days of the tier (blocked tasks only). Unknown tier: the all-tasks median."""
-    blocked = tasks["days_blocked_total"].where(tasks["days_blocked_total"] > 0)
-    median = blocked.groupby(tasks["tier"]).transform("median")
-    overall = blocked.median()
-    median = median.where(tasks["tier"] != _UNKNOWN, overall)
-    ratio = (tasks["days_blocked_total"] / median).where(median > 0)
-    return ratio, median
-
-
 def detect(tasks: pd.DataFrame, cfg: ChronicBlockerConfig, clusters: pd.DataFrame | None = None) -> list[Flag]:
-    """`tasks` is features_task. A candidate is unfinished, or finished at least `late_age_ratio_to_tier` tier
-    medians late. It is flagged when it was blocked >= `min_ratio_to_tier` tier medians and carried >= `min_dependents`."""
+    """`tasks` is features_task. A task is flagged when it was ACTIVE at least `min_active_ratio` tier medians
+    (`active_ratio_to_tier`, so unfinished tasks count up to `as_of`) and had at least `min_dependents` dependents at
+    once. A long task nobody waits on is not flagged. The time a task itself spent blocked plays no part: a chronic
+    blocker holds others up while it is being worked on, it is not stuck itself."""
     if tasks.empty:
         return []
-    t = tasks.copy()
-    t["ratio"], t["tier_median"] = _ratio_to_median(t)
+    t = tasks
     if clusters is not None:
         t = t.merge(clusters[["task_id", "cluster"]], on="task_id", how="left")
-
-    candidate = t["is_open"] | (t["age_ratio_to_tier"] >= cfg.late_age_ratio_to_tier)
-    hit = t[candidate & (t["n_dependents_max"] >= cfg.min_dependents) & (t["ratio"] >= cfg.min_ratio_to_tier)]
+    hit = t[(t["active_ratio_to_tier"] >= cfg.min_active_ratio) & (t["n_dependents_max"] >= cfg.min_dependents)]
     hit = hit.sort_values("task_id")
 
     rows = []
     for r in hit.itertuples():
+        tier_median = r.days_active / r.active_ratio_to_tier
         evidence = {
-            "days_blocked": round(float(r.days_blocked_total), 2), "tier": r.tier,
-            "tier_median_blocked_days": round(float(r.tier_median), 2), "ratio_to_tier_median": round(float(r.ratio), 2),
-            "n_dependents_max": int(r.n_dependents_max), "age_ratio_to_tier": round(float(r.age_ratio_to_tier), 2),
-            "is_open": bool(r.is_open),
+            "days_active": round(float(r.days_active), 2), "tier": r.tier,
+            "tier_median_active_days": round(float(tier_median), 2), "ratio_to_tier_median": round(float(r.active_ratio_to_tier), 2),
+            "n_dependents_max": int(r.n_dependents_max), "is_open": bool(r.is_open),
+            "days_blocked": round(float(r.days_blocked_total), 2),
         }
         if clusters is not None:
             evidence["cluster"] = None if pd.isna(r.cluster) else int(r.cluster)
-        explanation = (f"חסומה {round(r.days_blocked_total)} יום, פי {r.ratio:.1f} מהחציון של {tier_phrase(r.tier)} "
-                       f"({round(r.tier_median)} יום), חוסמת {int(r.n_dependents_max)} משימות")
+        explanation = (f"בעבודה {round(r.days_active)} יום, פי {r.active_ratio_to_tier:.1f} מהחציון של {tier_phrase(r.tier)} "
+                       f"({round(tier_median)} יום), חוסמת {int(r.n_dependents_max)} משימות")
         if r.is_open:
             explanation += "; המשימה עדיין לא הסתיימה"
-        rows.append((r.task_id, float(r.ratio), _severity(r.ratio, cfg), explanation, evidence))
+        rows.append((r.task_id, float(r.active_ratio_to_tier), _severity(r.active_ratio_to_tier, cfg), explanation, evidence))
 
     ids = [make_flag_id(PATTERN, [task_id]) for task_id, *_ in rows]
     scores = percentile_scores([ratio for _, ratio, *_ in rows], ids)

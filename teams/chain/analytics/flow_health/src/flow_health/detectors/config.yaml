@@ -1,11 +1,10 @@
 # Starting thresholds of the detectors. Tuned on the dev set (seed 42) only; the eval set is not opened before task 4.
 
 chronic_blocker:
-  min_ratio_to_tier: 3.0        # blocked time / median blocked time of the task's tier
-  min_dependents: 3             # the most dependents the task ever had at the same time
-  late_age_ratio_to_tier: 3.0   # a finished task is a candidate only if its age was at least this many tier medians
-  medium_from_ratio: 4.0        # low: [min, medium); medium: [medium, high); high: [high, ...)
-  high_from_ratio: 6.0
+  min_active_ratio: 4.0         # days the task was ACTIVE / median ACTIVE days of its tier (feature active_ratio_to_tier)
+  min_dependents: 2             # the most dependents the task ever had at the same time
+  medium_from_ratio: 8.0        # low: [min, medium); medium: [medium, high); high: [high, ...)
+  high_from_ratio: 16.0
 
 recurring_cycle:
   min_transitions: 3            # ADDED<->REMOVED switches of one edge (the first ADDED is not a switch)
