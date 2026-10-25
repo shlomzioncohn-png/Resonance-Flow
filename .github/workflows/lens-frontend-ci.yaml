@@ -57,6 +57,8 @@ jobs:
     timeout-minutes: 15
     needs: ci
     if: always()
+    env:
+      CI: true
     defaults:
       run:
         working-directory: teams/lens/frontend
@@ -94,6 +96,8 @@ jobs:
     timeout-minutes: 15
     needs: ci
     if: always()
+    env:
+      CI: true
     defaults:
       run:
         working-directory: teams/lens/frontend

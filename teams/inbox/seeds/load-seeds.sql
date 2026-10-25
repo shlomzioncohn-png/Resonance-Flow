@@ -6,7 +6,7 @@
 -- itself is run from, not against this script's location. Run from this directory:
 --
 --   cd teams/inbox/seeds
---   psql -h localhost -p ${DB_PORT:-5432} -U ${DB_USER:-postgres} -d ${DB_NAME:-resonance_flow} -f load-seeds.sql
+--   psql -h localhost -p ${DB_PORT:-5432} -U ${DB_USER:-inbox} -d ${DB_NAME:-inbox} -f load-seeds.sql
 --
 -- Order matters — later tables reference earlier ones by foreign key:
 --   tenants -> users -> teams (team_lead_id references users!) -> team_members -> tasks -> assignments
