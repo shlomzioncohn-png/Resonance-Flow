@@ -35,18 +35,31 @@ def _line(n, step=5):
     return tasks, [(f"t{i}", f"t{i - 1}", 0, None) for i in range(1, n)]
 
 
-def test_a_linear_chain_is_one_path_with_root_first_and_the_right_time():
+def test_a_linear_chain_gives_its_whole_path_root_first_with_the_right_time():
     paths = extract_paths(_timeline(*_line(5)), CFG)
-    assert list(paths.columns) == PATH_COLUMNS and len(paths) == 1
-    row = paths.iloc[0]
+    assert list(paths.columns) == PATH_COLUMNS
+    row = paths[paths.chain_length == 5].iloc[0]
     assert row.task_ids == "t0;t1;t2;t3;t4" and row.chain_length == 5 and row.sink_task_id == "t4"
     assert row.end_to_end_days == 25 and row.max_hop_share == 0.2  # five hops of five days
 
 
-def test_paths_shorter_than_four_or_longer_than_eight_tasks_are_left_out():
+def test_shorter_than_four_tasks_is_left_out_and_a_longer_path_gives_every_window_of_four_to_eight():
     assert extract_paths(_timeline(*_line(3)), CFG).empty
-    assert extract_paths(_timeline(*_line(9)), CFG).empty
-    assert len(extract_paths(_timeline(*_line(8)), CFG)) == 1
+    assert len(extract_paths(_timeline(*_line(8)), CFG)) == 5 + 4 + 3 + 2 + 1  # windows of 4, 5, 6, 7, 8 tasks
+    nine = extract_paths(_timeline(*_line(9)), CFG)
+    assert nine.chain_length.max() == 8 and len(nine) == 6 + 5 + 4 + 3 + 2
+    assert "t0;t1;t2;t3;t4;t5;t6;t7" in set(nine.task_ids) and "t1;t2;t3;t4;t5;t6;t7;t8" in set(nine.task_ids)
+
+
+def test_a_window_inside_a_long_path_is_timed_from_its_own_first_task():
+    paths = extract_paths(_timeline(*_line(9)), CFG).set_index("task_ids")
+    assert paths.loc["t5;t6;t7;t8", "end_to_end_days"] == 21 and paths.loc["t5;t6;t7;t8", "sink_task_id"] == "t8"
+
+
+def test_the_guard_stops_a_graph_with_too_many_paths():
+    import pytest
+    with pytest.raises(ValueError):
+        extract_paths(_timeline(*_line(5)), SlowChainConfig(max_paths=0))
 
 
 def test_a_task_with_two_dependencies_gives_two_paths_that_share_a_tail():
@@ -54,7 +67,7 @@ def test_a_task_with_two_dependencies_gives_two_paths_that_share_a_tail():
     tasks["side"] = (0, 8)
     edges.append(("t3", "side", 0, None))  # t3 waits on t2 and on side
     paths = extract_paths(_timeline(tasks, edges), CFG)
-    assert sorted(paths.task_ids) == ["t0;t1;t2;t3"]  # the side path has only 2 tasks
+    assert list(paths.task_ids) == ["t0;t1;t2;t3"]  # the side path has only 2 tasks
 
 
 def test_a_fan_in_with_long_sides_gives_each_side():
@@ -63,7 +76,8 @@ def test_a_fan_in_with_long_sides_gives_each_side():
     tasks["join"] = (20, 30)
     edges = [("a1", "a0", 0, None), ("a2", "a1", 0, None), ("b1", "b0", 0, None), ("b2", "b1", 0, None),
              ("join", "a2", 0, None), ("join", "b2", 0, None)]
-    assert sorted(extract_paths(_timeline(tasks, edges), CFG).task_ids) == ["a0;a1;a2;join", "b0;b1;b2;join"]
+    paths = extract_paths(_timeline(tasks, edges), CFG)
+    assert set(paths.task_ids) == {"a0;a1;a2;join", "b0;b1;b2;join"} and len(paths) == 2
 
 
 def test_an_edge_removed_before_its_dependent_finished_is_not_used():

@@ -179,25 +179,29 @@ The detectors never read the answer files (checked by `tests/test_no_answer_leak
 
 | Detector | Looks at | Flagged when | Severity |
 |---|---|---|---|
-| `CHRONIC_BLOCKER` (a task) | `features_task`: unfinished tasks, or finished ones that took at least 3 tier medians | blocked time is at least 3x the median blocked time of its tier **and** it had at least 3 dependents at once. A long task nobody waits on is not flagged. A task with no known tier is compared with all tasks. | by the ratio: 3-4 low, 4-6 medium, 6 and up high |
+| `CHRONIC_BLOCKER` (a task) | `features_task` | `active_ratio_to_tier` (days the task was ACTIVE / the usual for its tier) is at least 4 **and** it had at least 2 dependents at once. A long task nobody waits on is not flagged. A chronic blocker is held while it is worked on, so its own blocked time is not used. | by the ratio: 4-8 low, 8-16 medium, 16 and up high |
 | `RECURRING_CYCLE` (an edge, or a pair of edges) | `dependency_history`: ADDED / REMOVED events of each `(task_id, depends_on_task_id)` | at least 3 switches (the first ADDED is not a switch) and a median gap between events of 1-10 days. An edge fixed once is not flagged. A **near-cycle** (two live edges of one task, one removed and back after at least a day) is flagged on the pair; edges already flagged alone are not repeated. | 8+ switches, or 5+ with even gaps (CV <= 0.3): high; 5+ medium; else low. A pair is always low. |
-| `SLOW_CHAIN` (a path) | every maximal path of 4-8 finished tasks in the dependency graph (`chain_paths.py`) | at least 3x the median closing time of paths **of the same length**, robust z (median / MAD, IQR when MAD is 0) at least 3.5, **and** no single link above 50% of the total time (such a path is a chronic blocker). Groups smaller than 8 are not judged. | by the ratio to the median: 3-4 low, 4-6 medium, 6 and up high |
+| `SLOW_CHAIN` (a path) | windows of 4-8 consecutive finished tasks of the dependency graph (`chain_paths.py`); value of a window = the median `active_ratio_to_tier` of its tasks | the value is at least 3x the median value of windows **of the same length**, robust z (median / MAD, IQR when MAD is 0) at least 3.5, **and** no single link above 50% of the total time (such a path is a chronic blocker). Groups smaller than 8 are not judged. Overlapping windows of one stretch give one flag (the strongest). | by the ratio to the group median: 3-4 low, 4-8 medium, 8 and up high |
 
 **Paths.** The graph holds finished tasks; an edge counts if it was active when its dependent finished and its target
-finished no later. A path starts at a task with no such dependency and ends at one nothing depends on. Paths longer
-than 8 tasks are left out whole, not cut. The time runs from the first task's first ACTIVE to the last task's DONE;
-the first hop is the first task's own work, so the hops add up to the total. Paths share tasks, so the flags of one
-slow stretch can overlap.
+finished no later. A maximal path starts at a task with no such dependency and ends at one nothing depends on; every
+window of 4-8 consecutive tasks of it is a candidate, so a slow stretch inside a longer path is seen. The time runs from
+the first task's first ACTIVE to the last task's DONE; the first hop is the first task's own work, so the hops add up
+to the total. Windows share tasks, so after the thresholds the weaker of two windows that share more than half of the
+smaller one is dropped.
 
 **Thresholds** live in `src/flow_health/detectors/config.yaml` (`--config` points at another file); the file's comments
-say what each value means. The ones that decide most: `chronic_blocker.min_ratio_to_tier`, `min_dependents`;
+say what each value means. The ones that decide most: `chronic_blocker.min_active_ratio`, `min_dependents`;
 `recurring_cycle.min_transitions`, `min_median_gap_days`, `max_median_gap_days`; `slow_chain.min_ratio_to_median`,
 `min_robust_z`, `max_link_share`, `min_group_size`. They were set on the dev set (seed 42) only; the eval set was not opened.
 The only change from the starting values: `min_median_gap_days` is 1.0 instead of 2 (on dev every edge with 3 or more
 switches has a median gap of 1.8-3.0 days).
 
-**Result on dev:** 14 chronic blockers, 20 recurring-cycle edges, 1 slow chain, 0 near-cycle pairs (no task in dev has
-two live edges of which one flaps).
+**Result on dev:** 206 flags: 109 chronic blockers, 20 recurring-cycle edges, 77 slow chains, 0 near-cycle pairs (no
+task in dev has two live edges of which one flaps).
 
-**Limits.** Chronic blocker sees blocked time, not a task that is long without ever being blocked. The slow-chain
-baseline is the length group alone, with no tier or team pace, so groups of long paths are wide and few paths stand out.
+**Limits.** Work time is compared with the whole tier, not with the task's own team, so a slow team's ordinary tasks
+look slow and a fast team's slow task can hide. `active_ratio_to_tier` is a task feature (see `feature_spec.md`); a
+second feature that compares with the tier **within the task's project** would sharpen both detectors, and the slow
+chain detector can use it through `slow_chain.link_ratio_column`. A subtle chronic blocker with a single dependent is
+hard to tell from an ordinary busy task.

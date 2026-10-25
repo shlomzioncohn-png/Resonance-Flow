@@ -37,7 +37,10 @@ class SlowChainConfig:
     min_robust_z: float = 3.5
     max_link_share: float = 0.5
     medium_from_ratio: float = 4.0
-    high_from_ratio: float = 6.0
+    high_from_ratio: float = 8.0
+    max_overlap: float = 0.5
+    max_paths: int = 1_000_000
+    link_ratio_column: str = "active_ratio_to_tier"
 
 
 @dataclass(frozen=True)

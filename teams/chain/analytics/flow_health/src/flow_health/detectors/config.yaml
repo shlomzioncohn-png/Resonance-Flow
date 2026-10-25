@@ -16,11 +16,14 @@ recurring_cycle:
   pair_min_return_days: 1.0     # near-cycle: the removed edge must stay away at least this long before it returns
 
 slow_chain:
-  min_length: 4                 # chains are compared only with chains of the same length, in tasks
+  min_length: 4                 # paths of min_length..max_length tasks; windows of that size are cut from longer ones
   max_length: 8
-  min_group_size: 8             # fewer chains of one length: no baseline, nothing is flagged
-  min_ratio_to_median: 3.0      # end-to-end days / median end-to-end days of the same length
+  max_paths: 1000000            # guard against a graph with an exploding number of paths
+  max_overlap: 0.5              # of two overlapping flags on one stretch, the weaker is dropped if they share more than this
+  link_ratio_column: active_ratio_to_tier   # per-task feature: work time against the usual of the task's tier
+  min_group_size: 8             # fewer paths of one length: no baseline, nothing is flagged
+  min_ratio_to_median: 3.0      # median link ratio of the path / median of that value over paths of the same length
   min_robust_z: 3.5             # 0.6745 * (x - median) / MAD, within the same length
   max_link_share: 0.5           # no single link may account for more than this share of the total time
-  medium_from_ratio: 4.0        # severity bands, same shape as the chronic blocker's
-  high_from_ratio: 6.0
+  medium_from_ratio: 4.0        # severity bands on the ratio to the group median
+  high_from_ratio: 8.0

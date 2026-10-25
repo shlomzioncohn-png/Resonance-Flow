@@ -20,7 +20,7 @@ def run_detectors(tasks: pd.DataFrame, dependency_history: pd.DataFrame, chains:
     """All three detectors, one after the other. Merging them into one ranked list is the next task."""
     return (chronic_blocker.detect(tasks, cfg.chronic_blocker, clusters)
             + recurring_cycle.detect(dependency_history, cfg.recurring_cycle)
-            + slow_chain.detect(chains, cfg.slow_chain))
+            + slow_chain.detect(chains, tasks, cfg.slow_chain))
 
 
 def main(argv: list[str] | None = None) -> int:
