@@ -92,6 +92,10 @@ class Planter:
         at = task.created_at + timedelta(seconds=self.rng.uniform(1, 30))
         self._edges.append(EdgeBatch(at, "ADDED", task.id, tuple(t.id for t in targets), "MIND"))
 
+    def toggle(self, task: TaskSpec, target: TaskSpec, action: str, at: datetime) -> None:
+        """One ADDED / REMOVED write of the edge task -> target at an explicit time."""
+        self._edges.append(EdgeBatch(at, action, task.id, (target.id,), "MIND"))
+
     def attach_upstream(self, root: TaskSpec) -> None:
         """Most real blockers are themselves downstream of something healthy."""
         if self.rng.random() < 0.6:

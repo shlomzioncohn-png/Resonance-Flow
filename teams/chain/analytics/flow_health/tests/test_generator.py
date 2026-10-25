@@ -8,11 +8,11 @@ from dataclasses import replace
 
 import pytest
 
-from health.generator import DISEASE_TYPES, HOLDOUT_DISEASES, SEVERITIES, GeneratorConfig, generate, validate
-from health.generator.__main__ import main as generate_cli
-from health.generator.diseases import REGISTRY, Disease
-from health.generator.export import write_dataset
-from health.generator.model import TIER_PROFILES, TIERS
+from flow_health.generator import DISEASE_TYPES, HOLDOUT_DISEASES, SEVERITIES, GeneratorConfig, generate, validate
+from flow_health.generator.__main__ import main as generate_cli
+from flow_health.generator.diseases import REGISTRY, Disease
+from flow_health.generator.export import write_dataset
+from flow_health.generator.model import TIER_PROFILES, TIERS
 
 SMALL = replace(GeneratorConfig(), n_normal_tasks=300, n_projects=6, instances_per_severity=1)
 
@@ -82,19 +82,23 @@ def test_planted_diseases_leave_their_signature(full):
             blocked_days[r.task_id] = max(blocked_days[r.task_id], (r.created_at - opened.pop(r.task_id)).days)
     for task, since in opened.items():
         blocked_days[task] = max(blocked_days[task], (end - since).days)
-    done = defaultdict(int)
+    blocks = defaultdict(int)
     for r in rows:
-        if r.event_type == "STATUS_CHANGED" and r.to_status == "DONE":
-            done[r.task_id] += 1
+        if r.event_type == "BLOCKED":
+            blocks[r.task_id] += 1
 
     for d in full.world.diseases:
         days_available = (end - d.start).days  # late starters are cut off by the end of the history
         if d.type in ("chronic_blocking", "stuck_subgraph") and d.severity == "severe":
             assert max(blocked_days[t] for t in d.task_ids) >= 0.75 * min(d.params["hold_days"], days_available) - 3, d.id
         if d.type == "recurring_blocker":
-            assert done[d.root_task_id] >= min(d.params["cycles"], days_available // 9) - 1, d.id
+            assert max(blocks[t] for t in d.task_ids) >= min(d.params["cycles"], days_available // 7) - 1, d.id
         if d.type == "growing_bottleneck":
             assert len(d.task_ids) == d.params["dependents"] + 1
+
+
+def test_no_task_ever_leaves_done(full):
+    assert not [r for r in full.history.state_rows if r.event_type == "STATUS_CHANGED" and r.from_status == "DONE"]
 
 
 def test_chronic_and_stuck_roots_are_long_for_their_own_tier(full):
@@ -105,7 +109,7 @@ def test_chronic_and_stuck_roots_are_long_for_their_own_tier(full):
 
 def test_normal_world_has_healthy_lookalikes_and_dead_ends(full):
     kinds = {t.kind for t in full.world.tasks}
-    assert {"slow_legit", "reopened_legit", "backlog", "abandoned"} <= kinds
+    assert {"slow_legit", "backlog", "abandoned"} <= kinds
     # nothing depends on backlog/abandoned tasks, so they can't masquerade as chronic blockers
     dead = {t.id for t in full.world.tasks if t.kind in ("backlog", "abandoned")}
     real = [e for e in full.history.dependency_rows if e.action != "REJECTED"]
@@ -225,14 +229,17 @@ def test_everything_works_when_no_task_has_a_known_tier(tmp_path):
     assert all(d["observed"]["peer_group"]["tier_used"] is None for d in truth)
     assert all("tier" not in d["observed"]["peer_group"]["level"] for d in truth)
     assert all(d["observed"]["peer_chains"]["tier_used"] is None for d in truth if d["type"] == "slow_chain")
-    with (tmp_path / "tasks_meta.csv").open(encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-    assert all(r["tier"] == "" and r["true_tier"] for r in rows)  # hidden from the analysis, kept in the key
+    with (tmp_path / "task_meta.csv").open(encoding="utf-8") as f:
+        visible = list(csv.DictReader(f))
+    with (tmp_path / "answer_key_tasks.csv").open(encoding="utf-8") as f:
+        key = list(csv.DictReader(f))
+    assert all(r["tier"] == "" for r in visible)
+    assert all(r["true_tier"] for r in key)  # hidden from the analysis, kept in the key
 
 
 def test_the_simulation_runs_for_tasks_that_have_no_tier_at_all():
-    from health.generator.planner import plan_world
-    from health.generator.simulation import simulate
+    from flow_health.generator.planner import plan_world
+    from flow_health.generator.simulation import simulate
 
     world = plan_world(SMALL)
     for i, task in enumerate(world.tasks):
@@ -244,7 +251,7 @@ def test_the_simulation_runs_for_tasks_that_have_no_tier_at_all():
 
 def test_some_tiers_are_hidden_by_default_and_the_rest_are_visible(full, tmp_path):
     write_dataset(tmp_path, full.config, full.world, full.history)
-    with (tmp_path / "tasks_meta.csv").open(encoding="utf-8") as f:
+    with (tmp_path / "task_meta.csv").open(encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     hidden = sum(1 for r in rows if r["tier"] == "") / len(rows)
     assert abs(hidden - full.config.missing_tier_rate) < 0.02
@@ -261,7 +268,7 @@ def test_one_command_writes_independent_dev_and_eval_sets(tmp_path):
     assert eval_manifest["disease_types_held_out"] == []
     ids = []
     for name in ("dev", "eval"):
-        with (tmp_path / name / "tasks_meta.csv").open(encoding="utf-8") as f:
+        with (tmp_path / name / "tasks.csv").open(encoding="utf-8") as f:
             ids.append({r["task_id"] for r in csv.DictReader(f)})
         for table in ("dependency_history", "task_state_history", "ground_truth"):
             assert (tmp_path / name / f"{table}.csv").is_file()

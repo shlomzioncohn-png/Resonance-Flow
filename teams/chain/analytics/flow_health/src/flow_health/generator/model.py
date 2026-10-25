@@ -76,14 +76,12 @@ class TaskSpec:
     project: int
     created_at: datetime
     tier: str | None = "operational"  # None = unknown tier; its pace falls back to the average
-    kind: str = "normal"  # normal | slow_legit | reopened_legit | backlog | abandoned | disease | control_chain
+    kind: str = "normal"  # normal | slow_legit | backlog | abandoned | disease | control_chain
     disease_id: str | None = None
     control_id: str | None = None  # set on the links of a healthy control chain
     work_mult: float = 1.0
     hold_start_until: datetime | None = None  # task cannot leave PENDING before this
     hold_finish_until: datetime | None = None  # task cannot reach DONE before this
-    reopen_budget: int = 0  # times it is reopened after reaching DONE
-    reopen_gap_hours: tuple[float, float] = (24.0, 96.0)
 
 
 @dataclass(frozen=True)

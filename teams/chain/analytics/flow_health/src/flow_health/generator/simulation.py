@@ -58,7 +58,6 @@ class _State:
         self.deps: dict[UUID, None] = {}  # dicts as ordered sets: deterministic iteration
         self.dependents: dict[UUID, None] = {}
         self.blocking = 0
-        self.reopens_left = spec.reopen_budget
 
 
 def simulate(cfg: GeneratorConfig, world: World) -> History:
@@ -167,22 +166,6 @@ class _Simulator:
             d.blocking -= 1
             if d.blocking == 0:
                 self._unblocked(d, before=1)
-        if st.reopens_left > 0:
-            st.reopens_left -= 1
-            lo, hi = st.spec.reopen_gap_hours
-            self._push(self.now + timedelta(hours=st.rng.uniform(lo, hi)), "reopen", task_id, st.rng)
-
-    def _on_reopen(self, task_id: UUID) -> None:
-        st = self.states[task_id]
-        if st.status != "DONE":
-            return
-        self._set_status(st, "ACTIVE")
-        for dep_id in st.dependents:
-            d = self.states[dep_id]
-            d.blocking += 1
-            if d.blocking == 1:
-                self._emit_state(dep_id, "BLOCKED", before=0, after=1)
-        self._push(self.now + self._work(st), "finish", task_id, st.rng)
 
     def _on_edges(self, batch: EdgeBatch) -> None:
         a = self.states[batch.task_id]
