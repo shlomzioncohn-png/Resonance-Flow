@@ -13,18 +13,19 @@ import asyncio
 
 from mind.config import get_settings
 from mind.embeddings import embed
+from mind.embeddings.base import DEMO_TENANT_ID
 from mind.embeddings.pgvector_store import PgVectorStore
 
 _SAMPLE_QUERY = "Collect the team members' own seating preferences"
 
 
 async def main() -> None:
-    store = PgVectorStore(get_settings().vector_store)
-    await store.open()
+    index = PgVectorStore(get_settings().vector_store)
+    await index.open()
     try:
-        results = await store.search(embed(_SAMPLE_QUERY), k=3)
+        results = await index.for_tenant(DEMO_TENANT_ID).search(embed(_SAMPLE_QUERY), k=3)
     finally:
-        await store.close()
+        await index.close()
 
     print(f"Query: {_SAMPLE_QUERY!r}")
     for rank, r in enumerate(results, start=1):

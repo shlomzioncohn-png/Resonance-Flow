@@ -34,7 +34,6 @@ tests that spelled that change out ran as xfail(strict=True) until it landed.
 from __future__ import annotations
 
 import dataclasses
-import json
 import logging
 import subprocess
 import sys
@@ -62,7 +61,7 @@ from mind.observability.tracking import (
     get_recent_calls,
     model_call_summary,
 )
-from tests.extraction.fakes import ScriptedProvider
+from tests.extraction.fakes import ScriptedProvider, answer_of
 from tests.test_asr_pipeline import (
     _CLEAN_RECORDING,
     _ROOT,
@@ -152,8 +151,9 @@ def one_asr_call(monkeypatch: pytest.MonkeyPatch, model: FakeWhisper | None = No
     assert transcribe(tone(1.0)).success
 
 
-# A valid extraction of _SOURCE: one call, no repair round.
-_ANSWER = json.dumps(
+# A valid extraction of _SOURCE: one call, no repair round. In the list shape
+# the model answers in since #690.
+_ANSWER = answer_of(
     {
         "title": "Send the Q3 report to finance",
         "description": "Finance asked for the Q3 report before the close.",

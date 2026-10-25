@@ -34,8 +34,13 @@ spec:
               env:
                 - name: KAFKA_BOOTSTRAP_SERVERS
                   value: {{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $.Values.dependencies "name" "kafka") | quote }}
-                - name: KAFKA_SASL_JAAS_CONFIG
-                  value: {{ include "resonance-flow.kafkaSaslJaasConfig" (dict "root" $) | quote }}
+                - name: KAFKA_SASL_USERNAME
+                  value: {{ first $.Values.kafka.sasl.client.users | quote }}
+                - name: KAFKA_SASL_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: resonance-flow-kafka-sasl-credentials
+                      key: client-passwords
                 - name: GROUP_PATTERN
                   value: {{ $sweep.groupPattern | quote }}
 

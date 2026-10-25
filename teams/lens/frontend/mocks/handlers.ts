@@ -25,7 +25,7 @@
  */
 import { delay, http, HttpResponse } from 'msw';
 import type { GatewayErrorBody } from '@/services/api';
-import type { LoginRequest, LoginResponse } from '@/services/authApi';
+import type { AuthRole, LoginRequest, LoginResponse } from '@/services/authApi';
 import type { DependencyGraph } from '@/services/bottlenecksApi';
 import type {
   UserCreateFields,
@@ -93,20 +93,20 @@ export function resetMockUsers() {
 resetMockUsers();
 
 // Same users and passwords as the Keycloak realm (teams/lens/keycloak/realm-lens.json).
-const MOCK_ACCOUNTS: (LoginRequest & LoginResponse)[] = [
+const MOCK_ACCOUNTS: (LoginRequest & { password: string; id: string; displayName: string; role: AuthRole })[] = [
   {
-    username: 'manager1',
+    login: 'manager1',
     password: 'manager1',
     id: 'a3c5e0b2-4f1d-4c8e-9b7a-1d2e3f4a5b01',
     displayName: 'Maya Manager',
-    role: 'manager',
+    role: 'TENANT_ADMIN',
   },
   {
-    username: 'employee1',
+    login: 'employee1',
     password: 'employee1',
     id: 'a3c5e0b2-4f1d-4c8e-9b7a-1d2e3f4a5b02',
     displayName: 'Eli Employee',
-    role: 'employee',
+    role: 'EMPLOYEE',
   },
 ];
 
@@ -235,9 +235,9 @@ export const handlers = [
     async ({ request }) => {
       await delay(400);
 
-      const { username, password } = await request.json();
+      const { login, password } = await request.json();
       const account = MOCK_ACCOUNTS.find(
-        (candidate) => candidate.username === username && candidate.password === password,
+        (candidate) => candidate.login === login && candidate.password === password,
       );
 
       if (!account) {
@@ -254,9 +254,12 @@ export const handlers = [
       }
 
       return HttpResponse.json<LoginResponse>({
-        id: account.id,
-        displayName: account.displayName,
-        role: account.role,
+        expiresIn: 3600,
+        user: {
+          id: account.id,
+          displayName: account.displayName,
+          role: account.role,
+        },
       });
     },
   ),

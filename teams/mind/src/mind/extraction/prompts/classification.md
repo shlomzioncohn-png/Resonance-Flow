@@ -1,5 +1,5 @@
-In addition to the keys above, the object has the keys below. They say what
-kind of task this is and how long it takes, and each of them may be null.
+In addition to the keys above, each task has the keys below. They say what
+kind of task it is and how long it takes, and each of them may be null.
 
 - `tier` — string or null. Exactly one of `"OPERATIONAL"`, `"TACTICAL"`,
   `"STRATEGIC"`. Tier is about the **time horizon of the work and how far its
@@ -69,31 +69,42 @@ Examples. Each answer is the whole object, written exactly as you return it:
 
     "The checkout service is throwing null pointers since the deploy, users
     cannot pay."
-    {"title": "Fix the checkout service null pointers", "description": "Users cannot pay since the deploy.", "source_ref": null, "has_dependencies": false, "tier": "OPERATIONAL", "urgency": 5, "role_context": "DEVELOPER", "effort_estimate_minutes": null, "effort_estimate_basis": null}
+    {"tasks": [{"title": "Fix the checkout service null pointers", "description": "Users cannot pay since the deploy.", "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "OPERATIONAL", "urgency": 5, "role_context": "DEVELOPER", "effort_estimate_minutes": null, "effort_estimate_basis": null}]}
 
     "Before Thursday I need the recommendation on whether we enter the German
     market, the board is deciding."
-    {"title": "Write the recommendation on entering the German market", "description": "The board decides on Thursday and is waiting for it.", "source_ref": null, "has_dependencies": true, "tier": "STRATEGIC", "urgency": 4, "role_context": "CEO", "effort_estimate_minutes": null, "effort_estimate_basis": null}
+    {"tasks": [{"title": "Write the recommendation on entering the German market", "description": "The board decides on Thursday and is waiting for it.", "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "STRATEGIC", "urgency": 4, "role_context": "CEO", "effort_estimate_minutes": null, "effort_estimate_basis": null}]}
 
     "Can you line up next sprint and work out who picks up the migration?"
-    {"title": "Line up next sprint", "description": "Includes working out who picks up the migration.", "source_ref": null, "has_dependencies": false, "tier": "TACTICAL", "urgency": 2, "role_context": "MANAGER", "effort_estimate_minutes": null, "effort_estimate_basis": null}
+    {"tasks": [{"title": "Line up next sprint", "description": "Includes working out who picks up the migration.", "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "TACTICAL", "urgency": 2, "role_context": "MANAGER", "effort_estimate_minutes": null, "effort_estimate_basis": null}]}
 
     "Please fix the typo on the login page."
-    {"title": "Fix the typo on the login page", "description": null, "source_ref": null, "has_dependencies": false, "tier": "OPERATIONAL", "urgency": 1, "role_context": null, "effort_estimate_minutes": 10, "effort_estimate_basis": "INFERRED"}
+    {"tasks": [{"title": "Fix the typo on the login page", "description": null, "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "OPERATIONAL", "urgency": 1, "role_context": null, "effort_estimate_minutes": 10, "effort_estimate_basis": "INFERRED"}]}
 
     "Could you review my pull request today? It should take about half an
     hour."
-    {"title": "Review the pull request", "description": null, "source_ref": null, "has_dependencies": false, "tier": "OPERATIONAL", "urgency": 3, "role_context": "DEVELOPER", "effort_estimate_minutes": 30, "effort_estimate_basis": "STATED"}
+    {"tasks": [{"title": "Review the pull request", "description": null, "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "OPERATIONAL", "urgency": 3, "role_context": "DEVELOPER", "effort_estimate_minutes": 30, "effort_estimate_basis": "STATED"}]}
 
     "The badge readers at the warehouse gate stopped working about two hours
     ago, can someone go check them?"
-    {"title": "Check the badge readers at the warehouse gate", "description": "They stopped working about two hours ago.", "source_ref": null, "has_dependencies": false, "tier": "OPERATIONAL", "urgency": 4, "role_context": "FIELD_ENGINEER", "effort_estimate_minutes": null, "effort_estimate_basis": null}
+    {"tasks": [{"title": "Check the badge readers at the warehouse gate", "description": "They stopped working about two hours ago.", "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "OPERATIONAL", "urgency": 4, "role_context": "FIELD_ENGINEER", "effort_estimate_minutes": null, "effort_estimate_basis": null}]}
+
+    "Project Manager: Can you send the client the revised mock-ups by tomorrow?
+    I will set up the review call with their team once they have them."
+    {"tasks": [{"title": "Send the client the revised mock-ups", "description": "Due tomorrow.", "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "OPERATIONAL", "urgency": 3, "role_context": null, "effort_estimate_minutes": null, "effort_estimate_basis": null}, {"title": "Set up the review call with the client's team", "description": "Once the client has the revised mock-ups.", "source_ref": null, "has_dependencies": true, "dependency_mentions": ["Send the client the revised mock-ups"], "tier": "OPERATIONAL", "urgency": 2, "role_context": null, "effort_estimate_minutes": 15, "effort_estimate_basis": "INFERRED"}]}
+
+    "Thanks everyone, good discussion on the colour options. See you next week."
+    {"tasks": []}
 
     The typo shows the normal case for an empty field: a one-line request
     with no sign of whose work it is. Null there is the right answer, not a
     failure to answer. It is also the inferred estimate, and the pull request
     the stated one. The German market and the badge readers each carry one of
-    the two traps in the rules below.
+    the two traps in the rules below. The meeting turn holds two tasks, one
+    asked for and one offered, so the list has two entries; the call waits
+    for the mock-ups, so it names them by their title, and the mock-ups,
+    which wait for nothing, name nothing. The last one
+    discusses but asks nobody for anything, so the list is empty.
 
 Rules for `tier`, `urgency` and `role_context`:
 

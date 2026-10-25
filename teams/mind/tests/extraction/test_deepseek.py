@@ -14,12 +14,13 @@ import json
 
 import httpx
 import pytest
-from tests.extraction.fakes import ScriptedProvider
+from tests.extraction.fakes import ScriptedProvider, answer_of, only
 
 from mind.contracts.base_enums import SourceType
 from mind.extraction.config import ExtractionConfig
 from mind.extraction.extractor import BasicExtractor, ExtractionFailure, ExtractionSuccess
 from mind.extraction.providers.base import (
+    LLMAccessDenied,
     LLMProvider,
     LLMRateLimited,
     LLMRejected,
@@ -30,7 +31,7 @@ from mind.extraction.providers.deepseek import DeepSeekProvider
 from mind.extraction.providers.http import MAX_ERROR_DETAIL_CHARS
 from mind.extraction.providers.settings import DeepSeekSettings
 
-VALID_ANSWER = json.dumps(
+VALID_ANSWER = answer_of(
     {
         "title": "Send the Q3 report to finance",
         "description": "Finance asked for the Q3 report before the close.",
@@ -395,15 +396,15 @@ def test_the_extractor_drives_the_real_client_end_to_end() -> None:
     outcome = extractor.extract(SOURCE_TEXT, SourceType.EMAIL)
 
     assert isinstance(outcome, ExtractionSuccess)
-    assert outcome.fields.title == "Send the Q3 report to finance"
-    assert outcome.fields.source_ref == "MSG-4471"
+    assert only(outcome).fields.title == "Send the Q3 report to finance"
+    assert only(outcome).fields.source_ref == "MSG-4471"
     assert outcome.model == "deepseek-chat"
     assert outcome.provider_calls == 1
 
 
 def test_the_repair_round_works_over_http() -> None:
     handler, seen = _scripted(
-        httpx.Response(200, json=_envelope('{"title": "no deps field"}')),
+        httpx.Response(200, json=_envelope(answer_of({"title": "no deps field"}))),
         httpx.Response(200, json=_envelope(VALID_ANSWER)),
     )
     extractor = BasicExtractor(_provider(handler), sleep=lambda _: None)
@@ -469,3 +470,27 @@ def test_the_scripted_fake_and_the_real_client_agree_on_the_protocol() -> None:
 
     for provider in providers:
         assert provider.complete("system", "user").text == VALID_ANSWER
+
+
+@pytest.mark.parametrize("status", [401, 402, 403, 404])
+def test_a_refused_account_is_environmental(status: int) -> None:
+    """The key, the credit or the model: no other item would pass either (#919)."""
+
+    handler, _ = _always({"error": {"message": "nope"}}, status)
+
+    with pytest.raises(LLMAccessDenied) as raised:
+        _provider(handler).complete("system", "user")
+
+    assert raised.value.environmental is True
+    assert raised.value.retryable is False
+
+
+@pytest.mark.parametrize("status", [400, 422, 409])
+def test_a_refused_request_is_the_items_not_the_environments(status: int) -> None:
+    handler, _ = _always({"error": {"message": "nope"}}, status)
+
+    with pytest.raises(LLMRejected) as raised:
+        _provider(handler).complete("system", "user")
+
+    assert not isinstance(raised.value, LLMAccessDenied)
+    assert raised.value.environmental is False

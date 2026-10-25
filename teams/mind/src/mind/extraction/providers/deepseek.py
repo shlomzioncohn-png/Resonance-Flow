@@ -24,8 +24,12 @@ Status mapping, and whether the extractor will try again:
     429                                    LLMRateLimited  retried
     5xx                                    LLMUnavailable  retried
     body is not the envelope we need       LLMUnavailable  retried
-    401, 403 (key), 402 (out of credit)    LLMRejected     not retried
-    400, 404, 422, any other 4xx           LLMRejected     not retried
+    401, 403 (key), 402 (out of credit)    LLMAccessDenied not retried
+    404 (wrong model or URL)               LLMAccessDenied not retried
+    400, 422, any other 4xx                LLMRejected     not retried
+
+Every row but the last is `environmental`: no other item would pass either,
+so the pipeline stops rather than skipping the item (#919).
 
 DeepSeek's JSON mode requires the word "json" to appear in the prompt. The
 system prompt says "Return a single JSON object", so that holds today - check
@@ -38,6 +42,7 @@ from typing import Any, Self
 import httpx
 
 from mind.extraction.providers.base import (
+    LLMAccessDenied,
     LLMRateLimited,
     LLMRejected,
     LLMResponse,
@@ -51,8 +56,10 @@ logger = logging.getLogger("mind.extraction.providers")
 
 # 402 is DeepSeek's "insufficient balance". It belongs with the refusals on
 # purpose: the call will keep failing until somebody tops the account up, so
-# retrying it only burns the attempt budget and hides the real problem.
-_REJECTING_STATUSES = frozenset({400, 401, 402, 403, 404, 422})
+# retrying it only burns the attempt budget and hides the real problem. With
+# the key and a missing model it is the account's fault, not the item's.
+_ACCESS_STATUSES = frozenset({401, 402, 403, 404})
+_REJECTING_STATUSES = frozenset({400, 422})
 
 
 class DeepSeekProvider:
@@ -166,6 +173,9 @@ class DeepSeekProvider:
 
         if status >= httpx.codes.INTERNAL_SERVER_ERROR:
             raise LLMUnavailable(f"DeepSeek is failing ({status}): {detail}")
+
+        if status in _ACCESS_STATUSES:
+            raise LLMAccessDenied(f"DeepSeek refused the account ({status}): {detail}")
 
         if status in _REJECTING_STATUSES:
             raise LLMRejected(f"DeepSeek refused the request ({status}): {detail}")

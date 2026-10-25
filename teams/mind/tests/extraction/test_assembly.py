@@ -14,11 +14,10 @@ pointer the text mentions, not the item's own id, and as a link it would lead
 somewhere else.
 """
 
-import json
 from uuid import UUID
 
 import pytest
-from tests.extraction.fakes import ScriptedProvider
+from tests.extraction.fakes import ScriptedProvider, answer_of
 
 from mind.contracts.base_enums import SourceType
 from mind.extraction.assembly import to_task_creation_requested
@@ -29,7 +28,7 @@ BRIDGE_ITEM = UUID("6f1c2e9a-3b4d-4c8e-9a1f-2d7e5b0c4a83")
 
 
 def _extracted(source_ref: str | None) -> ExtractionSuccess:
-    answer = json.dumps(
+    answer = answer_of(
         {
             "title": "Send the Q3 revenue report",
             "description": None,
@@ -46,12 +45,13 @@ def _extracted(source_ref: str | None) -> ExtractionSuccess:
 
 
 def _source_ref(extracted: str | None, bridge: str | None) -> str | None:
-    return to_task_creation_requested(
+    [proposal] = to_task_creation_requested(
         _extracted(extracted),
         tenant_id=TENANT_ID,
         bridge_source_ref=bridge,
         bridge_correlation_id=BRIDGE_ITEM,
-    ).source_ref
+    )
+    return proposal.source_ref
 
 
 def test_bridges_source_ref_is_sent_as_it_is() -> None:

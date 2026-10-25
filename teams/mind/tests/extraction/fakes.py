@@ -2,8 +2,14 @@
 
 Lives in the test tree on purpose: it satisfies `LLMProvider` structurally,
 so production code never imports it and it can never be shipped by accident.
+
+`answer_of` and `only` sit beside it: the answer is a list of tasks (#690),
+and most tests script and read exactly one.
 """
 
+import json
+
+from mind.extraction.extractor import ExtractedTask, ExtractionSuccess
 from mind.extraction.providers.base import LLMResponse
 
 
@@ -46,3 +52,16 @@ class ScriptedProvider:
             prompt_tokens=len(system) + len(user),
             completion_tokens=len(item),
         )
+
+
+def answer_of(*tasks: dict[str, object]) -> str:
+    """An answer in the shape the model is asked for: every task in one list (#690)."""
+
+    return json.dumps({"tasks": list(tasks)})
+
+
+def only(outcome: ExtractionSuccess) -> ExtractedTask:
+    """The one task of an answer that was scripted with exactly one."""
+
+    [task] = outcome.tasks
+    return task
