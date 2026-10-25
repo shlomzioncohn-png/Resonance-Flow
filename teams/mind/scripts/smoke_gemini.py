@@ -36,7 +36,8 @@ SAMPLE = (
     "From: dana@acme-demo.test\n"
     "Subject: Q3 report for finance\n\n"
     "Hi, finance needs the Q3 revenue report before Friday's close. I cannot start it "
-    "until the data team finishes the warehouse backfill. Message id: MSG-4471"
+    "until the data team finishes the warehouse backfill. Also, could you book the board "
+    "room for Monday's review? Message id: MSG-4471"
 )
 
 
@@ -83,17 +84,27 @@ def main() -> int:
         return 1
 
     print(f"\nschema attempts: {outcome.schema_attempts}  provider calls: {outcome.provider_calls}")
-    print(f"confidence: {outcome.confidence.value}")
-    for penalty in outcome.confidence.penalties:
-        print(f"  -{penalty.effective:<8} {penalty.reason}")
+    print(f"tasks: {len(outcome.tasks)}")
+    if not outcome.tasks:
+        # A valid answer in general, but not for SAMPLE, which asks for two
+        # things. Passing here would hide the one regression #690 invites: a
+        # model told that "no task" is allowed, answering it everywhere.
+        print("\nFAILED: no task found in a sample that contains two", file=sys.stderr)
+        return 1
+    for number, task in enumerate(outcome.tasks, start=1):
+        print(f"\n[{number}] {task.fields.title}  confidence: {task.confidence.value}")
+        for penalty in task.confidence.penalties:
+            print(f"  -{penalty.effective:<8} {penalty.reason}")
 
-    # The proposal Inbox would receive. tenant_id is invented here: outside a
-    # smoke test it comes from the intake event, never from this stage.
-    proposal = to_task_creation_requested(
+    # The proposals Inbox would receive, one per task. tenant_id is invented
+    # here: outside a smoke test it comes from the intake event, never from
+    # this stage.
+    proposals = to_task_creation_requested(
         outcome, tenant_id=uuid4(), bridge_source_ref=None, bridge_correlation_id=uuid4()
     )
-    print("\nTaskCreationRequested:")
-    print(proposal.model_dump_json(indent=2, exclude={"tenant_id"}))
+    for proposal in proposals:
+        print("\nTaskCreationRequested:")
+        print(proposal.model_dump_json(indent=2, exclude={"tenant_id"}))
     return 0
 
 

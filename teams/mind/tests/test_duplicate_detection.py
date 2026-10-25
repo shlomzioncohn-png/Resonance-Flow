@@ -3,6 +3,7 @@ real similarity scores, which a fake store can't produce."""
 
 import os
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
 from benchmarks.vector_store_test_table import create_vector_store_test_table
@@ -13,9 +14,12 @@ from mind.embeddings.duplicate_detection import find_duplicate
 from mind.embeddings.embeddings import EMBEDDING_DIM
 from mind.embeddings.pgvector_store import PgVectorStore
 
+TENANT = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+OTHER_TENANT = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+
 
 @pytest.fixture(scope="module")
-async def store():
+async def index():
     settings = VectorStoreSettings(
         dsn=os.environ["MIND_VECTOR_STORE__DSN"],
         table="task_embeddings_test_dupes",
@@ -27,9 +31,19 @@ async def store():
     await s.close()
 
 
+@pytest.fixture
+def store(index):
+    return index.for_tenant(TENANT)
+
+
+@pytest.fixture
+def other_store(index):
+    return index.for_tenant(OTHER_TENANT)
+
+
 @pytest.fixture(autouse=True)
-async def clean_store(store):
-    await store.clear()
+async def clean_store(index):
+    await index.clear()
     yield
 
 
@@ -154,4 +168,20 @@ async def test_uses_symmetric_embedding_not_the_mention_vs_passage_case():
         await find_duplicate(store, "Title", "Description", threshold=0.9)
 
     mock_embed_async.assert_awaited_once_with("Title Description", is_query=False)
-    store.search.assert_awaited_once_with([0.0] * EMBEDDING_DIM, k=1, exclude_completed=True)
+    store.search.assert_awaited_once_with(
+        [0.0] * EMBEDDING_DIM, k=1, exclude_completed=True, exclude_task_id=None
+    )
+
+
+async def test_a_near_identical_task_in_another_tenant_is_not_a_duplicate(store, other_store):
+    """#841: another customer's task is never flagged."""
+    existing = task_text(
+        "Upgrade the production database", "Move to the new major version before Q2"
+    )
+    await other_store.upsert("task-theirs", embed(existing))
+
+    match = await find_duplicate(
+        store, "Upgrade the production database", "Move to the new major version before Q2"
+    )
+
+    assert match is None

@@ -3,6 +3,8 @@
 components:
   bridge:
     enabled: true
+  schema-registry:
+    enabled: true
 kafka:
   enabled: true
 minio:

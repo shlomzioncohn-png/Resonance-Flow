@@ -39,6 +39,7 @@ from typing import Any
 from benchmarks.vector_store_test_table import create_vector_store_test_table
 from mind.config import VectorStoreSettings
 from mind.embeddings import embed
+from mind.embeddings.base import DEMO_TENANT_ID
 from mind.embeddings.pgvector_store import PgVectorStore
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -133,9 +134,10 @@ async def main() -> None:
         dsn=os.environ["MIND_VECTOR_STORE__DSN"],  # type: ignore[arg-type]
         table=_BENCH_TABLE,
     )
-    store = await _open_bench_store(settings)
+    index = await _open_bench_store(settings)
+    store = index.for_tenant(DEMO_TENANT_ID)
     try:
-        await store.clear()  # dedicated bench table -- start from empty every run
+        await index.clear()  # dedicated bench table -- start from empty every run
 
         for task_id, text in real_tasks + filler_tasks:
             await store.upsert(task_id, embed(text))
@@ -174,8 +176,8 @@ async def main() -> None:
                 }
             )
     finally:
-        await store.clear()
-        await store.close()
+        await index.clear()
+        await index.close()
 
     latency = _percentiles(latencies_ms)
     results = {

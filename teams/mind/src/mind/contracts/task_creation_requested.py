@@ -61,6 +61,10 @@ class TaskCreationRequested(BaseModel):
 
     # Tells Inbox whether the task initially has dependencies.
     # The dependency IDs themselves are sent separately to Chain.
+    # True when the task depends on, or is blocked by, other work: it cannot
+    # be finished until that work is done. Not set for a task that others
+    # wait for (narrowed in #690 from "depends on, is blocked by, or blocks",
+    # so that it means what Chain's depends_on edges mean).
     has_dependencies: bool
 
     # General confidence in the extracted Task.

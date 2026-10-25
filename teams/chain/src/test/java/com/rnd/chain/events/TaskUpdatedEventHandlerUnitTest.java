@@ -8,6 +8,7 @@ import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.inbox.event.TaskUpdatedEvent;
 import org.junit.jupiter.api.Test;
+import com.rnd.chain.exception.TaskNotFoundException;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;

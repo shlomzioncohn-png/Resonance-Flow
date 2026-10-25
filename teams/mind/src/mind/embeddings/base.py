@@ -8,8 +8,13 @@ pgvector_store.PgVectorStore directly.
 """
 
 from abc import ABC, abstractmethod
+from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+# Inbox's built-in System tenant (exists in every Inbox database). Used by
+# local loaders and benchmarks that have no real tenant.
+DEMO_TENANT_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
 class SearchResult(BaseModel):
@@ -28,15 +33,7 @@ class SearchResult(BaseModel):
 
 
 class VectorStore(ABC):
-    @abstractmethod
-    async def open(self) -> None:
-        """Eagerly initialize (confirms the schema is migrated). Optional -- other methods init lazily."""
-        ...
-
-    @abstractmethod
-    async def close(self) -> None:
-        """Release resources. Call on graceful shutdown."""
-        ...
+    """One tenant's slice of the index (#841). Get it from VectorIndex.for_tenant()."""
 
     @abstractmethod
     async def upsert(
@@ -95,7 +92,16 @@ class VectorStore(ABC):
         """Remove a task_id's vector. No-op if it isn't stored."""
         ...
 
+
+class VectorIndex(ABC):
+    """The whole index. Reads and writes go through for_tenant(), so no
+    caller can search across tenants by mistake."""
+
     @abstractmethod
-    async def clear(self) -> None:
-        """Remove every stored vector. Test teardown only."""
+    def for_tenant(self, tenant_id: UUID) -> VectorStore: ...
+
+    @abstractmethod
+    async def tenant_of(self, task_id: str) -> UUID | None:
+        """The tenant a task is indexed under, for callers that only have
+        a task_id. None if not indexed, or indexed before #841."""
         ...

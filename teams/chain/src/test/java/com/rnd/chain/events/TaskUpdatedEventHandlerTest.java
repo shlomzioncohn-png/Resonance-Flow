@@ -1,5 +1,6 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
 
 import com.rnd.chain.testsupport.PgRepos;
@@ -20,8 +21,9 @@ import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.PriorityScoreService;
-import com.rnd.chain.service.TaskCounterUpdater;
+import com.rnd.chain.service.DependencyEdgeService;
 import com.rnd.chain.service.TaskEligibilityService;
+import com.rnd.chain.service.TaskStateHistoryRecorder;
 import com.rnd.inbox.event.TaskUpdatedEvent;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,6 +44,22 @@ class TaskUpdatedEventHandlerTest {
 
     @Autowired
     private TaskReadinessRepository taskReadinessRepository;
+
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
 
     private static final LocalDateTime BASE_TIME =
             LocalDateTime.of(2026, 1, 1, 12, 0, 0);
@@ -65,9 +83,6 @@ class TaskUpdatedEventHandlerTest {
                 .id(id)
                 .tenantId(TENANT_ID)
                 .status(status)
-                .isReady(true)
-                .blockingCount(0)
-                .openConstraintCount(0)
                 .createdAt(BASE_TIME)
                 .updatedAt(updatedAt)
                 .build();
@@ -81,10 +96,17 @@ class TaskUpdatedEventHandlerTest {
         TaskRepository taskRepo = PgRepos.tasks(tasks);
         TaskDependencyRepository dependencyRepo = PgRepos.dependencies(edges);
         SchedulingUpdateService scheduling = mock(SchedulingUpdateService.class);
+        PriorityScoreService priorityScoreService = new PriorityScoreService(
+                taskRepo,
+                dependencyRepo,
+                taskReadinessRepository,
+                scheduling,
+                new SchedulingPublishListener(taskRepo, scheduling));
+        TaskStateHistoryRecorder recorder = TaskStateHistoryFixtures.newRecorder();
+        DependencyEdgeService edgeService = new DependencyEdgeService(taskRepo, dependencyRepo,
+                PgRepos.graphLock(), priorityScoreService, recorder, taskReadinessRepository);
         TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
-                PgRepos.graphLock(), new TaskCounterUpdater(taskRepo, dependencyRepo,
-                        new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling), taskReadinessRepository),
-                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
+                PgRepos.graphLock(), edgeService, priorityScoreService, recorder, taskReadinessRepository);
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(PgRepos.processedEvents());
         return new Fixture(taskRepo, new TaskUpdatedEventHandler(eligibilityService, template), eligibilityService, dependencyRepo);
     }
@@ -132,9 +154,6 @@ class TaskUpdatedEventHandlerTest {
                 .id(id)
                 .tenantId(TENANT_ID)
                 .status(TaskStatus.PENDING)
-                .isReady(false)
-                .blockingCount(1)
-                .openConstraintCount(0)
                 .createdAt(BASE_TIME)
                 .updatedAt(BASE_TIME)
                 .build();
@@ -167,8 +186,8 @@ class TaskUpdatedEventHandlerTest {
         assertEquals(BASE_TIME, blockerAfter.getUpdatedAt(), "a DONE update must not stamp updated_at");
 
         Task dependentAfter = fixture.taskRepo().findById(dependent).orElseThrow();
-        assertEquals(1, dependentAfter.getBlockingCount());
-        assertFalse(dependentAfter.isReady());
+        assertEquals(1, blockingCount(dependentAfter));
+        assertFalse(isReady(dependentAfter));
     }
 
     @Test
@@ -186,8 +205,8 @@ class TaskUpdatedEventHandlerTest {
 
         assertEquals(TaskStatus.DONE, fixture.taskRepo().findById(blocker).orElseThrow().getStatus());
         Task dependentAfter = fixture.taskRepo().findById(dependent).orElseThrow();
-        assertEquals(0, dependentAfter.getBlockingCount());
-        assertTrue(dependentAfter.isReady());
+        assertEquals(0, blockingCount(dependentAfter));
+        assertTrue(isReady(dependentAfter));
     }
 
     @Test
@@ -221,7 +240,7 @@ class TaskUpdatedEventHandlerTest {
         fixture.service().onTaskCompleted(blocker, eventTime);
 
         assertEquals(TaskStatus.DONE, fixture.taskRepo().findById(blocker).orElseThrow().getStatus());
-        assertEquals(0, fixture.taskRepo().findById(dependent).orElseThrow().getBlockingCount());
+        assertEquals(0, blockingCount(fixture.taskRepo().findById(dependent).orElseThrow()));
     }
 
     @Test
@@ -244,7 +263,6 @@ class TaskUpdatedEventHandlerTest {
         UUID dependent = UUID.randomUUID();
 
         Task released = Task.builder().id(dependent).tenantId(TENANT_ID).status(TaskStatus.PENDING)
-                .isReady(true).blockingCount(0).openConstraintCount(0)
                 .createdAt(BASE_TIME).updatedAt(BASE_TIME).build();
         Fixture fixture = newFixture(
                 List.of(buildTask(blocker, TaskStatus.DONE, BASE_TIME), released),
@@ -255,8 +273,8 @@ class TaskUpdatedEventHandlerTest {
 
         assertEquals(TaskStatus.ACTIVE, fixture.taskRepo().findById(blocker).orElseThrow().getStatus());
         Task dependentAfter = fixture.taskRepo().findById(dependent).orElseThrow();
-        assertEquals(1, dependentAfter.getBlockingCount());
-        assertFalse(dependentAfter.isReady());
+        assertEquals(1, blockingCount(dependentAfter));
+        assertFalse(isReady(dependentAfter));
     }
 
     @Test
@@ -275,9 +293,6 @@ class TaskUpdatedEventHandlerTest {
                                 .id(dependent)
                                 .tenantId(TENANT_ID)
                                 .status(TaskStatus.PENDING)
-                                .isReady(false)
-                                .blockingCount(1)
-                                .openConstraintCount(0)
                                 .createdAt(BASE_TIME)
                                 .updatedAt(BASE_TIME)
                                 .build()),
@@ -305,11 +320,11 @@ class TaskUpdatedEventHandlerTest {
 
         assertEquals(
                 0,
-                dependentAfter.getBlockingCount(),
+                blockingCount(dependentAfter),
                 "an abandoned (cancelled) blocker must release its dependents, same as a completed one");
 
         assertTrue(
-                dependentAfter.isReady());
+                isReady(dependentAfter));
     }
 
     @Test
@@ -328,9 +343,6 @@ class TaskUpdatedEventHandlerTest {
                                 .id(dependent)
                                 .tenantId(TENANT_ID)
                                 .status(TaskStatus.PENDING)
-                                .isReady(false)
-                                .blockingCount(1)
-                                .openConstraintCount(0)
                                 .createdAt(BASE_TIME)
                                 .updatedAt(BASE_TIME)
                                 .build()),
@@ -358,11 +370,11 @@ class TaskUpdatedEventHandlerTest {
 
         assertEquals(
                 0,
-                dependentAfter.getBlockingCount(),
+                blockingCount(dependentAfter),
                 "an abandoned (rejected) blocker must release its dependents, same as a completed one");
 
         assertTrue(
-                dependentAfter.isReady());
+                isReady(dependentAfter));
     }
 
     @Test
@@ -440,14 +452,14 @@ class TaskUpdatedEventHandlerTest {
 
         assertEquals(
                 0,
-                created.getBlockingCount());
+                blockingCount(created));
 
         assertEquals(
                 0,
-                created.getOpenConstraintCount());
+                openConstraintCount(created));
 
         assertTrue(
-                created.isReady());
+                isReady(created));
     }
 
     @Test

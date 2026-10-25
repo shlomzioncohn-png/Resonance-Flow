@@ -22,6 +22,7 @@ from pathlib import Path
 
 from mind.config import get_settings
 from mind.embeddings import embed
+from mind.embeddings.base import DEMO_TENANT_ID
 from mind.embeddings.pgvector_store import PgVectorStore
 
 _REAL_SLICE_DIR = Path(__file__).resolve().parent.parent / "eval" / "real_slice"
@@ -39,13 +40,14 @@ def _load_real_slice() -> list[tuple[str, str]]:
 
 async def main() -> None:
     real_tasks = _load_real_slice()
-    store = PgVectorStore(get_settings().vector_store)
-    await store.open()
+    index = PgVectorStore(get_settings().vector_store)
+    store = index.for_tenant(DEMO_TENANT_ID)
+    await index.open()
     try:
         for task_id, text in real_tasks:
             await store.upsert(task_id, embed(text))
     finally:
-        await store.close()
+        await index.close()
     print(f"Loaded {len(real_tasks)} real tasks from eval/real_slice/ into the vector store.")
 
 

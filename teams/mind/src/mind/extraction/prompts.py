@@ -6,11 +6,15 @@ keeping them separate means a prompt change shows up in review as a prompt
 change.
 """
 
+import logging
 import re
 from functools import cache
 from pathlib import Path
 
 from mind.contracts.base_enums import SourceType
+from mind.extraction.models import MAX_TASKS_PER_TEXT
+
+logger = logging.getLogger("mind.extraction")
 
 _PROMPT_DIR = Path(__file__).parent / "prompts"
 
@@ -19,6 +23,20 @@ _PROMPT_DIR = Path(__file__).parent / "prompts"
 # the marker keeps the truncation visible to whoever reads the prompt.
 MAX_CONTENT_CHARS = 8000
 TRUNCATION_MARKER = "\n[... content truncated ...]"
+
+# A meeting is the exception (#690): its action items come in the closing
+# recap, so cutting its tail cuts exactly them. Live on AMI, cut at 8000 the
+# two meetings found 0/4 and 0/8 gold action items, sent whole 4/4 and 4/8.
+# Their transcripts are 26k and 35k characters; this leaves room for an hour.
+# About 15k tokens at most, under a cent a meeting at today's price.
+MAX_MEETING_CONTENT_CHARS = 60000
+
+
+def content_cap(source_type: SourceType) -> int:
+    """How much of an item's content is sent to the model."""
+
+    return MAX_MEETING_CONTENT_CHARS if source_type is SourceType.MEETING else MAX_CONTENT_CHARS
+
 
 # Placeholders are {{NAME}} and are filled by substitution, not by
 # str.format: the prompts contain JSON braces, and format() would choke on
@@ -33,12 +51,12 @@ def _load(name: str) -> str:
     return (_PROMPT_DIR / name).read_text(encoding="utf-8").strip()
 
 
-def truncate(content: str) -> str:
+def truncate(content: str, limit: int = MAX_CONTENT_CHARS) -> str:
     """Cap the content sent to a provider, marking where it was cut."""
 
-    if len(content) <= MAX_CONTENT_CHARS:
+    if len(content) <= limit:
         return content
-    return content[:MAX_CONTENT_CHARS] + TRUNCATION_MARKER
+    return content[:limit] + TRUNCATION_MARKER
 
 
 def _fill(template: str, values: dict[str, str]) -> str:
@@ -69,18 +87,36 @@ def system_prompt(classify: bool = False) -> str:
     second call's system prompt, unchanged.
     """
 
+    # The cap is filled in from the model that enforces it, so the number the
+    # model is told and the number it is held to cannot drift apart.
+    system = _fill(_load("system.md"), {"MAX_TASKS": str(MAX_TASKS_PER_TEXT)})
     if not classify:
-        return _load("system.md")
+        return system
 
-    return _load("system.md") + "\n\n" + _load("classification.md")
+    return system + "\n\n" + _load("classification.md")
 
 
 def extraction_prompt(source_type: SourceType, content: str) -> str:
     """The first-attempt user message."""
 
+    # The marker tells the model; this tells whoever reads the run. "A task
+    # rarely hides in the tail" holds for a thread, not for a meeting, whose
+    # action items come in the closing recap (#690). Here and not in
+    # truncate(), which also runs on every repair round and on the model's
+    # own answer: once per item, about the content.
+    cap = content_cap(source_type)
+    if len(content) > cap:
+        logger.warning(
+            "extraction: %s content of %d characters truncated to %d; the last %d are not sent",
+            source_type.value,
+            len(content),
+            cap,
+            len(content) - cap,
+        )
+
     return _fill(
         _load("extraction_user.md"),
-        {"SOURCE_TYPE": source_type.value, "CONTENT": truncate(content)},
+        {"SOURCE_TYPE": source_type.value, "CONTENT": truncate(content, cap)},
     )
 
 
@@ -97,12 +133,16 @@ def repair_prompt(
     produces the same broken answer a second time.
     """
 
+    # The rejected answer gets the content's cap too: a meeting's list of
+    # tasks runs past 8000 characters, and a repair asked to return every
+    # task unchanged cannot copy the ones it is not shown.
+    cap = content_cap(source_type)
     return _fill(
         _load("repair_user.md"),
         {
             "SOURCE_TYPE": source_type.value,
-            "CONTENT": truncate(content),
-            "INVALID_OUTPUT": truncate(invalid_output),
+            "CONTENT": truncate(content, cap),
+            "INVALID_OUTPUT": truncate(invalid_output, cap),
             "ERROR": error,
         },
     )

@@ -471,13 +471,13 @@ and reads it back from the outcome:
 The eval-side contract for one extracted item is `ExtractedItem`
 (`extraction_contract.py`): `title` + optional `description`, nothing else.
 
-### Known limitation: one task per text
+### Several tasks per text (#690, was a known limitation)
 
-`BasicExtractor.extract` returns exactly one task per text, and a meeting has
-4–8 action items, so recall per meeting is structurally capped at `1/n` until
-that changes (#690). This does not change the join: whether the pipeline returns
-a list per text or meetings are segmented upstream, each result keeps the
-`item_key` of the text it came from, and the eval groups by it.
+`BasicExtractor.extract` used to return exactly one task per text, capping
+recall per meeting at `1/n`. Since #690 it returns `ExtractionSuccess.tasks`, a
+list of up to 15 tasks. The join is unchanged: the outcome keeps the `item_key`
+of the text it came from, and the eval groups by it. Content past
+`MAX_CONTENT_CHARS` (8000) is still truncated, which a long meeting can hit.
 
 ### Still open
 
@@ -550,8 +550,8 @@ owner-match diagnostic are still to build on top of it.
       comparison text. Confirmed 2026-10-14 (#233 step 4).
 - [ ] An AMI transcript loader — `src/mind/ingestion/` has none, and #348 is
       FUNSD only. Owner to be decided; blocks #178.
-- [ ] #690 — extraction returns one task per text; per-meeting recall is capped
-      at `1/n` until it is fixed.
+- [x] #690 — extraction returns a list of tasks per text; per-meeting recall is
+      no longer capped at `1/n`. Long meetings can still be truncated.
 
 **Build-time (not blocking the design):**
 - [ ] Redo the §5 Jaccard numbers with code once `similarity.py` exists — they

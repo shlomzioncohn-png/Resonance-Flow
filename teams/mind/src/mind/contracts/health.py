@@ -17,11 +17,11 @@ from pydantic import BaseModel, Field
 class HealthResponse(BaseModel):
     """The body of GET /health."""
 
-    status: Literal["ok"] = Field(
+    status: Literal["ok", "not_ready"] = Field(
         ...,
         description=(
-            'Always "ok" when this endpoint responds at all. There is no '
-            "degraded state today -- see docs/API.md \"Open decisions\"."
+            '"ok" (HTTP 200) once start-up has completed successfully; '
+            '"not_ready" (HTTP 503) before that or once shutdown has begun.'
         ),
     )
     version: str = Field(
