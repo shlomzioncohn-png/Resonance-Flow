@@ -6,7 +6,8 @@ import logging
 import pytest
 
 from mind.contracts.base_enums import SourceType
-from mind.extraction.models import MAX_TASKS_PER_TEXT, response_model
+from mind.extraction.deadline import OffsetUnit, PeriodEnd, Weekday
+from mind.extraction.models import MAX_TASKS_PER_TEXT, DeadlineKind, response_model
 from mind.extraction.parsing import parse_response
 from mind.extraction.prompts import (
     MAX_CONTENT_CHARS,
@@ -102,7 +103,7 @@ def test_the_switch_off_prompt_never_mentions_classification() -> None:
 
     prompt = system_prompt()
 
-    for word in ("tier", "urgency", "role_context", "STRATEGIC", "effort"):
+    for word in ("tier", "urgency", "role_context", "STRATEGIC", "effort", "deadline"):
         assert word not in prompt
 
 
@@ -198,7 +199,7 @@ def test_every_example_is_an_answer_the_parser_accepts() -> None:
     examples = _examples()
     shape = response_model(classify=True)
 
-    assert len(examples) == 8
+    assert len(examples) == 10
     for example in examples:
         for task in parse_response(json.dumps(example), shape):
             assert task.model_fields_set == set(shape.model_fields)
@@ -226,6 +227,26 @@ def test_the_switch_on_prompt_asks_for_the_estimate_and_its_basis() -> None:
 
     for word in ("effort_estimate_minutes", "effort_estimate_basis", "STATED", "INFERRED"):
         assert word in prompt
+
+
+def test_the_switch_on_prompt_spells_out_every_deadline_value() -> None:
+    """Read from the enums, so a kind or unit added later fails here until the
+    prompt shows it: otherwise the model invents a neighbouring word (#960)."""
+
+    prompt = system_prompt(classify=True)
+
+    assert "deadline" in prompt
+    for vocabulary in (DeadlineKind, OffsetUnit, PeriodEnd, Weekday):
+        for member in vocabulary:
+            assert f'"{member.value}"' in prompt
+
+
+def test_the_examples_show_every_kind_of_deadline_and_one_declined() -> None:
+    tasks = [task for example in _examples() for task in example["tasks"]]
+    kinds = {task["deadline"]["kind"] for task in tasks if task["deadline"]}
+
+    assert kinds == {kind.value for kind in DeadlineKind}
+    assert any(task["deadline"] is None for task in tasks)
 
 
 def test_the_classification_block_does_not_count_its_keys() -> None:

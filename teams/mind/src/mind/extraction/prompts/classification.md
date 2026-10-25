@@ -1,5 +1,6 @@
 In addition to the keys above, each task has the keys below. They say what
-kind of task it is and how long it takes, and each of them may be null.
+kind of task it is, how long it takes and when it is due, and each of them
+may be null.
 
 - `tier` — string or null. Exactly one of `"OPERATIONAL"`, `"TACTICAL"`,
   `"STRATEGIC"`. Tier is about the **time horizon of the work and how far its
@@ -65,6 +66,28 @@ kind of task it is and how long it takes, and each of them may be null.
     described ("look into the billing issue", "plan the migration"), both keys
     are null.
 
+- `deadline` — object or null. When the work must be done by, written down the
+  way the content says it. Do no date arithmetic: never work out a date from a
+  weekday, and never turn one unit into another. Every object has `phrase`,
+  the content's own words for the deadline copied exactly ("by Friday",
+  "within 72 hours"), and `kind`, exactly one of the four below with the keys
+  it lists. Leave out the keys a kind does not list.
+  - `"DATE"` — a calendar date: `month` (1 to 12) and `day` (1 to 31), plus
+    `year` only when the content writes one and `time_of_day` ("14:00") only
+    when it names a time. "By November 3", "on the 20th of October at 10:00".
+  - `"OFFSET"` — an amount of time from now: `amount` (integer above 0) and
+    `unit`, exactly one of `"MINUTES"`, `"HOURS"`, `"DAYS"`, `"WEEKS"`,
+    `"WORKING_DAYS"`. Write the amount and unit the content uses: "two weeks"
+    is 2 `"WEEKS"`, not 14 `"DAYS"`. Use `"WORKING_DAYS"` only when the content
+    says working or business days. "Tomorrow" is 1 `"DAYS"`.
+  - `"WEEKDAY"` — a day of the week: `weekday`, exactly one of `"MONDAY"`,
+    `"TUESDAY"`, `"WEDNESDAY"`, `"THURSDAY"`, `"FRIDAY"`, `"SATURDAY"`,
+    `"SUNDAY"`; `next_week` true only for "next Friday"; `time_of_day` only
+    when the content names a time.
+  - `"PERIOD_END"` — the end of a period: `period`, exactly one of `"DAY"`
+    ("today", "end of day"), `"WEEK"`, `"NEXT_WEEK"` ("next week"),
+    `"MONTH"`.
+
 Examples. Each answer is the whole object, written exactly as you return it:
 
     "The checkout service is throwing null pointers since the deploy, users
@@ -73,7 +96,7 @@ Examples. Each answer is the whole object, written exactly as you return it:
 
     "Before Thursday I need the recommendation on whether we enter the German
     market, the board is deciding."
-    {"tasks": [{"title": "Write the recommendation on entering the German market", "description": "The board decides on Thursday and is waiting for it.", "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "STRATEGIC", "urgency": 4, "role_context": "CEO", "effort_estimate_minutes": null, "effort_estimate_basis": null, "deadline": null}]}
+    {"tasks": [{"title": "Write the recommendation on entering the German market", "description": "The board decides on Thursday and is waiting for it.", "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "STRATEGIC", "urgency": 4, "role_context": "CEO", "effort_estimate_minutes": null, "effort_estimate_basis": null, "deadline": {"phrase": "Before Thursday", "kind": "WEEKDAY", "weekday": "THURSDAY"}}]}
 
     "Can you line up next sprint and work out who picks up the migration?"
     {"tasks": [{"title": "Line up next sprint", "description": "Includes working out who picks up the migration.", "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "TACTICAL", "urgency": 2, "role_context": "MANAGER", "effort_estimate_minutes": null, "effort_estimate_basis": null, "deadline": null}]}
@@ -83,7 +106,7 @@ Examples. Each answer is the whole object, written exactly as you return it:
 
     "Could you review my pull request today? It should take about half an
     hour."
-    {"tasks": [{"title": "Review the pull request", "description": null, "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "OPERATIONAL", "urgency": 3, "role_context": "DEVELOPER", "effort_estimate_minutes": 30, "effort_estimate_basis": "STATED", "deadline": null}]}
+    {"tasks": [{"title": "Review the pull request", "description": null, "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "OPERATIONAL", "urgency": 3, "role_context": "DEVELOPER", "effort_estimate_minutes": 30, "effort_estimate_basis": "STATED", "deadline": {"phrase": "today", "kind": "PERIOD_END", "period": "DAY"}}]}
 
     "The badge readers at the warehouse gate stopped working about two hours
     ago, can someone go check them?"
@@ -91,7 +114,14 @@ Examples. Each answer is the whole object, written exactly as you return it:
 
     "Project Manager: Can you send the client the revised mock-ups by tomorrow?
     I will set up the review call with their team once they have them."
-    {"tasks": [{"title": "Send the client the revised mock-ups", "description": "Due tomorrow.", "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "OPERATIONAL", "urgency": 3, "role_context": null, "effort_estimate_minutes": null, "effort_estimate_basis": null, "deadline": null}, {"title": "Set up the review call with the client's team", "description": "Once the client has the revised mock-ups.", "source_ref": null, "has_dependencies": true, "dependency_mentions": ["Send the client the revised mock-ups"], "tier": "OPERATIONAL", "urgency": 2, "role_context": null, "effort_estimate_minutes": 15, "effort_estimate_basis": "INFERRED", "deadline": null}]}
+    {"tasks": [{"title": "Send the client the revised mock-ups", "description": "Due tomorrow.", "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "OPERATIONAL", "urgency": 3, "role_context": null, "effort_estimate_minutes": null, "effort_estimate_basis": null, "deadline": {"phrase": "by tomorrow", "kind": "OFFSET", "amount": 1, "unit": "DAYS"}}, {"title": "Set up the review call with the client's team", "description": "Once the client has the revised mock-ups.", "source_ref": null, "has_dependencies": true, "dependency_mentions": ["Send the client the revised mock-ups"], "tier": "OPERATIONAL", "urgency": 2, "role_context": null, "effort_estimate_minutes": 15, "effort_estimate_basis": "INFERRED", "deadline": null}]}
+
+    "Please send the Q3 numbers to finance by November 3. They present them at
+    the board meeting on the 12th."
+    {"tasks": [{"title": "Send the Q3 numbers to finance", "description": "Finance presents them at the board meeting on the 12th.", "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "OPERATIONAL", "urgency": 3, "role_context": null, "effort_estimate_minutes": null, "effort_estimate_basis": null, "deadline": {"phrase": "by November 3", "kind": "DATE", "month": 11, "day": 3}}]}
+
+    "No rush on this, but could you tidy up the old feature flags at some point?"
+    {"tasks": [{"title": "Tidy up the old feature flags", "description": null, "source_ref": null, "has_dependencies": false, "dependency_mentions": [], "tier": "OPERATIONAL", "urgency": 1, "role_context": "DEVELOPER", "effort_estimate_minutes": null, "effort_estimate_basis": null, "deadline": null}]}
 
     "Thanks everyone, good discussion on the colour options. See you next week."
     {"tasks": []}
@@ -103,7 +133,11 @@ Examples. Each answer is the whole object, written exactly as you return it:
     the two traps in the rules below. The meeting turn holds two tasks, one
     asked for and one offered, so the list has two entries; the call waits
     for the mock-ups, so it names them by their title, and the mock-ups,
-    which wait for nothing, name nothing. The last one
+    which wait for nothing, name nothing. The German market, the pull request
+    and the mock-ups each show a deadline as the content wrote it: a weekday,
+    the end of today, one day from now. The Q3 numbers are due on a date; the
+    board meeting on the 12th is another event's date, not theirs. The feature
+    flags say there is no rush, so their deadline is null. The last one
     discusses but asks nobody for anything, so the list is empty.
 
 Rules for `tier`, `urgency` and `role_context`:
@@ -130,3 +164,20 @@ Rules for the effort estimate:
   usually takes is your own knowledge, and here you may use it. The work
   itself must still come from the content, and every other field still rests
   on the content alone.
+
+Rules for the deadline:
+
+- A duration is not a deadline. "It takes about two hours" says how long, not
+  by when.
+- Time that has already passed is not a deadline. "Down for 40 minutes" or
+  "waiting since Monday" describes the situation.
+- The date of something else is not this task's deadline. A meeting, a launch
+  or an offsite the content mentions is the deadline only when the content
+  says this work must be done by it: "before the board meeting" is one, "the
+  board meeting is on the 12th" on its own is not.
+- A softly worded date is still a deadline: "ideally by Friday" and "would be
+  great to have by Friday" are Friday. Only an explicit "no rush",
+  "whenever", "no deadline" or "at some point" is null.
+- When the content gives this task more than one date, use the one by which
+  the whole task must be done.
+- When the content says nothing about when the work is due, use null.
