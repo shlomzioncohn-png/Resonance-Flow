@@ -682,6 +682,9 @@ kafka:
   controller:
     replicaCount: 1
     controllerOnly: false
+    # Bitnami's default heap is 75% of the limit (576Mi of 768Mi), leaving too little for
+    # Kafka's off-heap memory - it got OOMKilled under load. Kafka leans on the page cache.
+    heapOpts: -XX:InitialRAMPercentage=50 -XX:MaxRAMPercentage=50
     resources:
       # 192Mi was OOMKilling the JVM before it finished KRaft storage formatting on
       # startup (verified locally - combined broker+controller needs more headroom).
