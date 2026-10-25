@@ -62,8 +62,8 @@ data — only spins up a throwaway local `kind` cluster for smoke tests.
   and commits the result itself (same pattern as `service-update-manifest.yaml`
   auto-committing image tag bumps). Nobody should ever
   hand-edit anything under `files/` — it's a generated mirror.
-- Three of the six schemas in `../ci/schema-subjects.tsv`
-  (`task-created-event.proto`, `raw-object-event.proto`, `github-task.proto`)
+- Two of the schemas in `../ci/schema-subjects.tsv`
+  (`task-created-event.proto`, `raw-object-event.proto`)
   are **still unconfirmed drafts** — Inbox/Bridge haven't signed off on them.
   (The two added 2026-09-09,
   `task-updated-event.proto` / `task-completed-event.proto` — are mechanical

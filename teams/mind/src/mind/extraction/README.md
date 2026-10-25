@@ -286,13 +286,15 @@ dollars per model and holds LLM calls to their duration and cost limits.
 Both outcomes carry `item_key`, and the log names it:
 
 ```
-giving up on tenant-7/email/4471-body.eml (EMAIL) after 3 attempt(s): ...
+giving up on 6f1c1f9e-0000-4000-8000-000000000001 (EMAIL) after 3 attempt(s): ...
 ```
 
-It is the intake event's `object_key`, not its `correlation_id` — a source
-body shares a correlation id with its attachments, so it cannot say *which* of
-them failed. `extract_many` takes `ExtractionItem` values for the same reason:
-a three-tuple of `(str, SourceType, str | None)` reads as a puzzle.
+It is whatever the caller calls the text. For a Bridge item it is the
+arrival's `correlation_id`: the item's files, an email body and its
+attachments, are joined into one text (#349, `ingestion/README.md`), so a
+failure names the item, not which of its files caused it. The eval passes the
+meeting id. `extract_many` takes `ExtractionItem` values so a call site never
+reads as the puzzle a three-tuple of `(str, SourceType, str | None)` would be.
 
 ### A pointer the content never contained
 
@@ -724,6 +726,13 @@ most content holds no task, and a model that first reads "return a list of
 tasks" goes looking for something to put in it. Live, a newsletter, a deploy
 status and small talk each came back as `{"tasks": []}`.
 
+It also says the content can come in parts under headings (`[Body]`,
+`[Attachment: form.jpg, scanned]`): a Bridge item's files are joined into one
+text (#349). The parts are one item, so a task may take its details from
+several of them, a task two parts raise is listed once, and a heading is never
+a task, a title or a `source_ref` (a file name is not a pointer). A text of
+one file comes without headings.
+
 ### Which tasks pay for a repair round
 
 A repair round re-asks for the whole list, so a shared attempt count charged
@@ -828,12 +837,18 @@ and may not be in the index yet when its mention is resolved.
 
 ### Known gaps, left for follow-ups
 
-- **Long content is truncated, meetings far later.** `MAX_CONTENT_CHARS`
-  (8000) still cuts every other source, where the tail is mostly quoted
-  history. A meeting gets `MAX_MEETING_CONTENT_CHARS` (60,000), because its
-  action items cluster in the closing recap: on AMI, cut at 8000 the two
-  meetings found 0/4 and 0/8 gold items, sent whole 4/4 and 4/8. Any cut is
-  logged as a warning with how much was not sent, and grounding reads only
+- **Only a runaway item is truncated.** `MAX_CONTENT_CHARS` (100,000, about
+  25k tokens) is one cap for every source, a safety net rather than a saving:
+  a cut loses what comes last, which in a meeting is the closing recap with
+  its action items (on AMI, cut at 8000 the two meetings found 0/4 and 0/8
+  gold items, sent whole 4/4 and 4/8). A Bridge item's parts share the cap
+  before they reach extraction, the longest cut first, so the attachment
+  after a long body is not the part lost (#968, `ingestion/README.md`).
+  The price: the quoted history at the end of a long
+  email thread is now sent too (not measured live), and an item near the cap
+  costs ~$0.019 a call, twice that from 2027 and again on each repair round,
+  past the monitoring's $0.02 limit, which was set for the 8000 cap. Any cut
+  is logged as a warning with how much was not sent, and grounding reads only
   the text that was sent. A repair round shows the model its own rejected
   answer under the same cap, so a long list of tasks is not cut either.
 - **AMI was measured by hand, once.** The transcripts (from #784's loader)
@@ -842,7 +857,5 @@ and may not be in the index yet when its mention is resolved.
   eval (#178), which can now read `ExtractionSuccess.tasks`.
 - **Urgency has no reference date.** `source_timestamp` is not in the prompt,
   so "by Friday" cannot be placed in time.
-- **An email body and its attachment are extracted separately**, and never
-  seen together.
 - **With classification switched off the model sees no examples at all**,
   including the multi-task and dependency ones. The switch defaults to on.

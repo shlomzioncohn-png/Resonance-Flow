@@ -10,31 +10,12 @@ HEALTH_PATH=$(yq eval ".components.${SERVICE}.readinessProbe.httpGet.path" "$CHA
 # same Service name ArgoCD deploys in prod.
 SVC="svc/resonance-flow-${SERVICE}"
 
-# ":80" with no local port: the OS picks a free one at bind time, so parallel
-# jobs on one host never fight over a fixed port. kubectl logs which one it got
-# ("Forwarding from 127.0.0.1:<port> -> <pod port>").
-PF_LOG="${RUNNER_TEMP:-/tmp}/port-forward-${SERVICE}.log"
-# Create it now: the background job's redirect may not have run yet when sed
-# first reads it, and a missing file would end the script (set -e).
-: > "$PF_LOG"
-kubectl -n "$SERVICE" port-forward "$SVC" :80 > "$PF_LOG" 2>&1 &
-PF_PID=$!
+source "$(dirname "${BASH_SOURCE[0]}")/../../scripts/port-forward.sh"
+healthy() { curl -sf "http://127.0.0.1:${LOCAL_PORT}${HEALTH_PATH}"; }
 # Free the port so it doesn't block the next run on the runner.
-trap 'kill "$PF_PID" 2>/dev/null || true' EXIT
+trap 'kill "${PF_PID:-}" 2>/dev/null || true' EXIT
 
-LOCAL_PORT=""
-for _ in $(seq 1 30); do
-  if [ -z "$LOCAL_PORT" ]; then
-    LOCAL_PORT=$(sed -n 's/^Forwarding from 127\.0\.0\.1:\([0-9][0-9]*\) -> .*/\1/p' "$PF_LOG" | head -n 1)
-  fi
-  if [ -n "$LOCAL_PORT" ] && curl -sf "http://127.0.0.1:${LOCAL_PORT}${HEALTH_PATH}"; then
-    exit 0
-  fi
-  if ! kill -0 "$PF_PID" 2>/dev/null; then
-    echo "port-forward to $SVC failed:" >&2; cat "$PF_LOG" >&2; exit 1
-  fi
-  sleep 1
-done
-echo "$SVC${HEALTH_PATH} not healthy after 30s (local port: ${LOCAL_PORT:-none}); port-forward log:" >&2
-cat "$PF_LOG" >&2
-exit 1
+if ! port_forward_until "$SERVICE" "$SVC" 80 "${RUNNER_TEMP:-/tmp}/port-forward-${SERVICE}.log" 30 1 healthy; then
+  echo "$SVC${HEALTH_PATH} not healthy after 30s" >&2
+  exit 1
+fi

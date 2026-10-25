@@ -183,8 +183,11 @@ public class DependencyEdgeService {
                             + " must be between 0 and 1, got "
                             + confidence);
         }
-
-        return graphLock.runExclusive(() -> {
+        UUID lockTenantId =
+            tenantId != null
+                ? tenantId
+                : tenantIdForTask(taskId);
+        return graphLock.runExclusive(lockTenantId, () -> {
 
 
             if (tenantId != null) {
@@ -527,8 +530,8 @@ public class DependencyEdgeService {
                 "Adding {} distinct dependency(ies) for task {}",
                 dependsOnTaskIdsWithConfidence.size(),
                 taskId);
-
-        graphLock.runExclusive(() -> {
+        UUID lockTenantId = tenantIdForTask(taskId);
+       graphLock.runExclusive(lockTenantId, () -> {
 
             List<PendingEdge> validated =
                     new ArrayList<>(
@@ -565,8 +568,9 @@ public class DependencyEdgeService {
                 dependsOnTaskId,
                 "dependsOnTaskId must not be null");
 
-        graphLock.runExclusive(() -> {
+        UUID lockTenantId = tenantIdForTask(taskId);
 
+        graphLock.runExclusive(lockTenantId, () -> {
             taskRepository.findById(taskId)
                     .orElseThrow(
                             () -> new TaskNotFoundException(taskId));
@@ -704,4 +708,14 @@ public class DependencyEdgeService {
                 beforeReadiness,
                 afterReadiness);
     }
+    private UUID tenantIdForTask(UUID taskId) {
+        TaskReadinessSnapshot snapshot =
+            taskReadinessRepository
+                    .findByIds(List.of(taskId))
+                    .get(taskId);
+
+        return snapshot != null
+            ? snapshot.tenantId()
+            : null;
+}
 }

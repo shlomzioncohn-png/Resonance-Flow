@@ -20,6 +20,7 @@ from mind.contracts.base_enums import SourceType
 from mind.extraction.config import ExtractionConfig
 from mind.extraction.extractor import BasicExtractor, ExtractionFailure, ExtractionSuccess
 from mind.extraction.providers.base import (
+    LLMAccessDenied,
     LLMProvider,
     LLMRateLimited,
     LLMRejected,
@@ -469,3 +470,27 @@ def test_the_scripted_fake_and_the_real_client_agree_on_the_protocol() -> None:
 
     for provider in providers:
         assert provider.complete("system", "user").text == VALID_ANSWER
+
+
+@pytest.mark.parametrize("status", [401, 402, 403, 404])
+def test_a_refused_account_is_environmental(status: int) -> None:
+    """The key, the credit or the model: no other item would pass either (#919)."""
+
+    handler, _ = _always({"error": {"message": "nope"}}, status)
+
+    with pytest.raises(LLMAccessDenied) as raised:
+        _provider(handler).complete("system", "user")
+
+    assert raised.value.environmental is True
+    assert raised.value.retryable is False
+
+
+@pytest.mark.parametrize("status", [400, 422, 409])
+def test_a_refused_request_is_the_items_not_the_environments(status: int) -> None:
+    handler, _ = _always({"error": {"message": "nope"}}, status)
+
+    with pytest.raises(LLMRejected) as raised:
+        _provider(handler).complete("system", "user")
+
+    assert not isinstance(raised.value, LLMAccessDenied)
+    assert raised.value.environmental is False

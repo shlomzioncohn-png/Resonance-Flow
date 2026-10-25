@@ -71,12 +71,16 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  mind-score-publisher:
+  # #919: bridge.raw.landed -> extraction -> dedup -> task.creation.requested,
+  # with the task.created listener in the same process (one in-memory pending
+  # store). Kafka, the vector store and the LLM provider come from the config
+  # files (#481), like the consumers above; MinIO from MIND_OBJECT_STORAGE__* in .env.
+  mind-landed-consumer:
     build:
       context: .
       additional_contexts:
         shared: ../../shared
-    command: ["python", "-m", "mind.scoring.score_publisher_runner"]
+    command: ["python", "-m", "mind.ingestion.landed_consumer_runner"]
     # A Kafka error kills the process on purpose, so the message is retried.
     restart: on-failure
     # No HTTP server here -- the Dockerfile's :8000/health check doesn't apply.
@@ -88,6 +92,11 @@ services:
       - .env
     environment: *mind-config-env
     configs: *mind-config-files
+    volumes:
+      - ./models:/app/models
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
   vector-store:
     image: pgvector/pgvector:pg16

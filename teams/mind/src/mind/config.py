@@ -186,8 +186,9 @@ class ObjectStorageSettings(BaseSettings):
 
 
 class LandedConsumerSettings(BaseSettings):
-    """Standalone -- the bridge.raw.landed runner (#349) needs no database, so it
-    does not read `Settings`, which requires the vector-store DSN.
+    """Standalone -- the bridge.raw.landed runner's own knobs. The runner also
+    reads `Settings` (#919: the index, for duplicates and for task.created),
+    but these do not depend on it, so they load without the vector-store DSN.
 
     Read from the environment and .env like every other MIND_* setting, so an
     override set next to the MinIO keys in .env is not silently ignored.
@@ -197,10 +198,10 @@ class LandedConsumerSettings(BaseSettings):
         env_prefix="MIND_LANDED_CONSUMER__", env_file=_ENV_FILE, extra="ignore"
     )
 
-    # Its own group, not the one in ProtobufConsumer's docstring example. Until
-    # extraction is wired, a run marks items processed and commits their
-    # offsets with nothing extracted: a test run against the shared topic sets
-    # MIND_LANDED_CONSUMER__GROUP_ID to a group of its own.
+    # Its own group, not the one in ProtobufConsumer's docstring example. A run
+    # commits the offsets it read, and sends Inbox real creation requests: a
+    # test run against the shared topic sets MIND_LANDED_CONSUMER__GROUP_ID to
+    # a group of its own.
     group_id: str = "mind-landed-consumer"
     # The same variable `Settings.log_level` reads.
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(

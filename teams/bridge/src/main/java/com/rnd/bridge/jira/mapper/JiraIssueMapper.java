@@ -10,6 +10,7 @@ import com.rnd.bridge.task.model.RoleContext;
 import com.rnd.bridge.task.model.SourceType;
 import com.rnd.bridge.task.model.TaskStatus;
 import com.rnd.bridge.task.model.Tier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -17,8 +18,18 @@ import java.time.Instant;
 @Component
 public class JiraIssueMapper extends AbstractTaskMapper<JiraIssue> {
 
-    public JiraIssueMapper(EnrichmentProperties enrichmentProperties, TaskEnricher taskEnricher) {
+    // Same contract as GitHubIssueMapper: configured deployment-wide tenant, blank -> null.
+    private final String organizationId;
+
+    public JiraIssueMapper(EnrichmentProperties enrichmentProperties, TaskEnricher taskEnricher,
+            @Value("${bridge.organization-id:}") String organizationId) {
         super(enrichmentProperties, taskEnricher);
+        this.organizationId = organizationId;
+    }
+
+    @Override
+    protected String organizationId() {
+        return organizationId.isBlank() ? null : organizationId;
     }
 
     @Override

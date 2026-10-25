@@ -7,9 +7,10 @@ spring:
   jackson:
     property-naming-strategy: SNAKE_CASE
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:resonance_flow}?stringtype=unspecified
-    username: ${DB_USER:postgres}
-    password: ${DB_PASSWORD:postgres}
+    # Own database + own DB user, like the chart (issue #869).
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:inbox}?stringtype=unspecified
+    username: ${DB_USER:inbox}
+    password: ${DB_PASSWORD:inbox}
   flyway:
     baseline-on-migrate: true
   kafka:

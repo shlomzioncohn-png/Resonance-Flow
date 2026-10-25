@@ -17,6 +17,7 @@ from mind.messaging.task_dependencies_proposed_event_pb2 import (
 
 # --- config from the mounted files -----------------------------------------
 
+
 def test_config_reads_kafka_from_the_mounted_files(tmp_path, monkeypatch):
     cfg = tmp_path / "config.yaml"
     cfg.write_text(
@@ -37,6 +38,24 @@ def test_config_reads_kafka_from_the_mounted_files(tmp_path, monkeypatch):
     assert s.sasl.enabled
     assert s.producer_conf()["security.protocol"] == "SASL_PLAINTEXT"
     assert s.consumer_conf("g")["group.id"] == "g"
+
+
+def test_kafka_sasl_password_comes_from_its_mounted_file_first(tmp_path, monkeypatch):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("kafka:\n  bootstrap_servers: broker:9092\n")
+    sec = tmp_path / "secrets.yaml"
+    sec.write_text("kafka:\n  sasl: { mechanism: PLAIN, username: u, password: stale }\n")
+    sasl_dir = tmp_path / "kafka-sasl"
+    sasl_dir.mkdir()
+    (sasl_dir / "client-passwords").write_text("fresh\n")
+    monkeypatch.setenv("CONFIG_FILE_PATH", str(cfg))
+    monkeypatch.setenv("SECRETS_FILE_PATH", str(sec))
+    monkeypatch.setenv("KAFKA_SASL_SECRETS_DIR", str(sasl_dir))
+
+    assert load_settings().sasl.password == "fresh"
+
+    (sasl_dir / "client-passwords").unlink()
+    assert load_settings().sasl.password == "stale"
 
 
 def test_config_missing_config_file_fails(tmp_path, monkeypatch):
@@ -61,6 +80,7 @@ def test_config_missing_secrets_file_is_safe(tmp_path, monkeypatch):
 
 # --- the consumer reads the Confluent wire format ------------------------
 
+
 def test_deserializer_reads_a_confluent_framed_message():
     """A Confluent Protobuf value = magic byte 0x00, 4-byte schema id, the
     message-index varint (0x00 for the first top-level message), then the
@@ -71,7 +91,8 @@ def test_deserializer_reads_a_confluent_framed_message():
     from confluent_kafka.serialization import MessageField, SerializationContext
 
     event = DependencyProposedEvent(
-        event_id="evt-1", task_id="task-1",
+        event_id="evt-1",
+        task_id="task-1",
         dependencies=[Dependency(depends_on_task_id="task-0", confidence=0.75)],
     )
     frame = b"\x00" + struct.pack(">I", 1) + b"\x00" + event.SerializeToString()
@@ -85,13 +106,12 @@ def test_deserializer_reads_a_confluent_framed_message():
 
     assert back.event_id == "evt-1"
     assert back.task_id == "task-1"
-    assert [(d.depends_on_task_id, d.confidence) for d in back.dependencies] == [
-        ("task-0", 0.75)
-    ]
+    assert [(d.depends_on_task_id, d.confidence) for d in back.dependencies] == [("task-0", 0.75)]
 
 
 def test_module_classes_construct():
     from mind.messaging import ProtobufConsumer, ProtobufProducer
+
     # constructing needs a broker/registry, so just assert the API surface
     assert hasattr(ProtobufProducer, "publish")
     assert hasattr(ProtobufConsumer, "run")
@@ -229,3 +249,44 @@ def test_a_producer_is_built_when_both_kafka_keys_are_set(tmp_path, monkeypatch)
 
 def _never_built(*args, **kwargs):
     raise AssertionError("a Kafka client was built despite a missing kafka key")
+
+
+class _IdleConsumer(_RecordingConsumer):
+    """A consumer with nothing to read: every poll times out."""
+
+    closed = False
+
+    def poll(self, timeout: float) -> None:
+        return None
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_a_consumer_stops_when_its_stop_event_is_set(tmp_path, monkeypatch):
+    # #920: a consumer running in a thread of the API must end on shutdown,
+    # and close so it leaves its group instead of waiting for a timeout.
+    import threading
+
+    from mind.messaging import consumer as consumer_module
+
+    _kafka_config(
+        tmp_path, monkeypatch, bootstrap_servers=_BOOTSTRAP, schema_registry_url=_REGISTRY
+    )
+    monkeypatch.setattr(consumer_module, "Consumer", _IdleConsumer)
+    built = consumer_module.ProtobufConsumer("g", ["t"])
+    stop = threading.Event()
+    result: list[int] = []
+
+    thread = threading.Thread(
+        target=lambda: result.append(
+            built.run(DependencyProposedEvent, lambda e, m: None, poll_timeout=0.05, stop=stop)
+        )
+    )
+    thread.start()
+    stop.set()
+    thread.join(timeout=2)
+
+    assert not thread.is_alive()
+    assert result == [0]
+    assert built._consumer.closed

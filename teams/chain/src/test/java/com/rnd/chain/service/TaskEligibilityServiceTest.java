@@ -119,7 +119,8 @@ class TaskEligibilityServiceTest {
                     edgeService,
                     priorityScoreService,
                     historyRecorder,
-                    taskReadinessRepository);
+                    taskReadinessRepository
+                    );
 
 }
 
