@@ -178,7 +178,9 @@ def test_each_topic_reaches_its_own_handler(started):
     by_topic = {c.topics[0]: c for c in _FakeConsumer.built}
     assert by_topic["task.created"].message_type is TaskCreatedEvent
     assert by_topic["task.updated"].message_type is TaskUpdatedEvent
-    assert {c.group_id for c in _FakeConsumer.built} == {"mind-score-publisher"}
+    # A group per topic, so one topic's retries never rebalance the other's.
+    assert by_topic["task.created"].group_id == "mind-score-publisher-task-created"
+    assert by_topic["task.updated"].group_id == "mind-score-publisher-task-updated"
 
 
 def test_the_consumers_get_the_same_kafka_settings(started):

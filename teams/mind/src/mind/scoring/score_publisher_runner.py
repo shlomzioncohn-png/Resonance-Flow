@@ -37,7 +37,13 @@ from mind.scoring.score_publisher import ScorePublisher
 
 logger = logging.getLogger(__name__)
 
-_GROUP_ID = "mind-score-publisher"
+# One consumer group per topic: in a shared group, every retry of one topic's
+# consumer (leave, then join again) would rebalance the other topic's too.
+# Relay has these names.
+_GROUP_IDS = {
+    "task.created": "mind-score-publisher-task-created",
+    "task.updated": "mind-score-publisher-task-updated",
+}
 
 
 @dataclass(frozen=True)
@@ -111,7 +117,7 @@ def _consume(
             # is moving again.
             progress()
 
-        consumer = ProtobufConsumer(group_id=_GROUP_ID, topics=[topic], settings=settings)
+        consumer = ProtobufConsumer(group_id=_GROUP_IDS[topic], topics=[topic], settings=settings)
         consumer.run(message_type, _handler, idle_timeout=None, stop=stop)
 
     return run

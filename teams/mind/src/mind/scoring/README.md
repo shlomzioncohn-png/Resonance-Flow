@@ -519,6 +519,18 @@ API and needs no entry of its own in Relay's chart.
   logged at ERROR: `background: thread <name> keeps failing (<n> times in a
   row); running it again every 60.0s`. So a short outage isn't an alert, and
   a stuck thread is.
+- **One consumer group per topic:** `mind-score-publisher-task-created` and
+  `mind-score-publisher-task-updated`. In one shared group, every retry of
+  one topic's consumer (it leaves the group and joins again) would rebalance
+  the other topic's consumer too. New groups start from the beginning of
+  their topic (`auto.offset.reset: earliest`).
+- **The publisher's lock is held during the Kafka send.** It keeps each task's
+  events in order, and a score recorded only once it was sent. So while a
+  send hangs, the other two threads wait on it and don't show in `retrying`.
+  A hung send fails only after about 5 minutes (librdkafka's
+  `message.timeout.ms`); from then on that thread is in `retrying`. Its
+  ERROR starts at the 7th failure in a row, when the wait reaches 60 s:
+  about 36 minutes after the send first hung (7 x 5 min + 63 s of waits).
 - **MIND must run as one replica (`replicaCount: 1`) with one uvicorn worker.**
   The publisher keeps its state in memory: a second copy would split the
   topics between two states, and the stale-event and loop checks would break.
