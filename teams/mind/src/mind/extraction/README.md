@@ -841,8 +841,10 @@ and may not be in the index yet when its mention is resolved.
   25k tokens) is one cap for every source, a safety net rather than a saving:
   a cut loses what comes last, which in a meeting is the closing recap with
   its action items (on AMI, cut at 8000 the two meetings found 0/4 and 0/8
-  gold items, sent whole 4/4 and 4/8) and in a Bridge item the attachment
-  after the body (#349). The price: the quoted history at the end of a long
+  gold items, sent whole 4/4 and 4/8). A Bridge item's parts share the cap
+  before they reach extraction, the longest cut first, so the attachment
+  after a long body is not the part lost (#968, `ingestion/README.md`).
+  The price: the quoted history at the end of a long
   email thread is now sent too (not measured live), and an item near the cap
   costs ~$0.019 a call, twice that from 2027 and again on each repair round,
   past the monitoring's $0.02 limit, which was set for the 8000 cap. Any cut

@@ -17,6 +17,7 @@ never even read.
 """
 
 import logging
+import re
 from pathlib import PurePosixPath
 from typing import assert_never
 
@@ -31,6 +32,8 @@ from mind.contracts.raw_object_event_enums import (
     ScopeDecision,
 )
 from mind.extraction.extractor import ExtractionItem
+from mind.extraction.prompts import MAX_CONTENT_CHARS
+from mind.ingestion.email_body import email_body_text
 from mind.ingestion.event_objects import ObjectReader, read_event_object, tenant_uuid
 from mind.ingestion.to_text import MediaPipeline, text_of
 from mind.multimodal.asr import transcribe
@@ -51,6 +54,14 @@ _TASK_SOURCE_TYPE: dict[RawSourceType, SourceType] = {
     RawSourceType.ZOOM: SourceType.MEETING,
     RawSourceType.BIGBLUEBUTTON: SourceType.MEETING,
 }
+
+
+# Ends a part cut to share the content cap, so the model knows the part goes on.
+PART_TRUNCATION_MARKER = "\n[... part truncated ...]"
+
+# Bridge lands an attachment as `{uuid}-{filename}`; the heading names the file
+# as it was sent, the way the email body lists it.
+_KEY_PREFIX = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-")
 
 
 def task_source_type(raw: RawSourceType) -> SourceType:
@@ -92,7 +103,11 @@ def _heading(obj: RawObjectRef) -> str:
         case ObjectRole.RECORDING:
             what = "Recording"
         case ObjectRole.ATTACHMENT:
-            what = f"Attachment: {PurePosixPath(obj.object_key).name}"
+            name = _KEY_PREFIX.sub("", PurePosixPath(obj.object_key).name, count=1)
+            # The sender picks the name: one line, and no bracket to close the
+            # heading early or open another.
+            name = " ".join(name.replace("[", " ").replace("]", "").split())
+            what = f"Attachment: {name}" if name else "Attachment"
         case ObjectRole.SOURCE_METADATA:
             # Never read, so never here; listed because assert_never below
             # makes mypy fail until every role has a branch.
@@ -111,6 +126,30 @@ def _heading(obj: RawObjectRef) -> str:
     return f"[{what}{how}]"
 
 
+def fit_to_budget(lengths: list[int], budget: int) -> list[int]:
+    """How much of each part to send so that together they fit `budget`.
+
+    The longest parts are cut first, all to one length, and a part shorter
+    than that stays whole: the room a short part leaves goes to the long
+    ones, and every part's start is sent. Cutting the joined text instead
+    would always lose the last part first, usually the attachment."""
+
+    if sum(lengths) <= budget:
+        return list(lengths)
+    allowed = list(lengths)
+    left = budget
+    shortest_first = sorted(range(len(lengths)), key=lambda i: lengths[i])
+    for done, i in enumerate(shortest_first):
+        share = left // (len(lengths) - done)
+        if lengths[i] > share:
+            # This part and every longer one get the same share.
+            for j in shortest_first[done:]:
+                allowed[j] = share
+            break
+        left -= lengths[i]
+    return allowed
+
+
 def item_text(parts: list[tuple[RawObjectRef, str]], *, headed: bool) -> str:
     """One text for the whole item, the parts in the event's order.
 
@@ -118,11 +157,35 @@ def item_text(parts: list[tuple[RawObjectRef, str]], *, headed: bool) -> str:
     did, every part goes under its heading, even when only one is left (the
     others missing or unreadable): it is still an attachment, still scanned.
     An item that had one file to begin with goes as it is, so it reads to
-    extraction exactly as that file does."""
+    extraction exactly as that file does, and extraction's own cap applies.
+
+    Headed parts share MAX_CONTENT_CHARS (fit_to_budget), so the joined text
+    is never cut past its last part's heading by extraction."""
 
     if not headed:
         return "\n\n".join(text for _, text in parts)
-    return "\n\n".join(f"{_heading(obj)}\n{text}" for obj, text in parts)
+    headings = [_heading(obj) for obj, _ in parts]
+    # What the join adds around the texts: each heading and its newline, the
+    # blank line between parts, and room for a marker on every part.
+    overhead = (
+        sum(len(heading) + 1 for heading in headings)
+        + 2 * (len(parts) - 1)
+        + len(PART_TRUNCATION_MARKER) * len(parts)
+    )
+    allowed = fit_to_budget([len(text) for _, text in parts], max(MAX_CONTENT_CHARS - overhead, 0))
+    sections = []
+    for (obj, text), heading, length in zip(parts, headings, allowed, strict=True):
+        if length < len(text):
+            # The file and the numbers only: Bridge may have classified it HIGH.
+            logger.warning(
+                "extraction_items: %s cut to %d of %d characters to fit the item",
+                obj.object_key,
+                length,
+                len(text),
+            )
+            text = text[:length] + PART_TRUNCATION_MARKER
+        sections.append(f"{heading}\n{text}")
+    return "\n\n".join(sections)
 
 
 def extraction_items(
@@ -155,6 +218,13 @@ def extraction_items(
         text = text_of(content, obj.modality, obj.object_key, ocr, asr)
         if text is None:
             return None
+        if (
+            event.source_type is RawSourceType.EMAIL
+            and obj.role is ObjectRole.BODY
+            and obj.modality is Modality.TEXT
+        ):
+            # The whole record, attachments inline as base64 (email_body.py).
+            text = email_body_text(text, obj.object_key)
         if not text.strip():
             logger.info("extraction_items: %s has no text in it, skipped", obj.object_key)
             return None

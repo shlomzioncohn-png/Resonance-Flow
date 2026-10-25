@@ -28,6 +28,7 @@ bridge.raw.landed ─► to_raw_object_event ─► classify_arrival ─► extr
 | `raw_object_event_proto.py` | the protobuf message → the `RawObjectEvent` contract |
 | `seen_revisions.py` | whether an item was already processed, and at which revision |
 | `extraction_items.py` | the event → one `ExtractionItem` for the item, read one file at a time |
+| `email_body.py` | an email's JSON `BODY` → the text a person reads, without the inline attachments |
 | `event_objects.py` | the reader contract and per-file checks (tenant, `content_hash`) |
 | `minio_reader.py` | reads one file from MinIO |
 | `to_text.py` | one file's bytes → text, via R4's OCR and ASR |
@@ -55,7 +56,15 @@ bridge.raw.landed ─► to_raw_object_event ─► classify_arrival ─► extr
    never read, only when a transcript gave speech; a missing, broken or empty
    one (a WEBVTT with timings and no words) leaves the recording to be
    transcribed. Other audio (an attached voice note) is always transcribed. A
-   file with no text in it is skipped.
+   file with no text in it is skipped. An email's `BODY` is the whole record
+   as JSON, each attachment inside it as base64 (Bridge's
+   `FixtureEmailSourceReader`); `email_body.py` keeps what a person reads
+   (from, to, subject, date, the attachments' names, the text), since each
+   attachment lands again as its own file. A body in another shape goes as
+   it is, with a WARNING naming the file. Gmail's own message
+   (`RealEmailSourceReader`, the text base64url in `payload.parts`) gets a
+   WARNING of its own, so an unknown shape still stands out, until Bridge
+   lands its plain text. A header is kept on one line.
 
    The texts left are joined into **one** `ExtractionItem` for the item, in
    the event's order (the transcript is read first, but keeps its place), keyed
@@ -72,9 +81,14 @@ bridge.raw.landed ─► to_raw_object_event ─► classify_arrival ─► extr
    other make one task, not two half-tasks. Per file, the same request in a
    body and its attachment would also become two tasks, and R3's
    `find_duplicate` cannot catch that: it compares against tasks already in the
-   index, and these two are created together. Extraction cuts only an item
-   past `MAX_CONTENT_CHARS` (100,000, `extraction/prompts.py`), one cap for
-   every source, so a long body does not cost the attachment after it.
+   index, and these two are created together. The parts share
+   `MAX_CONTENT_CHARS` (100,000, `extraction/prompts.py`): past it, the
+   longest parts are cut first, all to one length, and a shorter part stays
+   whole (`fit_to_budget`), ending in `[... part truncated ...]` where cut.
+   Cutting the joined text instead would always lose the last part first,
+   usually the attachment. A cut is a WARNING, as extraction's own is, naming
+   the file and its lengths only. An attachment's heading names the file as
+   it was sent, without the `{uuid}-` Bridge puts before it in the key.
 4. **Hand-off** (`on_items(event, items)`, the list empty or of one), then the
    item is marked processed. The event travels next to the item: it carries
    the tenant, `source_ref` and `correlation_id` extraction needs. Marked only

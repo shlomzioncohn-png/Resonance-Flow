@@ -23,9 +23,10 @@ _PROMPT_DIR = Path(__file__).parent / "prompts"
 # net against a runaway item (a 500-page scan), not a saving: a short item is
 # sent whole either way, and a cut loses what comes last. In a meeting that is
 # its closing recap, where the action items are (#690: on AMI, cut at 8000 the
-# two meetings found 0/4 and 0/8 gold items, sent whole 4/4 and 4/8); in a
-# Bridge item it is the attachment after the body (#349). One cap for every
-# source, and only an item this long pays it: about 25k tokens, ~$0.019 a call
+# two meetings found 0/4 and 0/8 gold items, sent whole 4/4 and 4/8). A Bridge
+# item's parts share it before they reach here, the longest cut first, so its
+# attachment is not the part lost (ingestion/extraction_items.py). One cap for
+# every source, and only an item this long pays it: about 25k tokens, ~$0.019 a call
 # today and twice that from 2027, again on every repair round, which resends
 # the content. Past the monitoring's $0.02 a call (config.py), set when this
 # cap was 8000, so such an item is flagged there.
