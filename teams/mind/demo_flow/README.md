@@ -122,7 +122,7 @@ make demo-feed ARGS="--dry-run"     # build + validate the three events; no infr
 
 ## Latest results
 
-2026-10-25, branch `michal-brecher/mind-demo-flow-359` merged with `main` at `4142843c`
+2026-10-25, branch `michal-brecher/mind-demo-flow-359` merged with `main` at `7f8e5b40`
 (#690 task lists, #834 dependency publisher, #841 tenant-scoped index, #920 score publisher
 in the API, #953/#994 canonical schemas, #968 one item per Bridge item), paid Gemini key,
 `gemini-3.6-flash`. Runs `20261025T145408Z-natural` and `20261025T150200Z-slack-first`. All
