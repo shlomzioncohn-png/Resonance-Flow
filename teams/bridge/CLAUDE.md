@@ -65,9 +65,15 @@ conform to the contract (§6). Anything Kafka-bound goes through the shared
 
 `organizationId` on `Task` is `null` by default from `AbstractTaskMapper` (no lane has a general
 tenant-id source) — a subclass overrides `AbstractTaskMapper.organizationId()` only once it has
-an actual value, never a made-up one. `DealToTaskMapper` is the only override today, backed by
-`${bridge.crm.organization-id}` / `CRM_ORGANIZATION_ID` — one static value standing in for one
-account until Inbox supports resolving it per deal from `Deal.crmAccountSlug()`.
+an actual value, never a made-up one. Two configured values exist today, both fed by the same
+`CRM_ORGANIZATION_ID` env var (one deployment = one Inbox tenant):
+
+- `${bridge.crm.organization-id}` → `DealToTaskMapper` (CRM only — one static value standing in
+  for one account until Inbox supports resolving it per deal from `Deal.crmAccountSlug()`).
+- `${bridge.organization-id}` → `GitHubIssueMapper`, `GitHubPullRequestMapper`, `JiraIssueMapper`
+  (sources carry no tenant; the deployment-wide value stands in). Blank means "not configured"
+  and maps to `null`, preserving the contract gap for local `LoggingPayloadPublisher` runs — set
+  `CRM_ORGANIZATION_ID` before running any lane under the `kafka` profile.
 
 `DealToTaskMapper.toUrgency` also adds +1 (before the 1..5 clamp) for a deal in an open stage
 (`PROSPECT`/`QUALIFIED`/`PROPOSAL`/`NEGOTIATION`) that's sat in that stage at least

@@ -224,7 +224,15 @@ components:
     service: *defaultService
     resources: *defaultResources
     <<: *defaultHealthProbes
-    env: {}
+    env:
+      # Required so BridgeTaskKafkaConfig's Protobuf producer (and the
+      # KafkaPayloadPublisher bean) activate - without it everything falls
+      # back to LoggingPayloadPublisher and nothing reaches Inbox.
+      SPRING_PROFILES_ACTIVE: "kafka"
+      # Deployment must --set a real Inbox tenant UUID (blank fails CrmLaneConfig's
+      # kafka-profile startup check by design). Feeds both bridge.crm.organization-id
+      # and bridge.organization-id (GitHub/Jira) via application.yml.
+      CRM_ORGANIZATION_ID: ""
     objectStorage:
       bucket: "bridge-raw"
     config:
@@ -328,6 +336,8 @@ components:
     dependencies:
       - name: object-storage
         port: 9000
+      - name: schema-registry
+        port: 8080
       - name: postgresql
         port: 5432
   lens-frontend:

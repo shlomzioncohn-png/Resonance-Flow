@@ -37,6 +37,9 @@ The Jira Bridge Adapter is a structured ETL lane for the Resonance Flow platform
 | `JIRA_SYNC_CRON_EXPRESSION` | `0 0 2 * * ?` | Cron expression for the scheduled sync (default: 02:00 daily). |
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka broker list. |
 | `bridge.structured-tasks-topic` | `bridge.structured.tasks` | Kafka topic used by the shared `KafkaPayloadPublisher`. |
+| `CRM_ORGANIZATION_ID` | empty | Inbox tenant UUID stamped onto every Jira task's `organizationId` (via `bridge.organization-id`). Required under the `kafka` profile - Inbox's `tasks.tenant_id` is NOT NULL. Blank leaves it `null` (local `LoggingPayloadPublisher` runs only). |
+
+`POST /api/bridge/jira/sync` returns `{ "project", "fetched", "published" }` - `fetched` is how many issues the client pulled, `published` counts only records that were actually published (a record that fails validation/publish is logged and excluded).
 
 ## Retry & Error Handling
 

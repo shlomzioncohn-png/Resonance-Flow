@@ -48,10 +48,10 @@ class GitHubClientTest {
     private WebClient.ResponseSpec responseSpec;
 
     @Spy
-    private GitHubIssueMapper gitHubIssueMapper = new GitHubIssueMapper(new EnrichmentProperties(), new NoOpTaskEnricher());
+    private GitHubIssueMapper gitHubIssueMapper = new GitHubIssueMapper(new EnrichmentProperties(), new NoOpTaskEnricher(), "");
 
     @Spy
-    private GitHubPullRequestMapper gitHubPullRequestMapper = new GitHubPullRequestMapper(new EnrichmentProperties(), new NoOpTaskEnricher());
+    private GitHubPullRequestMapper gitHubPullRequestMapper = new GitHubPullRequestMapper(new EnrichmentProperties(), new NoOpTaskEnricher(), "");
 
     @Spy
     private TaskValidator taskValidator;
