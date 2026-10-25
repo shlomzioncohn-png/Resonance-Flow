@@ -173,7 +173,7 @@ python -m flow_health.detectors --data data/dev --features out/dev --seed 42   #
 Three deterministic detectors; each returns a list of flags and the command writes all of them to one `flags.json`
 (`{"meta": {...}, "flags": [...]}`). Output is a recommendation only: nothing is written to Chain, and no task or
 dependency is changed. A flag has `flag_id`, `pattern`, `entity_type`, `entity_ids`, `score` (0-1, percentile rank inside
-its detector), `severity` (`low` / `medium` / `high`), `explanation` (a Hebrew sentence built from a template and the real
+its detector), `severity` (`low` / `medium` / `high`), `explanation` (an English sentence built from a template and the real
 numbers) and `evidence` (the numbers themselves). Merging the three lists into one ranked report is the next task.
 The detectors never read the answer files (checked by `tests/test_no_answer_leak.py`).
 

@@ -60,8 +60,8 @@ def test_a_group_where_every_path_is_slow_flags_none_because_length_alone_is_not
 
 def test_explanation_contains_the_actual_numbers():
     (flag,) = detect(*_frames(("slow", 5, 3.2, 0.31, 38.0)), CFG)
-    assert "שרשרת באורך 5" in flag.explanation and "ב-38 יום" in flag.explanation
-    assert "פי 3.2" in flag.explanation and "ליותר מ-50 אחוז" in flag.explanation and "הגדולה ביותר: 31 אחוז" in flag.explanation
+    assert "Chain of 5 tasks" in flag.explanation and "in 38 days" in flag.explanation
+    assert "3.2x" in flag.explanation and "more than 50 percent" in flag.explanation and "largest: 31 percent" in flag.explanation
     assert flag.evidence["median_link_ratio"] == 3.2 and flag.evidence["chain_length"] == 5
 
 

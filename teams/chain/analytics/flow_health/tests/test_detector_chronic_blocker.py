@@ -53,20 +53,20 @@ def test_a_task_that_was_never_blocked_can_still_be_a_chronic_blocker():
 
 def test_explanation_contains_the_actual_numbers():
     (flag,) = detect(_tasks(("t", "tactical", True, 85, 5)), CFG)
-    assert "בעבודה 85 יום" in flag.explanation and "פי 8.5" in flag.explanation
-    assert "משימות טקטיות באותו פרויקט" in flag.explanation and "(10 יום)" in flag.explanation
-    assert "חוסמת 5 משימות" in flag.explanation and "עדיין לא הסתיימה" in flag.explanation
+    assert "Worked on for 85 days" in flag.explanation and "8.5x" in flag.explanation
+    assert "tactical tasks in the same project" in flag.explanation and "(10 days)" in flag.explanation
+    assert "blocks 5 tasks" in flag.explanation and "still not finished" in flag.explanation
     assert flag.evidence["ratio_to_tier_median"] == 8.5 and flag.evidence["n_dependents_max"] == 5
 
 
 def test_a_finished_task_is_explained_without_the_open_note():
     (flag,) = detect(_tasks(("t", "tactical", False, 85, 5)), CFG)
-    assert "עדיין לא הסתיימה" not in flag.explanation
+    assert "still not finished" not in flag.explanation
 
 
 def test_unknown_tier_is_compared_with_all_tasks_in_the_wording():
     (flag,) = detect(_tasks(("t", "UNKNOWN", True, 85, 5)), CFG)
-    assert "כלל המשימות" in flag.explanation and flag.evidence["tier"] == "UNKNOWN"
+    assert "all tasks" in flag.explanation and flag.evidence["tier"] == "UNKNOWN"
 
 
 def test_score_is_a_percentile_within_the_detector_and_the_strongest_gets_one():
