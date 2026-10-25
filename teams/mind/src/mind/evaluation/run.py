@@ -34,6 +34,7 @@ from mind.evaluation.personas import (
     validate_personas,
 )
 from mind.scoring.hierarchy import load_hierarchy
+from mind.scoring.segmented_model import SegmentedRankingModel
 
 
 def _summary_lines(label: str, report: Report) -> str:
@@ -61,7 +62,8 @@ def main() -> None:
         "--model", type=str, default="dummy",
         help="Model to evaluate: 'dummy' (constant score, plumbing only), "
              "'nearest-deadline', 'skip-blocked-nearest-deadline' or 'longest-description' "
-             "(the cheap baselines from eval/personas/README.md's 'Cheap-baseline scores' table).",
+             "(the cheap baselines from eval/personas/README.md's 'Cheap-baseline scores' table), "
+             "or 'segmented' (R2's segmented-ranking baseline, #354 — the one #486 records).",
     )
     parser.add_argument(
         "--personas", type=str, default="eval/personas",
@@ -115,6 +117,7 @@ def main() -> None:
         "nearest-deadline": NearestDeadlineModel(),
         "skip-blocked-nearest-deadline": SkipBlockedNearestDeadlineModel(),
         "longest-description": LongestDescriptionModel(),
+        "segmented": SegmentedRankingModel(),
     }
     try:
         model = models[args.model]
