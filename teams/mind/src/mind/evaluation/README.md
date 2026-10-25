@@ -489,6 +489,32 @@ format" if a field is ever renamed or removed, instead of a validation error.
 `Report` it was written from, so the week-7 comparison (#487) diffs the stretch
 run against the recorded baseline instead of a re-run.
 
+### Recording the stretch run and the comparison (#487)
+
+The stretch is scored against the recorded baseline in one run:
+
+```bash
+python -m mind.evaluation.run --model <stretch-model> \
+    --compare-to eval/baselines/baseline_score_<YYYY-MM-DD>.json \
+    --record-stretch eval/baselines/stretch_score_<YYYY-MM-DD>.json \
+    --comparison-out eval/baselines/stretch_comparison_<YYYY-MM-DD>.json \
+    --model-commit <model-sha> --persona-set-commit <persona-set-sha>
+```
+
+- **`--compare-to`** loads the baseline with `load_baseline_record` before
+  scoring and never re-scores it. A record from a different persona set
+  (checksum mismatch) fails the run before scoring. After scoring, the run
+  prints #464's `diff_reports` summary: accuracy before → after, how many
+  scenarios changed in each direction, and every changed scenario.
+- **`--record-stretch`** writes the stretch run in the same `BaselineRecord`
+  format, with the same rules as `--record-baseline`: write-once, both commits
+  required, and written only after the accuracy gates. It cannot be combined
+  with `--record-baseline` in the same run.
+- **`--comparison-out`** (needs `--compare-to`) writes the `ComparisonReport`
+  as JSON, with `baseline_record` and `stretch_record` naming the two files it
+  compares (team-relative paths, like the records). It is write-once too: an
+  existing file fails the run before scoring.
+
 ### 2026-09-23: no week-5 baseline number exists yet
 
 - **Checked:** `origin/main` @ `c7e6c507` (2026-09-23).
@@ -531,8 +557,10 @@ run against the recorded baseline instead of a re-run.
   `higher_manager_approved_vision_memo`, `manager_idle_new_hires`,
   `developer_inflated_p0`, `field_engineer_released_controller`,
   `salesperson_dead_rfp`.
-- **Next:** #487 scores the stretch model on the same set and diffs it against
-  this record (`load_baseline_record` + `diff_reports`).
+- **Compared against:** the stretch model (#474) was scored against this record
+  on the same set: 76.2% (32/42), with 9 scenarios changed (4 wrong → right,
+  5 right → wrong). Records, diff and explanations are in
+  [`docs/stretch_evidence.md`](../../../docs/stretch_evidence.md).
 
 ## Real data slice
 

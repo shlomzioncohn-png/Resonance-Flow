@@ -1,4 +1,5 @@
 import argparse
+import dataclasses
 import json
 import sys
 from datetime import UTC, datetime
@@ -16,8 +17,11 @@ from mind.evaluation.baseline_record import (
     BaselineRecordError,
     Provenance,
     build_baseline_record,
+    load_baseline_record,
+    team_relative,
     write_baseline_record,
 )
+from mind.evaluation.comparison import ComparisonReport, diff_reports
 from mind.evaluation.dummy_model import DummyModel
 from mind.evaluation.harness import EvaluationOutput, Report, run, split_by_role
 from mind.evaluation.hierarchy import (
@@ -54,6 +58,47 @@ def _report_json(output: EvaluationOutput) -> str:
     Deliberately `json.dumps(..., allow_nan=False)` and not `model_dump_json()`:
     pydantic's JSON serializer writes NaN as `null` by default, silently."""
     return json.dumps(output.model_dump(), indent=4, allow_nan=False)
+
+
+def _comparison_summary(comparison: ComparisonReport) -> str:
+    lines = [
+        (
+            f"{comparison.baseline_model_name} {comparison.baseline_accuracy:.1%} -> "
+            f"{comparison.stretch_model_name} {comparison.stretch_accuracy:.1%}"
+        ),
+        f"  Changed top-1: {comparison.changed_count}/{comparison.total_scenarios}  "
+        + "  ".join(f"{d}: {n}" for d, n in comparison.direction_counts.items()),
+    ]
+    for d in comparison.scenario_diffs:
+        if d.changed:
+            lines.append(
+                f"  {d.direction:<26} {d.scenario_id}: {d.baseline_predicted_top_task_id} -> "
+                f"{d.stretch_predicted_top_task_id} (expected {d.expected_top_task_id})"
+            )
+    return "\n".join(lines)
+
+
+def _write_comparison(
+    path: Path,
+    comparison: ComparisonReport,
+    *,
+    baseline_record: Path,
+    stretch_record: Path | None,
+) -> None:
+    """Write #464's diff, plus which two records it compares, to `path`.
+    Write-once like the records: a re-run goes to a new, dated file."""
+    data = {
+        "baseline_record": team_relative(baseline_record),
+        "stretch_record": None if stretch_record is None else team_relative(stretch_record),
+        **dataclasses.asdict(comparison),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("x", encoding="utf-8") as f:
+            f.write(json.dumps(data, indent=4, allow_nan=False))
+            f.write("\n")
+    except FileExistsError:
+        raise BaselineRecordError(f"{path} already exists; write the comparison to a new file") from None
 
 
 def main() -> None:
@@ -98,19 +143,44 @@ def main() -> None:
              "exists. See the 'Baseline score' section in the README.",
     )
     parser.add_argument(
+        "--record-stretch", type=Path, default=None, metavar="PATH",
+        help="Like --record-baseline, for the stretch run (#487): same format, same "
+             "write-once rule, e.g. eval/baselines/stretch_score_<date>.json.",
+    )
+    parser.add_argument(
+        "--compare-to", type=Path, default=None, metavar="BASELINE",
+        help="A recorded baseline to diff this run against (#464's diff_reports). "
+             "Loaded from the file, never re-scored, and refused if the persona set "
+             "changed since it was recorded.",
+    )
+    parser.add_argument(
+        "--comparison-out", type=Path, default=None, metavar="PATH",
+        help="With --compare-to: also write the diff to PATH (e.g. "
+             "eval/baselines/stretch_comparison_<date>.json). Fails if PATH exists.",
+    )
+    parser.add_argument(
         "--model-commit", type=str, default=None, metavar="SHA",
-        help="With --record-baseline (required there): the commit holding the "
-             "scored model's code.",
+        help="With --record-baseline / --record-stretch (required there): the "
+             "commit holding the scored model's code.",
     )
     parser.add_argument(
         "--persona-set-commit", type=str, default=None, metavar="SHA",
-        help="With --record-baseline (required there): the last commit that "
+        help="With --record-baseline / --record-stretch (required there): the last commit that "
              "touched the persona set (git log -1 --format=%%H -- eval/personas "
              "eval/hierarchy).",
     )
     args = parser.parse_args()
-    if args.record_baseline is None and (args.model_commit or args.persona_set_commit):
-        parser.error("--model-commit / --persona-set-commit only apply with --record-baseline")
+    if args.record_baseline is not None and args.record_stretch is not None:
+        parser.error("--record-baseline and --record-stretch are separate runs, not one")
+    record_path: Path | None = args.record_baseline or args.record_stretch
+    record_kind = "baseline" if args.record_baseline is not None else "stretch"
+    if record_path is None and (args.model_commit or args.persona_set_commit):
+        parser.error(
+            "--model-commit / --persona-set-commit only apply with "
+            "--record-baseline / --record-stretch"
+        )
+    if args.comparison_out is not None and args.compare_to is None:
+        parser.error("--comparison-out needs --compare-to")
 
     models: dict[str, RankingModel] = {
         "dummy": DummyModel(),
@@ -126,25 +196,26 @@ def main() -> None:
 
     personas_path = Path(args.personas)
 
-    # Checked before scoring, so a baseline run that can't be recorded fails fast.
+    # Checked before scoring, so a run that can't be recorded fails fast.
     provenance: Provenance | None = None
-    if args.record_baseline is not None:
+    if record_path is not None:
         try:
             if args.model_commit is None or args.persona_set_commit is None:
                 raise BaselineRecordError(
-                    "--record-baseline needs both --model-commit and --persona-set-commit"
+                    f"--record-{record_kind} needs both --model-commit and --persona-set-commit"
                 )
-            if args.record_baseline.exists():
-                raise BaselineRecordError(
-                    BASELINE_EXISTS_MESSAGE.format(path=args.record_baseline)
-                )
+            if record_path.exists():
+                raise BaselineRecordError(BASELINE_EXISTS_MESSAGE.format(path=record_path))
             provenance = Provenance(
                 model_commit=args.model_commit,
                 persona_set_commit=args.persona_set_commit,
             )
         except BaselineRecordError as e:
-            print(f"Cannot record baseline: {e}", file=sys.stderr)
+            print(f"Cannot record {record_kind}: {e}", file=sys.stderr)
             sys.exit(1)
+    if args.comparison_out is not None and args.comparison_out.exists():
+        print(f"Cannot write comparison: {args.comparison_out} already exists", file=sys.stderr)
+        sys.exit(1)
 
     try:
         all_scenarios = load_personas(personas_path)
@@ -180,6 +251,17 @@ def main() -> None:
             print(f"  - {error}")
         print("-----------------------------------\n")
         sys.exit(1)
+
+    # Loaded before scoring: a baseline recorded on a different set fails fast.
+    baseline: Report | None = None
+    if args.compare_to is not None:
+        try:
+            baseline = load_baseline_record(
+                args.compare_to, personas_path=personas_path, hierarchy_dir=hierarchy_dir
+            )
+        except BaselineRecordError as e:
+            print(f"Cannot compare: {e}", file=sys.stderr)
+            sys.exit(1)
 
     # One report per scenario group (a subdirectory of the personas dir), plus a combined one.
     group_dirs = sorted(p for p in personas_path.iterdir() if p.is_dir())
@@ -249,7 +331,7 @@ def main() -> None:
 
     # Written last, after both accuracy gates: a run the project's own CI treats as a
     # regression must not leave a (write-once, therefore blocking) record behind.
-    if args.record_baseline is not None and provenance is not None:
+    if record_path is not None and provenance is not None:
         record = build_baseline_record(
             recorded_on=datetime.now(UTC).date(),
             provenance=provenance,
@@ -261,11 +343,29 @@ def main() -> None:
             roles=role_reports,
         )
         try:
-            write_baseline_record(args.record_baseline, record)
+            write_baseline_record(record_path, record)
         except BaselineRecordError as e:
-            print(f"Cannot record baseline: {e}", file=sys.stderr)
+            print(f"Cannot record {record_kind}: {e}", file=sys.stderr)
             sys.exit(1)
-        print(f"Baseline recorded to {args.record_baseline} (commit it).\n")
+        print(f"{record_kind.capitalize()} recorded to {record_path} (commit it).\n")
+
+    if baseline is not None:
+        comparison = diff_reports(baseline, combined_report)
+        print("=== Comparison against the recorded baseline ===")
+        print(_comparison_summary(comparison))
+        print("================================================\n")
+        if args.comparison_out is not None:
+            try:
+                _write_comparison(
+                    args.comparison_out,
+                    comparison,
+                    baseline_record=args.compare_to,
+                    stretch_record=record_path,
+                )
+            except BaselineRecordError as e:
+                print(f"Cannot write comparison: {e}", file=sys.stderr)
+                sys.exit(1)
+            print(f"Comparison written to {args.comparison_out} (commit it).\n")
 
 
 if __name__ == "__main__":

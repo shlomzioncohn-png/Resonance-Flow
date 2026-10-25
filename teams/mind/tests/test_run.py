@@ -255,3 +255,119 @@ def test_an_existing_record_stops_the_run_before_scoring_and_is_left_untouched(
     assert exit_info.value.code == 1
     assert record.read_text(encoding="utf-8") == "already here"
     assert BASELINE_EXISTS_MESSAGE.format(path=record) in capsys.readouterr().err
+
+
+# -- --compare-to / --record-stretch / --comparison-out (#487) ---------------------
+
+
+def _record_baseline(monkeypatch, tmp_path) -> Path:
+    baseline = tmp_path / "baseline.json"
+    _run_cli(monkeypatch, tmp_path, "--record-baseline", str(baseline))
+    return baseline
+
+
+def test_compare_to_writes_the_stretch_record_and_the_diff(monkeypatch, tmp_path, capsys):
+    baseline = _record_baseline(monkeypatch, tmp_path)
+    stretch = tmp_path / "stretch.json"
+    comparison = tmp_path / "comparison.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run",
+            "--personas", str(REAL_PERSONAS_DIR),
+            "--model", "nearest-deadline",
+            "--model-commit", "c" * 40,
+            "--persona-set-commit", "b" * 40,
+            "--record-stretch", str(stretch),
+            "--compare-to", str(baseline),
+            "--comparison-out", str(comparison),
+        ],
+    )
+    main()
+
+    out = capsys.readouterr().out
+    assert "Stretch recorded to" in out
+    assert "Comparison against the recorded baseline" in out
+    stretch_report = load_baseline_record(
+        stretch, personas_path=REAL_PERSONAS_DIR, hierarchy_dir=REAL_HIERARCHY_DIR
+    )
+    assert stretch_report.model_name == "NearestDeadlineModel"
+    data = json.loads(comparison.read_text(encoding="utf-8"))
+    assert data["baseline_record"] == baseline.as_posix()
+    assert data["stretch_record"] == stretch.as_posix()
+    assert data["baseline_model_name"] == "SkipBlockedNearestDeadlineModel"
+    assert data["stretch_model_name"] == "NearestDeadlineModel"
+    assert data["changed_count"] == sum(d["changed"] for d in data["scenario_diffs"])
+    assert data["changed_count"] > 0
+
+
+def test_compare_to_a_baseline_from_another_set_fails_before_scoring(
+    monkeypatch, tmp_path, capsys
+):
+    baseline = _record_baseline(monkeypatch, tmp_path)
+    record = json.loads(baseline.read_text(encoding="utf-8"))
+    record["persona_set"]["checksum"] = "0" * 64
+    baseline.write_text(json.dumps(record), encoding="utf-8")
+    capsys.readouterr()
+    stretch = tmp_path / "stretch.json"
+
+    with pytest.raises(SystemExit) as exit_info:
+        _run_cli(
+            monkeypatch, tmp_path,
+            "--compare-to", str(baseline), "--record-stretch", str(stretch),
+        )
+
+    assert exit_info.value.code == 1
+    assert "Cannot compare" in capsys.readouterr().err
+    assert not stretch.exists()
+
+
+def test_an_existing_comparison_file_stops_the_run_and_is_left_untouched(
+    monkeypatch, tmp_path, capsys
+):
+    baseline = _record_baseline(monkeypatch, tmp_path)
+    comparison = tmp_path / "comparison.json"
+    comparison.write_text("already here", encoding="utf-8")
+    stretch = tmp_path / "stretch.json"
+
+    with pytest.raises(SystemExit) as exit_info:
+        _run_cli(
+            monkeypatch, tmp_path,
+            "--compare-to", str(baseline), "--comparison-out", str(comparison),
+            "--record-stretch", str(stretch),
+        )
+
+    assert exit_info.value.code == 1
+    assert comparison.read_text(encoding="utf-8") == "already here"
+    assert not stretch.exists()
+
+
+def test_the_comparison_names_the_record_this_run_wrote_whichever_flag_wrote_it(
+    monkeypatch, tmp_path
+):
+    old = _record_baseline(monkeypatch, tmp_path)
+    new = tmp_path / "baseline_rerun.json"
+    comparison = tmp_path / "comparison.json"
+
+    _run_cli(
+        monkeypatch, tmp_path,
+        "--record-baseline", str(new),
+        "--compare-to", str(old), "--comparison-out", str(comparison),
+    )
+
+    data = json.loads(comparison.read_text(encoding="utf-8"))
+    assert data["stretch_record"] == new.as_posix()
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ("--comparison-out", "c.json"),
+        ("--record-baseline", "a.json", "--record-stretch", "b.json"),
+    ],
+)
+def test_flag_combinations_that_make_no_sense_are_refused(monkeypatch, tmp_path, extra):
+    with pytest.raises(SystemExit) as exit_info:
+        _run_cli(monkeypatch, tmp_path, *extra)
+    assert exit_info.value.code == 2

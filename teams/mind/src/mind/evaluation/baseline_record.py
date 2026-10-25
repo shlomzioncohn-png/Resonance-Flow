@@ -216,7 +216,7 @@ class BaselineRecord(BaseModel):
         )
 
 
-def _team_relative(path: Path) -> str:
+def team_relative(path: Path) -> str:
     """`path` as stored in a record: relative to teams/mind when it is inside it.
 
     A record is committed to the repo, so it must not carry the recorder's own
@@ -249,7 +249,7 @@ def build_baseline_record(
     The persona set's checksum is computed here from `personas_path` and
     `hierarchy_dir`, not passed in. `hierarchy_dir` has no default: the caller
     says which hierarchy was scored, or `None` for none. Both paths are stored
-    relative to teams/mind (`_team_relative`)."""
+    relative to teams/mind (`team_relative`)."""
     try:
         checksum = compute_personas_checksum(personas_path, hierarchy_dir=hierarchy_dir)
     except FileNotFoundError as e:
@@ -260,8 +260,8 @@ def build_baseline_record(
         model_commit=provenance.model_commit,
         metric=METRIC,
         persona_set=PersonaSetInfo(
-            path=_team_relative(personas_path),
-            hierarchy_path=_team_relative(hierarchy_dir) if hierarchy_dir is not None else None,
+            path=team_relative(personas_path),
+            hierarchy_path=team_relative(hierarchy_dir) if hierarchy_dir is not None else None,
             checksum=checksum,
             commit=provenance.persona_set_commit,
             scenarios=len(scenarios),

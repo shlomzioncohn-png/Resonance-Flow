@@ -1,0 +1,546 @@
+{
+    "baseline_record": "eval/baselines/baseline_score_2026-10-25.json",
+    "stretch_record": "eval/baselines/stretch_score_2026-10-25.json",
+    "baseline_model_name": "SegmentedRankingModel",
+    "stretch_model_name": "HierarchicalRankingModel",
+    "total_scenarios": 42,
+    "baseline_accuracy": 0.7857142857142857,
+    "stretch_accuracy": 0.7619047619047619,
+    "changed_count": 9,
+    "direction_counts": {
+        "wrong_to_right": 4,
+        "right_to_wrong": 5,
+        "wrong_to_different_wrong": 0
+    },
+    "scenario_diffs": [
+        {
+            "scenario_id": "ceo_blocked_ma_review_vs_vp_offer",
+            "expected_top_task_id": "task_vp",
+            "baseline_predicted_top_task_id": "task_vp",
+            "stretch_predicted_top_task_id": "task_vp",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_ma": 0.0,
+                "task_vp": 0.0
+            }
+        },
+        {
+            "scenario_id": "ceo_expansion_partnership_vs_wound_down_line_partnership",
+            "expected_top_task_id": "task_halvorsen",
+            "baseline_predicted_top_task_id": "task_quayle",
+            "stretch_predicted_top_task_id": "task_halvorsen",
+            "changed": true,
+            "direction": "wrong_to_right",
+            "score_deltas": {
+                "task_halvorsen": 0.025926923076923014,
+                "task_quayle": -0.07923586118251935,
+                "task_filler_interview": 0.0
+            }
+        },
+        {
+            "scenario_id": "ceo_investor_update_vs_allhands_prep",
+            "expected_top_task_id": "task_investor",
+            "baseline_predicted_top_task_id": "task_investor",
+            "stretch_predicted_top_task_id": "task_investor",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_investor": 0.002664660056657331,
+                "task_allhands": 0.10499999999999998
+            }
+        },
+        {
+            "scenario_id": "ceo_overdue_launch_statement_vs_earnings_prep",
+            "expected_top_task_id": "task_earnings",
+            "baseline_predicted_top_task_id": "task_earnings",
+            "stretch_predicted_top_task_id": "task_earnings",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_statement": -0.05879999999999996,
+                "task_earnings": 0.031387970711297175
+            }
+        },
+        {
+            "scenario_id": "ceo_own_investor_commitment_vs_unaccepted_keynote_request",
+            "expected_top_task_id": "task_investor",
+            "baseline_predicted_top_task_id": "task_investor",
+            "stretch_predicted_top_task_id": "task_investor",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_keynote": 0.0,
+                "task_acquisitions": -0.06352499999999994,
+                "task_investor": 0.0038019623780771727
+            }
+        },
+        {
+            "scenario_id": "ceo_payment_processor_cutoff_vs_strategy_deck",
+            "expected_top_task_id": "task_processor",
+            "baseline_predicted_top_task_id": "task_processor",
+            "stretch_predicted_top_task_id": "task_processor",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_deck": 0.0,
+                "task_processor": 0.0,
+                "task_filler_press": 0.0
+            }
+        },
+        {
+            "scenario_id": "ceo_regulator_call_vs_board_prep",
+            "expected_top_task_id": "task_regulator",
+            "baseline_predicted_top_task_id": "task_regulator",
+            "stretch_predicted_top_task_id": "task_board",
+            "changed": true,
+            "direction": "right_to_wrong",
+            "score_deltas": {
+                "task_board": 0.03743530534351147,
+                "task_regulator": 0.0
+            }
+        },
+        {
+            "scenario_id": "developer_blocked_oauth_vs_pr_review",
+            "expected_top_task_id": "task_pr",
+            "baseline_predicted_top_task_id": "task_pr",
+            "stretch_predicted_top_task_id": "task_pr",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_pr": 0.0,
+                "task_oauth": 0.012028434684684702
+            }
+        },
+        {
+            "scenario_id": "developer_cosmetic_typo_vs_data_corruption",
+            "expected_top_task_id": "task_corruption",
+            "baseline_predicted_top_task_id": "task_corruption",
+            "stretch_predicted_top_task_id": "task_corruption",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_filler_wiki": 0.0,
+                "task_typo": 0.0,
+                "task_corruption": 0.0
+            }
+        },
+        {
+            "scenario_id": "developer_inflated_p0_vs_understated_data_leak",
+            "expected_top_task_id": "task_leak",
+            "baseline_predicted_top_task_id": "task_staging",
+            "stretch_predicted_top_task_id": "task_staging",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_cache": 0.0,
+                "task_staging": 0.0,
+                "task_leak": 0.0
+            }
+        },
+        {
+            "scenario_id": "developer_login_hotfix_vs_migration",
+            "expected_top_task_id": "task_hotfix",
+            "baseline_predicted_top_task_id": "task_hotfix",
+            "stretch_predicted_top_task_id": "task_hotfix",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_migration": 0.0,
+                "task_hotfix": 0.0
+            }
+        },
+        {
+            "scenario_id": "developer_owns_arch_decision_vs_dep_bump",
+            "expected_top_task_id": "task_arch",
+            "baseline_predicted_top_task_id": "task_arch",
+            "stretch_predicted_top_task_id": "task_arch",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_arch": -0.0041999999999999815,
+                "task_bump": 0.0
+            }
+        },
+        {
+            "scenario_id": "developer_payment_incident_vs_migration_steps",
+            "expected_top_task_id": "task_payment_retries",
+            "baseline_predicted_top_task_id": "task_payment_retries",
+            "stretch_predicted_top_task_id": "task_payment_retries",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_port_config": 0.07494842233009702,
+                "task_port_tests": 0.09344242125984248,
+                "task_payment_retries": 0.0
+            }
+        },
+        {
+            "scenario_id": "developer_prod_crash_vs_backlog_feature",
+            "expected_top_task_id": "task_crash",
+            "baseline_predicted_top_task_id": "task_crash",
+            "stretch_predicted_top_task_id": "task_crash",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_wiki": 0.0,
+                "task_crash": 0.0,
+                "task_backlog_widget": 0.21670833333333328
+            }
+        },
+        {
+            "scenario_id": "field_engineer_blocked_rma_vs_runbook_update",
+            "expected_top_task_id": "task_runbook",
+            "baseline_predicted_top_task_id": "task_runbook",
+            "stretch_predicted_top_task_id": "task_runbook",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_rma": 0.0,
+                "task_runbook": 0.0
+            }
+        },
+        {
+            "scenario_id": "field_engineer_customer_degradation_vs_internal_tooling",
+            "expected_top_task_id": "task_degradation",
+            "baseline_predicted_top_task_id": "task_degradation",
+            "stretch_predicted_top_task_id": "task_script",
+            "changed": true,
+            "direction": "right_to_wrong",
+            "score_deltas": {
+                "task_script": 0.07524999999999998,
+                "task_degradation": 0.0,
+                "task_filler_inventory": 0.0
+            }
+        },
+        {
+            "scenario_id": "field_engineer_cutover_inspection_vs_backlog_patch",
+            "expected_top_task_id": "task_inspection",
+            "baseline_predicted_top_task_id": "task_inspection",
+            "stretch_predicted_top_task_id": "task_inspection",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_inspection": 0.0,
+                "task_patch": 0.0
+            }
+        },
+        {
+            "scenario_id": "field_engineer_noisy_alert_vs_silent_backup_gap",
+            "expected_top_task_id": "task_backup",
+            "baseline_predicted_top_task_id": "task_backup",
+            "stretch_predicted_top_task_id": "task_backup",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_filler_inventory": 0.0,
+                "task_backup": 0.0,
+                "task_alert": 0.0
+            }
+        },
+        {
+            "scenario_id": "field_engineer_prod_incident_vs_scheduled_maintenance",
+            "expected_top_task_id": "task_incident",
+            "baseline_predicted_top_task_id": "task_incident",
+            "stretch_predicted_top_task_id": "task_incident",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_maintenance": 0.0,
+                "task_alarm": 0.0,
+                "task_incident": 0.0
+            }
+        },
+        {
+            "scenario_id": "field_engineer_released_controller_vs_blocked_fibre_fix",
+            "expected_top_task_id": "task_swap",
+            "baseline_predicted_top_task_id": "task_checklist",
+            "stretch_predicted_top_task_id": "task_checklist",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_fibre": 0.0,
+                "task_swap": 0.0,
+                "task_checklist": 0.0
+            }
+        },
+        {
+            "scenario_id": "field_engineer_site_outage_vs_rollout_survey",
+            "expected_top_task_id": "task_site_restore",
+            "baseline_predicted_top_task_id": "task_site_restore",
+            "stretch_predicted_top_task_id": "task_rollout_survey",
+            "changed": true,
+            "direction": "right_to_wrong",
+            "score_deltas": {
+                "task_site_restore": -0.17420454545454545,
+                "task_rollout_survey": 0.05888201320132025,
+                "task_filler_mileage": 0.0
+            }
+        },
+        {
+            "scenario_id": "higher_manager_approved_vision_memo_vs_expiring_capacity_offer",
+            "expected_top_task_id": "task_capacity",
+            "baseline_predicted_top_task_id": "task_vision",
+            "stretch_predicted_top_task_id": "task_vision",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_vision": 0.03556932314410477,
+                "task_capacity": 0.09939102564102564,
+                "task_travel_exceptions": 0.0
+            }
+        },
+        {
+            "scenario_id": "higher_manager_blocked_budget_vs_headcount_plan",
+            "expected_top_task_id": "task_headcount",
+            "baseline_predicted_top_task_id": "task_headcount",
+            "stretch_predicted_top_task_id": "task_headcount",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_budget": 0.012723494764397908,
+                "task_headcount": 0.05444782608695653
+            }
+        },
+        {
+            "scenario_id": "higher_manager_board_deck_vs_reorg_memo",
+            "expected_top_task_id": "task_deck",
+            "baseline_predicted_top_task_id": "task_deck",
+            "stretch_predicted_top_task_id": "task_deck",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_deck": 0.00020271260997062335,
+                "task_memo": -0.06352499999999994
+            }
+        },
+        {
+            "scenario_id": "higher_manager_migration_budget_vs_reporting_requests",
+            "expected_top_task_id": "task_orion_budget",
+            "baseline_predicted_top_task_id": "task_ledger_staffing",
+            "stretch_predicted_top_task_id": "task_orion_budget",
+            "changed": true,
+            "direction": "wrong_to_right",
+            "score_deltas": {
+                "task_ledger_staffing": -0.15293464203233254,
+                "task_ledger_budget": -0.15280322580645167,
+                "task_orion_budget": 0.057327586206896486
+            }
+        },
+        {
+            "scenario_id": "higher_manager_regulatory_filing_vs_strategy_section",
+            "expected_top_task_id": "task_filing",
+            "baseline_predicted_top_task_id": "task_filing",
+            "stretch_predicted_top_task_id": "task_strategy",
+            "changed": true,
+            "direction": "right_to_wrong",
+            "score_deltas": {
+                "task_filing": 0.0,
+                "task_strategy": 0.04414772727272731
+            }
+        },
+        {
+            "scenario_id": "higher_manager_stalled_renewal_vs_market_expansion",
+            "expected_top_task_id": "task_renewal",
+            "baseline_predicted_top_task_id": "task_renewal",
+            "stretch_predicted_top_task_id": "task_renewal",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_filler_travel_policy": 0.0,
+                "task_renewal": 0.12935416666666677,
+                "task_expansion": 0.04147500000000004
+            }
+        },
+        {
+            "scenario_id": "higher_manager_top_customer_outage_vs_okr_review",
+            "expected_top_task_id": "task_outage",
+            "baseline_predicted_top_task_id": "task_outage",
+            "stretch_predicted_top_task_id": "task_outage",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_filler_newsletter": 0.0,
+                "task_okr": 0.0,
+                "task_outage": 0.0
+            }
+        },
+        {
+            "scenario_id": "manager_blocked_hire_vs_budget_review",
+            "expected_top_task_id": "task_budget",
+            "baseline_predicted_top_task_id": "task_budget",
+            "stretch_predicted_top_task_id": "task_budget",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_budget": -0.03539729729729724,
+                "task_hire": 0.0399621212121212
+            }
+        },
+        {
+            "scenario_id": "manager_escalation_call_vs_design_review",
+            "expected_top_task_id": "task_escalation",
+            "baseline_predicted_top_task_id": "task_escalation",
+            "stretch_predicted_top_task_id": "task_escalation",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_escalation": -0.14815666666666671,
+                "task_review": -0.05862500000000004
+            }
+        },
+        {
+            "scenario_id": "manager_idle_new_hires_vs_informational_steering_deck",
+            "expected_top_task_id": "task_access",
+            "baseline_predicted_top_task_id": "task_vendor",
+            "stretch_predicted_top_task_id": "task_vendor",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_deck": 0.0,
+                "task_vendor": 0.0,
+                "task_access": 0.0
+            }
+        },
+        {
+            "scenario_id": "manager_overdue_preread_vs_tomorrow_review",
+            "expected_top_task_id": "task_preread",
+            "baseline_predicted_top_task_id": "task_preread",
+            "stretch_predicted_top_task_id": "task_preread",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_preread": 0.0,
+                "task_review": 0.0
+            }
+        },
+        {
+            "scenario_id": "manager_restructuring_team_signoff_vs_maintenance_team_signoff",
+            "expected_top_task_id": "task_atlas_signoff",
+            "baseline_predicted_top_task_id": "task_birchwood_signoff",
+            "stretch_predicted_top_task_id": "task_atlas_signoff",
+            "changed": true,
+            "direction": "wrong_to_right",
+            "score_deltas": {
+                "task_birchwood_signoff": -0.138625,
+                "task_atlas_signoff": 0.07200492125984259,
+                "task_filler_drive": 0.0
+            }
+        },
+        {
+            "scenario_id": "manager_sprint_plan_vs_1on1_notes",
+            "expected_top_task_id": "task_sprint",
+            "baseline_predicted_top_task_id": "task_sprint",
+            "stretch_predicted_top_task_id": "task_sprint",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_expenses": 0.0,
+                "task_notes": 0.0,
+                "task_sprint": -0.027833817829457375
+            }
+        },
+        {
+            "scenario_id": "manager_status_digest_vs_reorg_proposal",
+            "expected_top_task_id": "task_reorg",
+            "baseline_predicted_top_task_id": "task_reorg",
+            "stretch_predicted_top_task_id": "task_reorg",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_status": -0.14437500000000003,
+                "task_filler_survey": 0.0,
+                "task_reorg": 0.06380264765784116
+            }
+        },
+        {
+            "scenario_id": "salesperson_at_risk_renewal_vs_owned_outage",
+            "expected_top_task_id": "task_renewal",
+            "baseline_predicted_top_task_id": "task_renewal",
+            "stretch_predicted_top_task_id": "task_renewal",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_filler_forecast": 0.0,
+                "task_renewal": 0.0,
+                "task_outage_followup": 0.0
+            }
+        },
+        {
+            "scenario_id": "salesperson_blocked_discount_vs_warm_followup",
+            "expected_top_task_id": "task_followup",
+            "baseline_predicted_top_task_id": "task_followup",
+            "stretch_predicted_top_task_id": "task_followup",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_discount": 0.0,
+                "task_followup": 0.0
+            }
+        },
+        {
+            "scenario_id": "salesperson_contract_redlines_vs_cold_prospecting",
+            "expected_top_task_id": "task_redlines",
+            "baseline_predicted_top_task_id": "task_redlines",
+            "stretch_predicted_top_task_id": "task_prospecting",
+            "changed": true,
+            "direction": "right_to_wrong",
+            "score_deltas": {
+                "task_prospecting": 0.1787916666666668,
+                "task_redlines": -0.012286745406824062,
+                "task_crm": 0.0
+            }
+        },
+        {
+            "scenario_id": "salesperson_core_target_proposal_vs_paused_vertical_proposal",
+            "expected_top_task_id": "task_northgate",
+            "baseline_predicted_top_task_id": "task_pinecrest",
+            "stretch_predicted_top_task_id": "task_northgate",
+            "changed": true,
+            "direction": "wrong_to_right",
+            "score_deltas": {
+                "task_pinecrest": -0.14402169243986251,
+                "task_filler_crm": 0.0,
+                "task_northgate": 0.06703869047619049
+            }
+        },
+        {
+            "scenario_id": "salesperson_dead_rfp_vs_live_signing_round",
+            "expected_top_task_id": "task_signing",
+            "baseline_predicted_top_task_id": "task_qbr",
+            "stretch_predicted_top_task_id": "task_qbr",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_rfp": -0.15903961748633877,
+                "task_signing": 0.10086465617715623,
+                "task_qbr": 0.0
+            }
+        },
+        {
+            "scenario_id": "salesperson_expense_report_vs_departed_champion",
+            "expected_top_task_id": "task_champion",
+            "baseline_predicted_top_task_id": "task_champion",
+            "stretch_predicted_top_task_id": "task_champion",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_expense": 0.0,
+                "task_filler_crm": 0.0,
+                "task_champion": 0.09012500000000001
+            }
+        },
+        {
+            "scenario_id": "salesperson_processing_cutoff_vs_call_summary",
+            "expected_top_task_id": "task_orderform",
+            "baseline_predicted_top_task_id": "task_orderform",
+            "stretch_predicted_top_task_id": "task_orderform",
+            "changed": false,
+            "direction": null,
+            "score_deltas": {
+                "task_orderform": 0.03222128378378386,
+                "task_summary": 0.05960144927536226
+            }
+        }
+    ]
+}
