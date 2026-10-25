@@ -298,7 +298,7 @@ components:
           zoom-recordings-dir: "${BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR:}"
           bbb-recordings-dir: "${BRIDGE_MEDIA_BBB_RECORDINGS_DIR:}"
           scanned-docs-dir: "${BRIDGE_MEDIA_SCANNED_DOCS_DIR:}"
-          tenant-id: "${BRIDGE_MEDIA_TENANT_ID:kamatech}"
+          tenant-id: "${BRIDGE_TENANT_ID:00000000-0000-0000-0000-000000000001}"
           min-file-size-bytes: "${BRIDGE_MEDIA_MIN_FILE_SIZE_BYTES:1}"
     volumeMounts:
       - name: object-storage-credentials

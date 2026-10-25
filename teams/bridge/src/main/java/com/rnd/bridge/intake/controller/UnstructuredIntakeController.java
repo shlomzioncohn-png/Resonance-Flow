@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -28,10 +29,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/bridge/intake")
 public class UnstructuredIntakeController {
 
-    // Single-tenant today, like every other default in this lane (WhatsAppImportProperties,
-    // SlackApiProperties, ScopingProperties) - revisit if/when this lane serves more than one
-    // tenant.
-    private static final String TENANT_ID = "kamatech";
+    // Single-tenant today: bridge.tenant-id, the same value every reader in this lane sends -
+    // revisit if/when this lane serves more than one tenant.
+    private final String tenantId;
 
     private final Map<RawSourceType, UnstructuredIntakeLane> lanesBySource;
     private final CursorStore cursorStore;
@@ -41,7 +41,9 @@ public class UnstructuredIntakeController {
 
     public UnstructuredIntakeController(
             List<UnstructuredIntakeLane> lanes, CursorStore cursorStore, CalendarSourceReader calendarSourceReader,
-            EmailSourceReader emailSourceReader, KeyedLock tokenCursorLock) {
+            EmailSourceReader emailSourceReader, KeyedLock tokenCursorLock,
+            @Value("${bridge.tenant-id}") String tenantId) {
+        this.tenantId = tenantId;
         this.lanesBySource = lanes.stream()
                 .collect(Collectors.toMap(UnstructuredIntakeLane::sourceType, Function.identity()));
         this.cursorStore = cursorStore;
@@ -67,7 +69,7 @@ public class UnstructuredIntakeController {
             return runEmail(lane);
         }
 
-        ReadCursor cursor = cursorStore.load(sourceType, TENANT_ID);
+        ReadCursor cursor = cursorStore.load(sourceType, tenantId);
         Instant asOf = Instant.now();
         IntakeResult result = lane.run(cursor, asOf);
         // Only reached if run() returned normally (no uncaught exception) - see plan.md "Cursor
@@ -84,7 +86,7 @@ public class UnstructuredIntakeController {
         // other source has this confirmation mechanism, so freezing their cursor the same way
         // would just force a full, unconditional re-publish of the whole window on every retry.
         if (sourceType != RawSourceType.SLACK || result.rejected() == 0) {
-            cursorStore.save(sourceType, TENANT_ID, new ReadCursor(asOf));
+            cursorStore.save(sourceType, tenantId, new ReadCursor(asOf));
         }
         return result;
     }
@@ -97,7 +99,7 @@ public class UnstructuredIntakeController {
      * {@link #runEmail} both follow.
      */
     private IntakeResult runCalendar(UnstructuredIntakeLane lane) {
-        return runTokenBasedSource(RawSourceType.CALENDAR, cursorLockKey(RawSourceType.CALENDAR, TENANT_ID), lane,
+        return runTokenBasedSource(RawSourceType.CALENDAR, cursorLockKey(RawSourceType.CALENDAR, tenantId), lane,
                 cursor -> {
                     CalendarReadResult read = calendarSourceReader.read(cursor);
                     return new TokenRead(read.records(), read.nextSyncToken());
@@ -114,7 +116,7 @@ public class UnstructuredIntakeController {
      * contend on each other's key despite using the same KeyedLock instance.
      */
     private IntakeResult runEmail(UnstructuredIntakeLane lane) {
-        return runTokenBasedSource(RawSourceType.EMAIL, cursorLockKey(RawSourceType.EMAIL, TENANT_ID), lane,
+        return runTokenBasedSource(RawSourceType.EMAIL, cursorLockKey(RawSourceType.EMAIL, tenantId), lane,
                 cursor -> {
                     EmailReadResult read = emailSourceReader.read(cursor);
                     return new TokenRead(read.records(), read.nextHistoryId());
@@ -142,7 +144,7 @@ public class UnstructuredIntakeController {
             Function<ReadCursor, TokenRead> reader, BiFunction<Instant, String, ReadCursor> buildCursor) {
         AtomicReference<IntakeResult> result = new AtomicReference<>();
         tokenCursorLock.run(lockKey, () -> {
-            ReadCursor cursor = cursorStore.load(sourceType, TENANT_ID);
+            ReadCursor cursor = cursorStore.load(sourceType, tenantId);
             Instant asOf = Instant.now();
             TokenRead read = reader.apply(cursor);
             IntakeResult r = lane.run(SourceRecordGrouper.groupByCorrelationId(read.records()).stream(), asOf);
@@ -150,7 +152,7 @@ public class UnstructuredIntakeController {
             // mode) - leave whatever's already stored untouched rather than overwriting a real
             // token with nothing.
             if (r.rejected() == 0 && read.token() != null) {
-                cursorStore.save(sourceType, TENANT_ID, buildCursor.apply(asOf, read.token()));
+                cursorStore.save(sourceType, tenantId, buildCursor.apply(asOf, read.token()));
             }
             result.set(r);
         });
