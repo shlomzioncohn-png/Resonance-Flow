@@ -1,0 +1,1903 @@
+{
+    "format_version": 1,
+    "recorded_on": "2026-10-25",
+    "model_name": "SegmentedRankingModel",
+    "model_commit": "b16bfeccf471fce81c3b1b0f011223c58d901a8f",
+    "metric": "top-1 accuracy",
+    "persona_set": {
+        "path": "eval/personas",
+        "hierarchy_path": "eval/hierarchy",
+        "checksum": "f5639b84298d52ddd3e428a5b535ff14973aa4d29e1d6190dc167d98e634d778",
+        "commit": "f07b5e719206782595b5b29d57888608b3364085",
+        "scenarios": 42,
+        "team_lead_approved": 30
+    },
+    "combined": {
+        "correct_top1": 33,
+        "total_scenarios": 42,
+        "top1_accuracy": 0.7857142857142857
+    },
+    "groups": {
+        "cross_tier": {
+            "correct_top1": 14,
+            "total_scenarios": 16,
+            "top1_accuracy": 0.875
+        },
+        "hierarchy_decides": {
+            "correct_top1": 2,
+            "total_scenarios": 6,
+            "top1_accuracy": 0.3333333333333333
+        },
+        "same_tier": {
+            "correct_top1": 17,
+            "total_scenarios": 20,
+            "top1_accuracy": 0.85
+        }
+    },
+    "roles": {
+        "CEO": {
+            "correct_top1": 6,
+            "total_scenarios": 7,
+            "top1_accuracy": 0.8571428571428571
+        },
+        "Developer": {
+            "correct_top1": 6,
+            "total_scenarios": 7,
+            "top1_accuracy": 0.8571428571428571
+        },
+        "Field Engineer": {
+            "correct_top1": 6,
+            "total_scenarios": 7,
+            "top1_accuracy": 0.8571428571428571
+        },
+        "Higher Manager": {
+            "correct_top1": 5,
+            "total_scenarios": 7,
+            "top1_accuracy": 0.7142857142857143
+        },
+        "Manager": {
+            "correct_top1": 5,
+            "total_scenarios": 7,
+            "top1_accuracy": 0.7142857142857143
+        },
+        "Salesperson": {
+            "correct_top1": 5,
+            "total_scenarios": 7,
+            "top1_accuracy": 0.7142857142857143
+        }
+    },
+    "scenario_results": [
+        {
+            "scenario_id": "ceo_own_investor_commitment_vs_unaccepted_keynote_request",
+            "expected_top_task_id": "task_investor",
+            "predicted_top_task_id": "task_investor",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_keynote",
+                    "score": 0.7563556338028168,
+                    "reasoning": "operational task, scores high: the deadline is 4 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.4394366197183099,
+                            "impact": 0.125,
+                            "quick_win": 0.08750000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.6519366197183099
+                    }
+                },
+                {
+                    "task_id": "task_acquisitions",
+                    "score": 0.5670499999999999,
+                    "reasoning": "strategic task, scores low: its wording plays it down (\"exploratory\"); no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.105,
+                            "impact": 0.27649999999999997
+                        },
+                        "blocked": false,
+                        "base_score": 0.38149999999999995
+                    }
+                },
+                {
+                    "task_id": "task_investor",
+                    "score": 0.8523960752438458,
+                    "reasoning": "strategic task, scores high: it mentions \"investor\", \"needs your\"; the deadline is 23 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.1966372503483511,
+                            "impact": 0.5925
+                        },
+                        "blocked": false,
+                        "base_score": 0.7891372503483511
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "ceo_payment_processor_cutoff_vs_strategy_deck",
+            "expected_top_task_id": "task_processor",
+            "predicted_top_task_id": "task_processor",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_deck",
+                    "score": 0.73295,
+                    "reasoning": "strategic task, scores high: it mentions \"board\"; no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.105,
+                            "impact": 0.5135000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.6185
+                    }
+                },
+                {
+                    "task_id": "task_processor",
+                    "score": 0.9737499999999999,
+                    "reasoning": "operational task, scores high: its wording says it is urgent now (\"are failing\"); it mentions \"compliance flag\", \"customer\", \"escalate\"; no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.65,
+                            "impact": 0.25,
+                            "quick_win": 0.0625
+                        },
+                        "blocked": false,
+                        "base_score": 0.9625
+                    }
+                },
+                {
+                    "task_id": "task_filler_press",
+                    "score": 0.4645,
+                    "reasoning": "operational task, scores low: no deadline given; its wording plays it down (\"low stakes\", \"flexible\").",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.05,
+                            "quick_win": 0.08750000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.23500000000000001
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "developer_blocked_oauth_vs_pr_review",
+            "expected_top_task_id": "task_pr",
+            "predicted_top_task_id": "task_pr",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_pr",
+                    "score": 0.6885,
+                    "reasoning": "operational task, scores in the middle: no factor stands out.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.3466666666666667,
+                            "impact": 0.125,
+                            "quick_win": 0.08333333333333334
+                        },
+                        "blocked": false,
+                        "base_score": 0.555
+                    }
+                },
+                {
+                    "task_id": "task_oauth",
+                    "score": 0.17594313063063063,
+                    "reasoning": "tactical task, would score high: the deadline is 2 hours away; blocked, so it cannot outrank anything startable.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.3891891891891892,
+                            "impact": 0.275,
+                            "quick_win": 0.03958333333333333
+                        },
+                        "blocked": true,
+                        "base_score": 0.7037725225225225
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "developer_owns_arch_decision_vs_dep_bump",
+            "expected_top_task_id": "task_arch",
+            "predicted_top_task_id": "task_arch",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_arch",
+                    "score": 0.8684000000000001,
+                    "reasoning": "strategic task, scores high: it mentions \"blocked from starting\", \"sign-off\", \"needs your\"; the deadline is 2 days away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.18,
+                            "impact": 0.6320000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.812
+                    }
+                },
+                {
+                    "task_id": "task_bump",
+                    "score": 0.39974178403755867,
+                    "reasoning": "operational task, scores low: the deadline is 23 days away; its wording plays it down (\"housekeeping\", \"routine\").",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.009154929577464789,
+                            "impact": 0.05,
+                            "quick_win": 0.08333333333333334
+                        },
+                        "blocked": false,
+                        "base_score": 0.14248826291079814
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "developer_prod_crash_vs_backlog_feature",
+            "expected_top_task_id": "task_crash",
+            "predicted_top_task_id": "task_crash",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_wiki",
+                    "score": 0.43825,
+                    "reasoning": "operational task, scores low: no deadline given; its wording plays it down (\"nobody is waiting\", \"stale\").",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.012500000000000011,
+                            "quick_win": 0.08750000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.1975
+                    }
+                },
+                {
+                    "task_id": "task_crash",
+                    "score": 0.8584090909090909,
+                    "reasoning": "operational task, scores high: the deadline is 3 hours away; it mentions \"sla\", \"customers\", \"escalated\".",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.4727272727272728,
+                            "impact": 0.25,
+                            "quick_win": 0.07500000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.7977272727272728
+                    }
+                },
+                {
+                    "task_id": "task_backlog_widget",
+                    "score": 0.4265833333333333,
+                    "reasoning": "tactical task, scores low: its wording plays it down (\"not requested by anyone\", \"backlog\"); no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.12,
+                            "impact": 0.027500000000000028,
+                            "quick_win": 0.03333333333333334
+                        },
+                        "blocked": false,
+                        "base_score": 0.18083333333333337
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "field_engineer_noisy_alert_vs_silent_backup_gap",
+            "expected_top_task_id": "task_backup",
+            "predicted_top_task_id": "task_backup",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_filler_inventory",
+                    "score": 0.49075,
+                    "reasoning": "operational task, scores low: no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.0875,
+                            "quick_win": 0.08750000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.2725
+                    }
+                },
+                {
+                    "task_id": "task_backup",
+                    "score": 0.8687499999999999,
+                    "reasoning": "tactical task, scores high: it mentions \"customer\"; its wording says it is urgent now (\"data is at risk\"); no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.27999999999999997,
+                            "impact": 0.49500000000000005,
+                            "quick_win": 0.037500000000000006
+                        },
+                        "blocked": false,
+                        "base_score": 0.8125
+                    }
+                },
+                {
+                    "task_id": "task_alert",
+                    "score": 0.6482843137254901,
+                    "reasoning": "operational task, scores in the middle: no factor stands out.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.3058823529411765,
+                            "impact": 0.125,
+                            "quick_win": 0.06666666666666668
+                        },
+                        "blocked": false,
+                        "base_score": 0.49754901960784315
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "higher_manager_approved_vision_memo_vs_expiring_capacity_offer",
+            "expected_top_task_id": "task_capacity",
+            "predicted_top_task_id": "task_vision",
+            "passed": false,
+            "candidates": [
+                {
+                    "task_id": "task_vision",
+                    "score": 0.7888613537117903,
+                    "reasoning": "strategic task, scores high: it mentions \"board\"; the deadline is 46 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.18487336244541486,
+                            "impact": 0.5135000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.6983733624454149
+                    }
+                },
+                {
+                    "task_id": "task_capacity",
+                    "score": 0.6612179487179487,
+                    "reasoning": "tactical task, scores in the middle: no factor stands out.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.20769230769230768,
+                            "impact": 0.275,
+                            "quick_win": 0.03333333333333334
+                        },
+                        "blocked": false,
+                        "base_score": 0.5160256410256411
+                    }
+                },
+                {
+                    "task_id": "task_travel_exceptions",
+                    "score": 0.7870833333333334,
+                    "reasoning": "operational task, scores high: the deadline is 3 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.48750000000000004,
+                            "impact": 0.125,
+                            "quick_win": 0.08333333333333334
+                        },
+                        "blocked": false,
+                        "base_score": 0.6958333333333334
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "higher_manager_stalled_renewal_vs_market_expansion",
+            "expected_top_task_id": "task_renewal",
+            "predicted_top_task_id": "task_renewal",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_filler_travel_policy",
+                    "score": 0.49075,
+                    "reasoning": "operational task, scores low: no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.0875,
+                            "quick_win": 0.08750000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.2725
+                    }
+                },
+                {
+                    "task_id": "task_renewal",
+                    "score": 0.6012916666666666,
+                    "reasoning": "tactical task, scores in the middle; against it: no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.12,
+                            "impact": 0.275,
+                            "quick_win": 0.035416666666666666
+                        },
+                        "blocked": false,
+                        "base_score": 0.43041666666666667
+                    }
+                },
+                {
+                    "task_id": "task_expansion",
+                    "score": 0.5670499999999999,
+                    "reasoning": "strategic task, scores low: its wording plays it down (\"exploratory\"); no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.105,
+                            "impact": 0.27649999999999997
+                        },
+                        "blocked": false,
+                        "base_score": 0.38149999999999995
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "higher_manager_top_customer_outage_vs_okr_review",
+            "expected_top_task_id": "task_outage",
+            "predicted_top_task_id": "task_outage",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_filler_newsletter",
+                    "score": 0.5670499999999999,
+                    "reasoning": "strategic task, scores low: its wording plays it down (\"flexible\"); no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.105,
+                            "impact": 0.27649999999999997
+                        },
+                        "blocked": false,
+                        "base_score": 0.38149999999999995
+                    }
+                },
+                {
+                    "task_id": "task_okr",
+                    "score": 0.696383495145631,
+                    "reasoning": "strategic task, scores in the middle; in its favour: the deadline is 3 days away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.17126213592233008,
+                            "impact": 0.395
+                        },
+                        "blocked": false,
+                        "base_score": 0.5662621359223301
+                    }
+                },
+                {
+                    "task_id": "task_outage",
+                    "score": 0.9766666666666666,
+                    "reasoning": "operational task, scores high: its wording says it is urgent now (\"has been down\"); it mentions \"outage\", \"production\", \"customer\", \"escalating\"; no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.65,
+                            "impact": 0.25,
+                            "quick_win": 0.06666666666666668
+                        },
+                        "blocked": false,
+                        "base_score": 0.9666666666666667
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "manager_blocked_hire_vs_budget_review",
+            "expected_top_task_id": "task_budget",
+            "predicted_top_task_id": "task_budget",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_budget",
+                    "score": 0.7207945945945945,
+                    "reasoning": "strategic task, scores high: it mentions \"sign-off\".",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.1271351351351351,
+                            "impact": 0.474
+                        },
+                        "blocked": false,
+                        "base_score": 0.6011351351351351
+                    }
+                },
+                {
+                    "task_id": "task_hire",
+                    "score": 0.12007575757575759,
+                    "reasoning": "tactical task, would score in the middle: no factor stands out; blocked, so it cannot outrank anything startable.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.16363636363636364,
+                            "impact": 0.275,
+                            "quick_win": 0.04166666666666667
+                        },
+                        "blocked": true,
+                        "base_score": 0.48030303030303034
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "manager_idle_new_hires_vs_informational_steering_deck",
+            "expected_top_task_id": "task_access",
+            "predicted_top_task_id": "task_vendor",
+            "passed": false,
+            "candidates": [
+                {
+                    "task_id": "task_deck",
+                    "score": 0.722738341968912,
+                    "reasoning": "strategic task, scores high: the deadline is 2 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.20891191709844562,
+                            "impact": 0.395
+                        },
+                        "blocked": false,
+                        "base_score": 0.6039119170984456
+                    }
+                },
+                {
+                    "task_id": "task_vendor",
+                    "score": 0.8444444444444443,
+                    "reasoning": "operational task, scores high: the deadline is 1 hour away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.5777777777777777,
+                            "impact": 0.125,
+                            "quick_win": 0.07500000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.7777777777777777
+                    }
+                },
+                {
+                    "task_id": "task_access",
+                    "score": 0.8002384020618556,
+                    "reasoning": "tactical task, scores high: the deadline is less than an hour away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.3958762886597938,
+                            "impact": 0.275,
+                            "quick_win": 0.043750000000000004
+                        },
+                        "blocked": false,
+                        "base_score": 0.7146262886597938
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "manager_sprint_plan_vs_1on1_notes",
+            "expected_top_task_id": "task_sprint",
+            "predicted_top_task_id": "task_sprint",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_expenses",
+                    "score": 0.49075,
+                    "reasoning": "operational task, scores low: no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.0875,
+                            "quick_win": 0.08750000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.2725
+                    }
+                },
+                {
+                    "task_id": "task_notes",
+                    "score": 0.4265833333333333,
+                    "reasoning": "operational task, scores low: no deadline given; its wording plays it down (\"nothing waiting on it\", \"already happened\").",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.0,
+                            "quick_win": 0.08333333333333334
+                        },
+                        "blocked": false,
+                        "base_score": 0.18083333333333335
+                    }
+                },
+                {
+                    "task_id": "task_sprint",
+                    "score": 0.7056676356589148,
+                    "reasoning": "tactical task, scores in the middle; in its favour: it mentions \"depends on it\", \"so it can be circulated\".",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.1674418604651163,
+                            "impact": 0.385,
+                            "quick_win": 0.027083333333333338
+                        },
+                        "blocked": false,
+                        "base_score": 0.5795251937984497
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "manager_status_digest_vs_reorg_proposal",
+            "expected_top_task_id": "task_reorg",
+            "predicted_top_task_id": "task_reorg",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_status",
+                    "score": 0.72875,
+                    "reasoning": "operational task, scores high: the deadline is 5 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.4,
+                            "impact": 0.125,
+                            "quick_win": 0.08750000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.6125
+                    }
+                },
+                {
+                    "task_id": "task_filler_survey",
+                    "score": 0.5024166666666666,
+                    "reasoning": "operational task, scores low: no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.125,
+                            "quick_win": 0.06666666666666668
+                        },
+                        "blocked": false,
+                        "base_score": 0.2891666666666667
+                    }
+                },
+                {
+                    "task_id": "task_reorg",
+                    "score": 0.7323947046843177,
+                    "reasoning": "strategic task, scores high: it mentions \"needs your\".",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.14370672097759674,
+                            "impact": 0.474
+                        },
+                        "blocked": false,
+                        "base_score": 0.6177067209775967
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "salesperson_blocked_discount_vs_warm_followup",
+            "expected_top_task_id": "task_followup",
+            "predicted_top_task_id": "task_followup",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_discount",
+                    "score": 0.1756875,
+                    "reasoning": "tactical task, would score high: the deadline is 3 hours away; blocked, so it cannot outrank anything startable.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.384,
+                            "impact": 0.275,
+                            "quick_win": 0.043750000000000004
+                        },
+                        "blocked": true,
+                        "base_score": 0.70275
+                    }
+                },
+                {
+                    "task_id": "task_followup",
+                    "score": 0.5111666666666667,
+                    "reasoning": "operational task, scores low: no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.125,
+                            "quick_win": 0.07916666666666666
+                        },
+                        "blocked": false,
+                        "base_score": 0.30166666666666664
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "salesperson_contract_redlines_vs_cold_prospecting",
+            "expected_top_task_id": "task_redlines",
+            "predicted_top_task_id": "task_redlines",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_prospecting",
+                    "score": 0.5024166666666666,
+                    "reasoning": "operational task, scores low: no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.125,
+                            "quick_win": 0.06666666666666668
+                        },
+                        "blocked": false,
+                        "base_score": 0.2891666666666667
+                    }
+                },
+                {
+                    "task_id": "task_redlines",
+                    "score": 0.6745734908136483,
+                    "reasoning": "tactical task, scores in the middle: no factor stands out.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.22677165354330708,
+                            "impact": 0.275,
+                            "quick_win": 0.03333333333333334
+                        },
+                        "blocked": false,
+                        "base_score": 0.5351049868766404
+                    }
+                },
+                {
+                    "task_id": "task_crm",
+                    "score": 0.43533333333333335,
+                    "reasoning": "operational task, scores low: no deadline given; its wording plays it down (\"nobody waiting\", \"housekeeping\").",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.012500000000000011,
+                            "quick_win": 0.08333333333333334
+                        },
+                        "blocked": false,
+                        "base_score": 0.19333333333333336
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "salesperson_expense_report_vs_departed_champion",
+            "expected_top_task_id": "task_champion",
+            "predicted_top_task_id": "task_champion",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_expense",
+                    "score": 0.5879545454545454,
+                    "reasoning": "operational task, scores in the middle; against it: the deadline is 14 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.2363636363636364,
+                            "impact": 0.0875,
+                            "quick_win": 0.08750000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.4113636363636364
+                    }
+                },
+                {
+                    "task_id": "task_filler_crm",
+                    "score": 0.42366666666666664,
+                    "reasoning": "operational task, scores low: no deadline given; its wording plays it down (\"housekeeping\", \"backlog\", \"stale\").",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.012500000000000011,
+                            "quick_win": 0.06666666666666668
+                        },
+                        "blocked": false,
+                        "base_score": 0.1766666666666667
+                    }
+                },
+                {
+                    "task_id": "task_champion",
+                    "score": 0.67975,
+                    "reasoning": "tactical task, scores in the middle; in its favour: it mentions \"competitor\"; against it: no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.12,
+                            "impact": 0.385,
+                            "quick_win": 0.037500000000000006
+                        },
+                        "blocked": false,
+                        "base_score": 0.5425
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "ceo_expansion_partnership_vs_wound_down_line_partnership",
+            "expected_top_task_id": "task_halvorsen",
+            "predicted_top_task_id": "task_quayle",
+            "passed": false,
+            "candidates": [
+                {
+                    "task_id": "task_halvorsen",
+                    "score": 0.7031461538461539,
+                    "reasoning": "strategic task, scores in the middle; in its favour: the deadline is 2 days away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.1809230769230769,
+                            "impact": 0.395
+                        },
+                        "blocked": false,
+                        "base_score": 0.575923076923077
+                    }
+                },
+                {
+                    "task_id": "task_quayle",
+                    "score": 0.7034717223650385,
+                    "reasoning": "strategic task, scores in the middle; in its favour: the deadline is 2 days away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.1813881748071979,
+                            "impact": 0.395
+                        },
+                        "blocked": false,
+                        "base_score": 0.576388174807198
+                    }
+                },
+                {
+                    "task_id": "task_filler_interview",
+                    "score": 0.5140833333333333,
+                    "reasoning": "operational task, scores low: no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.125,
+                            "quick_win": 0.08333333333333334
+                        },
+                        "blocked": false,
+                        "base_score": 0.30583333333333335
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "developer_payment_incident_vs_migration_steps",
+            "expected_top_task_id": "task_payment_retries",
+            "predicted_top_task_id": "task_payment_retries",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_port_config",
+                    "score": 0.7101031553398058,
+                    "reasoning": "tactical task, scores in the middle; in its favour: the deadline is 31 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.2796116504854369,
+                            "impact": 0.275,
+                            "quick_win": 0.03125
+                        },
+                        "blocked": false,
+                        "base_score": 0.5858616504854369
+                    }
+                },
+                {
+                    "task_id": "task_port_tests",
+                    "score": 0.6731151574803149,
+                    "reasoning": "tactical task, scores in the middle: no factor stands out.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.22677165354330708,
+                            "impact": 0.275,
+                            "quick_win": 0.03125
+                        },
+                        "blocked": false,
+                        "base_score": 0.5330216535433071
+                    }
+                },
+                {
+                    "task_id": "task_payment_retries",
+                    "score": 0.8525757575757575,
+                    "reasoning": "operational task, scores high: the deadline is 3 hours away; it mentions \"sla\", \"production\", \"customers\".",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.4727272727272728,
+                            "impact": 0.25,
+                            "quick_win": 0.06666666666666668
+                        },
+                        "blocked": false,
+                        "base_score": 0.7893939393939394
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "field_engineer_site_outage_vs_rollout_survey",
+            "expected_top_task_id": "task_site_restore",
+            "predicted_top_task_id": "task_site_restore",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_site_restore",
+                    "score": 0.7884090909090908,
+                    "reasoning": "operational task, scores high: the deadline is 3 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.4727272727272728,
+                            "impact": 0.1625,
+                            "quick_win": 0.0625
+                        },
+                        "blocked": false,
+                        "base_score": 0.6977272727272728
+                    }
+                },
+                {
+                    "task_id": "task_rollout_survey",
+                    "score": 0.7422359735973597,
+                    "reasoning": "tactical task, scores high: it mentions \"customer\", \"needs your\".",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.19009900990099007,
+                            "impact": 0.41250000000000003,
+                            "quick_win": 0.029166666666666664
+                        },
+                        "blocked": false,
+                        "base_score": 0.6317656765676568
+                    }
+                },
+                {
+                    "task_id": "task_filler_mileage",
+                    "score": 0.517,
+                    "reasoning": "operational task, scores low: no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.125,
+                            "quick_win": 0.08750000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.31
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "higher_manager_migration_budget_vs_reporting_requests",
+            "expected_top_task_id": "task_orion_budget",
+            "predicted_top_task_id": "task_ledger_staffing",
+            "passed": false,
+            "candidates": [
+                {
+                    "task_id": "task_ledger_staffing",
+                    "score": 0.745869284064665,
+                    "reasoning": "strategic task, scores high: it mentions \"needs your\"; the deadline is 4 days away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.16295612009237873,
+                            "impact": 0.474
+                        },
+                        "blocked": false,
+                        "base_score": 0.6369561200923787
+                    }
+                },
+                {
+                    "task_id": "task_ledger_budget",
+                    "score": 0.7456064516129032,
+                    "reasoning": "strategic task, scores high: it mentions \"needs your\"; the deadline is 4 days away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.1625806451612903,
+                            "impact": 0.474
+                        },
+                        "blocked": false,
+                        "base_score": 0.6365806451612903
+                    }
+                },
+                {
+                    "task_id": "task_orion_budget",
+                    "score": 0.7453448275862069,
+                    "reasoning": "strategic task, scores high: it mentions \"needs your\"; the deadline is 4 days away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.16220689655172413,
+                            "impact": 0.474
+                        },
+                        "blocked": false,
+                        "base_score": 0.6362068965517241
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "manager_restructuring_team_signoff_vs_maintenance_team_signoff",
+            "expected_top_task_id": "task_atlas_signoff",
+            "predicted_top_task_id": "task_birchwood_signoff",
+            "passed": false,
+            "candidates": [
+                {
+                    "task_id": "task_birchwood_signoff",
+                    "score": 0.7172499999999999,
+                    "reasoning": "tactical task, scores in the middle; in its favour: it mentions \"needs your\".",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.22857142857142856,
+                            "impact": 0.33,
+                            "quick_win": 0.037500000000000006
+                        },
+                        "blocked": false,
+                        "base_score": 0.5960714285714286
+                    }
+                },
+                {
+                    "task_id": "task_atlas_signoff",
+                    "score": 0.7159901574803149,
+                    "reasoning": "tactical task, scores in the middle; in its favour: it mentions \"needs your\".",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.22677165354330708,
+                            "impact": 0.33,
+                            "quick_win": 0.037500000000000006
+                        },
+                        "blocked": false,
+                        "base_score": 0.5942716535433071
+                    }
+                },
+                {
+                    "task_id": "task_filler_drive",
+                    "score": 0.5111666666666667,
+                    "reasoning": "operational task, scores low: no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.125,
+                            "quick_win": 0.07916666666666666
+                        },
+                        "blocked": false,
+                        "base_score": 0.30166666666666664
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "salesperson_core_target_proposal_vs_paused_vertical_proposal",
+            "expected_top_task_id": "task_northgate",
+            "predicted_top_task_id": "task_pinecrest",
+            "passed": false,
+            "candidates": [
+                {
+                    "task_id": "task_pinecrest",
+                    "score": 0.7280433848797251,
+                    "reasoning": "tactical task, scores high: the deadline is 25 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.29690721649484536,
+                            "impact": 0.275,
+                            "quick_win": 0.03958333333333333
+                        },
+                        "blocked": false,
+                        "base_score": 0.6114905498281787
+                    }
+                },
+                {
+                    "task_id": "task_filler_crm",
+                    "score": 0.5140833333333333,
+                    "reasoning": "operational task, scores low: no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.125,
+                            "quick_win": 0.08333333333333334
+                        },
+                        "blocked": false,
+                        "base_score": 0.30583333333333335
+                    }
+                },
+                {
+                    "task_id": "task_northgate",
+                    "score": 0.725922619047619,
+                    "reasoning": "tactical task, scores high: the deadline is 26 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.29387755102040813,
+                            "impact": 0.275,
+                            "quick_win": 0.03958333333333333
+                        },
+                        "blocked": false,
+                        "base_score": 0.6084608843537415
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "ceo_blocked_ma_review_vs_vp_offer",
+            "expected_top_task_id": "task_vp",
+            "predicted_top_task_id": "task_vp",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_ma",
+                    "score": 0.15868223234624146,
+                    "reasoning": "strategic task, would score high: it mentions \"sign-off\"; the deadline is 4 days away; blocked, so it cannot outrank anything startable.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.16072892938496583,
+                            "impact": 0.474
+                        },
+                        "blocked": true,
+                        "base_score": 0.6347289293849658
+                    }
+                },
+                {
+                    "task_id": "task_vp",
+                    "score": 0.6882466063348416,
+                    "reasoning": "strategic task, scores in the middle; in its favour: the deadline is 4 days away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.15963800904977374,
+                            "impact": 0.395
+                        },
+                        "blocked": false,
+                        "base_score": 0.5546380090497738
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "ceo_investor_update_vs_allhands_prep",
+            "expected_top_task_id": "task_investor",
+            "predicted_top_task_id": "task_investor",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_investor",
+                    "score": 0.8546706798866854,
+                    "reasoning": "strategic task, scores high: it mentions \"investor\", \"needs your\"; the deadline is 17 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.1998866855524079,
+                            "impact": 0.5925
+                        },
+                        "blocked": false,
+                        "base_score": 0.792386685552408
+                    }
+                },
+                {
+                    "task_id": "task_allhands",
+                    "score": 0.6499999999999999,
+                    "reasoning": "strategic task, scores in the middle: no factor stands out; no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.105,
+                            "impact": 0.395
+                        },
+                        "blocked": false,
+                        "base_score": 0.5
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "ceo_overdue_launch_statement_vs_earnings_prep",
+            "expected_top_task_id": "task_earnings",
+            "predicted_top_task_id": "task_earnings",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_statement",
+                    "score": 0.5576,
+                    "reasoning": "strategic task, scores low: its wording plays it down (\"already happened\"); in its favour: the deadline has passed.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.21,
+                            "impact": 0.15800000000000003
+                        },
+                        "blocked": false,
+                        "base_score": 0.368
+                    }
+                },
+                {
+                    "task_id": "task_earnings",
+                    "score": 0.7972240585774057,
+                    "reasoning": "strategic task, scores high: it mentions \"analysts\"; the deadline is 23 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.19682008368200835,
+                            "impact": 0.5135000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.7103200836820084
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "ceo_regulator_call_vs_board_prep",
+            "expected_top_task_id": "task_regulator",
+            "predicted_top_task_id": "task_regulator",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_board",
+                    "score": 0.7851293893129772,
+                    "reasoning": "strategic task, scores high: it mentions \"board\"; the deadline is 2 days away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.17954198473282443,
+                            "impact": 0.5135000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.6930419847328245
+                    }
+                },
+                {
+                    "task_id": "task_regulator",
+                    "score": 0.8056883419689118,
+                    "reasoning": "strategic task, scores high: it mentions \"regulator\"; the deadline is 2 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.20891191709844562,
+                            "impact": 0.5135000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.7224119170984457
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "developer_cosmetic_typo_vs_data_corruption",
+            "expected_top_task_id": "task_corruption",
+            "predicted_top_task_id": "task_corruption",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_filler_wiki",
+                    "score": 0.44699999999999995,
+                    "reasoning": "operational task, scores low: no deadline given; its wording plays it down (\"nobody is waiting\").",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.05,
+                            "quick_win": 0.0625
+                        },
+                        "blocked": false,
+                        "base_score": 0.21000000000000002
+                    }
+                },
+                {
+                    "task_id": "task_typo",
+                    "score": 0.65625,
+                    "reasoning": "operational task, scores in the middle; against it: its wording plays it down (\"purely cosmetic\").",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.37142857142857144,
+                            "impact": 0.05,
+                            "quick_win": 0.08750000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.5089285714285714
+                    }
+                },
+                {
+                    "task_id": "task_corruption",
+                    "score": 0.9883333333333333,
+                    "reasoning": "operational task, scores high: its wording says it is urgent now (\"corrupting\"); it mentions \"malformed records\", \"customer\"; no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.65,
+                            "impact": 0.25,
+                            "quick_win": 0.08333333333333334
+                        },
+                        "blocked": false,
+                        "base_score": 0.9833333333333334
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "developer_inflated_p0_vs_understated_data_leak",
+            "expected_top_task_id": "task_leak",
+            "predicted_top_task_id": "task_staging",
+            "passed": false,
+            "candidates": [
+                {
+                    "task_id": "task_cache",
+                    "score": 0.18684210526315792,
+                    "reasoning": "operational task, would score high: the deadline is 2 hours away; blocked, so it cannot outrank anything startable.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.5473684210526316,
+                            "impact": 0.125,
+                            "quick_win": 0.07500000000000001
+                        },
+                        "blocked": true,
+                        "base_score": 0.7473684210526317
+                    }
+                },
+                {
+                    "task_id": "task_staging",
+                    "score": 0.85375,
+                    "reasoning": "operational task, scores high: the deadline is 3 hours away; it mentions \"production\", \"customer\".",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.49523809523809526,
+                            "impact": 0.2125,
+                            "quick_win": 0.08333333333333334
+                        },
+                        "blocked": false,
+                        "base_score": 0.7910714285714286
+                    }
+                },
+                {
+                    "task_id": "task_leak",
+                    "score": 0.5862852112676056,
+                    "reasoning": "operational task, scores in the middle; in its favour: it mentions \"customer\", \"regulator\"; against it: the deadline is 28 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.14647887323943662,
+                            "impact": 0.2,
+                            "quick_win": 0.0625
+                        },
+                        "blocked": false,
+                        "base_score": 0.4089788732394366
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "developer_login_hotfix_vs_migration",
+            "expected_top_task_id": "task_hotfix",
+            "predicted_top_task_id": "task_hotfix",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_migration",
+                    "score": 0.5626005747126437,
+                    "reasoning": "operational task, scores low: the deadline is 21 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.1793103448275862,
+                            "impact": 0.125,
+                            "quick_win": 0.07083333333333333
+                        },
+                        "blocked": false,
+                        "base_score": 0.37514367816091954
+                    }
+                },
+                {
+                    "task_id": "task_hotfix",
+                    "score": 0.8881944444444443,
+                    "reasoning": "operational task, scores high: the deadline is 1 hour away; it mentions \"sla\".",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.5777777777777777,
+                            "impact": 0.1875,
+                            "quick_win": 0.07500000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.8402777777777777
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "field_engineer_blocked_rma_vs_runbook_update",
+            "expected_top_task_id": "task_runbook",
+            "predicted_top_task_id": "task_runbook",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_rma",
+                    "score": 0.12951388888888887,
+                    "reasoning": "operational task, would score in the middle: no factor stands out; blocked, so it cannot outrank anything startable.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.28888888888888886,
+                            "impact": 0.1625,
+                            "quick_win": 0.06666666666666668
+                        },
+                        "blocked": true,
+                        "base_score": 0.5180555555555555
+                    }
+                },
+                {
+                    "task_id": "task_runbook",
+                    "score": 0.6354166666666666,
+                    "reasoning": "operational task, scores in the middle: no factor stands out; no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.325,
+                            "impact": 0.0875,
+                            "quick_win": 0.06666666666666668
+                        },
+                        "blocked": false,
+                        "base_score": 0.4791666666666667
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "field_engineer_customer_degradation_vs_internal_tooling",
+            "expected_top_task_id": "task_degradation",
+            "predicted_top_task_id": "task_degradation",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_script",
+                    "score": 0.4995,
+                    "reasoning": "operational task, scores low: no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.125,
+                            "quick_win": 0.0625
+                        },
+                        "blocked": false,
+                        "base_score": 0.28500000000000003
+                    }
+                },
+                {
+                    "task_id": "task_degradation",
+                    "score": 0.5607500000000001,
+                    "reasoning": "operational task, scores low: no deadline given; in its favour: it mentions \"customer\", \"analysts\".",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.2,
+                            "quick_win": 0.07500000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.37250000000000005
+                    }
+                },
+                {
+                    "task_id": "task_filler_inventory",
+                    "score": 0.49075,
+                    "reasoning": "operational task, scores low: no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.0875,
+                            "quick_win": 0.08750000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.2725
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "field_engineer_cutover_inspection_vs_backlog_patch",
+            "expected_top_task_id": "task_inspection",
+            "predicted_top_task_id": "task_inspection",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_inspection",
+                    "score": 0.7486999999999999,
+                    "reasoning": "operational task, scores high: the deadline is 5 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.41600000000000004,
+                            "impact": 0.1625,
+                            "quick_win": 0.0625
+                        },
+                        "blocked": false,
+                        "base_score": 0.641
+                    }
+                },
+                {
+                    "task_id": "task_patch",
+                    "score": 0.46158333333333335,
+                    "reasoning": "operational task, scores low: no deadline given; its wording plays it down (\"no customer impact\", \"backlog\").",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.05,
+                            "quick_win": 0.08333333333333334
+                        },
+                        "blocked": false,
+                        "base_score": 0.23083333333333333
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "field_engineer_prod_incident_vs_scheduled_maintenance",
+            "expected_top_task_id": "task_incident",
+            "predicted_top_task_id": "task_incident",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_maintenance",
+                    "score": 0.44447425828970333,
+                    "reasoning": "operational task, scores low: the deadline is 8 days away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.02722513089005236,
+                            "impact": 0.125,
+                            "quick_win": 0.054166666666666675
+                        },
+                        "blocked": false,
+                        "base_score": 0.20639179755671905
+                    }
+                },
+                {
+                    "task_id": "task_alarm",
+                    "score": 0.43241666666666667,
+                    "reasoning": "operational task, scores low: no deadline given; its wording plays it down (\"self-resolved\", \"was noise\").",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.0975,
+                            "impact": 0.0,
+                            "quick_win": 0.09166666666666667
+                        },
+                        "blocked": false,
+                        "base_score": 0.18916666666666668
+                    }
+                },
+                {
+                    "task_id": "task_incident",
+                    "score": 0.95625,
+                    "reasoning": "operational task, scores high: its wording says it is urgent now (\"has been down\"); it mentions \"sla\", \"customer\".",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.65,
+                            "impact": 0.225,
+                            "quick_win": 0.0625
+                        },
+                        "blocked": false,
+                        "base_score": 0.9375
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "field_engineer_released_controller_vs_blocked_fibre_fix",
+            "expected_top_task_id": "task_swap",
+            "predicted_top_task_id": "task_checklist",
+            "passed": false,
+            "candidates": [
+                {
+                    "task_id": "task_fibre",
+                    "score": 0.18601598173515982,
+                    "reasoning": "operational task, would score high: it mentions \"customer\", \"escalated\", \"board\"; the deadline is 4 hours away; blocked, so it cannot outrank anything startable.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.42739726027397257,
+                            "impact": 0.2375,
+                            "quick_win": 0.07916666666666666
+                        },
+                        "blocked": true,
+                        "base_score": 0.7440639269406393
+                    }
+                },
+                {
+                    "task_id": "task_swap",
+                    "score": 0.6386630434782609,
+                    "reasoning": "operational task, scores in the middle; against it: the deadline is 11 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.271304347826087,
+                            "impact": 0.1625,
+                            "quick_win": 0.05
+                        },
+                        "blocked": false,
+                        "base_score": 0.483804347826087
+                    }
+                },
+                {
+                    "task_id": "task_checklist",
+                    "score": 0.6914046391752577,
+                    "reasoning": "operational task, scores in the middle: no factor stands out.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.32164948453608255,
+                            "impact": 0.1625,
+                            "quick_win": 0.07500000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.5591494845360826
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "higher_manager_blocked_budget_vs_headcount_plan",
+            "expected_top_task_id": "task_headcount",
+            "predicted_top_task_id": "task_headcount",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_budget",
+                    "score": 0.1745530104712042,
+                    "reasoning": "strategic task, would score high: it mentions \"board\"; the deadline is 46 hours away; blocked, so it cannot outrank anything startable.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.18471204188481677,
+                            "impact": 0.5135000000000001
+                        },
+                        "blocked": true,
+                        "base_score": 0.6982120418848168
+                    }
+                },
+                {
+                    "task_id": "task_headcount",
+                    "score": 0.7511043478260868,
+                    "reasoning": "strategic task, scores high: it mentions \"sign-off\"; the deadline is 3 days away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.17043478260869563,
+                            "impact": 0.474
+                        },
+                        "blocked": false,
+                        "base_score": 0.6444347826086956
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "higher_manager_board_deck_vs_reorg_memo",
+            "expected_top_task_id": "task_deck",
+            "predicted_top_task_id": "task_deck",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_deck",
+                    "score": 0.8595945747800586,
+                    "reasoning": "strategic task, scores high: it mentions \"board\", \"must reach\"; the deadline is 5 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.2069208211143695,
+                            "impact": 0.5925
+                        },
+                        "blocked": false,
+                        "base_score": 0.7994208211143695
+                    }
+                },
+                {
+                    "task_id": "task_memo",
+                    "score": 0.5670499999999999,
+                    "reasoning": "strategic task, scores low: its wording plays it down (\"exploratory\"); no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.105,
+                            "impact": 0.27649999999999997
+                        },
+                        "blocked": false,
+                        "base_score": 0.38149999999999995
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "higher_manager_regulatory_filing_vs_strategy_section",
+            "expected_top_task_id": "task_filing",
+            "predicted_top_task_id": "task_filing",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_filing",
+                    "score": 0.8038710526315789,
+                    "reasoning": "strategic task, scores high: it mentions \"regulatory\"; the deadline is 6 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.2063157894736842,
+                            "impact": 0.5135000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.7198157894736843
+                    }
+                },
+                {
+                    "task_id": "task_strategy",
+                    "score": 0.7717045454545455,
+                    "reasoning": "strategic task, scores high: it mentions \"board\"; the deadline is 4 days away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.16036363636363637,
+                            "impact": 0.5135000000000001
+                        },
+                        "blocked": false,
+                        "base_score": 0.6738636363636364
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "manager_escalation_call_vs_design_review",
+            "expected_top_task_id": "task_escalation",
+            "predicted_top_task_id": "task_escalation",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_escalation",
+                    "score": 0.9463133333333333,
+                    "reasoning": "tactical task, scores high: it mentions \"customer\", \"escalation\", \"needs your\"; the deadline is less than an hour away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.39497142857142864,
+                            "impact": 0.49500000000000005,
+                            "quick_win": 0.03333333333333334
+                        },
+                        "blocked": false,
+                        "base_score": 0.9233047619047621
+                    }
+                },
+                {
+                    "task_id": "task_review",
+                    "score": 0.76725,
+                    "reasoning": "tactical task, scores high: the deadline is 24 hours away; it mentions \"so they can prepare\".",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.30000000000000004,
+                            "impact": 0.33,
+                            "quick_win": 0.037500000000000006
+                        },
+                        "blocked": false,
+                        "base_score": 0.6675000000000001
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "manager_overdue_preread_vs_tomorrow_review",
+            "expected_top_task_id": "task_preread",
+            "predicted_top_task_id": "task_preread",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_preread",
+                    "score": 0.7439166666666666,
+                    "reasoning": "tactical task, scores high: the deadline has passed; against it: its wording plays it down (\"routine\").",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.4,
+                            "impact": 0.1925,
+                            "quick_win": 0.04166666666666667
+                        },
+                        "blocked": false,
+                        "base_score": 0.6341666666666667
+                    }
+                },
+                {
+                    "task_id": "task_review",
+                    "score": 0.6691828097731238,
+                    "reasoning": "tactical task, scores in the middle; in its favour: the deadline is 24 hours away; against it: its wording plays it down (\"routine\").",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.3015706806282723,
+                            "impact": 0.1925,
+                            "quick_win": 0.03333333333333334
+                        },
+                        "blocked": false,
+                        "base_score": 0.5274040139616056
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "salesperson_at_risk_renewal_vs_owned_outage",
+            "expected_top_task_id": "task_renewal",
+            "predicted_top_task_id": "task_renewal",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_filler_forecast",
+                    "score": 0.549375,
+                    "reasoning": "tactical task, scores low: its wording plays it down (\"routine\"); no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.12,
+                            "impact": 0.1925,
+                            "quick_win": 0.043750000000000004
+                        },
+                        "blocked": false,
+                        "base_score": 0.35625
+                    }
+                },
+                {
+                    "task_id": "task_renewal",
+                    "score": 0.75675,
+                    "reasoning": "tactical task, scores high: it mentions \"churn risk\", \"customer\"; against it: no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.12,
+                            "impact": 0.49500000000000005,
+                            "quick_win": 0.037500000000000006
+                        },
+                        "blocked": false,
+                        "base_score": 0.6525000000000001
+                    }
+                },
+                {
+                    "task_id": "task_outage_followup",
+                    "score": 0.636875,
+                    "reasoning": "tactical task, scores in the middle; in its favour: it mentions \"outage\", \"escalated\"; against it: no deadline given.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.12,
+                            "impact": 0.33,
+                            "quick_win": 0.03125
+                        },
+                        "blocked": false,
+                        "base_score": 0.48125
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "salesperson_dead_rfp_vs_live_signing_round",
+            "expected_top_task_id": "task_signing",
+            "predicted_top_task_id": "task_qbr",
+            "passed": false,
+            "candidates": [
+                {
+                    "task_id": "task_rfp",
+                    "score": 0.7580792349726776,
+                    "reasoning": "tactical task, scores high: it mentions \"competitor\".",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.2360655737704918,
+                            "impact": 0.385,
+                            "quick_win": 0.03333333333333334
+                        },
+                        "blocked": false,
+                        "base_score": 0.6543989071038252
+                    }
+                },
+                {
+                    "task_id": "task_signing",
+                    "score": 0.6582706876456876,
+                    "reasoning": "tactical task, scores in the middle: no factor stands out.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.20139860139860138,
+                            "impact": 0.275,
+                            "quick_win": 0.035416666666666666
+                        },
+                        "blocked": false,
+                        "base_score": 0.5118152680652681
+                    }
+                },
+                {
+                    "task_id": "task_qbr",
+                    "score": 0.7843355263157895,
+                    "reasoning": "tactical task, scores high: the deadline is 23 hours away; it mentions \"customer\".",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.3031578947368421,
+                            "impact": 0.35750000000000004,
+                            "quick_win": 0.03125
+                        },
+                        "blocked": false,
+                        "base_score": 0.6919078947368422
+                    }
+                }
+            ]
+        },
+        {
+            "scenario_id": "salesperson_processing_cutoff_vs_call_summary",
+            "expected_top_task_id": "task_orderform",
+            "predicted_top_task_id": "task_orderform",
+            "passed": true,
+            "candidates": [
+                {
+                    "task_id": "task_orderform",
+                    "score": 0.7955574324324324,
+                    "reasoning": "tactical task, scores high: the deadline is 2 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.3891891891891892,
+                            "impact": 0.275,
+                            "quick_win": 0.043750000000000004
+                        },
+                        "blocked": false,
+                        "base_score": 0.7079391891891892
+                    }
+                },
+                {
+                    "task_id": "task_summary",
+                    "score": 0.7407971014492754,
+                    "reasoning": "tactical task, scores high: the deadline is 20 hours away.",
+                    "factors": {
+                        "contributions": {
+                            "time_pressure": 0.3130434782608696,
+                            "impact": 0.275,
+                            "quick_win": 0.04166666666666667
+                        },
+                        "blocked": false,
+                        "base_score": 0.6297101449275363
+                    }
+                }
+            ]
+        }
+    ]
+}
