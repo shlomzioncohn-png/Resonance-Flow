@@ -83,7 +83,7 @@ class SlackSessionSchedulerTest {
             messages.add(new MessageSnapshot("m" + i, "ruth", Instant.parse(messageTimestamps[i]), "hi", 0));
         }
         GroupState state = new GroupState(
-                groupId, RawSourceType.SLACK, "kamatech", "chat-a", null, "corr-" + groupId, messages, published,
+                groupId, RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", "chat-a", null, "corr-" + groupId, messages, published,
                 revision, null);
         groupStateStore.save(state);
         return state;
@@ -230,7 +230,7 @@ class SlackSessionSchedulerTest {
         ChatMessage.Attachment attachment =
                 new ChatMessage.Attachment("F1", "note.txt", "text/plain", "fake-bytes".getBytes());
         ChatMessage message = new ChatMessage(
-                RawSourceType.SLACK, "kamatech", "chat-a", "ruth", Instant.parse("2026-08-18T09:00:00Z"),
+                RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", "chat-a", "ruth", Instant.parse("2026-08-18T09:00:00Z"),
                 "listen to this", List.of(attachment), "m1", null);
         ChatGroupStateReconciler.RealtimeReconcileResult result = reconciler.reconcileNonThreadedMessage(message);
         assertThat(result.newAttachmentRecords()).hasSize(1);
@@ -251,10 +251,10 @@ class SlackSessionSchedulerTest {
                 // window this fix closes - every load after this one (including the claim's own
                 // precheck and the post-claim reload) must observe it.
                 groupStateStore.recordLandedAttachment(
-                        RawSourceType.SLACK, "kamatech", groupId, "m1", "F1", attachmentRef);
+                        RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", groupId, "m1", "F1", attachmentRef);
             }
             return real;
-        }).when(spyStore).load(RawSourceType.SLACK, "kamatech", groupId);
+        }).when(spyStore).load(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", groupId);
 
         taskScheduler.scheduled.get(0).task().run();
 
@@ -264,7 +264,7 @@ class SlackSessionSchedulerTest {
         assertThat(captor.getValue().objects()).extracting(RawObjectRef::role)
                 .containsExactlyInAnyOrder(Role.TRANSCRIPT, Role.ATTACHMENT);
 
-        GroupState afterPublish = groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow();
+        GroupState afterPublish = groupStateStore.load(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", groupId).orElseThrow();
         assertThat(afterPublish.published()).isTrue();
     }
 
@@ -355,7 +355,7 @@ class SlackSessionSchedulerTest {
         SlackSessionScheduler scheduler = newScheduler(45);
 
         ChatMessage root = new ChatMessage(
-                RawSourceType.SLACK, "kamatech", "chat-a", "malki", Instant.parse("2026-08-18T09:00:00Z"),
+                RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", "chat-a", "malki", Instant.parse("2026-08-18T09:00:00Z"),
                 "root question", List.of(), "r1", null);
         ChatGroupStateReconciler.RealtimeReconcileResult rootResult = reconciler.reconcileNonThreadedMessage(root);
         String originalGroupId = rootResult.groupState().groupId();
@@ -365,10 +365,10 @@ class SlackSessionSchedulerTest {
         // marking the original (above) superseded - see ChatGroupStateReconciler.
         // newThreadGroupState/migratedRootSnapshot.
         ChatMessage reply = new ChatMessage(
-                RawSourceType.SLACK, "kamatech", "chat-a", "ruth", Instant.parse("2026-08-18T09:05:00Z"), "reply",
+                RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", "chat-a", "ruth", Instant.parse("2026-08-18T09:05:00Z"), "reply",
                 List.of(), "reply1", "r1");
         reconciler.group(List.of(reply));
-        assertThat(groupStateStore.load(RawSourceType.SLACK, "kamatech", originalGroupId).orElseThrow().superseded())
+        assertThat(groupStateStore.load(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", originalGroupId).orElseThrow().superseded())
                 .isTrue();
 
         // The original group's own timer, scheduled before the migration, now fires - it must do
@@ -378,7 +378,7 @@ class SlackSessionSchedulerTest {
 
         verify(sessionPublisher, never()).publishSession(any(), any());
         GroupState originalAfterFiring =
-                groupStateStore.load(RawSourceType.SLACK, "kamatech", originalGroupId).orElseThrow();
+                groupStateStore.load(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", originalGroupId).orElseThrow();
         assertThat(originalAfterFiring.published()).isFalse();
         assertThat(originalAfterFiring.claimedRevision()).isNull();
     }
@@ -408,7 +408,7 @@ class SlackSessionSchedulerTest {
 
         taskScheduler.scheduled.get(0).task().run(); // must not throw out of the callback
 
-        GroupState after = groupStateStore.load(RawSourceType.SLACK, "kamatech", "g1").orElseThrow();
+        GroupState after = groupStateStore.load(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", "g1").orElseThrow();
         assertThat(after.published()).isFalse();
         assertThat(after.claimedRevision()).isEqualTo(0);
     }
@@ -434,7 +434,7 @@ class SlackSessionSchedulerTest {
         SlackSessionScheduler scheduler = newScheduler(45);
 
         ChatMessage first = new ChatMessage(
-                RawSourceType.SLACK, "kamatech", "chat-a", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi",
+                RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", "chat-a", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi",
                 List.of(), "m1", null);
         ChatGroupStateReconciler.RealtimeReconcileResult firstResult = reconciler.reconcileNonThreadedMessage(first);
         String xGroupId = firstResult.groupState().groupId();
@@ -456,18 +456,18 @@ class SlackSessionSchedulerTest {
 
             // The claim already succeeded (proven by sessionPublisher.publishSession having been
             // invoked) - X must be frozen at this point.
-            GroupState xWhileClaimed = groupStateStore.load(RawSourceType.SLACK, "kamatech", xGroupId).orElseThrow();
+            GroupState xWhileClaimed = groupStateStore.load(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", xGroupId).orElseThrow();
             assertThat(xWhileClaimed.revision()).isZero();
             assertThat(xWhileClaimed.claimedRevision()).isZero();
 
             ChatMessage second = new ChatMessage(
-                    RawSourceType.SLACK, "kamatech", "chat-a", "malki", Instant.parse("2026-08-18T09:10:00Z"), "hey",
+                    RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", "chat-a", "malki", Instant.parse("2026-08-18T09:10:00Z"), "hey",
                     List.of(), "m2", null);
             ChatGroupStateReconciler.RealtimeReconcileResult secondResult = reconciler.reconcileNonThreadedMessage(second);
 
             assertThat(secondResult.groupState().groupId()).isNotEqualTo(xGroupId);
             GroupState xAfterNewMessage =
-                    groupStateStore.load(RawSourceType.SLACK, "kamatech", xGroupId).orElseThrow();
+                    groupStateStore.load(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", xGroupId).orElseThrow();
             assertThat(xAfterNewMessage.revision()).isZero(); // unchanged - no more R -> R+1 bump
             assertThat(xAfterNewMessage.claimedRevision()).isZero(); // claim intact
             assertThat(xAfterNewMessage.messages()).hasSize(1); // m2 never merged into X
@@ -480,7 +480,7 @@ class SlackSessionSchedulerTest {
         }
 
         // X's own claim resolves normally to a real, non-stale confirm.
-        GroupState xFinal = groupStateStore.load(RawSourceType.SLACK, "kamatech", xGroupId).orElseThrow();
+        GroupState xFinal = groupStateStore.load(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", xGroupId).orElseThrow();
         assertThat(xFinal.published()).isFalse(); // this test's mocked publisher never calls confirmPublished
         assertThat(xFinal.revision()).isZero();
     }

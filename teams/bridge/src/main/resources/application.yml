@@ -82,6 +82,10 @@ jira:
       expression: ${JIRA_SYNC_CRON_EXPRESSION:0 0 2 * * ?}
 
 bridge:
+  # The one tenant every RawObjectEvent lane sends (Email/Slack/WhatsApp/Calendar/Drive and the
+  # media lane). Must be a UUID of a tenant that exists in Inbox - Mind passes it through to Inbox's
+  # tasks.tenant_id. Inbox's only tenant today is System (...0001); a fixed demo UUID is still TBD.
+  tenant-id: ${BRIDGE_TENANT_ID:00000000-0000-0000-0000-000000000001}
   # Backs the control-plane lane (GroupStateStore/CursorStore/CalendarEventStateStore), not
   # the rest of Bridge - no default on any of these three, same convention as HUBSPOT_TOKEN: a
   # missing value must fail startup loudly, not silently fall back to a placeholder.
@@ -153,6 +157,7 @@ bridge:
       tokens-directory: ${BRIDGE_GOOGLE_TOKENS_DIR:}
     email:
       mode: fixture
+      tenant-id: ${bridge.tenant-id}
       sync:
         # Set to true to enable scheduled email sync via IntakeSyncJobs/SyncJobScheduler - off
         # by default, same convention as bridge.crm.sync.cron/github.sync.cron.
@@ -167,6 +172,7 @@ bridge:
           expression: ${BRIDGE_INTAKE_DRIVE_SYNC_CRON_EXPRESSION:0 */15 * * * ?}
     calendar:
       mode: fixture
+      tenant-id: ${bridge.tenant-id}
       sync:
         cron:
           enabled: ${BRIDGE_INTAKE_CALENDAR_SYNC_CRON_ENABLED:false}
@@ -179,7 +185,7 @@ bridge:
       # Only read when mode: real. Bot User OAuth Token (xoxb-...) from a Slack app installed
       # with channels:history/groups:history/files:read scopes - see plan.md.
       bot-token: ${BRIDGE_SLACK_BOT_TOKEN:}
-      tenant-id: kamatech
+      tenant-id: ${bridge.tenant-id}
       # Channel IDs (Cxxxxxxxx) the bot has been invited to - no config here means "read every
       # channel", Slack has no such mode without a much broader scope.
       channels: ${BRIDGE_SLACK_CHANNELS:}
@@ -188,6 +194,7 @@ bridge:
       signing-secret: ${BRIDGE_SLACK_SIGNING_SECRET:}
     whatsapp:
       mode: fixture
+      tenant-id: ${bridge.tenant-id}
       # Only read when mode: real. See plan.md - there's no export API, so this directory is
       # filled manually from WhatsApp's own "Export Chat" feature.
       import-dir: ${BRIDGE_WHATSAPP_IMPORT_DIR:}
@@ -253,7 +260,7 @@ bridge:
     zoom-recordings-dir: ${BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR:./temp/zoom}
     bbb-recordings-dir: ${BRIDGE_MEDIA_BBB_RECORDINGS_DIR:./temp/bbb}
     scanned-docs-dir: ${BRIDGE_MEDIA_SCANNED_DOCS_DIR:./temp/docs}
-    tenant-id: ${BRIDGE_MEDIA_TENANT_ID:demo-tenant}
+    tenant-id: ${bridge.tenant-id}
     # Files at or below this size never land - a conservative proxy for "empty/corrupt
     # recording", not real audio-duration filtering (that needs a codec-aware library this
     # lane doesn't depend on). Tune based on what garbage actually shows up in practice.

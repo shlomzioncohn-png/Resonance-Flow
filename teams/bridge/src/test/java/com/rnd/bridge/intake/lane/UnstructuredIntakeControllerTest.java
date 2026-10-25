@@ -120,7 +120,7 @@ class UnstructuredIntakeControllerTest {
     private UnstructuredIntakeController controllerFor(RawSourceType sourceType) {
         return new UnstructuredIntakeController(
                 List.of(laneFor(sourceType)), cursorStore, calendarSourceReader, emailSourceReader,
-                calendarCursorLock);
+                calendarCursorLock, "kamatech");
     }
 
     @Test
