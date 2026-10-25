@@ -1,31 +1,16 @@
-# ArgoCD removed its built-in health check for the `argoproj.io/Application`
-# CRD in 1.8 (https://github.com/argoproj/argo-cd/issues/3781). Without it,
-# ArgoCD has no way to tell whether a child Application (e.g.
-# `resonance-flow`) is actually Healthy, so the sync-wave annotations on
-# apps/resonance-flow.yaml ("0") and apps/schema-sync-hook.yaml ("1") never
-# gate anything - `root` creates both Applications back-to-back regardless.
-# (Originally written for the since-removed apps/kafka.yaml; the examples
-# below still describe that case.)
+# ArgoCD 1.8 dropped the health check for `argoproj.io/Application`
+# (https://github.com/argoproj/argo-cd/issues/3781). Without it, root can't
+# tell when a child Application is Healthy, so the sync-waves in apps/
+# ("0" -> "1" -> "2") don't wait for each other.
 #
-# This restores that health check, with one deviation from the script in
-# the ArgoCD docs (https://argo-cd.readthedocs.io/en/stable/operator-manual/health/):
-# a freshly-created child Application reports its own health as "Missing"
-# for the first instant, before its controller has even started
-# reconciling it. ArgoCD's wave engine (gitops-engine's
-# syncContext.getOperationPhase) switches on health.Status but has no case
-# for "Missing" - it falls through to the pre-switch default of
-# OperationSucceeded, so a script that copies "Missing" through verbatim
-# (as the docs' script does) marks the wave-gate task done instantly and
-# defeats the gate. Confirmed live on a kind cluster (issues #180, #186):
-# with the docs' verbatim script, kafka's Application object briefly
-# reports "Missing" right after creation, root's wave-gate reads that as
-# "succeeded", and resonance-flow gets synced before kafka is anywhere
-# close to Healthy. Mapping "Missing" to "Progressing" here closes that
-# gap.
+# This restores it, with one change from the script in the ArgoCD docs
+# (https://argo-cd.readthedocs.io/en/stable/operator-manual/health/): a new
+# child reports "Missing" for an instant, and the wave engine reads
+# "Missing" as succeeded, so the gate opens at once. Mapping it to
+# "Progressing" keeps the gate closed (verified on kind, #180, #186).
 #
-# Apply alongside root-app.yaml against a cluster that already has the
-# argocd-cm ConfigMap (kubectl apply merges this into the existing keys,
-# it does not replace the whole ConfigMap):
+# Apply before root-app.yaml; kubectl apply merges these keys into the
+# existing argocd-cm, it doesn't replace it:
 #
 #   kubectl apply -f teams/relay/argocd/argocd-cm-patch.yaml
 #   kubectl apply -f teams/relay/argocd/root-app.yaml

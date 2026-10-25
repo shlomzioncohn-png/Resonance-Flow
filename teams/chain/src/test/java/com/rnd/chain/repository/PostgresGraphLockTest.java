@@ -6,50 +6,114 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 class PostgresGraphLockTest {
 
-    private final List<String> calls = new ArrayList<>();
+    private final JdbcTemplate jdbcTemplate =
+            mock(JdbcTemplate.class);
 
-    private final JdbcTemplate recordingJdbcTemplate = new JdbcTemplate() {
-        @Override
-        public void query(String sql, RowCallbackHandler rch, Object... args) {
-            calls.add(sql + " " + List.of(args));
-        }
-    };
-
-    private final PostgresGraphLock graphLock = new PostgresGraphLock(recordingJdbcTemplate);
+    private final PostgresGraphLock graphLock =
+            new PostgresGraphLock(jdbcTemplate);
 
     @AfterEach
-    void clearTransactionFlag() {
-        TransactionSynchronizationManager.setActualTransactionActive(false);
+    void cleanUpTransactionState() {
+        TransactionSynchronizationManager
+                .setActualTransactionActive(false);
     }
 
     @Test
-    void runExclusive_throwsAndSkipsAction_whenNoTransactionIsActive() {
-        assertThatThrownBy(() -> graphLock.runExclusive(() -> calls.add("action")))
-                .isInstanceOf(IllegalStateException.class);
+    void sameTenant_returnsSameLockKey() {
 
-        assertThat(calls).isEmpty();
+        UUID tenantId =
+                UUID.randomUUID();
+
+        long first =
+                PostgresGraphLock.lockKeyForTenant(
+                        tenantId);
+
+        long second =
+                PostgresGraphLock.lockKeyForTenant(
+                        tenantId);
+
+        assertThat(first)
+                .isEqualTo(second);
     }
 
     @Test
-    void runExclusive_takesAdvisoryLockBeforeAction_whenTransactionIsActive() {
-        TransactionSynchronizationManager.setActualTransactionActive(true);
+    void differentTenants_returnDifferentLockKeys() {
 
-        String result = graphLock.runExclusive(() -> {
-            calls.add("action");
-            return "done";
-        });
+        UUID firstTenant =
+                UUID.randomUUID();
 
-        assertThat(result).isEqualTo("done");
-        assertThat(calls).containsExactly(
-                "SELECT pg_advisory_xact_lock(?) [" + PostgresGraphLock.GRAPH_LOCK_KEY + "]",
-                "action");
+        UUID secondTenant =
+                UUID.randomUUID();
+
+        long first =
+                PostgresGraphLock.lockKeyForTenant(
+                        firstTenant);
+
+        long second =
+                PostgresGraphLock.lockKeyForTenant(
+                        secondTenant);
+
+        assertThat(first)
+                .isNotEqualTo(second);
+    }
+
+    @Test
+    void nullTenant_returnsLegacyGraphLockKey() {
+
+        long key =
+                PostgresGraphLock.lockKeyForTenant(
+                        null);
+
+        assertThat(key)
+                .isEqualTo(
+                        PostgresGraphLock.GRAPH_LOCK_KEY);
+    }
+
+    @Test
+    void noActiveTransaction_throwsIllegalStateException() {
+
+        assertThatThrownBy(
+                () -> graphLock.runExclusive(
+                        UUID.randomUUID(),
+                        () -> "action"))
+                .isInstanceOf(
+                        IllegalStateException.class)
+                .hasMessageContaining(
+                        "inside a transaction");
+    }
+
+    @Test
+    void activeTransaction_acquiresLockAndRunsAction() {
+
+        TransactionSynchronizationManager
+                .setActualTransactionActive(true);
+
+        UUID tenantId =
+                UUID.randomUUID();
+
+        String result =
+                graphLock.runExclusive(
+                        tenantId,
+                        () -> "done");
+
+        assertThat(result)
+                .isEqualTo("done");
+
+        verify(jdbcTemplate)
+                .query(
+                        anyString(),
+                        any(RowCallbackHandler.class),
+                        any(Object[].class));
     }
 }

@@ -1,5 +1,6 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
 
 import com.rnd.chain.testsupport.PgRepos;
@@ -21,7 +22,6 @@ import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.DependencyEdgeService;
 import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.SchedulingUpdateService;
-import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskDependencyService;
 import com.rnd.mind.event.DependencyProposedEvent;
 import org.junit.jupiter.api.Test;
@@ -45,14 +45,27 @@ class DependencyProposedEventHandlerTest {
     @Autowired
     private TaskReadinessRepository taskReadinessRepository;
 
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
+
     private static Task buildTask(UUID id) {
         return Task.builder()
                 .id(id)
                 .tenantId(TaskTestFixtures.DEFAULT_TENANT_ID)
                 .status(TaskStatus.PENDING)
-                .isReady(true)
-                .blockingCount(0)
-                .openConstraintCount(0)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
@@ -92,10 +105,15 @@ class DependencyProposedEventHandlerTest {
         SchedulingUpdateService schedulingUpdateService = mock(SchedulingUpdateService.class);
         DependencyEdgeService edgeService =
                 new DependencyEdgeService(
+                        taskRepo,
                         dependencyRepo,
                         PgRepos.graphLock(),
-                        new TaskCounterUpdater(taskRepo, dependencyRepo, new PriorityScoreService(),
-                                new SchedulingPublishListener(taskRepo, schedulingUpdateService), taskReadinessRepository),
+                        new PriorityScoreService(
+                                        taskRepo,
+                                        dependencyRepo,
+                                        taskReadinessRepository,
+                                        schedulingUpdateService,
+                                        new SchedulingPublishListener(taskRepo, schedulingUpdateService)),
                         TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
 
         DependencyHistoryRepository historyRepo =
@@ -117,8 +135,9 @@ class DependencyProposedEventHandlerTest {
         DependencyProposedEventHandler handler =
                 new DependencyProposedEventHandler(
                         dependencyService,
-                        new TaskCounterUpdater(taskRepo, dependencyRepo, new PriorityScoreService(),
-                                new SchedulingPublishListener(taskRepo, schedulingUpdateService), taskReadinessRepository),
+                        edgeService,
+                        schedulingUpdateService,
+                        new SchedulingPublishListener(taskRepo, schedulingUpdateService),
                         taskReadinessRepository,
                         template);
 
@@ -165,8 +184,8 @@ class DependencyProposedEventHandlerTest {
                         .findById(taskId)
                         .orElseThrow();
 
-        assertEquals(2, after.getBlockingCount());
-        assertFalse(after.isReady());
+        assertEquals(2, blockingCount(after));
+        assertFalse(isReady(after));
 
         assertEquals(
                 2,
@@ -209,7 +228,7 @@ class DependencyProposedEventHandlerTest {
 
         assertEquals(
                 1,
-                after.getBlockingCount());
+                blockingCount(after));
 
         assertEquals(
                 1,
@@ -224,7 +243,7 @@ class DependencyProposedEventHandlerTest {
         UUID otherTenantDep = UUID.randomUUID();
         Task crossTenantTask = Task.builder()
                 .id(otherTenantDep).tenantId(TaskTestFixtures.OTHER_TENANT_ID)
-                .status(TaskStatus.PENDING).isReady(true).blockingCount(0).openConstraintCount(0)
+                .status(TaskStatus.PENDING)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
         Fixture fixture = newFixture(List.of(buildTask(taskId), crossTenantTask));
         UUID eventId = UUID.randomUUID();
@@ -237,7 +256,7 @@ class DependencyProposedEventHandlerTest {
 
         assertThrows(NonRetryableEventException.class, () -> fixture.handler().onMessage(event));
 
-        assertTrue(fixture.taskRepo().findById(taskId).map(t -> t.getBlockingCount() == 0).orElse(false),
+        assertTrue(fixture.taskRepo().findById(taskId).map(t -> blockingCount(t) == 0).orElse(false),
                 "a rejected edge must never be applied");
         List<com.rnd.chain.dto.DependencyHistoryEntry> entries =
                 fixture.historyRepo().findByTaskId(taskId, 0, 10).content();
@@ -261,11 +280,11 @@ class DependencyProposedEventHandlerTest {
         Task placeholder = fixture.taskRepo().findById(missingDep).orElseThrow();
         assertEquals(TaskStatus.PENDING, placeholder.getStatus());
         assertEquals(TaskTestFixtures.DEFAULT_TENANT_ID, placeholder.getTenantId());
-        assertEquals(0, placeholder.getBlockingCount());
-        assertEquals(0, placeholder.getOpenConstraintCount());
+        assertEquals(0, blockingCount(placeholder));
+        assertEquals(0, openConstraintCount(placeholder));
         assertEquals(LocalDateTime.ofEpochSecond(0, 0, ZoneOffset.UTC), placeholder.getUpdatedAt());
         assertEquals(1, fixture.dependencyRepo().findByTaskId(taskId).size());
-        assertEquals(1, fixture.taskRepo().findById(taskId).orElseThrow().getBlockingCount());
+        assertEquals(1, blockingCount(fixture.taskRepo().findById(taskId).orElseThrow()));
     }
 
     @Test
@@ -283,7 +302,7 @@ class DependencyProposedEventHandlerTest {
         Task source = fixture.taskRepo().findById(missingSource).orElseThrow();
         assertEquals(TaskStatus.PENDING, source.getStatus());
         assertEquals(TaskTestFixtures.DEFAULT_TENANT_ID, source.getTenantId());
-        assertEquals(1, source.getBlockingCount());
+        assertEquals(1, blockingCount(source));
         assertEquals(1, fixture.dependencyRepo().findByTaskId(missingSource).size());
     }
 
@@ -310,7 +329,7 @@ class DependencyProposedEventHandlerTest {
         UUID depId = UUID.randomUUID();
         Task existingDep = Task.builder()
                 .id(depId).tenantId(TaskTestFixtures.DEFAULT_TENANT_ID)
-                .status(TaskStatus.ACTIVE).isReady(true).blockingCount(0).openConstraintCount(0)
+                .status(TaskStatus.ACTIVE)
                 .createdAt(LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS))
                 .updatedAt(LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS)).build();
         Fixture fixture = newFixture(List.of(buildTask(taskId), existingDep));

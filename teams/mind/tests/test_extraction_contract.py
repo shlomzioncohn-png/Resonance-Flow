@@ -96,8 +96,8 @@ def test_an_item_is_frozen_after_validation():
 
 
 def test_the_pipelines_extracted_fields_for_a_meeting_validate():
-    # ExtractedFields is what the eval reads (ExtractionSuccess.fields, before
-    # assembly drops item_key). For a meeting, source_ref is None — a transcript
+    # ExtractedFields is what the eval reads (each `ExtractionSuccess.tasks[i].fields`,
+    # #690, before assembly drops item_key). For a meeting, source_ref is None — a transcript
     # carries no pointer — and that must not be rejected: the eval holds the
     # meeting id itself.
     fields = ExtractedFields(

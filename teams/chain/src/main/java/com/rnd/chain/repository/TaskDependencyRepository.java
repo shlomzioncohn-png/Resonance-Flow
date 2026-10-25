@@ -51,6 +51,8 @@ public interface TaskDependencyRepository {
      * list, never null, if nothing depends on the task.
      */
     List<TaskDependency> findByDependsOnTaskId(UUID taskId);
+    
+    List<TaskDependency> findByTaskIds(List<UUID> taskIds);
 
     /**
      * @return true if the edge (taskId, dependsOnTaskId) currently exists. A dedicated

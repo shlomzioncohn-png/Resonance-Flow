@@ -5,7 +5,8 @@ import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.repository.TaskReadinessRepository;
-import com.rnd.chain.service.TaskCounterUpdater;
+import com.rnd.chain.service.DependencyEdgeService;
+import com.rnd.chain.service.SchedulingUpdateService;
 import com.rnd.chain.service.TaskDependencyService;
 import com.rnd.mind.event.Dependency;
 import com.rnd.mind.event.DependencyProposedEvent;
@@ -19,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -31,10 +33,12 @@ class DependencyProposedEventHandlerUnitTest {
 
     private final TaskDependencyService dependencyService = mock(TaskDependencyService.class);
     private final ProcessedEventStore store = mock(ProcessedEventStore.class);
-    private final TaskCounterUpdater counterUpdater = mock(TaskCounterUpdater.class);
+    private final DependencyEdgeService edgeService = mock(DependencyEdgeService.class);
+    private final SchedulingUpdateService schedulingUpdateService = mock(SchedulingUpdateService.class);
+    private final SchedulingPublishListener publishListener = mock(SchedulingPublishListener.class);
     private final TaskReadinessRepository readinessRepository = mock(TaskReadinessRepository.class);
     private final DependencyProposedEventHandler handler = new DependencyProposedEventHandler(
-            dependencyService, counterUpdater, readinessRepository, new ChainEventProcessingTemplate(store));
+            dependencyService, edgeService, schedulingUpdateService, publishListener, readinessRepository, new ChainEventProcessingTemplate(store));
 
     private final UUID eventId = UUID.randomUUID();
     private final UUID taskId = UUID.randomUUID();
@@ -42,7 +46,7 @@ class DependencyProposedEventHandlerUnitTest {
 
     private void givenReadiness(int blockingCount) {
         when(readinessRepository.findByIds(List.of(taskId)))
-                .thenReturn(Map.of(taskId, new TaskReadinessSnapshot(taskId, blockingCount, 0)));
+                .thenReturn(Map.of(taskId, new TaskReadinessSnapshot(taskId, tenantId, blockingCount, 0)));
     }
 
     @Test
@@ -52,8 +56,8 @@ class DependencyProposedEventHandlerUnitTest {
 
         handler.onMessage(event(UUID.randomUUID()));
 
-        verify(counterUpdater).insertPlaceholderIfAbsent(taskId, tenantId);
-        verify(counterUpdater).requestPublishAfterCommit(taskId);
+        verify(edgeService).insertPlaceholderIfAbsent(taskId, tenantId);
+        verify(schedulingUpdateService).requestPublishAfterCommit(taskId, publishListener);
     }
 
     @Test
@@ -63,8 +67,8 @@ class DependencyProposedEventHandlerUnitTest {
 
         handler.onMessage(event());
 
-        verify(counterUpdater).insertPlaceholderIfAbsent(taskId, tenantId);
-        verify(counterUpdater).requestPublishAfterCommit(taskId);
+        verify(edgeService).insertPlaceholderIfAbsent(taskId, tenantId);
+        verify(schedulingUpdateService).requestPublishAfterCommit(taskId, publishListener);
     }
 
     @Test
@@ -74,7 +78,7 @@ class DependencyProposedEventHandlerUnitTest {
 
         handler.onMessage(event(UUID.randomUUID()));
 
-        verify(counterUpdater).requestPublishAfterCommit(taskId);
+        verify(schedulingUpdateService).requestPublishAfterCommit(taskId, publishListener);
     }
 
     @Test
@@ -84,7 +88,7 @@ class DependencyProposedEventHandlerUnitTest {
 
         handler.onMessage(event(UUID.randomUUID()));
 
-        verify(counterUpdater, never()).requestPublishAfterCommit(any());
+        verify(schedulingUpdateService, never()).requestPublishAfterCommit(any(), any());
     }
 
     @Test
@@ -96,7 +100,7 @@ class DependencyProposedEventHandlerUnitTest {
 
         handler.onMessage(event(UUID.randomUUID()));
 
-        verify(counterUpdater).requestPublishAfterCommit(taskId);
+        verify(schedulingUpdateService).requestPublishAfterCommit(taskId, publishListener);
     }
 
     @Test
@@ -107,7 +111,7 @@ class DependencyProposedEventHandlerUnitTest {
 
         handler.onMessage(event(target));
 
-        verify(counterUpdater, never()).requestPublishAfterCommit(target);
+        verify(schedulingUpdateService, never()).requestPublishAfterCommit(eq(target), any());
     }
 
     private DependencyProposedEvent event(UUID... dependsOn) {
@@ -150,7 +154,7 @@ class DependencyProposedEventHandlerUnitTest {
 
         handler.onMessage(event(UUID.randomUUID()));
 
-        verify(counterUpdater, never()).requestPublishAfterCommit(any());
+        verify(schedulingUpdateService, never()).requestPublishAfterCommit(any(), any());
 
         verify(dependencyService, never())
                 .addDependencyCreatingMissing(any(), any(), any(), anyString(), anyDouble(), any());
