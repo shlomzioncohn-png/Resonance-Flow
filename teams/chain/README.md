@@ -290,10 +290,9 @@ Computed by `PriorityScoreService.compute` (a pure function, no repository acces
 `is_available` changes; `DependencyEdgeService` and `TaskEligibilityService` call it.
 
 Readiness (`blocking_count`, `open_constraint_count`, `is_ready`) is no longer stored on `Task`/`TaskEntity`
-(#917 PR 2); the `task_readiness` view is the only source. `SchedulingUpdateService.requestPublishAfterCommit`
+(#917 PR 2) and the columns were dropped from the `task` table by V16 (#917 PR 3); the `task_readiness` view is the only source. `SchedulingUpdateService.requestPublishAfterCommit`
 reads `is_available` from the view inside the transaction and hands it to the after-commit publish; a task
-with no view row throws `IllegalStateException`. The old `task` columns remain in the schema until the
-follow-up migration drops them. API responses read the same view.
+with no view row throws `IllegalStateException`. API responses read the same view.
 
 ### Formula
 
