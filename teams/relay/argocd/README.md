@@ -127,6 +127,12 @@ team's sync.
   Grafana chart's own random password would change on every refresh. To
   rotate it, delete the Secret and sync.
 
+To try Grafana and the dashboards without a shared cluster,
+`../monitoring-env/up.sh` installs kube-prometheus-stack (same values) and the
+`resonance-flow` chart on a local kind cluster, without Traefik - Grafana at
+`http://localhost:3000` through a port-forward. See its
+[README](../monitoring-env/README.md).
+
 Prometheus and Alertmanager have no Ingress, and Grafana's is off until its
 host is set. Reach them with:
 
