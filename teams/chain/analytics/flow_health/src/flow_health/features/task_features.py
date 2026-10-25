@@ -14,7 +14,9 @@ TASK_COLUMNS = [
     "task_id", "project_id", "tier", "is_open", "age_days", "days_pending", "days_active", "days_blocked_total",
     "n_block_events", "blocked_p50", "blocked_p90", "blocked_max", "n_dependents_now", "n_dependents_max",
     "dependents_per_30d", "age_ratio_to_tier", "blocked_ratio_to_tier", "active_ratio_to_tier",
+    "active_ratio_to_tier_project",
 ]
+MIN_PROJECT_TIER_TASKS = 5  # a tier inside a project with fewer worked-on tasks has no usable median of its own
 MIN_AGE_DAYS_FOR_RATE = 1.0  # a task younger than a day is treated as one day old when computing a rate
 
 
@@ -47,6 +49,15 @@ def _ratio_to_tier(values: pd.Series, tier: pd.Series, fallback: float, only_pos
     basis = values.where(values > 0) if only_positive else values
     median = basis.groupby(tier).transform("median")
     return (values / median.where(median > 0, fallback)).where(values > 0, 0.0)
+
+
+def project_ratio(tasks: pd.DataFrame) -> pd.Series:
+    """days_active / median days_active of the worked-on tasks of the same tier in the same project; a cell with fewer
+    than MIN_PROJECT_TIER_TASKS such tasks takes the tier-wide `active_ratio_to_tier`."""
+    cell = tasks["tier"] + "|" + tasks["project_id"].astype(str)
+    in_cell = tasks["days_active"].where(tasks["days_active"] > 0).groupby(cell).transform("count")
+    by_cell = _ratio_to_tier(tasks["days_active"], cell, fallback=np.nan, only_positive=True)
+    return by_cell.where(in_cell >= MIN_PROJECT_TIER_TASKS, tasks["active_ratio_to_tier"])
 
 
 def task_features(ds: Dataset, tl: Timeline) -> pd.DataFrame:
@@ -87,4 +98,5 @@ def task_features(ds: Dataset, tl: Timeline) -> pd.DataFrame:
     active = tasks.loc[tasks["days_active"] > 0, "days_active"]
     tasks["active_ratio_to_tier"] = _ratio_to_tier(
         tasks["days_active"], tasks["tier"], fallback=active.median() if len(active) else np.nan, only_positive=True)
+    tasks["active_ratio_to_tier_project"] = project_ratio(tasks)
     return tasks.reset_index()[TASK_COLUMNS].sort_values("task_id", kind="stable").reset_index(drop=True)

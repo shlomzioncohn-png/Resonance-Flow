@@ -7,6 +7,12 @@ from flow_health.features import build_timeline
 from flow_health.features.task_features import TASK_COLUMNS, UNKNOWN_TIER, task_features
 
 
+def _project_ratio(tasks):
+    """The project-and-tier ratio computed on a hand-made table (the same code the feature uses)."""
+    from flow_health.features.task_features import project_ratio
+    return project_ratio(tasks)
+
+
 def _features(ds):
     return task_features(ds, build_timeline(ds)).set_index("task_id")
 
@@ -52,6 +58,25 @@ def test_ratios_divide_by_the_median_of_the_whole_tier_open_tasks_included(three
 def test_active_ratio_divides_work_time_by_the_median_of_tasks_that_were_worked_on(three):
     f = _features(three)  # ACTIVE days: A 3, B 4, C never ACTIVE -> median of the worked-on tasks is 3.5
     assert f["active_ratio_to_tier"].tolist() == pytest.approx([3 / 3.5, 4 / 3.5, 0.0])
+
+
+def test_project_ratio_uses_the_median_of_the_same_tier_in_the_same_project(three):
+    f = _features(three)  # one project and one tier here, so it equals the tier ratio
+    assert f["active_ratio_to_tier_project"].tolist() == pytest.approx(f["active_ratio_to_tier"].tolist())
+
+
+def test_project_ratio_compares_a_task_with_its_own_projects_pace():
+    days = [1.0] * 5 + [4.0] * 5  # project 1 works in 1 day, project 2 in 4 days, same tier
+    tasks = pd.DataFrame({"task_id": [f"t{i}" for i in range(10)], "tier": "operational", "days_active": days,
+                          "project_id": [1] * 5 + [2] * 5, "active_ratio_to_tier": [d / 2.5 for d in days]})
+    out = _project_ratio(tasks)
+    assert out.tolist() == pytest.approx([1.0] * 10)  # each is exactly the usual of its project
+
+
+def test_a_small_project_tier_cell_falls_back_to_the_tier_ratio():
+    tasks = pd.DataFrame({"task_id": list("abc"), "tier": "operational", "days_active": [1.0, 2.0, 9.0],
+                          "project_id": [1, 1, 2], "active_ratio_to_tier": [0.5, 1.0, 4.5]})
+    assert _project_ratio(tasks).tolist() == pytest.approx([0.5, 1.0, 4.5])
 
 
 def test_a_missing_tier_is_its_own_group_with_its_own_median():
