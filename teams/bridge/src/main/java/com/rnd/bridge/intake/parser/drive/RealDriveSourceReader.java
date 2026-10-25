@@ -55,12 +55,12 @@ public class RealDriveSourceReader implements DriveSourceReader {
     /** Default export target for native Google files - cheapest, most directly usable by
      * downstream text processing (Mind); trades away preserved formatting. */
     private static final String EXPORT_MIME_TYPE = "text/plain";
-    private static final String GOOGLE_APPS_MIME_PREFIX = "application/vnd.google-apps.";
-    private static final String LIST_FIELDS =
-            "nextPageToken, files(id, name, description, mimeType, modifiedTime, owners, size)";
+    private static final String LIST_FIELDS = "nextPageToken, files(id, name, description, mimeType, "
+            + "modifiedTime, owners, size, headRevisionId, version)";
     private static final String CHANGES_FIELDS = "nextPageToken, newStartPageToken, "
             + "changes(fileId, removed, "
-            + "file(id, name, description, mimeType, modifiedTime, owners, size, headRevisionId, trashed))";
+            + "file(id, name, description, mimeType, modifiedTime, owners, size, headRevisionId, version, "
+            + "trashed))";
 
     private final GoogleCredentialsProvider credentialsProvider;
     private final DriveImportProperties properties;
@@ -172,7 +172,8 @@ public class RealDriveSourceReader implements DriveSourceReader {
                 ? null
                 : file.getOwners().get(0).getEmailAddress();
         Instant occurredAt = Instant.ofEpochMilli(file.getModifiedTime().getValue());
-        DriveFileState state = fileStateReconciler.resolve(properties.tenantId(), file.getId(), file.getHeadRevisionId());
+        DriveFileState state = fileStateReconciler.resolve(
+                properties.tenantId(), file.getId(), file.getMimeType(), file.getHeadRevisionId(), file.getVersion());
         return new SourceRecord(
                 RawSourceType.DRIVE, properties.tenantId(), file.getId(), state.correlationId(),
                 occurredAt, owner, owner == null ? List.of() : List.of(owner), file.getName(),
@@ -189,7 +190,8 @@ public class RealDriveSourceReader implements DriveSourceReader {
      * only changeType marks this as a deletion.
      */
     private SourceRecord toTrashedSourceRecord(File file) {
-        DriveFileState state = fileStateReconciler.resolve(properties.tenantId(), file.getId(), file.getHeadRevisionId());
+        DriveFileState state = fileStateReconciler.resolve(
+                properties.tenantId(), file.getId(), file.getMimeType(), file.getHeadRevisionId(), file.getVersion());
         Instant occurredAt = file.getModifiedTime() != null
                 ? Instant.ofEpochMilli(file.getModifiedTime().getValue())
                 : Instant.now();
@@ -202,7 +204,7 @@ public class RealDriveSourceReader implements DriveSourceReader {
 
     private byte[] fetchContent(Drive drive, File file) {
         try {
-            if (file.getMimeType() != null && file.getMimeType().startsWith(GOOGLE_APPS_MIME_PREFIX)) {
+            if (DriveFileStateReconciler.isNativeGoogleFile(file.getMimeType())) {
                 return drainToBytes(drive.files().export(file.getId(), EXPORT_MIME_TYPE).executeMediaAsInputStream());
             }
             return drainToBytes(drive.files().get(file.getId()).executeMediaAsInputStream());

@@ -42,7 +42,7 @@ class DriveFileStateReconcilerTest {
 
     @Test
     void firstSeenFileGetsANewUuidCorrelationIdAndRevisionZero() {
-        DriveFileState state = reconciler.resolve(TENANT, "file-1", "rev-1");
+        DriveFileState state = reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-1", null);
 
         assertThat(UUID.fromString(state.correlationId())).isNotNull();
         assertThat(state.revision()).isZero();
@@ -51,9 +51,9 @@ class DriveFileStateReconcilerTest {
 
     @Test
     void aGenuineUpdateReusesTheCorrelationIdAndIncrementsRevision() {
-        DriveFileState first = reconciler.resolve(TENANT, "file-1", "rev-1");
+        DriveFileState first = reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-1", null);
 
-        DriveFileState updated = reconciler.resolve(TENANT, "file-1", "rev-2");
+        DriveFileState updated = reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-2", null);
 
         assertThat(updated.correlationId()).isEqualTo(first.correlationId());
         assertThat(updated.revision()).isEqualTo(1);
@@ -62,10 +62,10 @@ class DriveFileStateReconcilerTest {
 
     @Test
     void aSecondGenuineUpdateIncrementsRevisionAgain() {
-        reconciler.resolve(TENANT, "file-1", "rev-1");
-        reconciler.resolve(TENANT, "file-1", "rev-2");
+        reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-1", null);
+        reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-2", null);
 
-        DriveFileState secondUpdate = reconciler.resolve(TENANT, "file-1", "rev-3");
+        DriveFileState secondUpdate = reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-3", null);
 
         assertThat(secondUpdate.revision()).isEqualTo(2);
     }
@@ -77,11 +77,11 @@ class DriveFileStateReconcilerTest {
      */
     @Test
     void retryOfTheSameHeadRevisionIdAfterAFailedPublishReusesTheSameRevision() {
-        reconciler.resolve(TENANT, "file-1", "rev-1"); // revision 0
-        DriveFileState edited = reconciler.resolve(TENANT, "file-1", "rev-2"); // revision 1
+        reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-1", null); // revision 0
+        DriveFileState edited = reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-2", null); // revision 1
         assertThat(edited.revision()).isEqualTo(1);
 
-        DriveFileState retry = reconciler.resolve(TENANT, "file-1", "rev-2");
+        DriveFileState retry = reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-2", null);
 
         assertThat(retry.revision()).isEqualTo(1); // NOT 2
         assertThat(retry.correlationId()).isEqualTo(edited.correlationId());
@@ -90,12 +90,12 @@ class DriveFileStateReconcilerTest {
 
     @Test
     void twoDifferentFileIdsGetIndependentCorrelationIdsAndRevisions() {
-        DriveFileState fileA = reconciler.resolve(TENANT, "file-a", "rev-1");
-        DriveFileState fileB = reconciler.resolve(TENANT, "file-b", "rev-1");
-        reconciler.resolve(TENANT, "file-a", "rev-2"); // only A changes
+        DriveFileState fileA = reconciler.resolve(TENANT, "file-a", "application/pdf", "rev-1", null);
+        DriveFileState fileB = reconciler.resolve(TENANT, "file-b", "application/pdf", "rev-1", null);
+        reconciler.resolve(TENANT, "file-a", "application/pdf", "rev-2", null); // only A changes
 
-        DriveFileState fileAAfter = reconciler.resolve(TENANT, "file-a", "rev-2");
-        DriveFileState fileBAfter = reconciler.resolve(TENANT, "file-b", "rev-1");
+        DriveFileState fileAAfter = reconciler.resolve(TENANT, "file-a", "application/pdf", "rev-2", null);
+        DriveFileState fileBAfter = reconciler.resolve(TENANT, "file-b", "application/pdf", "rev-1", null);
 
         assertThat(fileAAfter.correlationId()).isEqualTo(fileA.correlationId()).isNotEqualTo(fileB.correlationId());
         assertThat(fileAAfter.revision()).isEqualTo(1);
@@ -104,7 +104,7 @@ class DriveFileStateReconcilerTest {
 
     @Test
     void successfulPublishMarksTheExpectedRevisionPublished() {
-        DriveFileState state = reconciler.resolve(TENANT, "file-1", "rev-1");
+        DriveFileState state = reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-1", null);
 
         store.confirmPublished(TENANT, "file-1", state.revision());
 
@@ -115,8 +115,8 @@ class DriveFileStateReconcilerTest {
 
     @Test
     void aStalePublishConfirmationCannotMarkANewerRevisionPublished() {
-        reconciler.resolve(TENANT, "file-1", "rev-1"); // revision 0
-        reconciler.resolve(TENANT, "file-1", "rev-2"); // revision 1, unconfirmed
+        reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-1", null); // revision 0
+        reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-2", null); // revision 1, unconfirmed
 
         store.confirmPublished(TENANT, "file-1", 0); // stale ack
 
@@ -133,10 +133,10 @@ class DriveFileStateReconcilerTest {
      */
     @Test
     void aTrashedChangeAfterAPublishedUpsertReusesCorrelationIdAndIncrementsRevision() {
-        DriveFileState published = reconciler.resolve(TENANT, "file-1", "rev-1");
+        DriveFileState published = reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-1", null);
         store.confirmPublished(TENANT, "file-1", published.revision());
 
-        DriveFileState trashed = reconciler.resolve(TENANT, "file-1", "rev-trashed");
+        DriveFileState trashed = reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-trashed", null);
 
         assertThat(trashed.correlationId()).isEqualTo(published.correlationId());
         assertThat(trashed.revision()).isEqualTo(1);
@@ -145,11 +145,11 @@ class DriveFileStateReconcilerTest {
 
     @Test
     void retryOfTheSameTrashedHeadRevisionIdAfterAFailedPublishReusesTheSameRevision() {
-        reconciler.resolve(TENANT, "file-1", "rev-1"); // revision 0
-        DriveFileState trashed = reconciler.resolve(TENANT, "file-1", "rev-trashed"); // revision 1
+        reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-1", null); // revision 0
+        DriveFileState trashed = reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-trashed", null); // revision 1
         assertThat(trashed.revision()).isEqualTo(1);
 
-        DriveFileState retry = reconciler.resolve(TENANT, "file-1", "rev-trashed");
+        DriveFileState retry = reconciler.resolve(TENANT, "file-1", "application/pdf", "rev-trashed", null);
 
         assertThat(retry.revision()).isEqualTo(1); // NOT 2
         assertThat(retry.correlationId()).isEqualTo(trashed.correlationId());
@@ -157,7 +157,7 @@ class DriveFileStateReconcilerTest {
 
     @Test
     void firstSeenTrashedFileStillGetsANewUuidCorrelationIdAndRevisionZero() {
-        DriveFileState state = reconciler.resolve(TENANT, "file-never-seen", "rev-trashed");
+        DriveFileState state = reconciler.resolve(TENANT, "file-never-seen", "application/pdf", "rev-trashed", null);
 
         assertThat(UUID.fromString(state.correlationId())).isNotNull();
         assertThat(state.revision()).isZero();
@@ -173,7 +173,7 @@ class DriveFileStateReconcilerTest {
 
     @Test
     void concurrentUpdateAndTrashOperationsProduceACleanRevisionSequence() throws Exception {
-        DriveFileState baseline = reconciler.resolve(TENANT, "file-race-3", "rev-0"); // revision 0
+        DriveFileState baseline = reconciler.resolve(TENANT, "file-race-3", "application/pdf", "rev-0", null); // revision 0
         ExecutorService pool = Executors.newFixedThreadPool(2);
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch go = new CountDownLatch(1);
@@ -181,12 +181,12 @@ class DriveFileStateReconcilerTest {
             Future<DriveFileState> updateFuture = pool.submit(() -> {
                 ready.countDown();
                 go.await();
-                return reconciler.resolve(TENANT, "file-race-3", "rev-update");
+                return reconciler.resolve(TENANT, "file-race-3", "application/pdf", "rev-update", null);
             });
             Future<DriveFileState> trashFuture = pool.submit(() -> {
                 ready.countDown();
                 go.await();
-                return reconciler.resolve(TENANT, "file-race-3", "rev-trashed");
+                return reconciler.resolve(TENANT, "file-race-3", "application/pdf", "rev-trashed", null);
             });
 
             assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
@@ -214,7 +214,7 @@ class DriveFileStateReconcilerTest {
         ExecutorService pool = Executors.newFixedThreadPool(callers);
         try {
             List<Future<DriveFileState>> futures = IntStream.range(0, callers)
-                    .mapToObj(i -> pool.submit(() -> reconciler.resolve(TENANT, "file-race", "rev-1")))
+                    .mapToObj(i -> pool.submit(() -> reconciler.resolve(TENANT, "file-race", "application/pdf", "rev-1", null)))
                     .toList();
 
             Set<String> correlationIds = new HashSet<>();
@@ -234,7 +234,7 @@ class DriveFileStateReconcilerTest {
 
     @Test
     void concurrentUpdatesToTheSameFileProduceACleanRevisionSequence() throws Exception {
-        reconciler.resolve(TENANT, "file-race-2", "rev-0"); // revision 0, baseline
+        reconciler.resolve(TENANT, "file-race-2", "application/pdf", "rev-0", null); // revision 0, baseline
         int updates = 10;
         ExecutorService pool = Executors.newFixedThreadPool(updates);
         CountDownLatch ready = new CountDownLatch(updates);
@@ -244,7 +244,7 @@ class DriveFileStateReconcilerTest {
                     .mapToObj(i -> pool.<DriveFileState>submit(() -> {
                         ready.countDown();
                         go.await();
-                        return reconciler.resolve(TENANT, "file-race-2", "rev-" + (i + 1));
+                        return reconciler.resolve(TENANT, "file-race-2", "application/pdf", "rev-" + (i + 1), null);
                     }))
                     .toList();
 
@@ -263,5 +263,63 @@ class DriveFileStateReconcilerTest {
         } finally {
             pool.shutdown();
         }
+    }
+
+    // --- Native Google file (Doc/Sheet/Slide) change detection via version, not headRevisionId --
+
+    private static final String NATIVE_MIME_TYPE = "application/vnd.google-apps.document";
+
+    @Test
+    void nativeGoogleDocFirstSeenStartsAtRevisionZero() {
+        DriveFileState state = reconciler.resolve(TENANT, "doc-1", NATIVE_MIME_TYPE, null, 100L);
+
+        assertThat(state.revision()).isZero();
+        assertThat(state.headRevisionId()).isNull();
+        assertThat(state.version()).isEqualTo(100L);
+    }
+
+    @Test
+    void nativeGoogleDocEditIsDetectedByVersionEvenThoughHeadRevisionIdStaysNull() {
+        reconciler.resolve(TENANT, "doc-1", NATIVE_MIME_TYPE, null, 100L); // revision 0
+
+        DriveFileState edited = reconciler.resolve(TENANT, "doc-1", NATIVE_MIME_TYPE, null, 101L);
+
+        assertThat(edited.revision()).isEqualTo(1);
+        assertThat(edited.headRevisionId()).isNull();
+    }
+
+    @Test
+    void nativeGoogleDocRetryWithTheSameVersionStaysUnchanged() {
+        DriveFileState edited = reconciler.resolve(TENANT, "doc-1", NATIVE_MIME_TYPE, null, 101L);
+
+        DriveFileState retry = reconciler.resolve(TENANT, "doc-1", NATIVE_MIME_TYPE, null, 101L);
+
+        assertThat(retry.revision()).isEqualTo(edited.revision());
+        assertThat(retry.correlationId()).isEqualTo(edited.correlationId());
+    }
+
+    /**
+     * A record persisted before the `version` field existed deserializes with version == null
+     * (Jackson leaves a missing JSON property as null for a reference-typed record component).
+     * The first resolve() call afterwards that sees a real, non-null version from Drive must be
+     * treated as a change - otherwise a native file upgraded from the old headRevisionId-only
+     * behavior would stay stuck at its pre-upgrade revision forever, since headRevisionId alone
+     * never distinguishes two different edits of a native file (both are always null).
+     */
+    @Test
+    void firstChangeAfterUpgradeForAPreExistingNativeFileWithNoStoredVersionBumpsRevisionOnce() {
+        String preUpgradeJson = "{\"fileId\":\"doc-legacy\",\"tenantId\":\"" + TENANT + "\","
+                + "\"correlationId\":\"corr-legacy\",\"headRevisionId\":null,\"revision\":0,\"published\":false}";
+        backingStore.put("_drive_files/" + TENANT + "/doc-legacy.json", preUpgradeJson.getBytes());
+
+        DriveFileState afterUpgrade = reconciler.resolve(TENANT, "doc-legacy", NATIVE_MIME_TYPE, null, 7L);
+
+        assertThat(afterUpgrade.correlationId()).isEqualTo("corr-legacy");
+        assertThat(afterUpgrade.revision()).isEqualTo(1);
+        assertThat(afterUpgrade.version()).isEqualTo(7L);
+
+        DriveFileState retryAfterUpgrade = reconciler.resolve(TENANT, "doc-legacy", NATIVE_MIME_TYPE, null, 7L);
+
+        assertThat(retryAfterUpgrade.revision()).isEqualTo(1);
     }
 }

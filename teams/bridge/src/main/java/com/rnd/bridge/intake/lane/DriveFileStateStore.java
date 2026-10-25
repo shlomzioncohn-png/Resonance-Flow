@@ -21,7 +21,7 @@ import org.springframework.stereotype.Component;
 public class DriveFileStateStore {
 
     private static final DriveFileState MISSING_STATE_SENTINEL =
-            new DriveFileState(null, null, null, null, -1, false);
+            new DriveFileState(null, null, null, null, null, -1, false);
 
     private final ObjectStorageClient storageClient;
     private final ControlPlaneStateStore controlPlaneStateStore;
@@ -67,7 +67,7 @@ public class DriveFileStateStore {
             }
             return new DriveFileState(
                     current.fileId(), current.tenantId(), current.correlationId(), current.headRevisionId(),
-                    current.revision(), true);
+                    current.version(), current.revision(), true);
         });
     }
 

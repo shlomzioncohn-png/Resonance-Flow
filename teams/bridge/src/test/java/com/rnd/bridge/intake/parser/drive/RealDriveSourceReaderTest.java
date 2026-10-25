@@ -60,10 +60,10 @@ class RealDriveSourceReaderTest {
     private RealDriveSourceReader reader(DriveImportProperties properties) {
         when(drive.files()).thenReturn(files);
         when(drive.changes()).thenReturn(changes);
-        when(fileStateReconciler.resolve(anyString(), anyString(), any()))
+        when(fileStateReconciler.resolve(anyString(), anyString(), any(), any(), any()))
                 .thenAnswer(inv -> new DriveFileState(
-                        inv.getArgument(1), inv.getArgument(0), "corr-" + inv.getArgument(1), inv.getArgument(2), 0,
-                        false));
+                        inv.getArgument(1), inv.getArgument(0), "corr-" + inv.getArgument(1), inv.getArgument(3),
+                        inv.getArgument(4), 0, false));
         return new RealDriveSourceReader(null, properties, fileStateReconciler, drive);
     }
 
@@ -266,8 +266,8 @@ class RealDriveSourceReaderTest {
     @Test
     void editedFileGetsTheReconciledRevisionFromFileStateReconciler() throws IOException {
         RealDriveSourceReader reader = reader(); // registers the default reconciler stub first
-        when(fileStateReconciler.resolve("kamatech", "f1", "rev-2"))
-                .thenReturn(new DriveFileState("f1", "kamatech", "corr-f1", "rev-2", 3, false));
+        when(fileStateReconciler.resolve("kamatech", "f1", "application/pdf", "rev-2", null))
+                .thenReturn(new DriveFileState("f1", "kamatech", "corr-f1", "rev-2", null, 3, false));
         Drive.Changes.List changesRequest = mock(Drive.Changes.List.class, Mockito.RETURNS_SELF);
         when(changes.list("page-token-1")).thenReturn(changesRequest);
         File editedFile = file("f1", "application/pdf").setHeadRevisionId("rev-2");
@@ -304,5 +304,116 @@ class RealDriveSourceReaderTest {
         DriveReadResult result = reader().read(new ReadCursor(null, "expired-token"));
 
         assertThat(result.nextToken()).isEqualTo("fresh-start-token");
+    }
+
+    // --- Full read -> real DriveFileStateReconciler path (headRevisionId never populated for ---
+    // --- native Google files, so version is the native-file change signal - see that class) ---
+
+    private RealDriveSourceReader readerWithRealReconciler() {
+        when(drive.files()).thenReturn(files);
+        when(drive.changes()).thenReturn(changes);
+        var backingStore = new java.util.concurrent.ConcurrentHashMap<String, byte[]>();
+        var store = new com.rnd.bridge.intake.lane.DriveFileStateStore(
+                new com.rnd.bridge.storage.InMemoryObjectStorageClient(backingStore),
+                com.rnd.bridge.storage.ControlPlaneStateStores.inMemory(backingStore),
+                new com.fasterxml.jackson.databind.ObjectMapper());
+        var realReconciler = new DriveFileStateReconciler(store);
+        return new RealDriveSourceReader(null, PROPERTIES, realReconciler, drive);
+    }
+
+    private File nativeDocFile(String id, long version) {
+        return new File()
+                .setId(id)
+                .setName("doc-" + id)
+                .setMimeType("application/vnd.google-apps.document")
+                .setModifiedTime(new DateTime(1_700_000_000_000L))
+                .setOwners(List.of(new User().setEmailAddress("malki@kamatech.org")))
+                .setHeadRevisionId(null)
+                .setVersion(version);
+    }
+
+    private void stubExport(String fileId, byte[] bytes) throws IOException {
+        Drive.Files.Export exportRequest = mock(Drive.Files.Export.class);
+        when(files.export(eq(fileId), anyString())).thenReturn(exportRequest);
+        when(exportRequest.executeMediaAsInputStream()).thenReturn(new ByteArrayInputStream(bytes));
+    }
+
+    @Test
+    void nativeGoogleDocEditThroughTheFullReadReconcilePathBumpsRevision() throws IOException {
+        RealDriveSourceReader reader = readerWithRealReconciler();
+        stubExport("doc1", "v1 text".getBytes(StandardCharsets.UTF_8));
+
+        Drive.Files.List listRequest = mockListRequest();
+        when(files.list()).thenReturn(listRequest);
+        when(listRequest.execute()).thenReturn(new FileList().setFiles(List.of(nativeDocFile("doc1", 1L))));
+        stubStartPageToken("start-1");
+
+        SourceRecord baseline = reader.read(ReadCursor.full()).records().get(0);
+        assertThat(baseline.revision()).isZero();
+
+        Drive.Changes.List changesRequest = mock(Drive.Changes.List.class, Mockito.RETURNS_SELF);
+        when(changes.list("start-1")).thenReturn(changesRequest);
+        Change edited = new Change().setFileId("doc1").setRemoved(false).setFile(nativeDocFile("doc1", 2L));
+        when(changesRequest.execute()).thenReturn(new ChangeList().setChanges(List.of(edited)));
+
+        SourceRecord afterEdit = reader.read(new ReadCursor(null, "start-1")).records().get(0);
+
+        assertThat(afterEdit.revision()).isEqualTo(1);
+        assertThat(afterEdit.correlationId()).isEqualTo(baseline.correlationId());
+    }
+
+    @Test
+    void binaryFileChangeDetectionThroughTheFullPathIsUnchangedByTheNativeFileFix() throws IOException {
+        RealDriveSourceReader reader = readerWithRealReconciler();
+
+        Drive.Files.List listRequest = mockListRequest();
+        when(files.list()).thenReturn(listRequest);
+        when(listRequest.execute()).thenReturn(new FileList().setFiles(List.of(file("f1", "application/pdf"))));
+        stubStartPageToken("start-1");
+        Drive.Files.Get getRequest = mock(Drive.Files.Get.class);
+        when(files.get("f1")).thenReturn(getRequest);
+        when(getRequest.executeMediaAsInputStream())
+                .thenReturn(new ByteArrayInputStream("bytes".getBytes(StandardCharsets.UTF_8)));
+
+        SourceRecord baseline = reader.read(ReadCursor.full()).records().get(0);
+        assertThat(baseline.revision()).isZero();
+
+        Drive.Changes.List changesRequest = mock(Drive.Changes.List.class, Mockito.RETURNS_SELF);
+        when(changes.list("start-1")).thenReturn(changesRequest);
+        File editedFile = file("f1", "application/pdf").setHeadRevisionId("rev-2");
+        Change change = new Change().setFileId("f1").setRemoved(false).setFile(editedFile);
+        when(changesRequest.execute()).thenReturn(new ChangeList().setChanges(List.of(change)));
+        when(getRequest.executeMediaAsInputStream())
+                .thenReturn(new ByteArrayInputStream("bytes2".getBytes(StandardCharsets.UTF_8)));
+
+        SourceRecord afterEdit = reader.read(new ReadCursor(null, "start-1")).records().get(0);
+
+        assertThat(afterEdit.revision()).isEqualTo(1);
+        assertThat(afterEdit.correlationId()).isEqualTo(baseline.correlationId());
+    }
+
+    @Test
+    void nativeGoogleDocUnchangedRetryThroughTheFullPathKeepsTheSameRevision() throws IOException {
+        RealDriveSourceReader reader = readerWithRealReconciler();
+        stubExport("doc1", "text".getBytes(StandardCharsets.UTF_8));
+
+        Drive.Files.List listRequest = mockListRequest();
+        when(files.list()).thenReturn(listRequest);
+        when(listRequest.execute()).thenReturn(new FileList().setFiles(List.of(nativeDocFile("doc1", 1L))));
+        stubStartPageToken("start-1");
+
+        SourceRecord baseline = reader.read(ReadCursor.full()).records().get(0);
+
+        Drive.Changes.List changesRequest = mock(Drive.Changes.List.class, Mockito.RETURNS_SELF);
+        when(changes.list("start-1")).thenReturn(changesRequest);
+        // Same version as the baseline read - e.g. a retry after a failed publish, nothing
+        // actually changed server-side.
+        Change retryChange = new Change().setFileId("doc1").setRemoved(false).setFile(nativeDocFile("doc1", 1L));
+        when(changesRequest.execute()).thenReturn(new ChangeList().setChanges(List.of(retryChange)));
+
+        SourceRecord retry = reader.read(new ReadCursor(null, "start-1")).records().get(0);
+
+        assertThat(retry.revision()).isEqualTo(baseline.revision());
+        assertThat(retry.correlationId()).isEqualTo(baseline.correlationId());
     }
 }

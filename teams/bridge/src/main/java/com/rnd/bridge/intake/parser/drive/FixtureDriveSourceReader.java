@@ -50,7 +50,12 @@ public class FixtureDriveSourceReader implements DriveSourceReader {
                 continue;
             }
             String owner = node.get("owners").get(0).get("emailAddress").asText();
-            DriveFileState state = fileStateReconciler.resolve(tenantId, fileId, node.toString());
+            // mimeType intentionally not passed through here: fixtures have no real Drive
+            // headRevisionId/version distinction to preserve, and the node.toString() surrogate
+            // (see class javadoc) already changes iff the fixture content changes for every
+            // file type, including native Google ones - so this always takes the
+            // headRevisionId-surrogate branch (null mimeType -> isNativeGoogleFile == false).
+            DriveFileState state = fileStateReconciler.resolve(tenantId, fileId, null, node.toString(), null);
             records.add(new SourceRecord(
                     RawSourceType.DRIVE,
                     tenantId,
@@ -82,7 +87,7 @@ public class FixtureDriveSourceReader implements DriveSourceReader {
     /** Fixture analog of RealDriveSourceReader.toTrashedSourceRecord - see its javadoc for why
      * only id/headRevisionId-surrogate-derived fields are used, nothing name/description/owners. */
     private SourceRecord toTrashedSourceRecord(String tenantId, String fileId, JsonNode node) {
-        DriveFileState state = fileStateReconciler.resolve(tenantId, fileId, node.toString());
+        DriveFileState state = fileStateReconciler.resolve(tenantId, fileId, null, node.toString(), null);
         return new SourceRecord(
                 RawSourceType.DRIVE, tenantId, fileId, state.correlationId(), Instant.now(), null, List.of(),
                 null, null, node.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(),
