@@ -1,3 +1,17 @@
+# #481: every MIND container reads its connection settings from two files,
+# mounted at the same paths Relay's Helm chart uses in the cluster:
+#   config.yaml  <- ./config.compose.yml (committed; no credentials)
+#   secrets.yaml <- built here from .env's POSTGRES_PASSWORD (mind-secrets below),
+#                   so no password is committed and it can't drift from the DB's.
+x-mind-config-env: &mind-config-env
+  CONFIG_FILE_PATH: /etc/resonance-flow/config/config.yaml
+  SECRETS_FILE_PATH: /etc/resonance-flow/secret/secrets.yaml
+x-mind-config-files: &mind-config-files
+  - source: mind-config
+    target: /etc/resonance-flow/config/config.yaml
+  - source: mind-secrets
+    target: /etc/resonance-flow/secret/secrets.yaml
+
 services:
   mind:
     build:
@@ -8,12 +22,8 @@ services:
       - "8000:8000"
     env_file:
       - .env
-    environment:
-      # Built from POSTGRES_USER/PASSWORD/DB (below) rather than read as a
-      # single var from .env, and pointed at the `vector-store` service
-      # name -- inside this container, `localhost` would mean the `mind`
-      # container itself, not the DB container next to it.
-      MIND_VECTOR_STORE__DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@vector-store:5432/${POSTGRES_DB}
+    environment: *mind-config-env
+    configs: *mind-config-files
     volumes:
       - ./models:/app/models
     depends_on:
@@ -25,11 +35,16 @@ services:
   # being healthy -- an unmigrated table must fail the whole stack here,
   # not surface later as an UndefinedTable on the app's first query.
   migrate:
-    build: .
+    # Same build as `mind`: the Dockerfile copies shared/proto from the
+    # `shared` context, so a bare `build: .` can't build it.
+    build:
+      context: .
+      additional_contexts:
+        shared: ../../shared
     env_file:
       - .env
-    environment:
-      MIND_VECTOR_STORE__DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@vector-store:5432/${POSTGRES_DB}
+    environment: *mind-config-env
+    configs: *mind-config-files
     command: ["alembic", "upgrade", "head"]
     depends_on:
       vector-store:
@@ -48,20 +63,24 @@ services:
     profiles: ["kafka"]
     env_file:
       - .env
-    environment:
-      MIND_VECTOR_STORE__DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@vector-store:5432/${POSTGRES_DB}
+    environment: *mind-config-env
+    configs: *mind-config-files
     volumes:
       - ./models:/app/models
     depends_on:
       migrate:
         condition: service_completed_successfully
 
-  mind-score-publisher:
+  # #919: bridge.raw.landed -> extraction -> dedup -> task.creation.requested,
+  # with the task.created listener in the same process (one in-memory pending
+  # store). Kafka, the vector store and the LLM provider come from the config
+  # files (#481), like the consumers above; MinIO from MIND_OBJECT_STORAGE__* in .env.
+  mind-landed-consumer:
     build:
       context: .
       additional_contexts:
         shared: ../../shared
-    command: ["python", "-m", "mind.scoring.score_publisher_runner"]
+    command: ["python", "-m", "mind.ingestion.landed_consumer_runner"]
     # A Kafka error kills the process on purpose, so the message is retried.
     restart: on-failure
     # No HTTP server here -- the Dockerfile's :8000/health check doesn't apply.
@@ -71,6 +90,13 @@ services:
     profiles: ["kafka"]
     env_file:
       - .env
+    environment: *mind-config-env
+    configs: *mind-config-files
+    volumes:
+      - ./models:/app/models
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
   vector-store:
     image: pgvector/pgvector:pg16
@@ -91,3 +117,13 @@ services:
 
 volumes:
   vector-store-data:
+
+configs:
+  mind-config:
+    file: ./config.compose.yml
+  # A config, not a Compose secret: a secret can only hold one raw value, and
+  # MIND needs a YAML file. Local dev only -- in the cluster it's a real Secret.
+  mind-secrets:
+    content: |
+      vector_store:
+        password: "${POSTGRES_PASSWORD}"

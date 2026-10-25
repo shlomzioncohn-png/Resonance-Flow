@@ -1,5 +1,6 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.testsupport.PgCleanup;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
@@ -49,6 +50,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         "chain.kafka.schema-registry-url=mock://task-completed-handler-test"
 })
 class TaskCompletedEventHandlerIntegrationTest {
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.rnd.chain.repository.TaskReadinessRepository taskReadinessRepository;
+
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
 
     private static final String TOPIC = "task.completed";
     private static final LocalDateTime BASE_TIME = LocalDateTime.of(2026, 1, 1, 12, 0, 0);
@@ -113,7 +133,6 @@ class TaskCompletedEventHandlerIntegrationTest {
     private static Task buildTask(UUID id, TaskStatus status, LocalDateTime updatedAt, int blockingCount) {
         return Task.builder()
                 .id(id).status(status).tenantId(com.rnd.chain.testsupport.TaskFixtures.DEFAULT_TENANT_ID)
-                .isReady(blockingCount == 0).blockingCount(blockingCount).openConstraintCount(0)
                 .createdAt(BASE_TIME).updatedAt(updatedAt)
                 .build();
     }
@@ -144,9 +163,9 @@ class TaskCompletedEventHandlerIntegrationTest {
         sendCompleted(blocker);
 
         await().atMost(Duration.ofSeconds(20)).alias("the dependent to be released").until(() ->
-                taskRepository.findById(dependent).map(Task::isReady).orElse(false));
+                taskRepository.findById(dependent).map(this::isReady).orElse(false));
 
-        assertEquals(0, taskRepository.findById(dependent).orElseThrow().getBlockingCount());
+        assertEquals(0, blockingCount(taskRepository.findById(dependent).orElseThrow()));
         assertEquals(TaskStatus.DONE, taskRepository.findById(blocker).orElseThrow().getStatus());
 
         // The event is published right after the repository update, so wait for it rather than assert at once.
@@ -172,13 +191,13 @@ class TaskCompletedEventHandlerIntegrationTest {
         sendCompleted(blocker);
 
         await().atMost(Duration.ofSeconds(20)).alias("first completion to be applied").until(() ->
-                taskRepository.findById(dependent).map(t -> t.getBlockingCount() == 1).orElse(false));
+                taskRepository.findById(dependent).map(t -> blockingCount(t) == 1).orElse(false));
 
         // A second decrement would show up within this window; the count must stay at 1 throughout.
         await().during(Duration.ofSeconds(3)).atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
             Task unchanged = taskRepository.findById(dependent).orElseThrow();
-            assertEquals(1, unchanged.getBlockingCount());
-            assertTrue(!unchanged.isReady());
+            assertEquals(1, blockingCount(unchanged));
+            assertTrue(!isReady(unchanged));
             assertTrue(schedulingEventsFor(dependent).isEmpty());
         });
     }
@@ -215,7 +234,7 @@ class TaskCompletedEventHandlerIntegrationTest {
 
         await().during(Duration.ofSeconds(3)).atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
             assertEquals(TaskStatus.ACTIVE, taskRepository.findById(blocker).orElseThrow().getStatus());
-            assertEquals(1, taskRepository.findById(dependent).orElseThrow().getBlockingCount());
+            assertEquals(1, blockingCount(taskRepository.findById(dependent).orElseThrow()));
         });
     }
 }

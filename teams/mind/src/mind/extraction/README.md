@@ -82,7 +82,7 @@ llm:
     base_url: https://api.deepseek.com
     model: deepseek-chat
     timeout_seconds: 60
-    max_output_tokens: 1024
+    max_output_tokens: 2048
 # secrets.yaml -> components.mind.secret
 llm:
   deepseek:
@@ -156,7 +156,9 @@ DeepSeek.
 that filters `api.deepseek.com` it is the only one that can actually be run. It
 is not `deepseek.py` with the URL swapped — Gemini takes the system prompt as
 its own `system_instruction` field, returns the answer as a list of parts, and
-puts its retry hint in the error body instead of a header.
+puts its retry hint in the error body instead of a header. Thinking tokens
+count against `maxOutputTokens`: a model that ignores `thinkingBudget: 0`
+spends part of the cap a full list of tasks needs.
 
 ```yaml
 llm:
@@ -685,3 +687,162 @@ Caveats, all load-bearing:
   by someone else.
 - it says nothing about the confidence values. Whether `INFERRED` estimates
   land near the truth is the persona calibration above, and that is R1's run.
+
+## Several tasks per text (#690)
+
+Until #690 the model was asked for one object, so every text yielded exactly
+one task and a meeting with eight action items lost seven. The answer is now
+one object holding a list:
+
+```json
+{"tasks": [{"title": "...", "has_dependencies": false, "dependency_mentions": []}]}
+```
+
+| Decision | Where |
+|---|---|
+| An empty list is a valid answer: a text with no task is the normal case | `ExtractedTasks`, `system.md` |
+| At most `MAX_TASKS_PER_TEXT` (15) tasks; more is rejected and repaired, never cut short | `models.py`; the prompt's number is filled in from the constant, not written twice |
+| One invalid task fails the whole answer; the message names it by place (`tasks.1.title`) | `parse_response` |
+| A bare list without the object is formatting, like a code fence: wrapped, not repaired | `parsing._read_payload` |
+| Grounding and confidence run per task; `item_key`, model and attempts stay on the answer | `ExtractedTask`, `ExtractionSuccess.tasks` |
+| One `TaskCreationRequested` per task, in order; none for an empty list | `assembly.to_task_creation_requested` |
+
+**One call per text, so all or nothing per call.** Every task of an item
+comes from one answer. A provider failure — the output cap, a safety block,
+a timeout after its retries — loses all of them together, where per-task calls
+would have lost one. Chosen because one call is cheaper and the model sees the
+whole context (a recap names what was asked earlier). What guards it: the
+output cap sized for a full list (`TOKENS_PER_TASK`, `DEFAULT_MAX_OUTPUT_TOKENS`
+2048), descriptions held to about 300 characters by the prompt and dropped past
+`MAX_DESCRIPTION_LENGTH` (600), and at most 10 mentions of a title's length. An
+empty meeting with an `ExtractionFailure` is this, not a parsing bug.
+
+`system.md` now also says what a task is: work someone is asked to do, offers
+to do, or agrees to do — not a topic only discussed, not work already done.
+Until #690 that never needed saying. It opens with that, before the format:
+most content holds no task, and a model that first reads "return a list of
+tasks" goes looking for something to put in it. Live, a newsletter, a deploy
+status and small talk each came back as `{"tasks": []}`.
+
+### Which tasks pay for a repair round
+
+A repair round re-asks for the whole list, so a shared attempt count charged
+every task for one sibling's `"N/A"`: in a meeting of eight, seven valid tasks
+lost 20% each. Instead, `read_rejected_answer` reads each task of a rejected
+answer on its own, and a final task **equal in every field** to one of those is
+charged only the rounds up to that one (`extractor._rounds_needed`). Matching is
+by content, not by place, because the model may reorder, merge or drop tasks
+between rounds. The rejected tasks are used for this comparison only; nothing
+from a rejected answer reaches the output.
+
+One rejection earns no credit at all: **more than 15 tasks**. A model listing
+past the cap is listing non-tasks, so none of what it listed counts as right
+the first time. Its rejection says so in its own words ("keep only the real
+tasks ... and leave out the rest"), and `repair_user.md` allows removing tasks
+when the rejection asks: told only to "return every task again, unchanged", a
+model resent the same over-long list until the item failed. An extra key beside `tasks` is formatting and keeps the credit.
+
+This narrows the problem; it does not close it. A valid task the model
+*rewords* during repair cannot be told apart from a new one, and is charged.
+`repair_user.md` asks for the untouched tasks back unchanged, and every success
+after a repair logs the comparison with the **last** rejected answer only —
+`the rejected answer had N task(s), V of them valid; the repaired answer has R,
+and U of the valid ones came back unchanged` — so how often this happens is
+measured, not guessed.
+
+**A dropped task is a warning.** The model can break #690's third decision by
+answering the repair with fewer tasks, and nothing raises. When the repaired
+answer is shorter *and* a valid task did not come back unchanged, it logs `a
+valid task may have been dropped`. Dropping only the invalid one stays quiet:
+the title message tells the model to leave a non-task out of the list.
+
+### Proposed: partial repair
+
+The exact fix is to send back only the failed tasks and freeze the valid ones,
+so nothing has to be matched. Envelope failures — broken JSON, more than 15
+tasks — would still re-ask for everything, and there every task is charged. Not built here: it changes the repair flow, needs a guard
+against the model resending the frozen tasks as duplicates, and departs from
+#690's third decision as worded ("one invalid task sends the whole answer to
+repair"), so it is that decision's owner's call. Worth building if the logged
+rewording count turns out to be high.
+
+### `dependency_mentions` (moved here from #842)
+
+**One direction.** A mention, and `has_dependencies`, mean "this task waits
+for that work" — never "that work waits for this task". #834 sends each
+resolved mention to Chain as this task's `depends_on_task_id`, so a mention of
+the work a task *blocks* would arrive as an edge pointing backwards, and two
+tasks naming each other as a cycle. The relation is not lost: the waiting task
+names its blocker. This narrows `has_dependencies` from #350's "depends on, is
+blocked by, or blocks": a task others wait for is now `false`. It is Inbox's
+field, so the change is called out in the PR.
+
+Each task names the work it depends on or is blocked by, in the content's own words
+("the DB upgrade"), so that #834's resolver can look up the real `task_id`.
+It is defined in `system.md`, beside `has_dependencies`, because it is a field
+of every task, with the switch on or off.
+
+Three steps, in this order, and the order is the point:
+
+1. **Cleaned, in the model** (`only_usable_mentions_survive`): blanks,
+   placeholders and repeats (case-blind) are dropped, non-strings and phrases
+   longer than a title (200) are dropped and logged, at most
+   `MAX_MENTIONS_PER_TASK` (10) are kept, and a bare string becomes a
+   one-item list. One empty mention used to stall #834's listener; none
+   leaves here.
+2. **Grounded, against the content** (`grounding.ground_dependency_mentions`):
+   a mention stays only if every one of its content words is in the text the
+   model was sent, except that one may be missing from a mention of three
+   words or more (`MIN_WORDS_TO_MISS_ONE`). Not a share: in a long meeting
+   "review" or "budget" is said somewhere, and half of a two-word mention
+   would ground almost anything. "the security review" in a text that never
+   says "security" is dropped. Closeness is not checked: the two words may
+   be far apart. A mention equal to another task's title in the same answer
+   is grounded by that task — the prompt asks for exactly that, and a title
+   is the model's own summary, whose words need not all have been said.
+3. **The rule:** a non-empty list after grounding means `has_dependencies` is
+   true. A `false` beside a grounded mention is corrected and logged, not
+   repaired: the mention is the evidence, the `false` the slip. `true` with an
+   empty list is allowed — the content may show other work without naming it.
+
+The rule lives at grounding, not in the model, because the model never sees
+the content: applied there, an invented mention had already turned a `false`
+into a `true` before anything could tell it was invented, and
+`has_dependencies` is a contract field. So the guarantee holds on
+`ExtractionSuccess`, what `extract` returns, and not on a bare
+`ExtractedFields` parsed or built anywhere else.
+
+**What a mention says.** Enough to be found: the work as the content names
+it, with whose it is or what it is for when the content says so, and, for
+another task in the same list, that task's title. More words do not make a
+mention easier to keep — each one must be in the content — so made-up
+context costs the whole mention. One gap is #834's, not this stage's: when
+the other task comes from the same text, it is created at the same moment,
+and may not be in the index yet when its mention is resolved.
+- **Not in the contract.** `TaskCreationRequested` carries only
+  `has_dependencies`. The mentions stay on `ExtractedTask.fields` and travel
+  separately, through `flow.send(..., dependency_mentions=...)` in #359.
+- **`repair_user.md` names no keys.** It refers to "the keys the instructions
+  list". Naming fields there once dropped three of them from every repaired
+  answer (#587), so a new field is never added to it.
+
+### Known gaps, left for follow-ups
+
+- **Long content is truncated, meetings far later.** `MAX_CONTENT_CHARS`
+  (8000) still cuts every other source, where the tail is mostly quoted
+  history. A meeting gets `MAX_MEETING_CONTENT_CHARS` (60,000), because its
+  action items cluster in the closing recap: on AMI, cut at 8000 the two
+  meetings found 0/4 and 0/8 gold items, sent whole 4/4 and 4/8. Any cut is
+  logged as a warning with how much was not sent, and grounding reads only
+  the text that was sent. A repair round shows the model its own rejected
+  answer under the same cap, so a long list of tasks is not cut either.
+- **AMI was measured by hand, once.** The transcripts (from #784's loader)
+  are not in the repository, as the corpus is gitignored; the run and its
+  numbers are in the PR. A repeatable AMI eval belongs to R1's extraction
+  eval (#178), which can now read `ExtractionSuccess.tasks`.
+- **Urgency has no reference date.** `source_timestamp` is not in the prompt,
+  so "by Friday" cannot be placed in time.
+- **An email body and its attachment are extracted separately**, and never
+  seen together.
+- **With classification switched off the model sees no examples at all**,
+  including the multi-task and dependency ones. The switch defaults to on.

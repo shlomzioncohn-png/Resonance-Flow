@@ -36,6 +36,16 @@ public class PostgresTaskDependencyRepository implements TaskDependencyRepositor
                 .toList();
     }
 
+    @Override
+    public List<TaskDependency> findByTaskIds(List<UUID> taskIds) {
+        if (taskIds == null || taskIds.isEmpty()) {
+            return List.of();
+        }
+
+        return jpaRepository.findByIdTaskIdIn(taskIds).stream()
+                .map(PostgresTaskDependencyRepository::toDto)
+                .toList();
+    }
     /**
      * Issue #445: upserts {@code confidence} even when the edge already exists (Mind's republish
      * semantics - see {@link SpringDataTaskDependencyJpaRepository#upsert}'s Javadoc), so this is

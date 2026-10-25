@@ -82,16 +82,6 @@ Build and base64-encode a .dockerconfigjson value from imagePullSecret.* values
 {{- end }}
 
 {{/*
-Resolve one dependency entry's host: an explicit `host` wins (an external
-Postgres/Kafka/whatever, not one of our own subcharts); else, if the name
-matches one of our own components.*, it's that component's own Service,
-<fullname>-<name> (same pattern service.yaml uses) - not the Bitnami
-subchart pattern below, which would silently 404/DNS-fail (verified live:
-wait-for-schema-registry hung forever against "inbox-schema-registry",
-which is nothing - the real Service is "inbox-resonance-flow-schema-registry").
-Otherwise it's a Bitnami subchart's Service, <release-name>-<name>.
-*/}}
-{{/*
 Resolve a logical dependency name to the concrete provider name.
 */}}
 {{- define "resonance-flow.dependencyProviderName" -}}
@@ -101,6 +91,17 @@ Resolve a logical dependency name to the concrete provider name.
 {{- .name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Resolve one dependency entry's host: an explicit `host` wins (an external
+Postgres/Kafka/whatever, not one of our own subcharts); else, if the name
+matches one of our own components.*, it's that component's own Service,
+<fullname>-<name> (same pattern service.yaml uses) - not the Bitnami
+subchart pattern below, which would silently 404/DNS-fail (verified live:
+wait-for-schema-registry hung forever against "inbox-schema-registry",
+which is nothing - the real Service is "inbox-resonance-flow-schema-registry").
+Otherwise it's a Bitnami subchart's Service, <release-name>-<name>.
+*/}}
 {{- define "resonance-flow.dependencyHost" -}}
 {{- $dependencyName := include "resonance-flow.dependencyProviderName" (dict "root" .root "name" .dep.name) }}
 {{- if .dep.host }}
@@ -125,6 +126,14 @@ re-derive it separately from the wait-for-<dep> initContainer.
 {{- end }}
 {{- end }}
 {{- $addr }}
+{{- end }}
+
+{{/*
+Schema Registry URL from a dependencies list: Apicurio's Confluent-compatible API,
+which the Confluent serdes expect. Takes {root, deps}.
+*/}}
+{{- define "resonance-flow.schemaRegistryUrl" -}}
+{{- printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" .root "deps" .deps "name" "schema-registry")) }}
 {{- end }}
 
 {{/*
@@ -229,17 +238,12 @@ code being deployed instead of drifting from a hand-run or CI-only step.
   {{- end }}
 {{- end }}
 {{/*
-Kafka SASL client JAAS config string, derived from kafka.sasl.client.users
-and kafka.sasl.client.passwords - the same values that seed the Kafka subchart's own
-auto-generated Secret (see charts/kafka/templates/secrets.yaml). Every component that
-talks to Kafka should render its credentials through this instead of duplicating the
-username/password as its own constant (the same kind of copy once let inbox's Postgres
-password drift from postgresql.auth.postgresPassword). Takes the root context ($),
-not a scoped one, since kafka.sasl.client.* lives at the top level of Values.
+Kafka SASL client JAAS config string. Takes the root context ($) and an
+optional .password (default "${client-passwords}").
 */}}
 {{- define "resonance-flow.kafkaSaslJaasConfig" -}}
 {{- $root := .root -}}
-{{- $password := .password | default (first $root.Values.kafka.sasl.client.passwords) -}}
+{{- $password := .password | default "${client-passwords}" -}}
 {{- printf "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";" (first $root.Values.kafka.sasl.client.users) $password }}
 {{- end }}
 {{/*

@@ -2,26 +2,36 @@
 tested against a real store in test_related_tasks.py; this covers only
 the HTTP wiring, with a mocked store so the real lifespan never runs."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
 
 from mind.api.main import app
-from mind.api.v1.router import get_vector_store
+from mind.api.v1.router import get_vector_index
 from mind.embeddings.base import SearchResult
 
 client = TestClient(app)
 
+TENANT = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+
 
 @pytest.fixture
-def mock_store():
+def mock_index():
     """Depends()-based override, not app.state mutation -- app is a
     shared module-level object other test files also import."""
-    store = AsyncMock()
-    app.dependency_overrides[get_vector_store] = lambda: store
-    yield store
-    app.dependency_overrides.pop(get_vector_store, None)
+    index = MagicMock()
+    index.tenant_of = AsyncMock(return_value=TENANT)
+    index.for_tenant.return_value = AsyncMock()
+    app.dependency_overrides[get_vector_index] = lambda: index
+    yield index
+    app.dependency_overrides.pop(get_vector_index, None)
+
+
+@pytest.fixture
+def mock_store(mock_index):
+    return mock_index.for_tenant.return_value
 
 
 def test_returns_200_with_the_expected_shape(mock_store):
@@ -69,3 +79,23 @@ def test_an_unhandled_store_error_returns_the_standard_error_format(mock_store):
     body = response.json()
     assert body["error_code"] == "internal_error"
     assert "db down" not in body["message"]
+
+
+def test_searches_only_inside_the_tenant_of_the_task(mock_index, mock_store):
+    """#841: the tenant comes from the task's own row, not from the caller."""
+    mock_store.get_vector.return_value = None
+
+    client.get("/v1/tasks/task-1/related")
+
+    mock_index.tenant_of.assert_awaited_once_with("task-1")
+    mock_index.for_tenant.assert_called_once_with(TENANT)
+
+
+def test_returns_an_empty_list_for_a_task_with_no_tenant(mock_index):
+    mock_index.tenant_of.return_value = None
+
+    response = client.get("/v1/tasks/task-old/related")
+
+    assert response.status_code == 200
+    assert response.json() == {"related": []}
+    mock_index.for_tenant.assert_not_called()

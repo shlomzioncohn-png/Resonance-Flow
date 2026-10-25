@@ -10,6 +10,7 @@ import json
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 DEMO_DIR = Path(__file__).resolve().parent
 SCENARIO_DIR = DEMO_DIR / "scenario"
@@ -30,6 +31,11 @@ MEETING_AUDIO = ARTIFACTS_DIR / "meeting.m4a"
 FORM_IMAGE = ARTIFACTS_DIR / "supplier_form.jpg"
 
 SCENARIO_MONDAY = date(2026, 10, 5)
+
+# Default tenant for events (overridable via --tenant-id or DEMO_TENANT_ID).
+# Uses Inbox's built-in "System" tenant (migration V15) to satisfy Mind's
+# UUID requirement and Inbox's foreign key constraints.
+DEFAULT_TENANT_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
 def _at(hour: int, minute: int) -> datetime:

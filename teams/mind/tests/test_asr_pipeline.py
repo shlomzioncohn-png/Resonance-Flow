@@ -1022,3 +1022,43 @@ def test_without_a_declared_length_the_buffer_grows_and_keeps_every_sample(
     grown = asr._decode(content, 600).audio  # starts at 1 s and doubles past it
     assert len(grown) == len(expected)
     assert np.array_equal(grown, expected)
+
+
+# --- ASR settings come from config.yaml (#481 review) ----------------------
+
+
+def test_asr_settings_are_read_once_per_process():
+    from mind.config import get_asr_settings
+
+    assert get_asr_settings() is get_asr_settings()
+
+
+def test_missing_config_is_asr_unavailable_not_internal_error(monkeypatch: pytest.MonkeyPatch):
+    """A config problem is the host's, not a bug in this module: retryable."""
+    monkeypatch.delenv("CONFIG_FILE_PATH", raising=False)
+
+    result = transcribe(tone(1.0))
+
+    assert (result.success, result.reason) == (False, ASRFailureReason.ASR_UNAVAILABLE)
+    assert result.failure_category == FailureCategory.ENVIRONMENT
+    assert result.retryable is True
+    assert "CONFIG_FILE_PATH" in (result.error or "")
+
+
+def test_a_fixed_config_is_picked_up_without_a_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A failed read isn't cached: once config.yaml is there, ASR uses it."""
+    monkeypatch.delenv("CONFIG_FILE_PATH", raising=False)
+    assert transcribe(tone(1.0)).reason == ASRFailureReason.ASR_UNAVAILABLE
+
+    (tmp_path / "config.yaml").write_text("asr:\n  whisper_model: base.en\n", encoding="utf-8")
+    monkeypatch.setenv("CONFIG_FILE_PATH", str(tmp_path / "config.yaml"))
+
+    assert asr._model_name() == "whisper-base.en-int8-local"
+
+
+def test_warm_up_without_config_reports_not_ready(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("CONFIG_FILE_PATH", raising=False)
+
+    assert asr.warm_up() is False

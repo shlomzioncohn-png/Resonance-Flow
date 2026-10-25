@@ -13,6 +13,7 @@ import { useDependencyGraph } from '@/hooks/useDependencyGraph';
 import { getErrorMessage } from '@/services/api';
 import { getProjects } from '@/services/projectsApi';
 import { projectKeys } from '@/services/queryKeys';
+import { MANAGER_TREND_REFRESH_MS } from '@/constants';
 import TaskDependenciesDrawer from './TaskDependenciesDrawer';
 
 const ALL_PROJECTS = 'all';
@@ -29,7 +30,13 @@ export default function BottlenecksView() {
 
   const graphQuery = useDependencyGraph(projectId);
   // Only feeds the filter's options: if it fails, the filter just offers "All projects".
-  const projectsQuery = useQuery({ queryKey: projectKeys.all, queryFn: getProjects });
+  // Uses TREND refresh interval because project list changes less frequently than task graphs.
+  const projectsQuery = useQuery({
+    queryKey: projectKeys.trend(),
+    queryFn: getProjects,
+    refetchInterval: MANAGER_TREND_REFRESH_MS,
+    refetchIntervalInBackground: true,
+  });
 
   const projectOptions = [
     { label: 'All projects', value: ALL_PROJECTS },
