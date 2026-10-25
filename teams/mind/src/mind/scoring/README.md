@@ -295,11 +295,19 @@ further network calls per ancestor; each one's own value is a local
 re-score of its already-cached state), plus one more (`get_direct_children`)
 on a genuine change, cascading. Both go through one client, one short timeout,
 no retry (a retry here would only make a slow Chain slower; the fallback
-already handles it). **Not yet measured against a live Chain** — there is
-none in this dev environment to measure against — so this is flagged, not
-reported: measure `score()`'s wall-clock time with a real `ChainHierarchyClient`
-once this runs where Chain is reachable, and report it against the
-under-300ms p95 commitment before relying on this model in production. The
+already handles it). **Still not measured against a live Chain** — there is
+none in this dev environment to reach, and that is the number that matters
+for the under-300ms p95 commitment. What *was* measured, with
+`benchmarks/hierarchy_propagation_latency.py`: both calls run through the
+real `ChainHierarchyClient` against an `httpx.MockTransport` serving #473's
+seven constructed graphs — no socket, no real Chain. Mean 0.13ms, p95
+0.27ms, max 0.39ms per call, 64 calls total. That number is this code
+path's *own* overhead (request construction, parsing a fake response) and
+shows Mind's side is not the bottleneck; it says nothing about real network
+round-trip time to Chain, which is the actual open question and which this
+cannot measure. Re-run `score()`'s wall-clock time with a real
+`ChainHierarchyClient` once this is deployed where Chain is reachable, and
+report that — not this — against the commitment. The
 harness path (`FixtureAncestorSource`) makes no network call at all — an
 in-memory walk of a graph with at most a few dozen nodes — so the
 `hierarchical` model's own harness run time is not informative about the

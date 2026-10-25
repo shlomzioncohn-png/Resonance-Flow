@@ -114,6 +114,12 @@ class ChainAncestorSource:
         for ancestor_id in self._client.get_ancestors(task.task_id):
             ancestor_task = self._cached_task(ancestor_id)
             if ancestor_task is None:
+                logger.warning(
+                    "scoring: ancestor %s of task %s is unknown since start-up, "
+                    "excluding it from the mean",
+                    ancestor_id,
+                    task.task_id,
+                )
                 continue
             try:
                 result = self._baseline.score(ancestor_task, context)
