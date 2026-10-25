@@ -19,7 +19,7 @@ import static org.mockito.Mockito.when;
 
 class TaskOwnershipServiceTest {
 
-    private static final UUID TASK_ID = UUID.fromString("33333333-3333-3333-3333-333333333333");
+    private static final UUID TASK_ID = TaskFixtures.DEFAULT_TASK_ID;
 
     private final TaskRepository taskRepository = mock(TaskRepository.class);
     private final TaskOwnershipService service = new TaskOwnershipService(taskRepository);

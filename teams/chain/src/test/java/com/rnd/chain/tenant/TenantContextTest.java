@@ -1,6 +1,7 @@
 package com.rnd.chain.tenant;
 
 import com.rnd.chain.exception.InvalidRequestException;
+import com.rnd.chain.testsupport.TaskFixtures;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -13,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class TenantContextTest {
 
-    private static final UUID TENANT = UUID.fromString("11111111-1111-1111-1111-111111111111");
+    private static final UUID TENANT = TaskFixtures.DEFAULT_TENANT_ID;
 
     private static TenantContext contextWithHeader(String value) {
         MockHttpServletRequest request = new MockHttpServletRequest();

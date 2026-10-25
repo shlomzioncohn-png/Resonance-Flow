@@ -14,6 +14,7 @@ import com.rnd.chain.service.TaskDependencyService;
 import com.rnd.chain.service.TaskTraversalService;
 import com.rnd.chain.tenant.TaskOwnershipService;
 import com.rnd.chain.tenant.TenantContext;
+import com.rnd.chain.testsupport.TaskFixtures;
 import com.rnd.chain.exception.GlobalExceptionHandler;
 import org.springframework.context.annotation.Import;
 
@@ -39,11 +40,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Import(GlobalExceptionHandler.class)
 class ChainControllerTest {
 
-    private static final UUID TASK_ID =
-            UUID.fromString("11111111-1111-1111-1111-111111111111");
-
-    private static final UUID OTHER_TASK_ID =
-            UUID.fromString("11111111-1111-1111-1111-111111111112");
+    private static final UUID TASK_ID = TaskFixtures.DEFAULT_TASK_ID;
+    private static final UUID OTHER_TASK_ID = TaskFixtures.OTHER_TASK_ID;
 
     @Autowired
     private MockMvc mockMvc;

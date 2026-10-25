@@ -9,6 +9,7 @@ import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.service.TaskStateHistoryService;
 import com.rnd.chain.tenant.TaskOwnershipService;
 import com.rnd.chain.tenant.TenantContext;
+import com.rnd.chain.testsupport.TaskFixtures;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -33,7 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ContextConfiguration(classes = {TaskStateHistoryController.class, GlobalExceptionHandler.class})
 class TaskStateHistoryControllerTest {
 
-    private static final UUID TASK_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
+    private static final UUID TASK_ID = TaskFixtures.DEFAULT_TASK_ID;
     private static final Instant T1 = Instant.parse("2026-10-01T10:00:00Z");
 
     @Autowired
