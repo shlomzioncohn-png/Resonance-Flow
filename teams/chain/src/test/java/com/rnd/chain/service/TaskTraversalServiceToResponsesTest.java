@@ -48,7 +48,7 @@ class TaskTraversalServiceToResponsesTest {
     }
 
     private static TaskReadinessSnapshot snapshot(UUID id, int blocking, int openConstraints) {
-        return new TaskReadinessSnapshot(id, blocking, openConstraints);
+        return new TaskReadinessSnapshot(id, UUID.randomUUID(), blocking, openConstraints);
     }
 
     @Test
