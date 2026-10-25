@@ -235,9 +235,6 @@ components:
             - "configtree:/etc/resonance-flow/secrets/kafka/"
             - "configtree:/etc/resonance-flow/secrets/bridge-db/"
         kafka:
-          # GitHub currently publishes to bridge.github.tasks.
-          # Issue #275 will decide whether to use the shared topic instead.
-          topic: "bridge.github.tasks"
           properties:
             security.protocol: "SASL_PLAINTEXT"
             sasl.mechanism: "PLAIN"

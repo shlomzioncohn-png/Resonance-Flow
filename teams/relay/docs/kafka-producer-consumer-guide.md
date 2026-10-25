@@ -44,7 +44,7 @@ There is no single shared schema. This system already has several, each with its
 
 - `task.created` — Inbox
 - `bridge.raw.landed` — Bridge (unstructured intake)
-- `bridge.github.tasks` — Bridge (GitHub)
+- `bridge.structured.tasks` — Bridge (every structured source: GitHub, Jira, CRM)
 
 Every event type your service publishes gets **its own** Kafka topic and **its own** `.proto`
 schema file — never reuse someone else's topic or schema, and never route two different event
