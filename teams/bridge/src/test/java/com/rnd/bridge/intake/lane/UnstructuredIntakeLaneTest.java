@@ -2,6 +2,7 @@ package com.rnd.bridge.intake.lane;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -174,6 +175,109 @@ class UnstructuredIntakeLaneTest {
         assertThat(result.rejected()).isEqualTo(1);
         assertThat(result.errors()).hasSize(1);
         assertThat(result.errors().get(0)).isInstanceOf(LaneException.class);
+    }
+
+    /**
+     * The fix: a threaded Slack attachment used to never get recordLandedAttachment called for
+     * it at all (only SlackEventsController.landAttachments did, and only for the non-thread
+     * path) - afterPublish now does it for every attachment record in the group, using the
+     * exact ref payload.objects() carries for that record (positionally aligned with group -
+     * see afterMap), never a recomputed one.
+     */
+    @Test
+    void afterPublishRecordsEachAttachmentInTheGroupUnderItsExactLandedRef() {
+        SourceRecord transcript = new SourceRecord(
+                RawSourceType.SLACK, "kamatech", "chat-a|2026-08-18T09:00:00Z", "corr-2",
+                Instant.parse("2026-08-18T09:00:00Z"), "ruth", List.of("ruth"), null, "ruth: hi",
+                "ruth: hi".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of("m1"), 0, "g1");
+        SourceRecord attachment = new SourceRecord(
+                RawSourceType.SLACK, "kamatech", "chat-a|2026-08-18T09:00:00Z|attachment-1", "corr-2",
+                Instant.parse("2026-08-18T09:00:00Z"), "ruth", List.of("ruth"), null, null,
+                "fake-bytes".getBytes(StandardCharsets.UTF_8), "text/plain", "note.txt", "F1", 1, 1, List.of("m1"), 0,
+                "g1");
+        RawObjectRef attachmentRef = new RawObjectRef(
+                Role.ATTACHMENT, "SLACK/kamatech/2026-08-18/note.txt", "sha256:" + "3".repeat(64), "text/plain", 10L,
+                Modality.TEXT);
+        RawObjectEvent event = RawObjectEvent.create(
+                RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:00:00Z"), ScopeDecision.INCLUDED,
+                List.of("ruth"), Instant.parse("2026-08-18T09:00:00Z"), "corr-2", 0, ChangeType.UPSERT,
+                List.of(SLACK_EVENT.objects().get(0), attachmentRef));
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(transcript, attachment)));
+        when(payloadMapper.map(any(), any())).thenReturn(event);
+
+        IntakeResult result = slackLane.run(ReadCursor.full(), Instant.now());
+
+        verify(groupStateStore).recordLandedAttachment(RawSourceType.SLACK, "kamatech", "g1", "m1", "F1", attachmentRef);
+        assertThat(result).isEqualTo(new IntakeResult(1, 1, 0, List.of()));
+    }
+
+    /**
+     * A carried-forward attachment (precomputedRef != null - already landed and recorded under
+     * a different group before this record was built, see SourceRecord's javadoc) must never be
+     * re-recorded here: it already has its own entry from whichever group originally landed it.
+     */
+    @Test
+    void afterPublishNeverRecordsAnAttachmentThatWasAlreadyLandedUnderPrecomputedRef() {
+        SourceRecord transcript = new SourceRecord(
+                RawSourceType.SLACK, "kamatech", "chat-a|2026-08-18T09:00:00Z", "corr-2",
+                Instant.parse("2026-08-18T09:00:00Z"), "ruth", List.of("ruth"), null, "ruth: hi",
+                "ruth: hi".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of("m1"), 0, "g1");
+        RawObjectRef carriedForwardRef = new RawObjectRef(
+                Role.ATTACHMENT, "SLACK/kamatech/2026-08-17/old.txt", "sha256:" + "4".repeat(64), "text/plain", 3L,
+                Modality.TEXT);
+        SourceRecord carriedForwardAttachment = new SourceRecord(
+                RawSourceType.SLACK, "kamatech", "chat-a|2026-08-18T09:00:00Z|attachment-1", "corr-2",
+                Instant.parse("2026-08-18T09:00:00Z"), "ruth", List.of("ruth"), null, null,
+                new byte[0], "F0", 1, 1, List.of("m0"), 0, "g1", carriedForwardRef);
+        RawObjectEvent event = RawObjectEvent.create(
+                RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:00:00Z"), ScopeDecision.INCLUDED,
+                List.of("ruth"), Instant.parse("2026-08-18T09:00:00Z"), "corr-2", 0, ChangeType.UPSERT,
+                List.of(SLACK_EVENT.objects().get(0), carriedForwardRef));
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(transcript, carriedForwardAttachment)));
+        when(payloadMapper.map(any(), any())).thenReturn(event);
+
+        slackLane.run(ReadCursor.full(), Instant.now());
+
+        verify(groupStateStore, never()).recordLandedAttachment(any(), any(), any(), any(), any(), any());
+    }
+
+    /**
+     * If Kafka publish itself fails, afterPublish never runs at all (see AbstractIntakeLane.run())
+     * - recordLandedAttachment must never fire for content that was never actually confirmed
+     * published, so a Slack retry that later succeeds is the only thing that ever records it.
+     */
+    @Test
+    void afterPublishAttachmentRecordingNeverRunsWhenKafkaPublishFails() {
+        SourceRecord transcript = new SourceRecord(
+                RawSourceType.SLACK, "kamatech", "chat-a|2026-08-18T09:00:00Z", "corr-2",
+                Instant.parse("2026-08-18T09:00:00Z"), "ruth", List.of("ruth"), null, "ruth: hi",
+                "ruth: hi".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of("m1"), 0, "g1");
+        SourceRecord attachment = new SourceRecord(
+                RawSourceType.SLACK, "kamatech", "chat-a|2026-08-18T09:00:00Z|attachment-1", "corr-2",
+                Instant.parse("2026-08-18T09:00:00Z"), "ruth", List.of("ruth"), null, null,
+                "fake-bytes".getBytes(StandardCharsets.UTF_8), "text/plain", "note.txt", "F1", 1, 1, List.of("m1"), 0,
+                "g1");
+        RawObjectRef attachmentRef = new RawObjectRef(
+                Role.ATTACHMENT, "SLACK/kamatech/2026-08-18/note.txt", "sha256:" + "3".repeat(64), "text/plain", 10L,
+                Modality.TEXT);
+        RawObjectEvent event = RawObjectEvent.create(
+                RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:00:00Z"), ScopeDecision.INCLUDED,
+                List.of("ruth"), Instant.parse("2026-08-18T09:00:00Z"), "corr-2", 0, ChangeType.UPSERT,
+                List.of(SLACK_EVENT.objects().get(0), attachmentRef));
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(transcript, attachment)));
+        when(payloadMapper.map(any(), any())).thenReturn(event);
+        doThrow(new RuntimeException("Kafka down")).when(payloadPublisher).publish(event);
+
+        // A plain RuntimeException out of publish() isn't a LaneException, so run() doesn't
+        // catch it as rejected - it propagates (see AbstractIntakeLane's own class javadoc) -
+        // the real-time caller (SlackEventsController.publishGroups) is what turns this into a
+        // non-2xx for Slack to retry. Either way, afterPublish is never reached.
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> slackLane.run(ReadCursor.full(), Instant.now()))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("Kafka down");
+
+        verify(groupStateStore, never()).recordLandedAttachment(any(), any(), any(), any(), any(), any());
+        verify(groupStateStore, never()).confirmPublished(any(), any(), any(), anyInt());
     }
 
     @Test
