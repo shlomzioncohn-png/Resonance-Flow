@@ -14,6 +14,7 @@
 > - **`TODO(Ayala)`** — does she expose a reusable `similarity(a,b)->float` over
 >   her embeddings? If not within a few days, the lexical baseline (§4.2, fully
 >   specified) ships instead. Either way the harness is unblocked.
+>   **2026-10-25:** the lexical baseline is built (`similarity.py`, §4.2).
 >
 > Settled with Yonit (2026-10-14, #233): `title` + `description` is the
 > comparison text, and the meeting id travels as the extractor's `item_key`, not
@@ -222,6 +223,16 @@ model? score range? version-pinned (so eval numbers reproduce)? *(question sent)
 - **Do not build it until Ayala answers** (issue step 8: "ask her first — do
   not assume either way"). The design here is so it can be built in an hour once
   she does.
+- **Built 2026-10-25 (#178)** as `similarity.lexical_similarity` +
+  `LEXICAL_THRESHOLD`, under issue step 8: as of that date `mind.embeddings`
+  exposes `embed` / `embed_batch` but no reusable `similarity(a, b)`. Questions
+  on an embedding backend were sent to Ayala the same week; they do not block
+  this baseline. Two details beyond the lines above: `processor=default_process`
+  (lowercase, punctuation to spaces — `_normalize` deliberately leaves internal
+  punctuation to the backend), and no stemming yet (Finding 1 in §5.5 asks for
+  it; whether τ = 0.60 needs it is checked on the §5 pairs before any real
+  run). `rapidfuzz` is in the `dev` extra, not a separate `eval` group, because
+  CI installs `.[dev]` only.
 
 ### 4.3 Swap plan
 
@@ -370,6 +381,35 @@ If the §5 numbers redone with code (an Open TODO) contradict this, `τ` is
 re-derived **from those pairs**, still before any harness run, and the reasoning
 here is rewritten.
 
+**Redone with code, 2026-10-25 (#178) — `τ = 0.60` kept, reasoning point 2
+corrected.** Before any real extraction went through the eval, every gold ×
+extracted pair of §5.1 (IS1008b) and §5.3 (ES2002a) was scored with
+`similarity.lexical_similarity` (29 pairs: 7 the same task, 22 not, labels as
+written in §5):
+
+- **Point 2 was wrong.** Different-task pairs from the same meeting do not sit at
+  ~0.33–0.40; with `token_set_ratio` they reach **0.72** (ES2002a G1–E2), and 8
+  of the 22 score ≥ 0.60. The meetings repeat the same words ("designer",
+  "present", "concept", "work on … the remote"), and `token_set_ratio` credits
+  them. The hand numbers were Jaccard and approximate.
+- Same-task pairs score **0.69** and up (lowest ES2002a G3–E3; the paraphrase
+  G4–E4 scores 0.87). So no single `τ` separates the two groups pair by pair:
+  0.70 drops G3–E3 and still lets G1–E2 through.
+- **Why 0.60 holds anyway:** the eval matches one-to-one, highest score first,
+  and in both meetings each true pair outscores every wrong pair that shares a
+  side with it. At 0.60 the matching returns exactly the hand-labelled pairs —
+  also in each of the 7 runs with one true extracted item removed (0 wrong
+  matches, 0 true pairs lost). Pinned in `tests/test_similarity_threshold.py`.
+- **Stemming (Finding 1) is not needed** on these pairs: every same-task pair
+  already clears 0.60 without it.
+- **Remaining risk:** a wrong match needs the true partner to be missing *and* an
+  unmatched extracted item that happens to score ≥ 0.60 against the orphaned
+  gold sentence — most likely in a meeting with repeated wording. The real run
+  therefore reviews every matched pair scoring **0.60–0.75** by hand (#178 step
+  4).
+- **Caveat:** 29 pairs, 7 positive, and the extracted side is invented. This
+  shows 0.60 is reasonable; the hand review on real output is the real test.
+
 ### Embedding backend — `τ = TODO(Ayala)`, method LOCKED
 
 Cannot be a number yet (depends on her model). The **method** is fixed: take
@@ -481,8 +521,11 @@ of the text it came from, and the eval groups by it. Content past
 
 ### Still open
 
-- **Who loads AMI transcripts:** `src/mind/ingestion/` has no AMI loader; #348
-  covers FUNSD only. Needed before #178 can run.
+- ~~**Who loads AMI transcripts**~~ — resolved by #784:
+  `src/mind/ingestion/ami_transcripts.py` loads AMI's human transcripts as
+  speaker turns. They are the manual transcripts, not ASR output, while #178
+  step 1 asks for meetings "that went through ayala's ASR" — which of the two
+  the real run uses is still to be decided.
 
 ---
 
@@ -548,8 +591,8 @@ owner-match diagnostic are still to build on top of it.
       the eval (§"Meeting IDs", revised 2026-10-12, #233 / PR #338).
 - [x] `TODO(Yonit)` — confirm `title` + `description` (§3.3) is the right
       comparison text. Confirmed 2026-10-14 (#233 step 4).
-- [ ] An AMI transcript loader — `src/mind/ingestion/` has none, and #348 is
-      FUNSD only. Owner to be decided; blocks #178.
+- [x] An AMI transcript loader — `ingestion/ami_transcripts.py` (#784), human
+      transcripts. Open: human transcript or ASR output for the #178 run.
 - [x] #690 — extraction returns a list of tasks per text; per-meeting recall is
       no longer capped at `1/n`. Long meetings can still be truncated.
 

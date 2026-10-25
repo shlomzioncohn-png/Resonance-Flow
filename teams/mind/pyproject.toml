@@ -74,6 +74,10 @@ dev = [
     # demo_flow/feed.py lands the #359 demo artifacts in MinIO the way Bridge
     # does (Bridge uses the Java io.minio client; this is its Python twin).
     "minio>=7.2,<8",
+    # The extraction eval's lexical similarity (src/mind/evaluation/similarity.py).
+    # Here, not in a runtime dependency: the service never scores extractions,
+    # and CI installs `.[dev]`, so the eval's tests can import it.
+    "rapidfuzz>=3,<4",
 ]
 # Not a runtime dependency of src/mind/ -- only benchmarks/ocr_asr_benchmark.py
 # needs these (psutil for peak-RSS sampling, PaddleOCR as the comparison
