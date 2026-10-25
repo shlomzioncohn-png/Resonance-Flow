@@ -105,14 +105,19 @@ services:
       - POSTGRES_USER=${DB_USER:-postgres}
       - POSTGRES_PASSWORD=${DB_PASSWORD:-postgres}
       - CHAIN_DB_PASSWORD=${CHAIN_DB_PASSWORD:-chain}
+      - INBOX_DB_PASSWORD=${INBOX_DB_PASSWORD:-inbox}
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - resonance-postgres-data:/var/lib/postgresql/data
       # Own database + own DB user for chain, on first init only - see PR #417.
       - ./shared/database/init/create-chain-database.sh:/docker-entrypoint-initdb.d/create-chain-database.sh:ro
+      # Same for inbox - see issue #869.
+      - ./shared/database/init/create-inbox-database.sh:/docker-entrypoint-initdb.d/create-inbox-database.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-resonance_flow}"]
+      # Over TCP: the init-scripts server listens only on the socket, so chain/inbox don't
+      # start before their databases exist.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${DB_USER:-postgres} -d ${DB_NAME:-resonance_flow}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -134,7 +139,11 @@ services:
         condition: service_healthy
 
   chain:
-    build: ./teams/chain
+    build:
+      context: ./teams/chain
+      # The Dockerfile copies shared/proto from here.
+      additional_contexts:
+        shared: ./shared
     container_name: chain-service
     ports:
       - "${CHAIN_SERVER_PORT:-8081}:8081"
@@ -151,7 +160,11 @@ services:
         condition: service_healthy
 
   bridge:
-    build: ./teams/bridge
+    build:
+      context: ./teams/bridge
+      # The Dockerfile copies shared/proto from here.
+      additional_contexts:
+        shared: ./shared
     container_name: bridge-service
     ports:
       - "${BRIDGE_SERVER_PORT:-8080}:8080"
@@ -161,8 +174,8 @@ services:
       # bridge.postgres.* (application.yml) has no default - control-plane state
       # (GroupStateStore/CursorStore/CalendarEventStateStore) now lives here instead of MinIO,
       # on the same shared Postgres as chain/inbox. "postgres" is the in-network service name,
-      # not localhost - matches DB_USER/DB_PASSWORD already used by the postgres/inbox blocks
-      # above so one .env controls all three.
+      # not localhost - matches DB_USER/DB_PASSWORD already used by the postgres block above
+      # so one .env controls both.
       - BRIDGE_DB_URL=jdbc:postgresql://postgres:5432/${DB_NAME:-resonance_flow}
       - BRIDGE_DB_USER=${DB_USER:-postgres}
       - BRIDGE_DB_PASSWORD=${DB_PASSWORD:-postgres}
@@ -171,7 +184,11 @@ services:
         condition: service_healthy
 
   inbox:
-    build: ./teams/inbox
+    build:
+      context: ./teams/inbox
+      # The Dockerfile copies shared/proto from here.
+      additional_contexts:
+        shared: ./shared
     container_name: inbox-service
     ports:
       - "${INBOX_SERVER_PORT:-8082}:8080"
@@ -180,9 +197,9 @@ services:
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
       - DB_HOST=postgres
       - DB_PORT=5432
-      - DB_NAME=${DB_NAME:-resonance_flow}
-      - DB_USER=${DB_USER:-postgres}
-      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_NAME=inbox
+      - DB_USER=inbox
+      - DB_PASSWORD=${INBOX_DB_PASSWORD:-inbox}
     depends_on:
       postgres:
         condition: service_healthy
