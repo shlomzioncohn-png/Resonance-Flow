@@ -15,7 +15,7 @@ import DataTable, { type Column } from '@/components/ui/DataTable';
 import WorkInsights from '@/components/ui/WorkInsights';
 import { getErrorMessage } from '@/services/api';
 import { listTasks, type ApiTask, type TaskListFilter } from '@/services/workspaceApi';
-import { PriorityChip, softToneSx, statusTone } from '../shared';
+import { displayValue, PriorityChip, softToneSx, statusTone, urgencyLabel } from '../shared';
 
 type LoadState = 'loading' | 'loaded' | 'error';
 
@@ -54,6 +54,16 @@ const columns: Column<ApiTask>[] = [
     id: 'priority',
     header: 'Priority',
     render: (task) => <PriorityChip priority={task.priority} />,
+  },
+  {
+    id: 'tier',
+    header: 'Tier',
+    render: (task) => displayValue(task.tier),
+  },
+  {
+    id: 'urgency',
+    header: 'Urgency',
+    render: (task) => urgencyLabel(task.urgency),
   },
   {
     id: 'owner',

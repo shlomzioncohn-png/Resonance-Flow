@@ -102,12 +102,14 @@ public class WorkspaceController {
 
     /**
      * Extract userId from JWT authentication.
-     * If no JWT found, returns 401 Unauthorized.
-     * 
+     * If no JWT found: the mock user in dev-mode (like the other workspace
+     * endpoints - while app.auth.enabled is off there is never a JWT here),
+     * otherwise 401 Unauthorized.
+     *
      * @return userId from JWT
-     * @throws ResponseStatusException with 401 if JWT not found
+     * @throws ResponseStatusException with 401 if JWT not found outside dev-mode
      */
-    private String getUserIdFromJwt() {
+    private String getUserIdFromJwt(String endpoint) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         
         if (auth != null && auth.getPrincipal() instanceof org.springframework.security.oauth2.jwt.Jwt) {
@@ -120,6 +122,10 @@ public class WorkspaceController {
             }
         }
         
+        if (devMode) {
+            return getMockUserId(endpoint);
+        }
+
         // No JWT found - return 401 Unauthorized
         logger.warn("No JWT token found in request");
         throw new ResponseStatusException(
@@ -293,7 +299,7 @@ public class WorkspaceController {
             @Parameter(description = "Page size (default 20, clamped to 1-100)")
             @RequestParam(required = false) Integer size) {
 
-        String userId = getUserIdFromJwt();
+        String userId = getUserIdFromJwt("workspace.tasks");
 
         logger.info("Task list request - userId: {}, filter: {}, search: {}, page: {}, size: {}",
                 userId, filter, search, page, size);

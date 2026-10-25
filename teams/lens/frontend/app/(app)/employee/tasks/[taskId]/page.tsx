@@ -19,7 +19,14 @@ import ArrowBackOutlinedIcon from '@mui/icons-material/ArrowBackOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlined';
 import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 import { radiusTokens } from '@/theme';
-import { DetailRow, PriorityChip, softToneSx, statusTone } from '../../shared';
+import {
+  DetailRow,
+  displayValue,
+  PriorityChip,
+  softToneSx,
+  statusTone,
+  urgencyLabel,
+} from '../../shared';
 import { getErrorMessage } from '@/services/api';
 import { useTaskDetails } from '@/hooks/useTaskDetails';
 
@@ -142,6 +149,12 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
                   value={task.effortEstimate != null ? `${task.effortEstimate} min` : '—'}
                 />
                 <DetailRow label="Project" value={task.project ?? '—'} />
+                <DetailRow label="Tier" value={displayValue(task.tier)} />
+                <DetailRow label="Urgency" value={urgencyLabel(task.urgency)} />
+                <DetailRow label="Source" value={displayValue(task.sourceType)} />
+                <DetailRow label="Created" value={task.createdAt ?? '—'} />
+                <DetailRow label="Last updated" value={task.updatedAt ?? '—'} />
+                {task.snoozedUntil && <DetailRow label="Snoozed until" value={task.snoozedUntil} />}
                 {(task.constraints ?? []).length > 0 && (
                   <DetailRow label="Constraints" value={(task.constraints ?? []).join(', ')} />
                 )}

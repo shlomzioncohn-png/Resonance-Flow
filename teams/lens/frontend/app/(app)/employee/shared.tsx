@@ -82,6 +82,18 @@ export function PriorityChip({ priority, bold = false }: { priority?: string; bo
   );
 }
 
+/** "strategic" -> "Strategic", "email_thread" -> "Email thread". Missing -> dash. */
+export function displayValue(value?: string): string {
+  if (!value) return '—';
+  const words = value.replace(/_/g, ' ').toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** Inbox's 1-5 urgency, e.g. "4 / 5". Missing -> dash. */
+export function urgencyLabel(urgency?: number): string {
+  return urgency != null ? `${urgency} / 5` : '—';
+}
+
 export function DetailRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <Box>

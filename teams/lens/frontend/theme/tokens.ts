@@ -38,6 +38,7 @@ export const colorTokens = {
   red: { 50: '#fef2f2', 100: '#fee2e2', 500: '#ef4444', 600: '#dc2626', 700: '#b91c1c' },
   gray: { 50: '#f8fafc', 100: '#f1f5f9', 500: '#94a3b8', 600: '#64748b', 700: '#475569' },
   violet: { 50: '#f5f3ff', 500: '#8b5cf6' },
+  cyan: { 600: '#0891b2' },
   pink: { 500: '#ec4899' },
 } as const;
 
@@ -50,6 +51,18 @@ export const aiTokens = {
 } as const;
 
 /** Semantic status meaning used across the product (see the status legend in the manager dashboard design). */
+/**
+ * One color per task state in charts, in this order (stacks and legends
+ * follow it). Checked for color-blind separation and contrast on white -
+ * change them together, not one at a time.
+ */
+export const chartTokens = {
+  inProgress: colorTokens.brand[600],
+  snoozed: colorTokens.amber[600],
+  open: colorTokens.cyan[600],
+  done: colorTokens.green[600],
+} as const;
+
 export const statusTokens = {
   healthy: {
     main: colorTokens.green[600],

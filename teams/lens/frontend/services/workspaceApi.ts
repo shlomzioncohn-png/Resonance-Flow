@@ -39,6 +39,17 @@ export interface ApiTask {
   constraints?: string[];
   /** Whether the task is available (no blockers) - computed by Chain */
   isAvailable?: boolean;
+  /** operational / tactical / strategic (lowercase, from Inbox) */
+  tier?: string;
+  /** 1 (low) - 5 (high), from Inbox */
+  urgency?: number;
+  /** Where Inbox got the task from, e.g. "email", "jira" (lowercase) */
+  sourceType?: string;
+  /** Already formatted by Inbox, Israel time, e.g. "12/10/2026 09:00" - shown as-is */
+  createdAt?: string;
+  updatedAt?: string;
+  /** When a SNOOZED task wakes up again - same format as createdAt */
+  snoozedUntil?: string;
 }
 
 // ── Recommendation response ────────────────────────────────────────────────
@@ -90,10 +101,7 @@ export interface TaskSelection {
   reason?: string;
 }
 
-/** Largest window the API accepts (Inbox's limit). */
-export const MAX_SELECTION_MINUTES = 480;
-
-/** The tasks that fit `availableMinutes` (1-480) together, picked by Inbox. */
+/** The tasks that fit `availableMinutes` (1-480, Inbox's limit) together, picked by Inbox. */
 export function selectTasks(availableMinutes: number): Promise<TaskSelection> {
   return api.get<TaskSelection>(
     `/api/workspace/tasks/selection?availableMinutes=${availableMinutes}`,
@@ -168,12 +176,3 @@ export function updateTaskStatus(
 
 /** Error code the backend returns when a status change is not allowed (e.g. moving a DONE task). */
 export const INVALID_TASK_STATUS_TRANSITION = 'INVALID_TASK_STATUS_TRANSITION';
-
-/**
- * A finished task can't move to any other status. Inbox calls it DONE, the BFF DTO
- * documents COMPLETED — accept both until the name is settled.
- */
-export function isFinalStatus(status: string): boolean {
-  const normalised = status.toUpperCase();
-  return normalised === 'DONE' || normalised === 'COMPLETED';
-}

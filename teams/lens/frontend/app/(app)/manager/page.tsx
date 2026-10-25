@@ -10,7 +10,10 @@ import PageContainer from '@/components/layout/PageContainer';
 import DependencyGraph from '@/components/ui/DependencyGraph';
 import { useDependencyGraph } from '@/hooks/useDependencyGraph';
 import { useManagerKpis } from '@/hooks/useManagerKpis';
+import { useProjectTaskCounts } from '@/hooks/useProjectTaskCounts';
 import { getErrorMessage } from '@/services/api';
+import { graphErrorMessage } from '@/services/bottlenecksApi';
+import DashboardCharts from './DashboardCharts';
 import ManagerKpiTiles from './ManagerKpiTiles';
 
 export default function ManagerDashboardPage() {
@@ -18,18 +21,22 @@ export default function ManagerDashboardPage() {
   // Same cache entry as /manager/bottlenecks, so opening the full graph from here doesn't refetch.
   const graph = useDependencyGraph();
   const kpis = useManagerKpis();
+  const projectCounts = useProjectTaskCounts();
 
   return (
-    <PageContainer
-      title="Manager Dashboard"
-      description="What needs your attention across the team."
-    >
+    <PageContainer title="Dashboard" description="What needs your attention across the team.">
       <Stack spacing={3}>
         <ManagerKpiTiles
           kpis={kpis.data}
           loading={kpis.isPending}
           error={kpis.isError ? getErrorMessage(kpis.error) : null}
           onRetry={() => kpis.refetch()}
+        />
+        <DashboardCharts
+          projects={projectCounts.data}
+          loading={projectCounts.isPending}
+          error={projectCounts.isError ? getErrorMessage(projectCounts.error) : null}
+          onRetry={() => projectCounts.refetch()}
         />
         <Card component="section" aria-labelledby="dashboard-bottlenecks-title" sx={{ p: 3 }}>
           <Stack
@@ -55,7 +62,7 @@ export default function ManagerDashboardPage() {
             ariaLabel="Top bottlenecks"
             graph={graph.data}
             loading={graph.isPending}
-            error={graph.isError ? getErrorMessage(graph.error) : null}
+            error={graph.isError ? graphErrorMessage(graph.error) : null}
             onRetry={() => graph.refetch()}
             onNodeSelect={(id) =>
               router.push(`/manager/bottlenecks?taskId=${encodeURIComponent(id)}`)

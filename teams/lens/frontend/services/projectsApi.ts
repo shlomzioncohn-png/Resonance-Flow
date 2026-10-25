@@ -1,11 +1,10 @@
 /**
  * Manager API — typed wrapper around the all-projects list with health/KPI
- * data. No project-aggregate endpoint exists yet (only task-level endpoints
- * under /api/workspace/*, see docs/api-integration-status.md), so it's
- * mocked one layer down, at the BFF (com.rnd.bff.client.ManagerClient) —
- * this call is real, straight through the Gateway, same as
- * services/workspaceApi.ts. Distinct from services/adminProjectsApi.ts,
- * which backs the separate per-project drill-down page.
+ * data. Real data: the BFF counts the tenant's Inbox tasks per project
+ * (ManagerKpisService.getProjects). Team, owner and members are placeholders
+ * ("No team" / "Unassigned" / none) until Inbox's project API is available.
+ * Distinct from services/adminProjectsApi.ts, which backs the separate
+ * per-project drill-down page.
  */
 import { api } from './api';
 import type { StatusTone } from '@/components/ui/StatusBadge';
