@@ -17,7 +17,7 @@ somewhere else.
 from uuid import UUID
 
 import pytest
-from tests.extraction.fakes import ScriptedProvider, answer_of
+from tests.extraction.fakes import DEADLINE_SETTINGS, WRITTEN_AT, ScriptedProvider, answer_of
 
 from mind.contracts.base_enums import SourceType
 from mind.extraction.assembly import to_task_creation_requested
@@ -50,6 +50,8 @@ def _source_ref(extracted: str | None, bridge: str | None) -> str | None:
         tenant_id=TENANT_ID,
         bridge_source_ref=bridge,
         bridge_correlation_id=BRIDGE_ITEM,
+        written_at=WRITTEN_AT,
+        deadline_settings=DEADLINE_SETTINGS,
     )
     return proposal.source_ref
 

@@ -118,7 +118,7 @@ def resolve_weekday(
     days_ahead = (weekday - written_at.weekday()) % 7
     if next_week:
         days_ahead += 7
-    return _at_end_of_day(written_at.date() + timedelta(days=days_ahead), written_at, end_of_day)
+    return at_end_of_day(written_at.date() + timedelta(days=days_ahead), written_at, end_of_day)
 
 
 # When the end of the working day has already passed on the day the text was
@@ -127,7 +127,9 @@ def resolve_weekday(
 _LAST_MINUTE = time(23, 59)
 
 
-def _at_end_of_day(day: date, written_at: datetime, end_of_day: time) -> datetime:
+def at_end_of_day(day: date, written_at: datetime, end_of_day: time) -> datetime:
+    """`day` at the end of the working day, in the writer's zone (decision 4)."""
+
     # Only a deadline on the very day of writing can find its working day over.
     is_today = day == written_at.date()
     working_day_over = is_today and written_at.time() >= end_of_day
@@ -169,7 +171,7 @@ def resolve_period_end(
     else:
         start = today if period is PeriodEnd.WEEK else _next_week_start(today, working_days)
         day = _first_day_ending_a_week(start, working_days)
-    return _at_end_of_day(day, written_at, end_of_day)
+    return at_end_of_day(day, written_at, end_of_day)
 
 
 def _end_of_month(today: date, working_days: frozenset[int]) -> date:

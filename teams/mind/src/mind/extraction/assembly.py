@@ -13,15 +13,31 @@ when it was off. The estimate's confidence is derived from its basis, in
 
 `source_ref` comes from Bridge, never from the model (#353): Inbox requires it,
 and its UI builds the link to the source from source_type + source_ref.
+
+`deadline` (#960) is resolved here, the one place that has both the model's
+answer and when the text was written: the model reports what the content
+says, and `resolve_deadline` turns it into a moment.
 """
 
+import logging
+from datetime import UTC, date, datetime
 from uuid import UUID
 
+from mind.config import DeadlineSettings
 from mind.contracts.base_enums import SourceType
 from mind.contracts.task_creation_requested import TaskCreationRequested
 from mind.extraction.confidence import effort_confidence
+from mind.extraction.deadline import (
+    at_end_of_day,
+    complete_year,
+    resolve_offset,
+    resolve_period_end,
+    resolve_weekday,
+)
 from mind.extraction.extractor import ExtractedTask, ExtractionSuccess
-from mind.extraction.models import ClassificationFields
+from mind.extraction.models import ClassificationFields, DeadlineKind, StatedDeadline
+
+logger = logging.getLogger("mind.extraction")
 
 #: Marks a source_ref that is Bridge's id for the item rather than the source
 #: system's: there is no external link to build from it.
@@ -48,6 +64,8 @@ def to_task_creation_requested(
     *,
     bridge_source_ref: str | None,
     bridge_correlation_id: UUID,
+    written_at: datetime,
+    deadline_settings: DeadlineSettings,
 ) -> list[TaskCreationRequested]:
     """Build one Inbox-facing proposal per extracted task (#690), in order.
 
@@ -58,10 +76,78 @@ def to_task_creation_requested(
     Every task from one item carries that item's `source_ref`: it names where
     the tasks came from, not which task this is. Inbox tells them apart by
     correlation_id, one per task.
+
+    `written_at` is when the text was written, not when Mind read it: the
+    event's `source_timestamp`, else its `ingested_at`. "By Friday" means the
+    Friday after that moment. Required, not defaulted: a caller that forgot
+    it would send every task without a deadline and nothing would say so.
     """
 
     source_ref = source_ref_for_inbox(bridge_source_ref, bridge_correlation_id)
-    return [_proposal(task, result.source_type, tenant_id, source_ref) for task in result.tasks]
+    return [
+        _proposal(task, result.source_type, tenant_id, source_ref, written_at, deadline_settings)
+        for task in result.tasks
+    ]
+
+
+def resolve_deadline(
+    stated: StatedDeadline, written_at: datetime, settings: DeadlineSettings
+) -> datetime | None:
+    """The moment a stated deadline points to, in UTC, or None if there is none.
+
+    Resolved in the configured zone, so "today" is the writer's today. A year
+    or a time the content wrote is used as written; without a time, the end
+    of the working day. A date no calendar has (February 30, or a February 29
+    with no leap year near) is None and logged: the model read it wrong, or
+    the content says it wrong, and either way there is no moment to send.
+    """
+
+    local = written_at.astimezone(settings.zone)
+    end_of_day, working_days = settings.end_of_day, settings.weekday_numbers
+    moment: datetime | None
+    match stated.kind:
+        case DeadlineKind.DATE if stated.month and stated.day:
+            moment = _on_date(stated, stated.month, stated.day, local, settings)
+        case DeadlineKind.OFFSET if stated.amount and stated.unit:
+            moment = resolve_offset(
+                stated.amount, stated.unit, local, end_of_day=end_of_day, working_days=working_days
+            )
+        case DeadlineKind.WEEKDAY if stated.weekday:
+            moment = resolve_weekday(
+                stated.weekday.number, stated.next_week, local, end_of_day=end_of_day
+            )
+            if stated.time_of_day is not None:
+                moment = datetime.combine(moment.date(), stated.time_of_day, tzinfo=local.tzinfo)
+        case DeadlineKind.PERIOD_END if stated.period:
+            moment = resolve_period_end(
+                stated.period, local, end_of_day=end_of_day, working_days=working_days
+            )
+        case _:
+            # The model's own validator makes every kind carry what it needs.
+            moment = None
+    if moment is None:
+        logger.warning(
+            "extraction: the %s deadline names no moment; recording it as null", stated.kind.value
+        )
+        return None
+    return moment.astimezone(UTC)
+
+
+def _on_date(
+    stated: StatedDeadline, month: int, day: int, local: datetime, settings: DeadlineSettings
+) -> datetime | None:
+    if stated.year is None:
+        on = complete_year(month, day, local.date())
+    else:
+        try:
+            on = date(stated.year, month, day)
+        except ValueError:
+            on = None
+    if on is None:
+        return None
+    if stated.time_of_day is not None:
+        return datetime.combine(on, stated.time_of_day, tzinfo=local.tzinfo)
+    return at_end_of_day(on, local, settings.end_of_day)
 
 
 def _proposal(
@@ -69,6 +155,8 @@ def _proposal(
     source_type: SourceType,
     tenant_id: UUID,
     source_ref: str,
+    written_at: datetime,
+    deadline_settings: DeadlineSettings,
 ) -> TaskCreationRequested:
     """One task's proposal: its own fields and confidence, the shared rest."""
 
@@ -79,6 +167,7 @@ def _proposal(
     # attributes that mypy verifies, where a misspelled string would quietly
     # return None for ever.
     classification = task.fields if isinstance(task.fields, ClassificationFields) else None
+    stated = classification.deadline if classification else None
 
     return TaskCreationRequested(
         tenant_id=tenant_id,
@@ -100,5 +189,8 @@ def _proposal(
         ),
         effort_estimate_confidence=(
             effort_confidence(classification.effort_estimate_basis) if classification else None
+        ),
+        deadline=(
+            resolve_deadline(stated, written_at, deadline_settings) if stated is not None else None
         ),
     )
