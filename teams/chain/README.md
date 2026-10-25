@@ -252,8 +252,7 @@ created from `task.updated` and when it already exists. A tier-only change write
 reads as "leave the stored value unchanged". `KafkaEventPublisher` (flat JSON, no envelope) was removed under #543 - it had no production caller.
 
 **Schemas**: the `.proto` sources come from the repo's [`shared/proto/`](../../shared/proto)
-(`chain-task-updated-event` - a self-contained copy of `task-updated-event` -,
-`chain-task-score-proposed-event` - a copy of `task-score-proposed-event` that reuses its `TaskTier` -,
+(`task-updated-event` and `task-score-proposed-event`, with the enums they import from `task-created-event`, and
 `task-dependencies-proposed-event`,
 `scheduling-updated-event`). Messages are
 validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock registry
@@ -290,10 +289,9 @@ Computed by `PriorityScoreService.compute` (a pure function, no repository acces
 `is_available` changes; `DependencyEdgeService` and `TaskEligibilityService` call it.
 
 Readiness (`blocking_count`, `open_constraint_count`, `is_ready`) is no longer stored on `Task`/`TaskEntity`
-(#917 PR 2); the `task_readiness` view is the only source. `SchedulingUpdateService.requestPublishAfterCommit`
+(#917 PR 2) and the columns were dropped from the `task` table by V16 (#917 PR 3); the `task_readiness` view is the only source. `SchedulingUpdateService.requestPublishAfterCommit`
 reads `is_available` from the view inside the transaction and hands it to the after-commit publish; a task
-with no view row throws `IllegalStateException`. The old `task` columns remain in the schema until the
-follow-up migration drops them. API responses read the same view.
+with no view row throws `IllegalStateException`. API responses read the same view.
 
 ### Formula
 
@@ -1011,13 +1009,14 @@ Same parameters, defaults and `400` cases as the state-history endpoint above (`
 - Not run yet (no local Postgres): `mvn test -Ppostgres-integration -Dtest=PostgresConstraintHistoryRepositoryTest`
   and the two new `getTaskEligibility_returnsReadinessView_*` tests in `TaskEligibilityServiceTest`.
 
-## Dependency-flow health analytics (`analytics/health/`)
+## Dependency-flow health analytics (`analytics/flow_health/`)
 
 A separate Python project next to the Java service (not part of the Maven build or the Docker image)
 that will flag unhealthy dependency patterns from `dependency_history` and `task_state_history`.
-Stage 1 only: a synthetic history generator that writes rows shaped like those two tables plus a
-ground-truth key of planted diseases. No model, no endpoint, nothing written to Postgres yet. See
-`analytics/health/README.md`.
+Today: a synthetic history generator (rows shaped like those two tables plus a ground-truth key of planted
+diseases), and from its CSV files a feature step (task, edge and chain features) with one KMeans clustering of the tasks,
+the "normal behaviour" the detectors will compare against. No detectors, no model, no endpoint, nothing written to
+Postgres yet. See `analytics/flow_health/README.md`.
 
 ## Constraint persistence (Issue #378)
 

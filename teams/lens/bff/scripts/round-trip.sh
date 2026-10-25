@@ -10,12 +10,13 @@ set -euo pipefail
 NAMESPACE="${NAMESPACE:?NAMESPACE env var is required}"
 
 PG_POD=$(kubectl get pod -n "$NAMESPACE" -l app.kubernetes.io/name=postgresql -o jsonpath='{.items[0].metadata.name}')
+PG_PASSWORD=$(kubectl get secret resonance-flow-postgres-db-credentials -n "$NAMESPACE" -o jsonpath='{.data.password}' | base64 -d)
 UUID_RE='[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
-TENANT_ID=$(kubectl exec -n "$NAMESPACE" "$PG_POD" -- env PGPASSWORD=postgres psql -U postgres -d resonance_flow -tAc "
+TENANT_ID=$(kubectl exec -n "$NAMESPACE" "$PG_POD" -- env PGPASSWORD="$PG_PASSWORD" psql -U postgres -d inbox -tAc "
   INSERT INTO tenants (name, slug, status) VALUES ('LENS round trip', 'lens-round-trip', 'active')
   ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name RETURNING id;" \
   | grep -Eo "$UUID_RE" | head -1)
-USER_ID=$(kubectl exec -n "$NAMESPACE" "$PG_POD" -- env PGPASSWORD=postgres psql -U postgres -d resonance_flow -tAc "
+USER_ID=$(kubectl exec -n "$NAMESPACE" "$PG_POD" -- env PGPASSWORD="$PG_PASSWORD" psql -U postgres -d inbox -tAc "
   INSERT INTO users (tenant_id, email, display_name, role, status)
   VALUES ('${TENANT_ID}', 'round-trip@test.local', 'Round Trip Tester', 'employee', 'active')
   ON CONFLICT (email) WHERE email IS NOT NULL

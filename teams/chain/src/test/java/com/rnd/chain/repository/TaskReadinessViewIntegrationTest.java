@@ -19,7 +19,7 @@ class TaskReadinessViewIntegrationTest {
     
 
     @Test
-    void taskReadinessView_matchesStoredReadinessColumns() {
+    void taskReadinessView_derivesBlockingAndConstraintCounts() {
 
         UUID tenantId = UUID.randomUUID();
 
@@ -30,33 +30,15 @@ class TaskReadinessViewIntegrationTest {
         UUID readyTaskId = UUID.randomUUID();
         UUID doneTaskId = UUID.randomUUID();
 
-        insertTask(doneTaskId, tenantId, "DONE", true, 0, 0);
+        insertTask(doneTaskId, tenantId, "DONE");
 
         // Task שאמורה להיות חסומה:
         // blocker פעיל אחד + constraint פתוח אחד.
-        insertTask(
-                blockedTaskId,
-                tenantId,
-                "ACTIVE",
-                false,
-                1,
-                1);
+        insertTask(blockedTaskId, tenantId, "ACTIVE");
 
-        insertTask(
-                activeBlockerId,
-                tenantId,
-                "ACTIVE",
-                true,
-                0,
-                0);
+        insertTask(activeBlockerId, tenantId, "ACTIVE");
 
-        insertTask(
-                doneBlockerId,
-                tenantId,
-                "DONE",
-                true,
-                0,
-                0);
+        insertTask(doneBlockerId, tenantId, "DONE");
 
         // dependency פעיל - צריך להיספר
         jdbcTemplate.update("""
@@ -105,76 +87,40 @@ class TaskReadinessViewIntegrationTest {
                 blockedTaskId);
 
         // Task מוכנה לחלוטין
-        insertTask(
-                readyTaskId,
-                tenantId,
-                "ACTIVE",
-                true,
-                0,
-                0);
+        insertTask(readyTaskId, tenantId, "ACTIVE");
 
-        assertViewMatchesStoredColumns(blockedTaskId);
-        assertViewMatchesStoredColumns(readyTaskId);
-        assertViewMatchesStoredColumns(doneTaskId);
+        assertReadiness(blockedTaskId, 1, 1, false);
+        assertReadiness(readyTaskId, 0, 0, true);
+        assertReadiness(doneTaskId, 0, 0, true);
     }
 
-    private void insertTask(
-            UUID id,
-            UUID tenantId,
-            String status,
-            boolean isReady,
-            int blockingCount,
-            int openConstraintCount) {
+    private void insertTask(UUID id, UUID tenantId, String status) {
 
         jdbcTemplate.update("""
                 INSERT INTO task(
                     id,
                     tenant_id,
-                    status,
-                    is_ready,
-                    blocking_count,
-                    open_constraint_count
+                    status
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?)
                 """,
                 id,
                 tenantId,
-                status,
-                isReady,
-                blockingCount,
-                openConstraintCount);
+                status);
     }
 
-    private void assertViewMatchesStoredColumns(UUID taskId) {
+    private void assertReadiness(UUID taskId, long blockingCount, long openConstraintCount, boolean isReady) {
 
         jdbcTemplate.queryForObject("""
-                SELECT
-                    t.blocking_count AS stored_blocking_count,
-                    tr.blocking_count AS calculated_blocking_count,
-
-                    t.open_constraint_count AS stored_open_constraint_count,
-                    tr.open_constraint_count AS calculated_open_constraint_count,
-
-                    t.is_ready AS stored_is_ready,
-                    tr.is_ready AS calculated_is_ready
-
-                FROM task t
-                JOIN task_readiness tr ON tr.id = t.id
-                WHERE t.id = ?
+                SELECT blocking_count, open_constraint_count, is_ready
+                FROM task_readiness
+                WHERE id = ?
                 """,
                 (rs, rowNum) -> {
 
-                    assertEquals(
-                            rs.getLong("stored_blocking_count"),
-                            rs.getLong("calculated_blocking_count"));
-
-                    assertEquals(
-                            rs.getLong("stored_open_constraint_count"),
-                            rs.getLong("calculated_open_constraint_count"));
-
-                    assertEquals(
-                            rs.getBoolean("stored_is_ready"),
-                            rs.getBoolean("calculated_is_ready"));
+                    assertEquals(blockingCount, rs.getLong("blocking_count"));
+                    assertEquals(openConstraintCount, rs.getLong("open_constraint_count"));
+                    assertEquals(isReady, rs.getBoolean("is_ready"));
 
                     return null;
                 },

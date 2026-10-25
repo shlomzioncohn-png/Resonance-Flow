@@ -5,9 +5,6 @@ INSERT INTO task (
     id,
     tenant_id,
     status,
-    is_ready,
-    blocking_count,
-    open_constraint_count,
     created_at,
     updated_at
 )
@@ -21,9 +18,6 @@ SELECT
         WHEN i % 10 = 0 THEN 'DONE'
         ELSE 'ACTIVE'
     END,
-    true,
-    0,
-    0,
     now(),
     now()
 FROM generate_series(1, 50000) AS i;
