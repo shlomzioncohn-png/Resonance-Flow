@@ -4,8 +4,15 @@
 > (#177).** Design for the *second* harness: "did the pipeline extract the right
 > action items from a meeting at all?" — precision / recall against AMI's
 > human-tagged action items. The matching core is `extraction_eval.py`
-> (`evaluate_extraction`), with a fixture and a CLI; per-meeting grouping, micro/macro
-> aggregation and the owner-match diagnostic (§3.7) are not built yet — see §9.
+> (`evaluate_extraction`), with a fixture and a CLI; per-meeting grouping and
+> micro/macro aggregation are `evaluate_meetings` (#178); the owner-match
+> diagnostic (§3.7) is not built yet — see §9.
+>
+> **First real run, 2026-10-25 (#178):** the v1 slice through main's extraction,
+> micro P 31.6% / R 37.5% / F1 34.3% at τ = 0.60 — results, hand review and
+> findings in the README, "Real-data validation (#178)". The lexical backend
+> missed four right pairs on real output; that is the case for the embedding
+> backend (§4.3), not for changing τ after the fact.
 >
 > Lives next to the code in `src/mind/evaluation/`; the README's "Extraction-quality
 > eval" section is the short version of this note.

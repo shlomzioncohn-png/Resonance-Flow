@@ -828,12 +828,92 @@ string match); it is not this eval.
 
 ### Current status
 
-**Fixture-validated, not yet run against real pipeline output** — see
-[Cross-team: should the Task model / API error format be shared contracts? #21](https://github.com/KamaTechOrg/Resonance-Flow/issues/21)
-(tracking issues for this eval: #176 design, #177 implementation).
-The extracted side needs Yonit's extraction pipeline and Michal's ASR to be
-producing output; the annotated side (AMI action items) wires in via a manifest
-edit, not a code change (`extraction_eval_design.md` §"Scope").
+**Run once on real AMI meetings through main's real extraction (#178, 2026-10-25).**
+Tracking issues: #176 design, #177 implementation, #178 real-data validation.
+Not yet on ASR output, and not yet in CI (#175).
+
+### Real-data validation (#178)
+
+**What was run.** The v1 slice — IB4003, IS1008b, IS1008d, 16 gold action items
+(8 + 4 + 4, `load_gold_actions`) — on AMI's **human** transcripts
+(`ingestion/ami_transcripts.py`, #784), each meeting sent whole as one MEETING
+item to `BasicExtractor` (main at the #968 merge) on `gemini-3.6-flash`, scored
+with `evaluate_meetings` at the locked lexical τ = 0.60. Human transcripts, not
+ASR, so this measures extraction alone (mentor's call); an ASR run comes later.
+
+```bash
+# needs a key; spends quota (see the script's docstring)
+CONFIG_FILE_PATH=config.local.yaml SECRETS_FILE_PATH=secrets.local.yaml \
+    python scripts/run_ami_extraction_eval.py
+# re-score the recorded run: no key, no model call
+python scripts/run_ami_extraction_eval.py \
+    --from-outcomes eval/extraction_runs/2026-10-25_gemini-3.6-flash/outcomes.json
+```
+
+The model's answers (`outcomes.json`) and the scored report (`scores.json`) of
+this run are in `eval/extraction_runs/2026-10-25_gemini-3.6-flash/`. `scores.json`
+quotes AMI's action items verbatim (CC BY 4.0, AMI Meeting Corpus, University of
+Edinburgh; see `eval/datasets/ami.manifest.json`).
+
+**The number, as the eval computes it** — the reported result, not adjusted:
+
+| | TP | FP | FN | precision | recall | F1 |
+|---|---|---|---|---|---|---|
+| IB4003 | 2 | 3 | 6 | 40.0% | 25.0% | 30.8% |
+| IS1008b | 3 | 4 | 1 | 42.9% | 75.0% | 54.5% |
+| IS1008d | 1 | 6 | 3 | 14.3% | 25.0% | 18.2% |
+| **micro** | 6 | 13 | 10 | **31.6%** | **37.5%** | **34.3%** |
+| macro | | | | 32.4% | 41.7% | 34.5% |
+
+No extraction failed.
+
+**Hand review (#178 step 4).** Every gold item and every extracted item was
+checked against the transcript (line numbers below are in the text
+`load_transcript` returns). This is a judgement, recorded to explain the number,
+not to replace it:
+
+| | gold found by the model | eval's TP | matcher missed a right pair | matcher took a wrong pair |
+|---|---|---|---|---|
+| IB4003 | 4 / 8 | 2 | g1 split offices (0.55, l. 76); g2 Gisella (0.59) | — |
+| IS1008b | 3 / 4 | 3 | g4 Intel/IBM, speech vs voice recognition (0.60, rounds below) | g3 "present the marketing concept" ← "keep watching market trends" (0.66) |
+| IS1008d | 2 / 4 | 1 | g2 promotion plan to management ← "convince management to align the launch with a sports event" (l. 235) | — |
+| **total** | **9 / 16 (56%)** | 6 | 4 | 1 |
+
+IB4003's g5 ("build a proposal") and g6 ("merge it with the other team's") are one
+sentence of the meeting (l. 243) and one extracted item; one-to-one matching
+gives one TP and one FN there, as design §3.4 intends.
+
+**Findings.**
+
+1. **The lexical backend is not enough on real output.** It rejected four right
+   pairs and accepted one wrong one, so the official recall is 19 points under
+   what the model found. Two causes: synonyms (speech/voice, split/separate,
+   convince/present) and long descriptions — the model writes a sentence of
+   detail per task, and `token_set_ratio` scores the longer text lower
+   (Gisella: 0.73 on the title, 0.59 on title + description). τ and the
+   comparison text were fixed before the run and are **not** changed after it.
+   This is the evidence for an embedding backend (Ayala); the recorded
+   `outcomes.json` lets it be scored on the very same answers.
+2. **AMI's `<actions>` is a partial answer key.** Of the 19 extracted items, 10
+   match no gold item yet were said in the meeting (send the minutes, the
+   sharing folder, four people in a three-person room, market tests, launch…).
+   Some sit in the same file's `<decisions>`; one contradicts the transcript
+   (IS1008d `<decisions>`: evaluate real units "rather than evaluating the
+   prototype"; l. 172–185: the team agrees on a prototype evaluation). So low
+   precision here does not mean invented tasks.
+3. **The model invents little.** No extracted task is absent from its meeting;
+   one adds a detail that was not said (IS1008d, "…or movie tie-in": the sports
+   event is l. 212–235, "movie" only appears at l. 151, about a 3D view).
+4. **What the model misses** (reported to Yonit, not fixed here): the next
+   meeting (IB4003 g8, "next Tuesday… about two o'clock", l. 276–293), loose
+   group tasks (IB4003 g3, g4), and tasks set for another speaker (IS1008b g3,
+   IS1008d g3).
+5. **One run is not a stable number.** IS1008b was run twice: the same seven
+   tasks, other descriptions, and TP went from 2 to 3 — through the wrong
+   pair above. Repeated runs would give a range.
+
+**Limitations.** Three meetings, 16 gold items, one run of one model; human
+transcripts, not ASR; the hand review is one reviewer's reading.
 
 ### Several tasks per text (#690, was a known limitation)
 
@@ -845,6 +925,6 @@ empty list is a valid answer. `item_key` stays on the outcome, so the eval still
 groups results by meeting through it (see "The extracted-item contract"); each
 `tasks[i].fields` is what it reads.
 
-Still a gap: content longer than `extraction.prompts.MAX_CONTENT_CHARS` (8000) is
-truncated, and a meeting's action items cluster in its closing recap, so a long
-transcript can still lose items. Truncation is now logged.
+Since #968, `extraction.prompts.MAX_CONTENT_CHARS` is 100,000 for every source,
+a safety net against a runaway item; the v1 slice's transcripts (26–35k
+characters) go through whole.
