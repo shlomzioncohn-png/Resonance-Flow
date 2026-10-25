@@ -24,7 +24,10 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,6 +41,13 @@ import org.springframework.beans.factory.annotation.Autowired;
  * cursor.syncToken() switches events.list to incremental mode (only events created/updated/
  * deleted since the last sync, regardless of how old the event itself is - unlike Slack's
  * "oldest", which filters by original send time and would miss an old event edited today).
+ * listPage never sets orderBy - Google rejects combining it with syncToken, but a full
+ * (token-less) list request is where this actually bit: orderBy("startTime") being present
+ * unconditionally meant Google never returned a nextSyncToken from a full sync, so the cursor
+ * was never saved (UnstructuredIntakeController.runTokenBasedSource's rejected==0 &&
+ * token!=null save gate never fired) and every run fell back to a full, unbounded re-list.
+ * readPages sorts the accumulated records by occurredAt once, after paging completes, instead -
+ * the same ordering guarantee without the orderBy/syncToken conflict.
  * A 410 response means the token expired server-side; the only recovery is a full re-sync -
  * readPages(null) does exactly that, and its resulting nextSyncToken (a fresh baseline, not
  * a continuation of the expired one) is returned as part of that same CalendarReadResult.
@@ -59,6 +69,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 @Component
 @ConditionalOnProperty(prefix = "bridge.intake.calendar", name = "mode", havingValue = "real")
 public class RealCalendarSourceReader implements CalendarSourceReader {
+
+    private static final Logger log = LoggerFactory.getLogger(RealCalendarSourceReader.class);
 
     private final GoogleCredentialsProvider credentialsProvider;
     private final CalendarImportProperties properties;
@@ -122,8 +134,18 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
             pageToken = page.getNextPageToken();
             if (pageToken == null) {
                 nextSyncToken = page.getNextSyncToken();
+                if (nextSyncToken == null) {
+                    // Known-silent case until now: a full list finishing with no nextSyncToken
+                    // leaves UnstructuredIntakeController's save gate (rejected==0 &&
+                    // token!=null) permanently unsatisfied, so the cursor is never persisted and
+                    // every subsequent run repeats this same full, unbounded list.
+                    log.warn("Calendar full list for calendar {} finished with no nextSyncToken - "
+                            + "the cursor will not be saved and the next run will be another full list",
+                            properties.calendarId());
+                }
             }
         } while (pageToken != null);
+        records.sort(Comparator.comparing(SourceRecord::occurredAt));
         // records/nextSyncToken are purely local to this call - returned together, never stashed
         // anywhere shared (see class javadoc).
         return new CalendarReadResult(records, nextSyncToken);
@@ -135,10 +157,9 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
                 .setPageToken(pageToken);
         if (syncToken != null) {
             // orderBy/timeMin/timeMax and a few others can't be combined with syncToken -
-            // Google rejects the request outright if they are.
+            // Google rejects the request outright if they are. orderBy is never set on either
+            // branch now (see class javadoc) - readPages sorts the accumulated records instead.
             request.setSyncToken(syncToken);
-        } else {
-            request.setOrderBy("startTime");
         }
         return request.execute();
     }

@@ -92,7 +92,7 @@ class RealCalendarSourceReaderTest {
         assertThat(result.records()).hasSize(1);
         assertThat(result.nextSyncToken()).isEqualTo("sync-token-1");
         verify(request, never()).setSyncToken(any());
-        verify(request).setOrderBy("startTime");
+        verify(request, never()).setOrderBy(any());
     }
 
     @Test
@@ -146,7 +146,7 @@ class RealCalendarSourceReaderTest {
         verify(incrementalRequest).setSyncToken("expired-token");
         // The recovery request is a full sync, not a continuation of the expired token.
         verify(fullResyncRequest, never()).setSyncToken(any());
-        verify(fullResyncRequest).setOrderBy("startTime");
+        verify(fullResyncRequest, never()).setOrderBy(any());
         assertThat(result.nextSyncToken()).isEqualTo("sync-token-fresh");
     }
 
@@ -369,6 +369,51 @@ class RealCalendarSourceReaderTest {
         SourceRecord record = reader().read(ReadCursor.full()).records().get(0);
 
         assertThat(record.sourceRef()).isEqualTo("evt-sparse");
+    }
+
+    /**
+     * orderBy("startTime") used to be set unconditionally on a full (token-less) list request -
+     * but Google rejects combining orderBy with syncToken, and more importantly, a full list with
+     * orderBy set never returns a nextSyncToken at all (see
+     * nullNextSyncTokenOnAFullListLeavesTheResultTokenNullAndDoesNotFailTheRead), which is what
+     * was silently preventing the cursor from ever being saved. listPage must never set it on
+     * either the full or incremental branch now.
+     */
+    @Test
+    void listPageNeverSetsOrderByOnEitherTheFullOrIncrementalBranch() throws IOException {
+        Calendar.Events.List fullRequest = mockRequest();
+        Calendar.Events.List incrementalRequest = mockRequest();
+        when(events.list("primary")).thenReturn(fullRequest, incrementalRequest);
+        when(fullRequest.execute()).thenReturn(new Events().setItems(List.of()).setNextSyncToken("sync-token-1"));
+        when(incrementalRequest.execute()).thenReturn(new Events().setItems(List.of()).setNextSyncToken("sync-token-2"));
+
+        RealCalendarSourceReader reader = reader();
+        reader.read(ReadCursor.full());
+        reader.read(new ReadCursor(null, "sync-token-1"));
+
+        verify(fullRequest, never()).setOrderBy(any());
+        verify(incrementalRequest, never()).setOrderBy(any());
+    }
+
+    /**
+     * Documents current behavior: when a full list's final page comes back with no
+     * nextSyncToken (which is exactly what happened while orderBy was set unconditionally -
+     * Google doesn't return one for an ordered full query), readPages must not throw - it
+     * returns the result with a null token, same as FixtureCalendarSourceReader always does.
+     * The cursor-save consequence of that null (UnstructuredIntakeController's
+     * rejected==0 && token!=null gate never firing) is covered on the controller's own test,
+     * not here.
+     */
+    @Test
+    void nullNextSyncTokenOnAFullListLeavesTheResultTokenNullAndDoesNotFailTheRead() throws IOException {
+        Calendar.Events.List request = mockRequest();
+        when(events.list("primary")).thenReturn(request);
+        when(request.execute()).thenReturn(new Events().setItems(List.of(event("e1"))));
+
+        CalendarReadResult result = reader().read(ReadCursor.full());
+
+        assertThat(result.records()).hasSize(1);
+        assertThat(result.nextSyncToken()).isNull();
     }
 
     private static GoogleJsonResponseException expiredTokenException() {
