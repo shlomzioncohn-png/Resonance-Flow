@@ -117,6 +117,9 @@ class DependencyProposedEventHandlerTest {
         DependencyProposedEventHandler handler =
                 new DependencyProposedEventHandler(
                         dependencyService,
+                        new TaskCounterUpdater(taskRepo, dependencyRepo, new PriorityScoreService(),
+                                new SchedulingPublishListener(taskRepo, schedulingUpdateService), taskReadinessRepository),
+                        taskReadinessRepository,
                         template);
 
         return new Fixture(

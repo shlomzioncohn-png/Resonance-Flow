@@ -67,7 +67,7 @@ public class TaskCounterUpdater {
                 tenantId);
     }
 
-    private void insertPlaceholderIfAbsent(
+    public void insertPlaceholderIfAbsent(
             UUID taskId,
             UUID tenantId) {
 
@@ -332,7 +332,7 @@ public class TaskCounterUpdater {
      *
      * Publishing occurs only after a successful commit.
      */
-    private void requestPublishAfterCommit(
+    public void requestPublishAfterCommit(
             UUID taskId) {
 
         if (!TransactionSynchronizationManager

@@ -4,6 +4,9 @@ import com.rnd.chain.dto.DependencyChangeSource;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.InvalidRequestException;
+import com.rnd.chain.dto.TaskReadinessSnapshot;
+import com.rnd.chain.repository.TaskReadinessRepository;
+import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskDependencyService;
 import com.rnd.mind.event.DependencyProposedEvent;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -14,6 +17,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -28,13 +32,19 @@ import static com.rnd.chain.events.EventFields.parseUuid;
 public class DependencyProposedEventHandler {
 
     private final TaskDependencyService taskDependencyService;
+    private final TaskCounterUpdater taskCounterUpdater;
+    private final TaskReadinessRepository taskReadinessRepository;
     private final ChainEventProcessingTemplate template;
 
     public DependencyProposedEventHandler(
             TaskDependencyService taskDependencyService,
+            TaskCounterUpdater taskCounterUpdater,
+            TaskReadinessRepository taskReadinessRepository,
             ChainEventProcessingTemplate template) {
 
         this.taskDependencyService = taskDependencyService;
+        this.taskCounterUpdater = taskCounterUpdater;
+        this.taskReadinessRepository = taskReadinessRepository;
         this.template = template;
     }
 
@@ -67,6 +77,9 @@ public class DependencyProposedEventHandler {
             UUID taskId,
             UUID tenantId,
             DependencyProposedEvent event) {
+
+        // Guarantees a row even for an empty dependency list, so the after-commit publish finds it.
+        taskCounterUpdater.insertPlaceholderIfAbsent(taskId, tenantId);
 
         Set<UUID> processedDependencyIds = new HashSet<>();
 
@@ -115,6 +128,13 @@ public class DependencyProposedEventHandler {
                                 + "]",
                         ex);
             }
+        }
+
+        // Inbox holds has_dependencies tasks as unavailable until Chain says otherwise, so a task that is
+        // already ready (no edges, or all blockers done) never gets a readiness transition to publish.
+        TaskReadinessSnapshot readiness = taskReadinessRepository.findByIds(List.of(taskId)).get(taskId);
+        if (readiness != null && readiness.isReady()) {
+            taskCounterUpdater.requestPublishAfterCommit(taskId);
         }
     }
 
