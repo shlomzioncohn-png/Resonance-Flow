@@ -48,6 +48,8 @@ jobs:
       CHART_DIR: teams/relay/helm/resonance-flow
       RELEASE: lens-bff-rt
       NAMESPACE: lens-bff-rt
+      KIND_CLUSTER: lens-bff-rt-${{ github.run_id }}-${{ github.run_attempt }}
+      IMAGE_TAG: local-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - uses: actions/checkout@v4
@@ -56,10 +58,13 @@ jobs:
 
       - uses: azure/setup-helm@v5
 
+      - name: Use this job's own kubeconfig
+        run: echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
       - name: Create kind cluster
         uses: helm/kind-action@v1
         with:
-          cluster_name: lens-bff-rt-cluster
+          cluster_name: ${{ env.KIND_CLUSTER }}
 
       - name: Fetch chart dependencies
         run: helm dependency build "$CHART_DIR"
@@ -73,10 +78,10 @@ jobs:
 
       - name: Build and load the lens-bff and inbox images
         run: |
-          docker build -t lens-bff:local teams/lens/bff
-          docker build -t inbox:local teams/inbox --build-context shared=shared
-          kind load docker-image lens-bff:local --name lens-bff-rt-cluster
-          kind load docker-image inbox:local --name lens-bff-rt-cluster
+          docker build -t "lens-bff:$IMAGE_TAG" teams/lens/bff
+          docker build -t "inbox:$IMAGE_TAG" teams/inbox --build-context shared=shared
+          kind load docker-image "lens-bff:$IMAGE_TAG" --name "$KIND_CLUSTER"
+          kind load docker-image "inbox:$IMAGE_TAG" --name "$KIND_CLUSTER"
 
       - name: Deploy chart with lens-bff + inbox enabled
         run: |
@@ -85,12 +90,12 @@ jobs:
             -f "$CHART_ALL_OFF" \
             --set components.lens-bff.enabled=true \
             --set components.lens-bff.image.repository=lens-bff \
-            --set components.lens-bff.image.tag=local \
+            --set components.lens-bff.image.tag="$IMAGE_TAG" \
             --set components.lens-bff.image.pullPolicy=Never \
             --set components.lens-bff.env.INBOX_MOCK_ENABLED=false \
             --set components.inbox.enabled=true \
             --set components.inbox.image.repository=inbox \
-            --set components.inbox.image.tag=local \
+            --set components.inbox.image.tag="$IMAGE_TAG" \
             --set components.inbox.image.pullPolicy=Never \
             --set components.schema-registry.enabled=true \
             --set postgresql.enabled=true \

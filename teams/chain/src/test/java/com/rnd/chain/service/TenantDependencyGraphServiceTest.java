@@ -98,11 +98,11 @@ class TenantDependencyGraphServiceTest {
         when(taskReadinessRepository.findByIds(taskIds))
                 .thenReturn(Map.of(
                         taskAId,
-                        new TaskReadinessSnapshot(taskAId, 1, 0),
+                        new TaskReadinessSnapshot(taskAId, tenantId, 1, 0),
                         taskBId,
-                        new TaskReadinessSnapshot(taskBId, 1, 0),
+                        new TaskReadinessSnapshot(taskBId, tenantId, 1, 0),
                         taskCId,
-                        new TaskReadinessSnapshot(taskCId, 0, 0)));
+                        new TaskReadinessSnapshot(taskCId, tenantId, 0, 0)));
 
         when(taskStateHistoryRepository
                 .findLatestBlockedSinceByTaskIds(taskIds))
@@ -170,11 +170,11 @@ class TenantDependencyGraphServiceTest {
         when(taskReadinessRepository.findByIds(taskIds))
                 .thenReturn(Map.of(
                         taskAId,
-                        new TaskReadinessSnapshot(taskAId, 1, 0),
+                        new TaskReadinessSnapshot(taskAId, tenantId, 1, 0),
                         taskBId,
-                        new TaskReadinessSnapshot(taskBId, 1, 0),
+                        new TaskReadinessSnapshot(taskBId, tenantId, 1, 0),
                         taskCId,
-                        new TaskReadinessSnapshot(taskCId, 0, 0)));
+                        new TaskReadinessSnapshot(taskCId, tenantId, 0, 0)));
 
         when(taskStateHistoryRepository
                 .findLatestBlockedSinceByTaskIds(taskIds))
@@ -375,6 +375,7 @@ class TenantDependencyGraphServiceTest {
                     task.getId(),
                     new TaskReadinessSnapshot(
                             task.getId(),
+                            task.getTenantId(),
                             0,
                             0));
         }

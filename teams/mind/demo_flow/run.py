@@ -18,8 +18,9 @@ What it does, each step a STAGE line:
    vector-store migrations.
 4. **Mind**: the landed runner (`bridge.raw.landed` -> OCR/ASR -> extraction
    -> duplicate check -> `task.creation.requested`, and the `task.created`
-   listener) and the score publisher, as two processes on this machine,
-   their output here with a prefix and in runs/<run-id>/.
+   listener) and Mind's API, which runs the score publisher (#920), as two
+   processes on this machine, their output here with a prefix and in
+   runs/<run-id>/.
 5. **feed**: `demo_flow.feed` lands the three items and publishes their
    pointer events, in the order asked for.
 6. **result**: reads the topics until everything expected.json predicts
@@ -63,6 +64,10 @@ BOOTSTRAP_SERVERS = "localhost:9092"
 SCHEMA_REGISTRY_URL = "http://localhost:8085/apis/ccompat/v6"
 INBOX_HEALTH_URL = "http://localhost:8082/actuator/health"
 MINIO_ENDPOINT = "http://localhost:9000"
+#: Mind's API, which runs the score publisher since #920. Not 8000, so a
+#: developer's own API is left alone.
+MIND_API_PORT = 8800
+MIND_API_HEALTH_URL = f"http://127.0.0.1:{MIND_API_PORT}/health"
 
 #: Every topic a party in the run reads. Inbox's own two are here so its
 #: consumers start cleanly; nothing in the demo publishes to them.
@@ -266,13 +271,14 @@ class MindProcess:
 
     name: str
     module: str
+    args: tuple[str, ...] = ()
     process: subprocess.Popen[str] | None = None
     last_output: float = field(default_factory=time.monotonic)
     restarts: int = 0
 
     def start(self, env: dict[str, str], log_dir: Path) -> None:
         self.process = subprocess.Popen(
-            [sys.executable, "-m", self.module],
+            [sys.executable, "-m", self.module, *self.args],
             cwd=MIND_DIR,
             env=env,
             stdout=subprocess.PIPE,
@@ -286,7 +292,12 @@ class MindProcess:
         threading.Thread(
             target=self._pump, args=(self.process.stdout, log_file), name=self.name, daemon=True
         ).start()
-        logger.info("started %s (pid %d): python -m %s", self.name, self.process.pid, self.module)
+        logger.info(
+            "started %s (pid %d): python -m %s",
+            self.name,
+            self.process.pid,
+            " ".join([self.module, *self.args]),
+        )
 
     def _pump(self, stream: IO[str] | None, log_file: IO[str]) -> None:
         assert stream is not None
@@ -310,7 +321,8 @@ class MindProcess:
 
 
 def wait_for_consumer_group(group_id: str, processes: list[MindProcess], timeout_s: float) -> None:
-    """Until the landed runner has joined its group: Whisper loaded, consuming."""
+    """Until the landed runner has joined its group (Whisper loaded, consuming)
+    and Mind's API reports ready (the score publisher started)."""
 
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
@@ -322,11 +334,25 @@ def wait_for_consumer_group(group_id: str, processes: list[MindProcess], timeout
         groups = _run(
             _compose("exec", "-T", "redpanda", "rpk", "group", "list"), what="rpk group list"
         )
-        if group_id in groups:
+        if group_id in groups and _api_ready():
             logger.info("the landed runner is consuming (group %s)", group_id)
+            logger.info("Mind's API is ready, score publisher included (%s)", MIND_API_HEALTH_URL)
             return
         time.sleep(2)
-    raise DemoError(f"the landed runner did not join {group_id} within {timeout_s:.0f} s")
+    raise DemoError(
+        f"the landed runner did not join {group_id}, or Mind's API was not ready, "
+        f"within {timeout_s:.0f} s"
+    )
+
+
+def _api_ready() -> bool:
+    """Whether the API's /health is 200: only once its whole start-up has run."""
+
+    try:
+        with urllib.request.urlopen(MIND_API_HEALTH_URL, timeout=2) as response:
+            return bool(response.status == 200)
+    except OSError:
+        return False
 
 
 # ------------------------------------------------------------------- result
@@ -414,7 +440,23 @@ def run(args: argparse.Namespace) -> int:
     env = mind_env(run_id)
     processes = [
         MindProcess("mind-landed", "mind.ingestion.landed_consumer_runner"),
-        MindProcess("mind-score", "mind.scoring.score_publisher_runner"),
+        # The score publisher runs inside the API since #920. SelectorEventLoop:
+        # uvicorn's own on Windows is the Proactor loop, which psycopg's async
+        # mode rejects (the same as the landed runner's); on Linux it is the
+        # default.
+        MindProcess(
+            "mind-api",
+            "uvicorn",
+            (
+                "mind.api.main:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(MIND_API_PORT),
+                "--loop",
+                "asyncio:SelectorEventLoop",
+            ),
+        ),
     ]
     logger.info("demo run %s, logs in %s", run_id, log_dir)
     try:
@@ -429,7 +471,7 @@ def run(args: argparse.Namespace) -> int:
         register_schemas()
         migrate(env)
 
-        stage(4, "Mind: landed runner and score publisher")
+        stage(4, "Mind: landed runner, and the API with the score publisher")
         for process in processes:
             process.start(env, log_dir)
         wait_for_consumer_group(

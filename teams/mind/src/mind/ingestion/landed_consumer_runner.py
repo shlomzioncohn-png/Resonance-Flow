@@ -2,7 +2,7 @@
 Mind's creation pipeline on it, end to end: each landed item to text, each
 text to a task, each new task to `task.creation.requested`, and Inbox's
 `task.created` reply matched and indexed. Own process, like
-score_publisher_runner.
+index_consumer_runner.
 
 Three threads, one `TaskCreationFlow`: the pending store is in memory, so the
 sender (this consumer) and the task.created listener must share it, and so

@@ -14,17 +14,17 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - name: Ensure labels exist
+      - name: Ensure labels exist and label the PR by its author's team
         uses: actions/github-script@v7
         with:
           script: |
             const teams = [
-              { label: 'Lens',   color: '0e8a16' },
-              { label: 'Inbox',  color: '1d76db' },
-              { label: 'Bridge', color: '5319e7' },
-              { label: 'Mind',   color: 'b60205' },
-              { label: 'Chain',  color: 'fbca04' },
-              { label: 'Relay',  color: '0052cc' },
+              { label: 'Lens',   color: '0e8a16', members: ['Dvori-558', 'elisheva-666', 'sarisholomon', 'mali8573'] },
+              { label: 'Inbox',  color: '1d76db', members: [] }, // fill in: INBOX team members
+              { label: 'Bridge', color: '5319e7', members: [] }, // fill in: BRIDGE team members
+              { label: 'Mind',   color: 'b60205', members: [] }, // fill in: MIND team members
+              { label: 'Chain',  color: 'fbca04', members: ['RuthHoltzman', 'Shifi-Aisenstain', 'rikiMittelman'] },
+              { label: 'Relay',  color: '0052cc', members: ['avigailrapa', 'Ayala679', 'ch-kap219', 'gittyafe'] },
             ];
 
             // Label names are case-insensitive on GitHub, so compare lowercased
@@ -45,19 +45,6 @@ jobs:
                 console.log(`Created missing label: ${team.label}`);
               }
             }
-
-      - name: Add label based on team
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const teams = [
-              { label: 'Lens',   members: ['Dvori-558', 'elisheva-666', 'sarisholomon', 'mali8573'] },
-              { label: 'Inbox',  members: [] }, // fill in: INBOX team members
-              { label: 'Bridge', members: [] }, // fill in: BRIDGE team members
-              { label: 'Mind',   members: [] }, // fill in: MIND team members
-              { label: 'Chain',  members: ['RuthHoltzman','Shifi-Aisenstain', 'rikiMittelman'] }, // fill in: CHAIN team members
-              { label: 'Relay',  members: ['avigailrapa', 'Ayala679', 'ch-kap219', 'gittyafe'] },
-            ];
 
             const author = context.payload.pull_request.user.login;
             const matchedTeam = teams.find(team => team.members.includes(author));

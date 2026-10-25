@@ -75,8 +75,9 @@ knobs that aren't connection settings still come from env vars:
 
 Start-up stops with a `mind.config_file.ConfigFileError` that names the
 problem. There is no fallback to a default path or to localhost. This
-applies to the API, `alembic`, and the runners: `index_consumer_runner`
-and `score_publisher_runner` at their first line, and
+applies to the API (including the score publisher it starts, #920, which
+stops start-up when only one of the two kafka keys is set), `alembic`, and
+the runners: `index_consumer_runner` at its first line, and
 `landed_consumer_runner` when it builds its Kafka consumer.
 
 | Situation | Result |
@@ -139,7 +140,6 @@ changed only in its port:
   failed.
 - Without the files, the API, `index_consumer_runner` and alembic each
   stopped with the errors above when actually run.
-  `score_publisher_runner` is covered by a unit test only, and
   `landed_consumer_runner` only by reading its code.
 
 **Not verified yet:**

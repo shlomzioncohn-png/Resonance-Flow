@@ -1,4 +1,4 @@
-.PHONY: install dev test lint fmt run run-local run-index-consumer run-score-publisher run-landed-consumer eval eval-ci schema migrate migrate-local docker-build docker-up proto demo-artifacts demo-check-media demo-feed demo-feed-slack-first demo-flow demo-flow-slack-first
+.PHONY: install dev test lint fmt run run-local run-index-consumer run-landed-consumer eval eval-ci schema migrate migrate-local docker-build docker-up proto demo-artifacts demo-check-media demo-feed demo-feed-slack-first demo-flow demo-flow-slack-first
 
 install:
 	pip install -e .
@@ -48,9 +48,6 @@ migrate-local: migrate
 
 run-index-consumer: proto
 	python -m mind.embeddings.index_consumer_runner
-
-run-score-publisher: proto
-	python -m mind.scoring.score_publisher_runner
 
 # #919: the whole creation pipeline, task.created listener included -- needs
 # Kafka, MinIO, the vector store and an LLM provider (src/mind/ingestion/README.md).

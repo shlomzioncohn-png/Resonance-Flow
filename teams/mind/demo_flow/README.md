@@ -75,14 +75,14 @@ naming what is missing.
 | 1 preflight | Docker, the LLM key, tesseract, the embedding model |
 | 2 stack | `docker compose down -v`, then up (`stack/docker-compose.yml`): Redpanda, Apicurio registry, MinIO, Inbox built from `teams/inbox`, pgvector. Empty on every run |
 | 3 topics, schemas, migrations | the topics every party reads; every schema registered by **Relay's own scripts** (`stack/seed-schemas.sh` runs `teams/relay/ci/seed-registry.sh`), as in the cluster; Mind's vector-store migrations |
-| 4 Mind | the landed runner (`mind.ingestion.landed_consumer_runner`) and the score publisher, as processes on this machine, their output prefixed `[mind-landed]` / `[mind-score]` |
+| 4 Mind | the landed runner (`mind.ingestion.landed_consumer_runner`) and Mind's API on port 8800, which runs the score publisher (#920), as processes on this machine, their output prefixed `[mind-landed]` / `[mind-api]` |
 | 5 feed | `demo_flow.feed` lands the three items and publishes their events, in the order asked for |
 | 6 result | `verify.py` reads `task.creation.requested`, `task.created`, `task.score.proposed` and `task.dependencies.proposed` until everything expected has come out or nothing has moved for 120 s, then prints one line per criterion |
 
 A run takes 6 to 8 minutes. The stack is left up afterwards (Redpanda Console
 <http://localhost:8090>, MinIO <http://localhost:9091>, `minioadmin`/`minioadmin`);
 `python -m demo_flow.run --down-only` takes it down. Each run keeps its logs and result in
-`runs/<run-id>/` (gitignored): `mind-landed.log`, `mind-score.log`, `result.txt`, next to
+`runs/<run-id>/` (gitignored): `mind-landed.log`, `mind-api.log`, `result.txt`, next to
 the feed's manifest `runs/<run-id>.json`.
 
 A Mind process that stops on an error is started again, up to 3 times, as the cluster's
@@ -145,7 +145,7 @@ lists, #834 dependency publisher and #841 tenant-scoped index all merged), paid 
 | extracted | the meeting: **T2 and T1** (#690); Slack: T1; the email body and the form: T3 | extraction (#690), classification and effort (#350-#352) |
 | deduplicated | slack-first: the meeting's T1 matched Slack's (0.957), not sent | R3's duplicate detection (#471, #841) |
 | created | `task.creation.requested` to Inbox, `task.created` back, 1.4-5.4 s each | Mind's creation flow (#353, #919), Inbox |
-| scored | `task.score.proposed` for each created task | the score publisher (#357) |
+| scored | `task.score.proposed` for each created task | the score publisher (#357; since #920 inside Mind's API) |
 | dependency | **none published**: see findings 1 and 2 | #834/#355 |
 
 T2 came out with the expected effort, 240 minutes (expected 180-300).
