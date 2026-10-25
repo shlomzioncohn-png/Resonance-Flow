@@ -20,6 +20,7 @@ import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.raw.model.RawSourceType;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -102,7 +103,8 @@ public class RealEmailSourceReader implements EmailSourceReader {
                 System.getLogger(RealEmailSourceReader.class.getName()).log(
                         System.Logger.Level.WARNING,
                         "Gmail historyId " + historyId + " expired or unknown (404) - falling back to full resync");
-                log.info("Email incremental read got 404 on stored historyId - falling back to full resync");
+                log.info("Email incremental read got 404 on stored historyId - falling back to full resync; "
+                        + "googleErrorDetails={}", e.getDetails() != null ? e.getDetails() : e.getMessage());
                 EmailReadResult result = readFull();
                 logResult("full (post-404 fallback)", result);
                 return result;
@@ -120,23 +122,44 @@ public class RealEmailSourceReader implements EmailSourceReader {
 
     private EmailReadResult readFull() {
         Gmail gmail = client();
+        // The historyId to resume from must be a high-water mark as of (at least) the start of
+        // this scan, not whichever message happens to be processed last - messages.list has no
+        // documented, stable ordering guarantee, and in practice returns newest-first, so "last
+        // processed" is the OLDEST message's historyId: constant across runs (nothing older ever
+        // arrives) and already expired/unknown by the time the next incremental read tries it,
+        // forcing an endless full resync. users.getProfile("me").historyId is Gmail's own current
+        // mailbox-level historyId, captured before any per-message fetch, so it's always >= every
+        // message's own historyId.
+        BigInteger profileHistoryId = fetchProfileHistoryId(gmail);
         List<SourceRecord> records = new ArrayList<>();
         String pageToken = null;
-        String latestHistoryId = null;
+        BigInteger maxMessageHistoryId = null;
         do {
             ListMessagesResponse page = listPage(gmail, pageToken);
             if (page.getMessages() != null) {
                 for (Message summary : page.getMessages()) {
                     Message full = getFull(gmail, summary.getId());
                     records.addAll(toSourceRecords(gmail, full));
-                    if (full.getHistoryId() != null) {
-                        latestHistoryId = full.getHistoryId().toString();
+                    if (full.getHistoryId() != null
+                            && (maxMessageHistoryId == null || full.getHistoryId().compareTo(maxMessageHistoryId) > 0)) {
+                        maxMessageHistoryId = full.getHistoryId();
                     }
                 }
             }
             pageToken = page.getNextPageToken();
         } while (pageToken != null);
-        return new EmailReadResult(records, latestHistoryId);
+        BigInteger nextHistoryId = profileHistoryId != null ? profileHistoryId : maxMessageHistoryId;
+        return new EmailReadResult(records, nextHistoryId == null ? null : nextHistoryId.toString());
+    }
+
+    private BigInteger fetchProfileHistoryId(Gmail gmail) {
+        try {
+            return gmail.users().getProfile("me").execute().getHistoryId();
+        } catch (IOException e) {
+            log.warn("Failed to fetch Gmail profile historyId - falling back to the max historyId "
+                    + "across this sync's fetched messages", e);
+            return null;
+        }
     }
 
     private EmailReadResult readIncremental(String startHistoryId) throws IOException {
