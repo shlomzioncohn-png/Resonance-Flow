@@ -1,7 +1,7 @@
 import type { Preview } from '@storybook/nextjs-vite';
 import { mswLoader } from 'msw-storybook-addon/csf3';
 import { worker } from '@/mocks/browser';
-import { resetMockUsers } from '@/mocks/handlers';
+import { resetMockUsers, resetMockWorkInsights } from '@/mocks/handlers';
 import CssBaseline from '@mui/material/CssBaseline';
 import { ThemeProvider } from '@mui/material/styles';
 import { theme } from '@/theme';
@@ -22,6 +22,8 @@ const preview: Preview = {
   beforeEach() {
     // Every story starts from the same 12 users, whatever the story before it created or edited.
     resetMockUsers();
+    // Reset work insights state
+    resetMockWorkInsights();
     // Every story starts signed out. RoleProvider keeps the role in localStorage, and all
     // stories share one browser, so a story that signs in (Pages/Login) would otherwise
     // leave its role behind for the next one.
