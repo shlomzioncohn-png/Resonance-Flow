@@ -28,6 +28,7 @@ that is still up):
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import logging
 import re
@@ -185,6 +186,47 @@ def _why_no_decision(item: dict[str, Any], landed_log: str) -> str:
     return "no duplicate decision for it in the landed runner's log"
 
 
+#: creation_pipeline.py's line for a task it did not send. The title is quoted
+#: (repr) only when Bridge classified the item NONE or LOW sensitivity, as the
+#: feed does; otherwise only its length shows.
+_DUPLICATE_LINE = re.compile(
+    r"creation: (?P<item>[0-9a-f-]{36}) task (?P<index>\d+) not sent, "
+    r"(?P<title>'.*'|\".*\"|a title of \d+ chars \(withheld[^)]*\)) "
+    r"is a duplicate of task (?P<target>[0-9a-f-]{36}) \(similarity (?P<similarity>[0-9.]+)\)"
+)
+
+
+@dataclass(frozen=True)
+class Merge:
+    """One task the pipeline did not send because it matched one already there."""
+
+    item_correlation_id: str
+    task_index: int
+    title: str | None  # None when the log withheld it
+    target: str
+    similarity: str
+
+    @property
+    def expected_id(self) -> str | None:
+        return match_expected(self.title) if self.title is not None else None
+
+
+def merges(landed_log: str) -> list[Merge]:
+    found = []
+    for line in _DUPLICATE_LINE.finditer(landed_log):
+        quoted = line["title"]
+        found.append(
+            Merge(
+                item_correlation_id=line["item"],
+                task_index=int(line["index"]),
+                title=ast.literal_eval(quoted) if quoted[0] in "'\"" else None,
+                target=line["target"],
+                similarity=line["similarity"],
+            )
+        )
+    return found
+
+
 def _duplicate_check(
     duplicate: dict[str, Any],
     mentions: list[Task],
@@ -196,12 +238,17 @@ def _duplicate_check(
     One request on the topic is not enough: a mention whose extraction failed
     sends nothing either, and would pass for a merged duplicate. A merged one
     leaves only the landed runner's INFO line, "creation: <item> task N not
-    sent, ... is a duplicate of task <id>" (creation_pipeline.py), so every
-    mention but the one sent must have that line, naming the task that was.
+    sent, '<title>' is a duplicate of task <id>" (creation_pipeline.py). So
+    every mention but the one sent must have that line, merging into the task
+    that was sent, **with a title that is this task's**: a line only says some
+    task of the item was merged into it. Another expected task merged into it
+    (T2 into T1 above the threshold) is a false duplicate and fails the check,
+    whatever else was merged. A withheld title proves nothing either way.
     """
 
+    task_id = duplicate["task"]
     criterion = (
-        f"{duplicate['task']} is one task, not {len(duplicate['sources'])} "
+        f"{task_id} is one task, not {len(duplicate['sources'])} "
         f"({' + '.join(duplicate['sources'])})"
     )
     if len(mentions) != 1:
@@ -213,23 +260,35 @@ def _duplicate_check(
             criterion, False, f"the request ({_describe(sent)}) was never created by Inbox"
         )
 
+    into_sent = [m for m in merges(landed_log) if m.target == sent.created["id"]]
+    false_merges = [
+        f"{m.expected_id} {m.title!r} merged into it (similarity {m.similarity}): a false duplicate"
+        for m in into_sent
+        if m.expected_id is not None and m.expected_id != task_id
+    ]
     merged, unproven = [], []
     for source in duplicate["sources"]:
         if source == sent.source:
             continue
         item = items[source]
-        line = re.compile(
-            rf"creation: {re.escape(item['correlation_id'])} task \d+ not sent, .* "
-            rf"is a duplicate of task {re.escape(sent.created['id'])} \(similarity ([0-9.]+)\)"
-        ).search(landed_log)
-        if line:
-            merged.append(f"{source} matched it (similarity {line.group(1)})")
+        of_item = [m for m in into_sent if m.item_correlation_id == item["correlation_id"]]
+        right = [m for m in of_item if m.expected_id == task_id]
+        if right:
+            merged.append(
+                f"{source}'s {right[0].title!r} matched it (similarity {right[0].similarity})"
+            )
+        elif any(m.title is None for m in of_item):
+            unproven.append(
+                f"{source}: a task of it was merged into it, title withheld "
+                "(the item is not classified as non-sensitive)"
+            )
         else:
             unproven.append(f"{source}: {_why_no_decision(item, landed_log)}")
-    detail = f"sent from {sent.source}; " + "; ".join(merged + unproven)
-    if unproven:
+    parts = merged + unproven + false_merges
+    detail = f"sent from {sent.source}; " + "; ".join(parts)
+    if unproven and not false_merges:
         detail = "not proven, " + detail
-    return Check(criterion, not unproven, detail)
+    return Check(criterion, not unproven and not false_merges, detail)
 
 
 def evaluate(

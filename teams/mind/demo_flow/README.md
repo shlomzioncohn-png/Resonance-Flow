@@ -101,7 +101,7 @@ it from Bridge's and the task's number, `task_index_for`) and to T1-T3 by its ti
 |---|---|
 | three tasks come out, the expected ones | exactly T1, T2 and T3 were requested, nothing else |
 | Inbox created every task Mind requested | each request has a `task.created` with its `correlation_id` |
-| T1 is one task, not 2 | one request for T1, **and** the landed runner's log shows every other mention reaching the duplicate check and matched to that same Inbox task. A merged duplicate sends nothing, so one request alone is not proof: a mention whose extraction failed sends nothing either |
+| T1 is one task, not 2 | one request for T1, **and** for every other mention the landed runner's log has a duplicate line whose **title is T1's**, merged into that same Inbox task. A merged duplicate sends nothing, so one request alone is not proof (a mention whose extraction failed sends nothing either), and a line alone is not proof either: it says *some* task of the item was merged. Another expected task merged into T1 (T2 above the 0.761 threshold) fails it as a false duplicate. The title shows in the line because the feed classifies the synthetic items as not sensitive; a withheld title is "not proven" |
 | T1 depends on T2 | a `task.dependencies.proposed` from T1's Inbox id to T2's |
 | tasks carry the fields | tier, urgency, `role_context` on each; a suggested owner and effort where `expected.json` has one. The checker also asks for the deadline, which #359 does not list: read a deadline-only FAIL as information |
 | every created task gets a score | a `task.score.proposed` for each created task |
@@ -122,15 +122,16 @@ make demo-feed ARGS="--dry-run"     # build + validate the three events; no infr
 
 ## Latest results
 
-2026-10-25, branch `michal-brecher/mind-demo-flow-359` on `main` at `ce60d3f4` (#690 task
-lists, #834 dependency publisher and #841 tenant-scoped index all merged), paid Gemini key,
-`gemini-3.6-flash`. Runs `20261025T080349Z-natural` and `20261025T081126Z-slack-first`.
+2026-10-25, branch `michal-brecher/mind-demo-flow-359` merged with `main` at `a832fd2d`
+(#690 task lists, #834 dependency publisher, #841 tenant-scoped index, #920 score publisher
+in the API), paid Gemini key, `gemini-3.6-flash`. Runs `20261025T131916Z-natural` and
+`20261025T132819Z-slack-first`. All six stages run in both, from a git worktree too.
 
 | Criterion | natural | slack-first |
 |---|---|---|
-| three tasks come out, the expected ones | FAIL: 4 requested, 3 created | FAIL: 4 requested, 3 created |
-| Inbox created every task Mind requested | FAIL: the meeting's T1 | FAIL: the email's second T3 |
-| T1 is one task, not 2 (meeting + Slack) | FAIL: 2 requests, one from each | **PASS**: sent from Slack, the meeting's matched it (similarity 0.957) |
+| three tasks come out, the expected ones | FAIL: 4 requested, 3 created | **PASS**: T1, T2, T3 |
+| Inbox created every task Mind requested | FAIL: the meeting's T1 | **PASS** |
+| T1 is one task, not 2 (meeting + Slack) | FAIL: 2 requests, one from each | **PASS**: sent from Slack; the meeting's 'Send Northwind the price quote' matched it (similarity 0.880) |
 | T1 depends on T2 | FAIL: no message | FAIL: no message |
 | tasks carry the fields | FAIL: no owner, no deadline; T2 no `role_context` | FAIL: same |
 | every created task gets a score | **PASS** (3) | **PASS** (3) |
@@ -179,7 +180,7 @@ Every event also carries Bridge's constants:
 | `change_type` | `CHANGE_TYPE_UPSERT` |
 | `change_significance_score` | `100` |
 | `scope_decision` | `SCOPE_DECISION_INCLUDED` |
-| `classification` | unset (Bridge's classifier is off by default) |
+| `classification` | `SENSITIVITY_NONE`, `DECIDED_BY_RULE` (`feed.DEMO_CLASSIFICATION`): the content is synthetic. Bridge's classifier is off by default; this is what its rules would say, and it lets Mind's duplicate line quote the task's title |
 
 Every MinIO object gets the same four tags Bridge's `storage/ObjectTags` puts on it. Tags
 and the first segment of an object key use Bridge's own enum name (`ZOOM`), without the
@@ -348,6 +349,18 @@ in Mind. Numbered by how much they block the demo.
 - **No dependency was ever published end to end.** #834 merged `DependencyAdapter`, but the
   landed runner (#919) still passed its placeholder no-op `on_matched`. It now passes the
   adapter, as `dependencies/README.md` shows.
+
+- **The duplicate check passed on a line that did not say which task was merged.** The
+  log withheld the title, and the checker took any task of the item merged into T1 as
+  proof, so a T2 merged into T1 above the 0.761 threshold would have passed (found in
+  review). The feed now classifies the synthetic items as not sensitive, so the line quotes
+  the title, and the checker requires T1's title and fails a false duplicate.
+- **The demo's own tooling on Windows and in a worktree.** Registering the schemas cloned
+  the repository inside a container, which fails from a git worktree (its `.git` names the
+  main repository by a host path); and a line Mind printed that the console's code page
+  could not show stopped the thread that writes the run's log.
+- **#920 moved the score publisher into Mind's API.** The demo now starts the API (port
+  8800) and waits for its `/health`.
 
 ### Resolved since the inputs were written (2026-10-19)
 

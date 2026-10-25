@@ -69,15 +69,31 @@ def _complete_run() -> Observed:
 _DUPLICATE = "T1 is one task, not 2 (meeting + slack)"
 
 
-def _merged_log(observed: Observed) -> str:
-    """The landed runner's line for the Slack mention merged into T1, as creation_pipeline logs it."""
+def _merge_line(
+    source: str,
+    target: str,
+    title: str | None = "Get our pricing proposal over to Northwind",
+    index: int = 0,
+    similarity: str = "0.934",
+) -> str:
+    """creation_pipeline's line for a task it did not send. `title` None: withheld,
+    as for an item not classified as non-sensitive."""
 
-    t1_id = observed.created[0][1]["id"]
-    return (
-        f"INFO:mind.ingestion.creation_pipeline:creation: {_ITEMS['slack']} task 0 not sent, "
-        f"a title of 34 chars (withheld, item not classified as non-sensitive) "
-        f"is a duplicate of task {t1_id} (similarity 0.934)\n"
+    shown = (
+        repr(title)
+        if title is not None
+        else ("a title of 34 chars (withheld, item not classified as non-sensitive)")
     )
+    return (
+        f"INFO:mind.ingestion.creation_pipeline:creation: {_ITEMS[source]} task {index} not sent, "
+        f"{shown} is a duplicate of task {target} (similarity {similarity})\n"
+    )
+
+
+def _merged_log(observed: Observed) -> str:
+    """The Slack mention of T1 merged into the meeting's T1, as a correct run logs it."""
+
+    return _merge_line("slack", observed.created[0][1]["id"])
 
 
 def _failed(observed: Observed, landed_log: str | None = None) -> dict[str, str]:
@@ -154,6 +170,59 @@ def test_the_duplicate_line_must_name_the_task_that_was_sent():
     log = _merged_log(observed).replace(observed.created[0][1]["id"], str(uuid.uuid4()))
 
     assert _DUPLICATE in _failed(observed, landed_log=log)
+
+
+def test_a_merge_with_a_withheld_title_proves_nothing():
+    observed = _complete_run()
+    log = _merge_line("slack", observed.created[0][1]["id"], title=None)
+
+    assert _failed(observed, landed_log=log)[_DUPLICATE] == (
+        "not proven, sent from meeting; slack: a task of it was merged into it, title withheld "
+        "(the item is not classified as non-sensitive)"
+    )
+
+
+def _slack_first_without_the_meetings_t1() -> tuple[Observed, str]:
+    """Slack's T1 sent first; the meeting's T1 never extracted; its T2 above the threshold."""
+
+    slack_t1 = _request("slack", 0, "Get our pricing proposal over to Northwind", "T1")
+    email_t3 = _request("email", 0, "Return the signed supplier registration form", "T3")
+    observed = Observed(requested=[slack_t1, email_t3])
+    for request in observed.requested:
+        task_id = str(uuid.uuid4())
+        observed.created.append((request["correlationId"], {"id": task_id}))
+        observed.scored.append({"taskId": task_id})
+    slack_t1_id = observed.created[0][1]["id"]
+    log = _merge_line(
+        "meeting", slack_t1_id, title="Finish the updated cost sheet", similarity="0.788"
+    )
+    return observed, log
+
+
+def test_another_task_merged_into_t1_is_a_false_duplicate_not_a_pass():
+    # The case found in review: a merge line for the item, into T1, is not
+    # proof that it was T1 that was merged.
+    observed, log = _slack_first_without_the_meetings_t1()
+
+    detail = _failed(observed, landed_log=log)[_DUPLICATE]
+
+    assert detail == (
+        "sent from slack; meeting: no duplicate decision for it in the landed runner's log; "
+        "T2 'Finish the updated cost sheet' merged into it (similarity 0.788): a false duplicate"
+    )
+
+
+def test_a_false_duplicate_fails_even_beside_the_right_one():
+    observed, log = _slack_first_without_the_meetings_t1()
+    slack_t1_id = observed.created[0][1]["id"]
+    log += _merge_line(
+        "meeting", slack_t1_id, title="Send Northwind the price quote", index=1, similarity="0.913"
+    )
+
+    detail = _failed(observed, landed_log=log)[_DUPLICATE]
+
+    assert "meeting's 'Send Northwind the price quote' matched it (similarity 0.913)" in detail
+    assert "T2 'Finish the updated cost sheet' merged into it (similarity 0.788)" in detail
 
 
 def test_a_meeting_that_yields_only_one_task_misses_t2_and_the_dependency():
