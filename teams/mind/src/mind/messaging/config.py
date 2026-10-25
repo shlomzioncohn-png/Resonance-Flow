@@ -17,10 +17,14 @@ Only the messaging-relevant keys are read here:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from mind import config_file
 from mind.config_file import ConfigFileError
+
+_DEFAULT_KAFKA_SASL_SECRETS_DIR = "/etc/resonance-flow/secrets/kafka-sasl"
 
 
 @dataclass
@@ -116,6 +120,13 @@ def load_settings() -> MessagingSettings:
     kafka = config_file.section(config_file.load_merged(), "kafka")
     producer = config_file.section(kafka, "producer")
     sasl = config_file.section(kafka, "sasl")
+    password_file = (
+        Path(os.environ.get("KAFKA_SASL_SECRETS_DIR", _DEFAULT_KAFKA_SASL_SECRETS_DIR))
+        / "client-passwords"
+    )
+    password = (
+        password_file.read_text().strip() if password_file.is_file() else sasl.get("password", "")
+    )
     return MessagingSettings(
         bootstrap_servers=kafka.get("bootstrap_servers", ""),
         schema_registry_url=kafka.get("schema_registry_url", ""),
@@ -124,6 +135,6 @@ def load_settings() -> MessagingSettings:
         sasl=SaslSettings(
             mechanism=sasl.get("mechanism", ""),
             username=sasl.get("username", ""),
-            password=sasl.get("password", ""),
+            password=password,
         ),
     )

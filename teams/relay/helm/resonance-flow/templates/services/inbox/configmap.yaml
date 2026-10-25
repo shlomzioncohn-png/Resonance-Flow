@@ -14,7 +14,7 @@ data:
     spring:
       config:
         # Binds the inbox-db-credentials Secret's "password" file to ${password} below.
-        import: "optional:configtree:/etc/resonance-flow/secrets/inbox-db/"
+        import: "optional:configtree:/etc/resonance-flow/secrets/inbox-db/,optional:configtree:/etc/resonance-flow/secrets/kafka-sasl/"
       datasource:
         # Same host/port helper as the wait-for-postgresql initContainer; Inbox's own
         # database (see inbox/_db-init.tpl).

@@ -13,7 +13,7 @@ data:
       config:
         # Binds the chain-db-credentials Secret's "password" file to the ${password}
         # placeholder below - the Secret is mounted as a file, not passed as an env var.
-        import: "optional:configtree:/etc/resonance-flow/secrets/chain-db/"
+        import: "optional:configtree:/etc/resonance-flow/secrets/chain-db/,optional:configtree:/etc/resonance-flow/secrets/kafka-sasl/"
       application:
         name: chain
       datasource:
