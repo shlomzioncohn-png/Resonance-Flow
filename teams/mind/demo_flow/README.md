@@ -1,14 +1,20 @@
-# demo_flow: inputs for the #359 end-to-end demo
+# demo_flow: the #359 end-to-end demo
 
-The input half of [#359](https://github.com/KamaTechOrg/Resonance-Flow/issues/359): four
-synthetic, English-only source artifacts describing one piece of work, the expected answer
-written down before any run, and a feed that puts them on the real pipeline path: objects
-landed in MinIO, then one pointer event per item on `bridge.raw.landed`.
+[#359](https://github.com/KamaTechOrg/Resonance-Flow/issues/359): one realistic scenario, a
+meeting recording, a Slack thread and an email with a scanned form, all about the same piece
+of work, run through the real pipeline path and checked against an answer written down
+before any run.
 
-**What this is not:** it is not the consumer, and it does not check the output. Reading
-`bridge.raw.landed`, then OCR/ASR, extraction, dedup, dependencies and publishing, is the
-pipeline's job (#349 and on). `make demo-flow` belongs to whoever runs the whole pipeline.
-It can call `make demo-feed` for its input.
+```bash
+python -m demo_flow.run                        # natural order (make demo-flow)
+python -m demo_flow.run --order slack-first    # Slack before the meeting (make demo-flow-slack-first)
+```
+
+One command brings up a clean stack, starts Mind, lands the three items in MinIO with one
+pointer event each on `bridge.raw.landed`, and prints PASS/FAIL per acceptance criterion.
+Nothing is called from Python directly: every item goes through Kafka, MinIO, Mind's
+consumer, Inbox and back. [Latest results](#latest-results): **not all criteria pass yet**,
+and the reasons are findings with owners, below.
 
 ## The scenario
 
@@ -44,7 +50,63 @@ appears in its source file, so the answer and the inputs can't drift apart.
 
 ## How to run it
 
-From `teams/mind`, with the venv active and `pip install -e ".[dev]"` (it brings `minio`):
+From `teams/mind`, with the venv active and `pip install -e ".[dev]"`. On Windows there is
+no `make`: run the `python -m` commands.
+
+**Once, before the first run:**
+
+1. **Docker** running (Docker Desktop on Windows).
+2. **`demo_flow/stack/secrets.yaml`**: copy `secrets.example.yaml` next to it and put an LLM
+   key in `llm.gemini.api_key`. It is gitignored. Use a **paid-tier** key: on the free tier
+   a full run hits the daily quota (429) and 503s part-way, and items are lost.
+3. **`tesseract`** installed (on Windows the run finds `C:\Program Files\Tesseract-OCR` on
+   its own).
+4. **Model weights** under `models/` (`models/README.md`): Whisper `base.en` and the
+   embedding model `bge-small-en-v1.5`. Both load from there, never from the Hugging Face
+   Hub, which the dev network's filter blocks (418).
+
+`python -m demo_flow.run` checks all four in its first stage and stops with a sentence
+naming what is missing.
+
+**What a run does**, one `STAGE` line each (`run.py`):
+
+| Stage | What happens |
+|---|---|
+| 1 preflight | Docker, the LLM key, tesseract, the embedding model |
+| 2 stack | `docker compose down -v`, then up (`stack/docker-compose.yml`): Redpanda, Apicurio registry, MinIO, Inbox built from `teams/inbox`, pgvector. Empty on every run |
+| 3 topics, schemas, migrations | the topics every party reads; every schema registered by **Relay's own scripts** (`stack/seed-schemas.sh` runs `teams/relay/ci/seed-registry.sh`), as in the cluster; Mind's vector-store migrations |
+| 4 Mind | the landed runner (`mind.ingestion.landed_consumer_runner`) and the score publisher, as processes on this machine, their output prefixed `[mind-landed]` / `[mind-score]` |
+| 5 feed | `demo_flow.feed` lands the three items and publishes their events, in the order asked for |
+| 6 result | `verify.py` reads `task.creation.requested`, `task.created`, `task.score.proposed` and `task.dependencies.proposed` until everything expected has come out or nothing has moved for 120 s, then prints one line per criterion |
+
+A run takes 6 to 8 minutes. The stack is left up afterwards (Redpanda Console
+<http://localhost:8090>, MinIO <http://localhost:9091>, `minioadmin`/`minioadmin`);
+`python -m demo_flow.run --down-only` takes it down. Each run keeps its logs and result in
+`runs/<run-id>/` (gitignored): `mind-landed.log`, `mind-score.log`, `result.txt`, next to
+the feed's manifest `runs/<run-id>.json`.
+
+A Mind process that stops on an error is started again, up to 3 times, as the cluster's
+`restart: on-failure` would: since #919 an LLM outage stops the landed runner on purpose, so
+its message is redelivered rather than lost.
+
+`python -m demo_flow.run --help` lists the options (`--order`, `--gap`, `--settle`,
+`--timeout`, `--down`).
+
+### How the result is checked
+
+`verify.py` traces each creation request to its source item by `correlation_id` (Mind derives
+it from Bridge's and the task's number, `task_index_for`) and to T1-T3 by its title. Then:
+
+| Criterion | Passes when |
+|---|---|
+| three tasks come out, the expected ones | exactly T1, T2 and T3 were requested, nothing else |
+| Inbox created every task Mind requested | each request has a `task.created` with its `correlation_id` |
+| T1 is one task, not 2 | one request for T1, **and** the landed runner's log shows every other mention reaching the duplicate check and matched to that same Inbox task. A merged duplicate sends nothing, so one request alone is not proof: a mention whose extraction failed sends nothing either |
+| T1 depends on T2 | a `task.dependencies.proposed` from T1's Inbox id to T2's |
+| tasks carry the fields | tier, urgency, `role_context` on each; a suggested owner and effort where `expected.json` has one. The checker also asks for the deadline, which #359 does not list: read a deadline-only FAIL as information |
+| every created task gets a score | a `task.score.proposed` for each created task |
+
+### Building and checking the inputs alone
 
 ```bash
 make demo-artifacts                 # builds artifacts/meeting.m4a and artifacts/supplier_form.jpg
@@ -52,28 +114,89 @@ make demo-check-media               # real OCR + ASR on them, on their own; fail
 make demo-feed ARGS="--dry-run"     # build + validate the three events; no infra needed
 ```
 
-The real feed needs Bridge's local MinIO, Redpanda and schema registry:
-
-```bash
-cd ../bridge && docker compose up -d redpanda redpanda-console schema-registry && cd ../mind
-docker run -d --name demo-minio -p 9000:9000 -p 9091:9001 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin bitnamilegacy/minio:latest   # see Findings, Open 6
-make demo-feed                      # natural order: meeting, then Slack 90 s later, then email
-make demo-feed-slack-first          # Slack, then the meeting 5 s later, then email
-```
-
-Each `make` target is one command. Running the feed again is safe for Kafka and MinIO, but
-the full pipeline only gives the expected answer on a clean store. See
-[Repeatability](#repeatability) before a second run.
-
 - **`make demo-artifacts`:** the form is drawn with Pillow and builds on any OS, giving the
   same image every time. The audio is read by the Windows speech synthesizer, so it builds
-  **on Windows only**. Anywhere else, use a copy someone built, or record
+  **on Windows only**. Anywhere else, use the committed copy, or record
   `scenario/meeting_script.txt` yourself in any format FFmpeg reads.
-- **`make demo-check-media`:** needs the `tesseract` binary and the Whisper `base.en` weights
-  (`models/README.md`). Your `.env` must have `WHISPER_MODEL=base.en`, as in `.env.example`.
-  Only pinned sizes load.
+- **`make demo-check-media`:** needs `tesseract` and the Whisper `base.en` weights.
 
-### Options
+## Latest results
+
+2026-10-25, branch `michal-brecher/mind-demo-flow-359` on `main` at `ce60d3f4` (#690 task
+lists, #834 dependency publisher and #841 tenant-scoped index all merged), paid Gemini key,
+`gemini-3.6-flash`. Runs `20261025T080349Z-natural` and `20261025T081126Z-slack-first`.
+
+| Criterion | natural | slack-first |
+|---|---|---|
+| three tasks come out, the expected ones | FAIL: 4 requested, 3 created | FAIL: 4 requested, 3 created |
+| Inbox created every task Mind requested | FAIL: the meeting's T1 | FAIL: the email's second T3 |
+| T1 is one task, not 2 (meeting + Slack) | FAIL: 2 requests, one from each | **PASS**: sent from Slack, the meeting's matched it (similarity 0.957) |
+| T1 depends on T2 | FAIL: no message | FAIL: no message |
+| tasks carry the fields | FAIL: no owner, no deadline; T2 no `role_context` | FAIL: same |
+| every created task gets a score | **PASS** (3) | **PASS** (3) |
+
+**What each stage did** (natural):
+
+| Stage | What happened | Component |
+|---|---|---|
+| landed | three items, five objects in MinIO, three events on `bridge.raw.landed` | the feed (as Bridge) |
+| transcribed | 67.5 s of audio in 14 s (`rtf=0.205`), 776 chars | R4's ASR, Whisper `base.en` |
+| OCR | the scanned form in 1.6 s, 540 chars | R4's OCR, tesseract |
+| extracted | the meeting: **T2 and T1** (#690); Slack: T1; the email body and the form: T3 | extraction (#690), classification and effort (#350-#352) |
+| deduplicated | slack-first: the meeting's T1 matched Slack's (0.957), not sent | R3's duplicate detection (#471, #841) |
+| created | `task.creation.requested` to Inbox, `task.created` back, 1.4-5.4 s each | Mind's creation flow (#353, #919), Inbox |
+| scored | `task.score.proposed` for each created task | the score publisher (#357) |
+| dependency | **none published**: see findings 1 and 2 | #834/#355 |
+
+T2 came out with the expected effort, 240 minutes (expected 180-300).
+
+**Not shown end to end yet: the T1 -> T2 dependency (#834).** The adapter is wired in this
+branch, but in neither run did the task carrying the dependency mention reach Inbox and come
+back: in natural the meeting's T1 was dropped by Inbox (finding 1), in slack-first it was
+merged into Slack's T1 and its mention went with it (finding 2).
+
+## What the feed sends
+
+The feed stands in for Bridge, so it rebuilds exactly what Bridge's own lanes land
+and publish for the same input:
+
+| Item | Bridge code it mirrors | Objects (role, modality, content type) | Event |
+|---|---|---|---|
+| meeting | `media/MediaIntakeService.landMeeting`, `MediaIntakeOrchestrator` (Zoom) | `ROLE_RECORDING` `MODALITY_AUDIO` `audio/mp4`, key `ZOOM/<tenant>/<date>/<correlation_id>.m4a`. Plus the Zoom report: `ROLE_SOURCE_METADATA` `MODALITY_TEXT` `application/json`, key `…/<correlation_id>.json` | `source_type=SOURCE_TYPE_ZOOM`, participants = the report's names, `source_timestamp` = its `start_time`, `source_ref` = its `uuid` |
+| Slack | `intake/service/ChatSourceRecordMapper`, `SourceRecordRefMapper` | `ROLE_TRANSCRIPT` `MODALITY_TEXT` `text/plain; charset=utf-8`: one `sender: text` line per message. Key `SLACK/<tenant>/<date>/<uuid>.txt` | `SOURCE_TYPE_SLACK`, participants = the senders, `source_timestamp` = the first message |
+| email | `intake/parser/email/FixtureEmailSourceReader` | `ROLE_BODY` `MODALITY_TEXT` `application/json`: the record as compact JSON, attachment base64 inline. Plus `ROLE_ATTACHMENT` `MODALITY_SCANNED_DOC` `image/jpeg`, key `<uuid>-supplier_form.jpg` | `SOURCE_TYPE_EMAIL`, participants = the sender, `source_timestamp` = `date` |
+
+The Zoom report is Zoom's Report API shape, with the same field names as Bridge's own
+fixture (`teams/bridge/src/main/resources/fixtures/media/zoom-meeting-metadata.sample.json`).
+Each run lands it with a fresh `uuid` and its times moved onto the run's Monday.
+
+Every event also carries Bridge's constants:
+
+| Field | Value |
+|---|---|
+| `schema_version` | `"1.0"` |
+| `revision` | `0` |
+| `change_type` | `CHANGE_TYPE_UPSERT` |
+| `change_significance_score` | `100` |
+| `scope_decision` | `SCOPE_DECISION_INCLUDED` |
+| `classification` | unset (Bridge's classifier is off by default) |
+
+Every MinIO object gets the same four tags Bridge's `storage/ObjectTags` puts on it. Tags
+and the first segment of an object key use Bridge's own enum name (`ZOOM`), without the
+proto's prefix. The
+Kafka key is Bridge's `dedupKey()`, `correlation_id:revision`. Events are serialized with
+Mind's own `ProtobufProducer` from `shared/proto/raw-object-event.proto`.
+
+Before sending anything, every run (dry or real) does three checks:
+
+- each event survives a protobuf round trip;
+- each object's hash and size match its content;
+- each event is validated against Mind's pydantic `RawObjectEvent`, after the proto's enum
+  prefixes are stripped (`SOURCE_TYPE_ZOOM` → `ZOOM`, `ROLE_BODY` → `BODY`; see
+  `feed.mind_view`). The consumer does the same, because Mind's model uses the bare values. A rejection is logged as a warning, not raised: the wire format is Bridge's, and
+  a mismatch is a finding about the contract. All three events pass today.
+
+### Feed options
 
 `python -m demo_flow.feed --help` lists them all. Pass them through `make` with
 `ARGS="..."`.
@@ -144,172 +267,106 @@ deadlines are already past: pass `--anchor` with the next Monday if that matters
 
 ### Repeatability
 
-**Transport level: safe to rerun.** Every run mints new correlation ids and new object keys,
-the same way Bridge does. Meeting objects are named after the meeting's correlation id;
-Slack and email objects get a random UUID each. Each run is also a new Zoom meeting, with
-its own `uuid` and so its own `source_ref`. The event dedup key is `correlation_id:revision`,
-so a second run's events are new events and are not skipped as replays.
-
-**Pipeline level: not repeatable yet.** Mind's duplicate detection
-(`embeddings/duplicate_detection.py`) compares each new task with every task already in
-the vector store. A second run carries exactly the same content as the first, so its three
-tasks match the first run's stored tasks and are treated as duplicates. The second run
-produces **0 tasks** instead of the 3 in `expected.json`, which looks like a failure but is
-duplicate detection working as designed.
-
-Until the demo can clear its own data, run the full pipeline once per clean store. That
-means a fresh vector store (and Inbox state) before every rehearsal and before Demo Day.
-Clearing only the demo's data needs a demo-scoped reset. That is waiting on the tenant fix
-in duplicate detection, and is not part of this feed yet.
-
-Each real run also writes `runs/<run-id>.json`, which is gitignored. It maps every item to
-its correlation id, Kafka key, object keys and the full event, so you can tell which run's
-output you are looking at.
-
-## What the feed sends
-
-There is no consumer of `bridge.raw.landed` in Mind yet, so the only payload format to
-match is the one Bridge produces. The feed rebuilds exactly what Bridge's own lanes land
-and publish for the same input:
-
-| Item | Bridge code it mirrors | Objects (role, modality, content type) | Event |
-|---|---|---|---|
-| meeting | `media/MediaIntakeService.landMeeting`, `MediaIntakeOrchestrator` (Zoom) | `ROLE_RECORDING` `MODALITY_AUDIO` `audio/mp4`, key `ZOOM/<tenant>/<date>/<correlation_id>.m4a`. Plus the Zoom report: `ROLE_SOURCE_METADATA` `MODALITY_TEXT` `application/json`, key `…/<correlation_id>.json` | `source_type=SOURCE_TYPE_ZOOM`, participants = the report's names, `source_timestamp` = its `start_time`, `source_ref` = its `uuid` |
-| Slack | `intake/service/ChatSourceRecordMapper`, `SourceRecordRefMapper` | `ROLE_TRANSCRIPT` `MODALITY_TEXT` `text/plain; charset=utf-8`: one `sender: text` line per message. Key `SLACK/<tenant>/<date>/<uuid>.txt` | `SOURCE_TYPE_SLACK`, participants = the senders, `source_timestamp` = the first message |
-| email | `intake/parser/email/FixtureEmailSourceReader` | `ROLE_BODY` `MODALITY_TEXT` `application/json`: the record as compact JSON, attachment base64 inline. Plus `ROLE_ATTACHMENT` `MODALITY_SCANNED_DOC` `image/jpeg`, key `<uuid>-supplier_form.jpg` | `SOURCE_TYPE_EMAIL`, participants = the sender, `source_timestamp` = `date` |
-
-The Zoom report is Zoom's Report API shape, with the same field names as Bridge's own
-fixture (`teams/bridge/src/main/resources/fixtures/media/zoom-meeting-metadata.sample.json`).
-Each run lands it with a fresh `uuid` and its times moved onto the run's Monday.
-
-Every event also carries Bridge's constants:
-
-| Field | Value |
-|---|---|
-| `schema_version` | `"1.0"` |
-| `revision` | `0` |
-| `change_type` | `CHANGE_TYPE_UPSERT` |
-| `change_significance_score` | `100` |
-| `scope_decision` | `SCOPE_DECISION_INCLUDED` |
-| `classification` | unset (Bridge's classifier is off by default) |
-
-Every MinIO object gets the same four tags Bridge's `storage/ObjectTags` puts on it. Tags
-and the first segment of an object key use Bridge's own enum name (`ZOOM`), without the
-proto's prefix. The
-Kafka key is Bridge's `dedupKey()`, `correlation_id:revision`. Events are serialized with
-Mind's own `ProtobufProducer` from `shared/proto/raw-object-event.proto`.
-
-Before sending anything, every run (dry or real) does three checks:
-
-- each event survives a protobuf round trip;
-- each object's hash and size match its content;
-- each event is validated against Mind's pydantic `RawObjectEvent`, after the proto's enum
-  prefixes are stripped (`SOURCE_TYPE_ZOOM` → `ZOOM`, `ROLE_BODY` → `BODY`; see
-  `feed.mind_view`). The consumer will need the same mapping, because Mind's model uses the
-  bare values. A rejection is logged as a warning, not raised: the wire format is Bridge's, and
-  a mismatch is a finding about the contract. All three events pass today.
-
-## What you see while it runs
-
-```
-... demo_flow.feed INFO run 20261019T074840Z-slack-first: order=slack-first gap=5s scenario Monday=2026-10-19 tenant=00000000-0000-0000-0000-000000000001, 3 items
-... demo_flow.feed INFO [1/3] SLACK   landed     SLACK/00000000-0000-0000-0000-000000000001/2026-10-19/<uuid>.txt (ROLE_TRANSCRIPT, MODALITY_TEXT, 213 bytes)
-... demo_flow.feed INFO [1/3] SLACK   published  SOURCE_TYPE_SLACK key=<correlation-id>:0
-... demo_flow.feed INFO waiting 5 s before the next item
-... demo_flow.feed INFO [2/3] MEETING landed     ZOOM/00000000-0000-0000-0000-000000000001/2026-10-19/<correlation-id>.m4a (ROLE_RECORDING, MODALITY_AUDIO, 334,022 bytes)
-... demo_flow.feed INFO [2/3] MEETING landed     ZOOM/00000000-0000-0000-0000-000000000001/2026-10-19/<correlation-id>.json (ROLE_SOURCE_METADATA, MODALITY_TEXT, 1,748 bytes)
-...
-... demo_flow.feed INFO expected (expected.json) for this run:
-... demo_flow.feed INFO   T1 'Send Northwind the price quote' owner=Dana due Thursday 2026-10-22
-```
-
-To see what landed, use the MinIO console at <http://localhost:9091> (Bridge's compose maps
-it there, not to 9001) and Redpanda Console at <http://localhost:8090>, topic
-`bridge.raw.landed`.
+Each run starts on an empty stack (`down -v`, then up): an empty broker, registry, bucket,
+Inbox database and vector store. So a run never meets the last run's tasks, and the same
+command gives the same flow every time. Content comes out of an LLM, so titles and
+classifications may differ between runs; the checker matches tasks by the words that name
+the work, not by exact titles.
 
 ## Findings
 
-Checked against `main` at `0275276e` (2026-10-19, after #823 merged Esther's
-`esther/media-llm-classification`). Each finding names its owner. None is worked around in
-the feed.
+From the runs above. Each names its owner and is reported to them rather than worked around
+in Mind. Numbered by how much they block the demo.
 
-### Open
+### Open, blocking the expected answer
 
-1. **Mind has no `bridge.raw.landed` consumer yet (#349).** Nothing on `main` reads the topic.
-   The only handler, `ingestion/raw_object_event_handler.py` on `yonit/mind-dual-intake`,
-   predates the per-item event: it reads `event.object_key`. So this feed has not been run
-   through the pipeline, and nothing here shows the demo working end to end.
-2. **The consumer has to strip the proto's enum prefixes (Mind).** Since #823 every enum value
-   on the wire carries its enum's name (`SOURCE_TYPE_ZOOM`, `ROLE_RECORDING`,
-   `SCOPE_DECISION_INCLUDED`, …). Mind's `contracts.RawObjectEvent` uses the bare values
-   (`ZOOM`, `RECORDING`, `INCLUDED`), so a straight `MessageToDict` → `model_validate` rejects
-   every event. With the prefixes stripped (`feed.mind_view`), all three events pass, the Zoom
-   meeting included.
-3. **Relay's registered copy of the schema predates #823 (Relay).** The schema-sync hook
-   registers `teams/relay/schema-sync-hook/files/schemas/raw-object-event.proto` as
-   `bridge.raw.landed-value`, and that file is still the old schema: `MEETING`/`DOC`,
-   unprefixed enums, no `source_ref` and no `classification`. `shared/proto` changed in #823;
-   the copy didn't. In the cluster the registered schema would not match what Bridge and this
-   feed now publish.
-4. **Bridge's own Protobuf publish fails against its local registry (Bridge/Relay).** On `main`
-   (rebuilt and run 2026-10-19), with the compose file's registry
-   (`REGISTRY_CCOMPAT_USE_CANONICAL_HASH=true`) and the schema registered from `shared/proto`
-   as text, exactly as Relay's `register-schema.sh` does it (references `[]`,
-   `google/protobuf/*` skipped):
-   - `POST /api/bridge/media/run` → `failedFiles: ["meeting.m4a"]`
-   - `POST /api/bridge/intake/EMAIL/run` → 500
+1. **Inbox keeps one task per `source_ref`, and drops the rest without an answer (Inbox,
+   #353 contract).** `TaskService.createTask` returns the existing task when one already has
+   the same `(tenant, source_type, source_ref)` (`findExisting`,
+   `uq_tasks_org_source_type_source_ref`), and publishes no `task.created`. Since #690 Mind
+   sends one request per task, each with its own `correlation_id` but all with the source
+   item's `source_ref`, so every task after the first from a meeting or an email is lost.
+   In the natural run it took the meeting's T1, so Slack's T1 found nothing to match and was
+   created as a second T1, and T1's dependency mention went with it. Focused repro, no LLM,
+   30 s, on a running stack: `python -m demo_flow.repro_inbox_source_ref` (two requests, one
+   `source_ref`: one task created, the other never answered). Mind does not work around it:
+   `source_ref` is what Inbox's UI builds the source link from. Suggested: key Mind's
+   requests on `correlation_id`, which is unique per task.
+2. **A merged duplicate's dependency mentions are lost (R3, #471/#355).** A task found to be
+   a duplicate is not sent, and nothing carries its `dependency_mentions` to the task it
+   matched. In slack-first, Slack's T1 ("get our pricing proposal over") was created first;
+   the meeting's T1, the one that says "once I have the updated cost sheet", was merged into
+   it, and the T1 -> T2 edge with it. So slack-first cannot show the dependency even once
+   finding 1 is fixed.
+3. **No suggested owner (#132).** No request carries `suggested_owner_user_id`. Dana and Omer
+   are also not Inbox users, so even with #132 there is no one to map them to: the demo needs
+   users seeded in Inbox.
+4. **No deadline on any task (week 8).** The extraction prompt says "Never output priority,
+   owner or deadline. Other stages handle those", and no stage does. "By Thursday" is in
+   every source. #359 does not list the deadline, so this is a gap for week 8, not a FAIL of
+   #359.
 
-   Both fail with `RestClientException: The given schema does not match any schema under the
-   subject bridge.raw.landed-value; error code: 40403`, before the feed published anything.
-   Bridge lands its objects and then fails to publish, so MinIO gets objects that no event
-   points to.
-5. **The feed registers its own schema version (Mind, Relay).** Bridge's producer never
-   registers (`auto.register.schemas=false`); Relay registers centrally as `.proto` text. The
-   feed publishes through Mind's `ProtobufProducer`, which auto-registers the schema as a
-   base64 `FileDescriptorProto`. Measured 2026-10-19:
-   - With Relay's text v1 in place, the feed's first publish added **v2**, the same schema in
-     descriptor form (both match `shared/proto`). Later publishes reuse v2.
-   - Lookup-only does not work with confluent-kafka 2.10.1. Plain lookup returns `40403`.
-     `use.latest.version` fails with "Error parsing message with type
-     'google.protobuf.FileDescriptorProto'", the limitation `producer.py`'s comment describes.
+### Open, other
 
-   Every Mind producer behaves this way, so whether Mind may register (and in which form) is a
-   Relay/Mind decision.
-6. **Bridge's local MinIO doesn't start (Bridge).** `teams/bridge/docker-compose.yml` still
-   uses `minio/minio:latest`, and Docker Hub refuses it ("pull access denied … repository does
-   not exist"); `quay.io/minio/minio` answers 401. MinIO stopped publishing free images. The
-   shared Helm chart already uses `bitnamilegacy/minio`. To run the feed, start that image by
-   hand with the compose file's ports and credentials (the command is under
-   [How to run it](#how-to-run-it)).
-7. **The email body differs by Bridge mode (Bridge).** In fixture mode, which is the default
-   and what local Bridge runs, BODY is the simplified fixture JSON with every attachment
-   inline as base64: 762 KB of body for a 571 KB scan, the scan carried twice. In real Gmail
-   mode it is Gmail's whole `Message` resource (`RealEmailSourceReader`, `message.toString()`).
-   A consumer that parses BODY has to handle two shapes. This feed sends the fixture shape.
-8. **Bridge's README gives the wrong MinIO console port.** It says
-   `http://localhost:9001`, but `teams/bridge/docker-compose.yml` maps it to **9091**.
-9. **The demo can't be rerun through the full pipeline yet (Mind).** Duplicate detection
-   matches a rerun's tasks against the previous run's stored tasks, so the second run yields
-   0 tasks (see [Repeatability](#repeatability)). The planned fix is a reset that deletes the
-   demo's data before a run, after the tenant fix in duplicate detection.
-10. **Bridge's media lane sends a tenant that is not a UUID (Bridge).**
-    `teams/bridge/.env.example` sets `BRIDGE_MEDIA_TENANT_ID=demo-tenant`, and Mind's consumer
-    skips every event whose tenant is not a UUID (see [Tenant](#tenant)). So a meeting or
-    scanned document that comes through Bridge itself, not through this feed, never reaches
-    extraction. The feed uses a UUID tenant and is not affected.
+5. **Two tasks from one event are not checked against each other (Mind).** The email's body
+   and its scanned form both yield T3; the duplicate check only sees tasks Inbox has already
+   confirmed, so both are sent. Finding 1 hides it today (Inbox keeps the first); it comes
+   back when finding 1 is fixed. The ingestion README's "Duplicates close together".
+6. **T2 never gets a `role_context` (R2, classification).** In both runs the model returned
+   tier, urgency and effort for "Finish the updated cost sheet" but no `role_context`.
+   Repeatable on this scenario.
+7. **The email body is the fixture JSON with the scan inline as base64 (Bridge).** 762,183
+   characters of body for a 571 KB scan; in Gmail mode BODY is Gmail's whole `Message`
+   instead. Since #690 extraction truncates it to 8,000 characters, so it no longer reaches
+   the LLM whole, but what it sends is mostly base64.
+8. **A retry redoes the media work (Mind, known).** After an LLM outage stops the runner, the
+   redelivered meeting is transcribed again: 43-50 CPU seconds per restart, three times in
+   one run on the free tier.
+9. **The free Gemini tier cannot carry a run (environment).** 503s and the daily quota (429)
+   stopped extraction in four runs on 2026-10-22. With the paid key, none.
+10. **The give-up log line counts schema attempts, not calls (R2).** "giving up ... after 0
+    attempt(s)" after three provider calls.
+11. **`index_consumer_runner.py` cannot open the vector store on Windows (Mind).** Same
+    `new_event_loop()` as the fix below; not part of the demo, so left as it is.
+12. **Bridge's local MinIO doesn't start (Bridge).** `teams/bridge/docker-compose.yml` uses
+    `minio/minio:latest`, which Docker Hub refuses; the demo stack uses `bitnamilegacy/minio`,
+    as the Helm chart does. Bridge's README also gives the console port as 9001; the compose
+    file maps 9091.
+13. **Relay's registered copy of `raw-object-event.proto` predated #823, and Bridge's own
+    Protobuf publish failed against its local registry with 40403 (Bridge/Relay).** Measured
+    2026-10-19, not re-checked since; the demo registers from `shared/proto` with Relay's
+    scripts and is not affected.
+14. **Bridge's media lane sends a tenant that is not a UUID (Bridge).**
+    `BRIDGE_MEDIA_TENANT_ID=demo-tenant` in `teams/bridge/.env.example`; Mind skips such
+    events. The feed uses Inbox's System tenant.
 
-### Resolved by #823
+### Fixed in this branch
 
-- **Meeting events were `MEETING`.** `shared/proto` and Bridge now send `SOURCE_TYPE_ZOOM` /
-  `SOURCE_TYPE_BIGBLUEBUTTON`, which matches Mind's `RawSourceType` once the prefix is stripped
-  (Open 2).
-- **Meeting events had no participants, `source_timestamp` or `source_ref`.** The Zoom report
-  sidecar now fills all three, and the feed sends it.
-- **The media lane published JSON.** It now publishes Protobuf through the same serializer as
-  the other lanes. Its landed objects match the feed's field for field: key
-  `<correlation_id>.m4a` / `.json`, content types, sizes and tags (compared on 2026-10-19).
-- **`schema_version` disagreed** with the proto's `"0.1"` comment. The comment is gone;
-  Bridge and the feed both send `"1.0"`.
+- **The landed runner could not open the vector store on Windows.** psycopg's async mode
+  rejects Windows' default `ProactorEventLoop`; the runner now opens `SelectorEventLoop`s, as
+  `tests/conftest.py` does. No change on Linux.
+- **No dependency was ever published end to end.** #834 merged `DependencyAdapter`, but the
+  landed runner (#919) still passed its placeholder no-op `on_matched`. It now passes the
+  adapter, as `dependencies/README.md` shows.
+
+### Resolved since the inputs were written (2026-10-19)
+
+- **No `bridge.raw.landed` consumer (#349, #919).** Mind's landed runner consumes it and runs
+  the creation pipeline.
+- **The enum prefixes.** The consumer strips them (`raw_object_event_proto.py`).
+- **The feed registered its own schema version.** Since #899 Mind's producers only look
+  schemas up; the demo registers them centrally with Relay's scripts.
+- **Not repeatable.** Every run starts on an empty stack.
+- **Inbox did not start (duplicate V15 migration).** Fixed on `main` by #944.
+- **The tenant was not a UUID.** #946: Inbox's System tenant.
+- **One task per text (#690).** The meeting yields T1 and T2.
+
+### Week 8
+
+Gaps this demo shows that are capabilities, not repairs: deadline extraction (finding 4),
+owner resolution with seeded users (3), carrying a merged duplicate's dependency mentions
+(2), duplicates within one event (5), and a demo-scoped reset so the demo can run on a shared
+stack instead of a fresh one.
 
 ## Files
 
@@ -317,9 +374,13 @@ the feed.
 |---|---|---|
 | `scenario/` | yes | sources: meeting script, Zoom meeting report, Slack thread, email, form text |
 | `expected.json` | yes | the expected answer |
-| `common.py`, `build_artifacts.py`, `check_media.py`, `feed.py` | yes | the tooling |
+| `run.py` | yes | the one command: stack, Mind, feed, result |
+| `verify.py` | yes | reads the output topics and the landed runner's log, checks them against `expected.json` |
+| `repro_inbox_source_ref.py` | yes | finding 1, on its own |
+| `stack/` | yes, except `secrets.yaml` | the demo stack's compose file, Mind's `config.yaml`, `secrets.example.yaml`, `seed-schemas.sh` |
+| `common.py`, `build_artifacts.py`, `check_media.py`, `feed.py` | yes | the inputs' tooling |
 | `artifacts/` | yes | `meeting.m4a` (326 KB), `supplier_form.jpg` (558 KB), built from `scenario/` |
-| `runs/` | no (gitignored) | one manifest per real run |
+| `runs/` | no (gitignored) | per run: the feed's manifest, the Mind processes' logs, `result.txt` |
 
 The two built artifacts are committed because the audio can only be built on Windows, and
 anyone running the demo on macOS or Linux needs it. Rebuild them with `make demo-artifacts`
