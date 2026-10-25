@@ -1,0 +1,183 @@
+{
+  "meta": {
+    "data": "data\\dev",
+    "seed": 42,
+    "as_of": "2026-07-03T15:36:16.574959+00:00",
+    "config_sha256": "56b380101f40f2c17c3b14f1a07412ebf702edca0cdb697f318ca2532fc7728d",
+    "config_frozen": true
+  },
+  "n_flags": 60,
+  "per_detector": {
+    "CHRONIC_BLOCKER": {
+      "tp": 5,
+      "fp": 4,
+      "fn": 10,
+      "precision": 0.5555555555555556,
+      "recall": 0.3333333333333333
+    },
+    "RECURRING_CYCLE": {
+      "tp": 15,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "SLOW_CHAIN": {
+      "tp": 7,
+      "fp": 13,
+      "fn": 8,
+      "precision": 0.35,
+      "recall": 0.4666666666666667
+    }
+  },
+  "overall": {
+    "tp": 27,
+    "fp": 17,
+    "fn": 18,
+    "precision": 0.6136363636363636,
+    "recall": 0.6
+  },
+  "recall_low_severity": {
+    "overall": {
+      "planted": 15,
+      "found": 5,
+      "recall": 0.3333333333333333
+    },
+    "CHRONIC_BLOCKER": {
+      "planted": 5,
+      "found": 0,
+      "recall": 0.0
+    },
+    "RECURRING_CYCLE": {
+      "planted": 5,
+      "found": 5,
+      "recall": 1.0
+    },
+    "SLOW_CHAIN": {
+      "planted": 5,
+      "found": 0,
+      "recall": 0.0
+    }
+  },
+  "recall_by_severity": {
+    "subtle": {
+      "planted": 15,
+      "found": 5,
+      "recall": 0.3333333333333333
+    },
+    "moderate": {
+      "planted": 15,
+      "found": 7,
+      "recall": 0.4666666666666667
+    },
+    "severe": {
+      "planted": 15,
+      "found": 15,
+      "recall": 1.0
+    }
+  },
+  "missed_diseases": [
+    "chronic_blocking-moderate-1",
+    "chronic_blocking-moderate-2",
+    "chronic_blocking-moderate-3",
+    "chronic_blocking-moderate-4",
+    "chronic_blocking-moderate-5",
+    "chronic_blocking-subtle-1",
+    "chronic_blocking-subtle-2",
+    "chronic_blocking-subtle-3",
+    "chronic_blocking-subtle-4",
+    "chronic_blocking-subtle-5",
+    "slow_chain-moderate-1",
+    "slow_chain-moderate-2",
+    "slow_chain-moderate-5",
+    "slow_chain-subtle-1",
+    "slow_chain-subtle-2",
+    "slow_chain-subtle-3",
+    "slow_chain-subtle-4",
+    "slow_chain-subtle-5"
+  ],
+  "fell_for_decoy": [
+    "CHRONIC_BLOCKER:4b416d927d",
+    "CHRONIC_BLOCKER:70c840ab14",
+    "SLOW_CHAIN:27219948ab",
+    "SLOW_CHAIN:99d0c6cbe2",
+    "SLOW_CHAIN:a8a7688151",
+    "SLOW_CHAIN:d0d612992f",
+    "SLOW_CHAIN:f1ea88fe47"
+  ],
+  "out_of_scope_flags": [
+    "CHRONIC_BLOCKER:091c6a2334",
+    "CHRONIC_BLOCKER:0c1fa0b56c",
+    "CHRONIC_BLOCKER:16e3991329",
+    "CHRONIC_BLOCKER:3cb9c63754",
+    "CHRONIC_BLOCKER:61b00583ae",
+    "CHRONIC_BLOCKER:66a912700e",
+    "CHRONIC_BLOCKER:c3a619a0f8",
+    "CHRONIC_BLOCKER:c3f615eb93",
+    "CHRONIC_BLOCKER:d26c427267",
+    "CHRONIC_BLOCKER:fbb5546a59"
+  ],
+  "flag_outcomes": {
+    "CHRONIC_BLOCKER:0c1fa0b56c": "OUT_OF_SCOPE",
+    "CHRONIC_BLOCKER:66a912700e": "OUT_OF_SCOPE",
+    "CHRONIC_BLOCKER:d26c427267": "OUT_OF_SCOPE",
+    "CHRONIC_BLOCKER:582fd8a099": "TP",
+    "CHRONIC_BLOCKER:59074e55fb": "FP",
+    "CHRONIC_BLOCKER:748fe46e7a": "TP",
+    "CHRONIC_BLOCKER:c3a619a0f8": "OUT_OF_SCOPE",
+    "CHRONIC_BLOCKER:fbb5546a59": "OUT_OF_SCOPE",
+    "CHRONIC_BLOCKER:3cb9c63754": "OUT_OF_SCOPE",
+    "CHRONIC_BLOCKER:c3f615eb93": "OUT_OF_SCOPE",
+    "CHRONIC_BLOCKER:52f4b66cf8": "FP",
+    "CHRONIC_BLOCKER:70c840ab14": "FP",
+    "CHRONIC_BLOCKER:61b00583ae": "OUT_OF_SCOPE",
+    "CHRONIC_BLOCKER:c450b798b1": "TP",
+    "CHRONIC_BLOCKER:703345cb0e": "TP",
+    "CHRONIC_BLOCKER:d48d4a54dd": "TP",
+    "CHRONIC_BLOCKER:16e3991329": "OUT_OF_SCOPE",
+    "CHRONIC_BLOCKER:4b416d927d": "FP",
+    "CHRONIC_BLOCKER:091c6a2334": "OUT_OF_SCOPE",
+    "RECURRING_CYCLE:041a88164f": "TP",
+    "RECURRING_CYCLE:173f9b31d5": "TP",
+    "RECURRING_CYCLE:23b7593a25": "TP",
+    "RECURRING_CYCLE:31c2dadaf7": "TP",
+    "RECURRING_CYCLE:3fa03ff438": "TP",
+    "RECURRING_CYCLE:474b4e3bdb": "TP",
+    "RECURRING_CYCLE:531188074c": "TP",
+    "RECURRING_CYCLE:68552dd9b4": "TP",
+    "RECURRING_CYCLE:774d4809af": "TP",
+    "RECURRING_CYCLE:87b0f3283a": "TP",
+    "RECURRING_CYCLE:98f2d430b7": "TP",
+    "RECURRING_CYCLE:9ab11233fd": "TP",
+    "RECURRING_CYCLE:9daf9a5dd8": "TP",
+    "RECURRING_CYCLE:a56c203aa5": "TP",
+    "RECURRING_CYCLE:a8d9201086": "TP",
+    "RECURRING_CYCLE:a93e8c1b10": "TP",
+    "RECURRING_CYCLE:d23cba39ec": "TP",
+    "RECURRING_CYCLE:f6838d55ff": "TP",
+    "RECURRING_CYCLE:f8b50784d5": "TP",
+    "RECURRING_CYCLE:f98591bca3": "TP",
+    "SLOW_CHAIN:080a9f8f89": "TP",
+    "SLOW_CHAIN:13e9545f5b": "FP",
+    "SLOW_CHAIN:1489fb130e": "FP",
+    "SLOW_CHAIN:23440cceb1": "TP",
+    "SLOW_CHAIN:27219948ab": "FP",
+    "SLOW_CHAIN:46b55ba268": "TP",
+    "SLOW_CHAIN:476a8c4f64": "FP",
+    "SLOW_CHAIN:54fb2ba953": "TP",
+    "SLOW_CHAIN:78ec48c7ea": "FP",
+    "SLOW_CHAIN:8f2970f808": "TP",
+    "SLOW_CHAIN:99d0c6cbe2": "FP",
+    "SLOW_CHAIN:a8a7688151": "FP",
+    "SLOW_CHAIN:abd72ff998": "TP",
+    "SLOW_CHAIN:b6f25ecc68": "FP",
+    "SLOW_CHAIN:c83d487d3e": "FP",
+    "SLOW_CHAIN:ce9bd8e244": "FP",
+    "SLOW_CHAIN:d0d612992f": "FP",
+    "SLOW_CHAIN:d978f7c1b9": "TP",
+    "SLOW_CHAIN:f1ea88fe47": "FP",
+    "SLOW_CHAIN:f3e1299874": "FP",
+    "SLOW_CHAIN:fc1d413c71": "TP"
+  },
+  "mentor": null
+}
