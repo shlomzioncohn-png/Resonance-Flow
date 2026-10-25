@@ -51,6 +51,15 @@ spec:
               existingSecret: grafana-admin
               userKey: admin-user
               passwordKey: admin-password
+            # See the resonance-flow chart's README "Dashboards".
+            sidecar:
+              dashboards:
+                folderAnnotation: grafana_folder
+                provider:
+                  foldersFromFilesStructure: true
+                # This chart's own dashboards.
+                annotations:
+                  grafana_folder: kubernetes
             resources:
               requests:
                 cpu: 50m

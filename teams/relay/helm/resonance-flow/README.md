@@ -257,18 +257,14 @@ two places:
   `resonance-flow-alerts`, with its state (Normal / Pending / Firing), labels,
   `summary` annotation, query and `for`. Grafana reads these from Prometheus;
   nothing is copied into Grafana.
-- **Dashboards → Resonance-Flow / Platform alerts**
-  (`dashboards/platform-alerts.json`, shipped by
-  `templates/grafana-dashboards.yaml` with the same CRD check): firing and
+- **Dashboards → platform → Resonance-Flow / Platform alerts**
+  (`dashboards/platform/platform-alerts.json` - see [Dashboards](#dashboards)): firing and
   pending counts, a state timeline per alert, and a table of active alerts
   with their labels, filterable by `team`. It's built on Prometheus's `ALERTS`
   series filtered to `team!=""`, so it shows exactly the rules here (the
   kube-prometheus-stack defaults have no `team`) and picks up new ones with
   no dashboard change. An alert drops out of `ALERTS` once it resolves - a
   gap in the timeline.
-
-Edit the dashboard JSON in git, not in the Grafana UI: the sidecar overwrites
-UI changes.
 
 ### Testing a rule by hand
 
@@ -299,6 +295,43 @@ and turn it back on afterwards (patching `root` back restores `resonance-flow`).
   down with it.
 - **`KafkaUnderReplicatedPartitions`** / **`PersistentVolumeFillingUp`** - not
   testable until there's a second broker / a PVC (see above).
+
+## Dashboards
+
+Grafana dashboards are JSON files in `dashboards/<folder>/`, one Grafana folder
+per directory. `templates/grafana-dashboards.yaml` renders one ConfigMap per
+folder, `resonance-flow-grafana-dashboards-<folder>`, labelled
+`grafana_dashboard: "1"` and annotated `grafana_folder: <folder>`;
+kube-prometheus-stack's Grafana sidecar loads it into that folder (Grafana
+access: `teams/relay/argocd/README.md` "Monitoring"). Same CRD check as the
+PrometheusRules, so not in teams' kind CI (`helm template` needs
+`--api-versions monitoring.coreos.com/v1/PrometheusRule`).
+
+| Folder | Owner | Dashboards |
+|---|---|---|
+| `platform` | relay | **System overview** (`system-overview.json`): ready/desired replicas per Deployment and StatefulSet, scrape targets up per `component`, restarts, CPU and memory per container; Kafka broker, offline partitions, consumer lag and produce rate per topic; PostgreSQL, MinIO and PVC usage. **Platform alerts** (`platform-alerts.json`) - see [Viewing alerts in Grafana](#viewing-alerts-in-grafana). |
+| `kubernetes` | upstream | kube-prometheus-stack's own dashboards (cluster, nodes, pods, ...). |
+
+**Adding your team's dashboards.** Build it in Grafana, then *Share → Export →
+Export for sharing externally* off, save the JSON as
+`dashboards/<your-team>/<name>.json` (lowercase team name - the folder name is
+part of the ConfigMap name), and open a PR. Before you commit:
+
+- Give it a fixed top-level `uid`, e.g. `<team>-<name>`, unique across all
+  folders. The sidecar keys dashboards by `uid`; the render fails on a missing
+  or repeated one, or on invalid JSON.
+- Use the `prometheus` datasource uid (`{"type": "prometheus", "uid": "prometheus"}`),
+  not one from your Grafana's export.
+- Drop the exported `id` and set `"editable": false`.
+- Filter on `namespace="resonance-flow"` and your `component` / `team` labels
+  (from [Metrics scraping](#metrics-scraping-metrics)).
+
+A file directly in `dashboards/` fails the render. Dashboards change only
+through git: the sidecar provider refuses saves from the UI
+(`allowUiUpdates: false`) and the sidecar reloads the file on every change. The
+ConfigMaps are applied server-side (`argocd.argoproj.io/sync-options`), so a
+folder isn't held to client-side apply's 256KiB annotation limit; a ConfigMap
+still caps at 1MiB.
 
 ## Component configuration (`config` / `secret`)
 

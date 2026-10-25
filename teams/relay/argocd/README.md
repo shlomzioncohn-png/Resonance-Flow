@@ -104,8 +104,10 @@ team's sync.
 
 - **Grafana.** On, with the Prometheus and Alertmanager datasources the chart
   provisions. Its dashboard sidecar loads any ConfigMap labelled
-  `grafana_dashboard: "1"` from any namespace - that's how the `resonance-flow`
-  chart ships its alert dashboard.
+  `grafana_dashboard: "1"` from any namespace into the folder its
+  `grafana_folder` annotation names (the chart's own dashboards go to
+  `kubernetes`), and refuses edits saved in the UI - that's how the
+  `resonance-flow` chart ships its dashboards (its README, "Dashboards").
 - **Grafana's Ingress.** Through Traefik, on its own host (no sub-path, so
   probes, metrics and port-forward keep working at `/`). Like the
   `resonance-flow` Ingress, its host and TLS live in
