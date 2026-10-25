@@ -10,6 +10,7 @@ import com.rnd.bridge.intake.config.WhatsAppImportProperties;
 import java.time.Clock;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import com.rnd.bridge.ai.AiProperties;
 import com.rnd.bridge.media.classification.MediaClassificationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -25,7 +26,8 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
     GoogleOAuthProperties.class,
     CalendarImportProperties.class,
     GmailImportProperties.class,
-    MediaClassificationProperties.class
+    MediaClassificationProperties.class,
+    AiProperties.class
 })
 public class BridgeApplication {
 

@@ -6,15 +6,15 @@ services:
         shared: ../../shared
     container_name: inbox-service
     ports:
-      - "${SERVER_PORT:-8080}:8080"
+      - "8082:8080"
     environment:
       - SERVER_PORT=${SERVER_PORT:-8080}
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
       - DB_HOST=host.docker.internal
       - DB_PORT=${DB_PORT:-5432}
-      - DB_NAME=${DB_NAME:-resonance_flow}
-      - DB_USER=${DB_USER:-postgres}
-      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_NAME=${DB_NAME:-inbox}
+      - DB_USER=${DB_USER:-inbox}
+      - DB_PASSWORD=${DB_PASSWORD:-inbox}
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - SCHEMA_REGISTRY_URL=http://schema-registry:8080/apis/ccompat/v6
     extra_hosts:

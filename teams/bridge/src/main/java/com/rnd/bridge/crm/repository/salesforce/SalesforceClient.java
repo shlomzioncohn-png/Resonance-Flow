@@ -20,39 +20,8 @@ import java.util.function.Supplier;
 
 /**
  * Talks to the Salesforce REST API: OAuth 2.0 Client Credentials Flow token acquisition, and SOQL
- * query execution with {@code nextRecordsUrl} pagination. See
- * {@code teams/bridge/docs/crm-salesforce-design.md} for the full rationale this class implements.
- * <p>
- * <b>One generic query method, not several endpoints.</b> Unlike {@code HubSpotClient} (a
- * different REST resource and response shape per concern - pipelines, deals list, one deal),
- * every Salesforce read is the same {@code query} resource with a different SOQL string. {@link
- * #query(String)} is deal-agnostic - it has no idea whether the SOQL it's running selects from
- * {@code Opportunity} or anything else; {@code SalesforceDealRepository} supplies the SOQL.
- * <p>
- * <b>Token caching and refresh.</b> Salesforce's Client Credentials Flow issues no refresh token
- * and no {@code expires_in} - there is nothing in the token response to compute a TTL from, and no
- * API to ask the session's remaining lifetime. So this client cannot refresh proactively; it
- * caches the token (together with the {@code instance_url} that came with it - every subsequent
- * call targets that host, not the login host) and refreshes <em>reactively</em>: a {@code 401}
- * from any data call means the cached token is no longer valid, not necessarily that the
- * credentials are bad, so it is refreshed exactly once and the triggering call retried exactly
- * once. A second {@code 401} after a genuinely fresh token means the credentials themselves are
- * bad and fails fatally - looping would never succeed. A {@code 401} from the token endpoint
- * itself (bad client id/secret) is never treated this way - there is nothing to refresh.
- * <p>
- * <b>{@code REQUEST_LIMIT_EXCEEDED} is fatal, never retried</b> - Salesforce has no {@code 429};
- * a {@code 403} with this {@code errorCode} in the body signals the org's rolling 24-hour API
- * budget is exhausted (or a narrower concurrent-long-running-request cap, same signal). Backing
- * off and retrying cannot help either case sooner than the window actually resets, so this fails
- * immediately with a clear {@link SalesforceClientException} instead of burning further calls.
- * <p>
- * <b>What is retried</b> - {@code 500}/{@code 502}/{@code 503}/{@code 504} and transport-level
- * failures (connect/read timeouts, DNS/IO errors, recognized by walking the cause chain for an
- * {@link IOException} the same way {@code HubSpotClient} does) - up to {@code maxRetries}
- * attempts with exponential backoff. Any other non-2xx response (e.g. {@code 400}, a {@code 403}
- * that isn't {@code REQUEST_LIMIT_EXCEEDED}, {@code 404}, {@code 405}, {@code 409}) is fatal and
- * fails immediately. The client secret and every access token are never included in any {@link
- * SalesforceClientException} message.
+ * query execution with {@code nextRecordsUrl} pagination. {@code REQUEST_LIMIT_EXCEEDED} is fatal,
+ * never retried; 500/502/503/504 and transport failures are, up to {@code maxRetries} with backoff.
  */
 final class SalesforceClient {
 
@@ -139,22 +108,10 @@ final class SalesforceClient {
         }
     }
 
-    /**
-     * The {@code instance_url} that came with the currently cached access token - acquiring one
-     * first (one token request) if none is cached yet. Every data call {@link #query} makes
-     * already targets this same host; exposed here only so {@code SalesforceDealRepository} can
-     * build a Salesforce record URL ({@code sourceUrl}), which needs the host but issues no query
-     * of its own.
-     */
     String instanceUrl() {
         return currentToken().instanceUrl();
     }
 
-    /**
-     * Runs one SOQL query to completion, following {@code nextRecordsUrl} until Salesforce
-     * reports {@code done: true}, and returns every record across every page. Each record is a
-     * raw, undeserialized {@code Map} - see {@link SalesforceQueryResult}'s Javadoc for why.
-     */
     List<Map<String, Object>> query(String soql) {
         List<Map<String, Object>> all = new ArrayList<>();
         String path = queryEndpoint + "?q=" + urlEncode(soql);
@@ -279,13 +236,6 @@ final class SalesforceClient {
                 "Salesforce request to " + path + " failed with status " + status + errorBodySuffix(body));
     }
 
-    /**
-     * The retry/backoff loop shared by token acquisition and every query call - {@code action} is
-     * one attempt, already classified by its caller into a plain result or one of the two
-     * retryable failures below. {@code REQUEST_LIMIT_EXCEEDED} and every other fatal status are
-     * {@link SalesforceClientException}s already by the time they reach here, and pass straight
-     * through unretried.
-     */
     private <T> T withRetry(String path, Supplier<T> action) {
         int attempt = 0;
         while (true) {
@@ -335,10 +285,7 @@ final class SalesforceClient {
         return false;
     }
 
-    /**
-     * Best-effort only: reading the body can itself fail (empty body, non-JSON-text content), and
-     * a failure here must never mask the real fatal-status exception this is attached to.
-     */
+    // Best-effort only - a failure here must not mask the real fatal-status exception.
     private static String bodyAsString(RestClient.RequestHeadersSpec.ConvertibleClientHttpResponse response) {
         try {
             String body = response.bodyTo(String.class);
@@ -384,10 +331,7 @@ final class SalesforceClient {
         }
     }
 
-    /**
-     * Wraps an IOException-caused {@link RestClientException} so it retries like the other
-     * transient failures above.
-     */
+    /** Wraps an IOException-caused {@link RestClientException} so it retries like the other transient failures. */
     private static final class TransportFailure extends RuntimeException {
         TransportFailure(RestClientException cause) {
             super(cause);

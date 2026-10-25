@@ -6,19 +6,33 @@ keeping them separate means a prompt change shows up in review as a prompt
 change.
 """
 
+import logging
 import re
 from functools import cache
 from pathlib import Path
 
 from mind.contracts.base_enums import SourceType
+from mind.extraction.models import MAX_TASKS_PER_TEXT
+
+logger = logging.getLogger("mind.extraction")
 
 _PROMPT_DIR = Path(__file__).parent / "prompts"
 
-# Content longer than this is truncated before it reaches the provider.
-# Tokens cost money and a task rarely hides in the tail of a long thread;
-# the marker keeps the truncation visible to whoever reads the prompt.
-MAX_CONTENT_CHARS = 8000
+# Content longer than this is truncated before it reaches the provider; the
+# marker keeps the truncation visible to whoever reads the prompt. A safety
+# net against a runaway item (a 500-page scan), not a saving: a short item is
+# sent whole either way, and a cut loses what comes last. In a meeting that is
+# its closing recap, where the action items are (#690: on AMI, cut at 8000 the
+# two meetings found 0/4 and 0/8 gold items, sent whole 4/4 and 4/8). A Bridge
+# item's parts share it before they reach here, the longest cut first, so its
+# attachment is not the part lost (ingestion/extraction_items.py). One cap for
+# every source, and only an item this long pays it: about 25k tokens, ~$0.019 a call
+# today and twice that from 2027, again on every repair round, which resends
+# the content. Past the monitoring's $0.02 a call (config.py), set when this
+# cap was 8000, so such an item is flagged there.
+MAX_CONTENT_CHARS = 100_000
 TRUNCATION_MARKER = "\n[... content truncated ...]"
+
 
 # Placeholders are {{NAME}} and are filled by substitution, not by
 # str.format: the prompts contain JSON braces, and format() would choke on
@@ -69,14 +83,29 @@ def system_prompt(classify: bool = False) -> str:
     second call's system prompt, unchanged.
     """
 
+    # The cap is filled in from the model that enforces it, so the number the
+    # model is told and the number it is held to cannot drift apart.
+    system = _fill(_load("system.md"), {"MAX_TASKS": str(MAX_TASKS_PER_TEXT)})
     if not classify:
-        return _load("system.md")
+        return system
 
-    return _load("system.md") + "\n\n" + _load("classification.md")
+    return system + "\n\n" + _load("classification.md")
 
 
 def extraction_prompt(source_type: SourceType, content: str) -> str:
     """The first-attempt user message."""
+
+    # The marker tells the model; this tells whoever reads the run. Here and
+    # not in truncate(), which also runs on every repair round and on the
+    # model's own answer: once per item, about the content.
+    if len(content) > MAX_CONTENT_CHARS:
+        logger.warning(
+            "extraction: %s content of %d characters truncated to %d; the last %d are not sent",
+            source_type.value,
+            len(content),
+            MAX_CONTENT_CHARS,
+            len(content) - MAX_CONTENT_CHARS,
+        )
 
     return _fill(
         _load("extraction_user.md"),
@@ -97,6 +126,9 @@ def repair_prompt(
     produces the same broken answer a second time.
     """
 
+    # The rejected answer gets the content's cap too: a meeting's list of
+    # tasks runs past 8000 characters, and a repair asked to return every
+    # task unchanged cannot copy the ones it is not shown.
     return _fill(
         _load("repair_user.md"),
         {

@@ -1,24 +1,25 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
-
 import com.rnd.chain.testsupport.PgRepos;
 import org.junit.jupiter.api.Tag;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.repository.ConstraintRepository;
-import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.SchedulingUpdateService;
 import com.rnd.chain.service.PriorityScoreService;
-import com.rnd.chain.service.TaskCounterUpdater;
+import com.rnd.chain.service.DependencyEdgeService;
 import com.rnd.chain.service.TaskEligibilityService;
+import com.rnd.chain.service.TaskStateHistoryRecorder;
 import com.rnd.inbox.event.TaskCompletedEvent;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.internals.RecordHeaders;
@@ -42,43 +43,132 @@ class TaskCompletedEventHandlerTest {
 
     private static final LocalDateTime BASE_TIME = LocalDateTime.of(2026, 1, 1, 12, 0, 0);
 
-    private static ConsumerRecord<String, TaskCompletedEvent> record(String taskId, boolean isCompleted,
-                                                                      LocalDateTime kafkaTime) {
+    @Autowired
+    private TaskReadinessRepository taskReadinessRepository;
+
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
+
+    private static ConsumerRecord<String, TaskCompletedEvent> record(
+            String taskId,
+            boolean isCompleted,
+            LocalDateTime kafkaTime) {
+
         TaskCompletedEvent event = TaskCompletedEvent.newBuilder()
                 .setTaskId(taskId)
                 .setIsCompleted(isCompleted)
                 .build();
-        return new ConsumerRecord<>("task.completed", 0, 0L, kafkaTime.toInstant(ZoneOffset.UTC).toEpochMilli(),
-                TimestampType.CREATE_TIME, 0, 0, taskId, event, new RecordHeaders(), Optional.empty());
+
+        return new ConsumerRecord<>(
+                "task.completed",
+                0,
+                0L,
+                kafkaTime.toInstant(ZoneOffset.UTC).toEpochMilli(),
+                TimestampType.CREATE_TIME,
+                0,
+                0,
+                taskId,
+                event,
+                new RecordHeaders(),
+                Optional.empty());
     }
 
-    private static Task task(UUID id, TaskStatus status, LocalDateTime updatedAt, int blockingCount) {
+    private static Task task(
+            UUID id,
+            TaskStatus status,
+            LocalDateTime updatedAt,
+            int blockingCount) {
+
         return Task.builder()
-                .id(id).status(status).tenantId(com.rnd.chain.testsupport.TaskFixtures.DEFAULT_TENANT_ID)
-                .isReady(blockingCount == 0).blockingCount(blockingCount).openConstraintCount(0)
-                .createdAt(BASE_TIME).updatedAt(updatedAt)
+                .id(id)
+                .status(status)
+                .tenantId(com.rnd.chain.testsupport.TaskFixtures.DEFAULT_TENANT_ID)
+                .createdAt(BASE_TIME)
+                .updatedAt(updatedAt)
                 .build();
     }
 
-    private record Fixture(TaskRepository taskRepo, TaskCompletedEventHandler handler) {
+    private record Fixture(
+            TaskRepository taskRepo,
+            TaskCompletedEventHandler handler) {
     }
 
-    private static Fixture newFixture(List<Task> tasks, List<TaskDependency> edges) {
-        TaskRepository taskRepo = PgRepos.tasks(tasks);
-        TaskDependencyRepository dependencyRepo = PgRepos.dependencies(edges);
-        SchedulingUpdateService scheduling = mock(SchedulingUpdateService.class);
-        TaskEligibilityService service = new TaskEligibilityService(taskRepo, dependencyRepo,
-                PgRepos.graphLock(), new TaskCounterUpdater(taskRepo, dependencyRepo,
-                        new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling)), TaskStateHistoryFixtures.newRecorder());
-        ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(PgRepos.processedEvents());
-        return new Fixture(taskRepo, new TaskCompletedEventHandler(service, template));
+    private Fixture newFixture(
+            List<Task> tasks,
+            List<TaskDependency> edges) {
+
+        TaskRepository taskRepo =
+                PgRepos.tasks(tasks);
+
+        TaskDependencyRepository dependencyRepo =
+                PgRepos.dependencies(edges);
+
+        SchedulingUpdateService scheduling =
+                mock(SchedulingUpdateService.class);
+
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
+                                taskRepo,
+                                dependencyRepo,
+                                taskReadinessRepository,
+                                scheduling,
+                                new SchedulingPublishListener(
+                                taskRepo,
+                                scheduling));
+
+        TaskStateHistoryRecorder recorder = TaskStateHistoryFixtures.newRecorder();
+
+        DependencyEdgeService edgeService =
+                new DependencyEdgeService(
+                        taskRepo,
+                        dependencyRepo,
+                        PgRepos.graphLock(),
+                        priorityScoreService,
+                        recorder,
+                        taskReadinessRepository);
+
+        TaskEligibilityService service =
+                new TaskEligibilityService(
+                        taskRepo,
+                        dependencyRepo,
+                        PgRepos.graphLock(),
+                        edgeService,
+                        priorityScoreService,
+                        recorder,
+                        taskReadinessRepository);
+
+        ChainEventProcessingTemplate template =
+                new ChainEventProcessingTemplate(
+                        PgRepos.processedEvents());
+
+        return new Fixture(
+                taskRepo,
+                new TaskCompletedEventHandler(service, template));
     }
 
-    private static Fixture blockerAndDependent(UUID blocker, UUID dependent) {
+    private Fixture blockerAndDependent(
+            UUID blocker,
+            UUID dependent) {
+
         return newFixture(
-                List.of(task(blocker, TaskStatus.ACTIVE, BASE_TIME, 0),
+                List.of(
+                        task(blocker, TaskStatus.ACTIVE, BASE_TIME, 0),
                         task(dependent, TaskStatus.PENDING, BASE_TIME, 1)),
-                List.of(new TaskDependency(dependent, blocker)));
+                List.of(
+                        new TaskDependency(dependent, blocker)));
     }
 
     @Test
@@ -91,8 +181,25 @@ class TaskCompletedEventHandlerTest {
 
         assertEquals(TaskStatus.DONE, fixture.taskRepo().findById(blocker).orElseThrow().getStatus());
         Task dependentAfter = fixture.taskRepo().findById(dependent).orElseThrow();
-        assertEquals(0, dependentAfter.getBlockingCount());
-        assertTrue(dependentAfter.isReady());
+        assertEquals(0, blockingCount(dependentAfter));
+        assertTrue(isReady(dependentAfter));
+    }
+
+    @Test
+    void onMessage_forATaskCreatedByADoneTaskUpdated_releasesItsDependents() {
+        UUID blocker = UUID.randomUUID();
+        UUID dependent = UUID.randomUUID();
+        LocalDateTime doneEventTime = BASE_TIME.plusMinutes(5);
+        // task.updated(DONE) leaves the task PENDING with updated_at one second before the event.
+        Fixture fixture = newFixture(
+                List.of(task(blocker, TaskStatus.PENDING, doneEventTime.minusSeconds(1), 0),
+                        task(dependent, TaskStatus.PENDING, BASE_TIME, 1)),
+                List.of(new TaskDependency(dependent, blocker)));
+
+        fixture.handler().onMessage(record(blocker.toString(), true, doneEventTime));
+
+        assertEquals(TaskStatus.DONE, fixture.taskRepo().findById(blocker).orElseThrow().getStatus());
+        assertEquals(0, blockingCount(fixture.taskRepo().findById(dependent).orElseThrow()));
     }
 
     @Test
@@ -111,33 +218,36 @@ class TaskCompletedEventHandlerTest {
         UUID dependent = UUID.randomUUID();
         UUID otherBlocker = UUID.randomUUID();
         Fixture fixture = newFixture(
-                List.of(task(blocker, TaskStatus.ACTIVE, BASE_TIME, 0),
+                List.of(
+                        task(blocker, TaskStatus.ACTIVE, BASE_TIME, 0),
                         task(otherBlocker, TaskStatus.ACTIVE, BASE_TIME, 0),
                         task(dependent, TaskStatus.PENDING, BASE_TIME, 2)),
-                List.of(new TaskDependency(dependent, blocker), new TaskDependency(dependent, otherBlocker)));
+                List.of(
+                        new TaskDependency(dependent, blocker),
+                        new TaskDependency(dependent, otherBlocker)));
 
         fixture.handler().onMessage(record(blocker.toString(), true, BASE_TIME.plusMinutes(5)));
         fixture.handler().onMessage(record(blocker.toString(), true, BASE_TIME.plusMinutes(6)));
 
         Task dependentAfter = fixture.taskRepo().findById(dependent).orElseThrow();
-        assertEquals(1, dependentAfter.getBlockingCount());
-        assertFalse(dependentAfter.isReady());
+        assertEquals(1, blockingCount(dependentAfter));
+        assertFalse(isReady(dependentAfter));
     }
 
     @Test
     void onMessage_arrivingAfterTheTaskWasReopened_isIgnored() {
         UUID blocker = UUID.randomUUID();
         UUID dependent = UUID.randomUUID();
-        // The reopen (task.updated) was stamped later than this completed record's Kafka time.
         Fixture fixture = newFixture(
-                List.of(task(blocker, TaskStatus.ACTIVE, BASE_TIME.plusMinutes(10), 0),
+                List.of(
+                        task(blocker, TaskStatus.ACTIVE, BASE_TIME.plusMinutes(10), 0),
                         task(dependent, TaskStatus.PENDING, BASE_TIME, 1)),
                 List.of(new TaskDependency(dependent, blocker)));
 
         fixture.handler().onMessage(record(blocker.toString(), true, BASE_TIME.plusMinutes(5)));
 
         assertEquals(TaskStatus.ACTIVE, fixture.taskRepo().findById(blocker).orElseThrow().getStatus());
-        assertEquals(1, fixture.taskRepo().findById(dependent).orElseThrow().getBlockingCount());
+        assertEquals(1, blockingCount(fixture.taskRepo().findById(dependent).orElseThrow()));
     }
 
     @Test
@@ -149,16 +259,16 @@ class TaskCompletedEventHandlerTest {
         fixture.handler().onMessage(record(blocker.toString(), false, BASE_TIME.plusMinutes(5)));
 
         assertEquals(TaskStatus.ACTIVE, fixture.taskRepo().findById(blocker).orElseThrow().getStatus());
-        assertEquals(1, fixture.taskRepo().findById(dependent).orElseThrow().getBlockingCount());
+        assertEquals(1, blockingCount(fixture.taskRepo().findById(dependent).orElseThrow()));
     }
 
     @Test
-    void onMessage_referencingATaskThatDoesNotExist_throwsReferencedTaskNotFoundException() {
+    void onMessage_referencingATaskThatDoesNotExist_throwsTransientProcessingException() {
         Fixture fixture = newFixture(List.of(), List.of());
         ConsumerRecord<String, TaskCompletedEvent> unknown =
                 record(UUID.randomUUID().toString(), true, BASE_TIME);
 
-        assertThrows(ReferencedTaskNotFoundException.class, () -> fixture.handler().onMessage(unknown));
+        assertThrows(ChainTransientProcessingException.class, () -> fixture.handler().onMessage(unknown));
     }
 
     @Test

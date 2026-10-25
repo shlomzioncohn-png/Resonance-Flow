@@ -1,22 +1,31 @@
 package com.rnd.chain.repository;
 
+import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * Single lock shared by every service that touches dependency edges or reads a DONE status to
- * decide whether an edge counts against blockingCount, taken before any task row lock. Per-task
- * field updates don't need it (TaskRepository#update is an atomic read-modify-write); cycle
- * detection and edge-vs-status decisions do. One key: all graph writes queue, across every project.
+ * Serializes graph mutations per tenant.
+ *
+ * <p>Operations for the same tenant share the same lock and therefore execute
+ * sequentially. Operations for different tenants may execute concurrently.
+ *
+ * <p>Each transaction must acquire at most one tenant graph lock.
  */
 public interface GraphLock {
 
-    /** Runs {@code action} while holding the graph lock. */
-    <T> T runExclusive(Supplier<T> action);
+    <T> T runExclusive(
+            UUID tenantId,
+            Supplier<T> action);
 
-    default void runExclusive(Runnable action) {
-        runExclusive(() -> {
-            action.run();
-            return null;
-        });
+    default void runExclusive(
+            UUID tenantId,
+            Runnable action) {
+
+        runExclusive(
+                tenantId,
+                () -> {
+                    action.run();
+                    return null;
+                });
     }
 }

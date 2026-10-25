@@ -4,6 +4,7 @@ similarity scores, which a fake store can't produce."""
 import os
 import time
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 from benchmarks.vector_store_test_table import create_vector_store_test_table
@@ -13,9 +14,12 @@ from mind.embeddings import embed, task_text
 from mind.embeddings.pgvector_store import PgVectorStore
 from mind.embeddings.related_tasks import find_related
 
+TENANT = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+OTHER_TENANT = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+
 
 @pytest.fixture(scope="module")
-async def store():
+async def index():
     settings = VectorStoreSettings(
         dsn=os.environ["MIND_VECTOR_STORE__DSN"],
         table="task_embeddings_test_related",
@@ -27,9 +31,19 @@ async def store():
     await s.close()
 
 
+@pytest.fixture
+def store(index):
+    return index.for_tenant(TENANT)
+
+
+@pytest.fixture
+def other_store(index):
+    return index.for_tenant(OTHER_TENANT)
+
+
 @pytest.fixture(autouse=True)
-async def clean_store(store):
-    await store.clear()
+async def clean_store(index):
+    await index.clear()
     yield
 
 
@@ -137,3 +151,20 @@ async def test_find_related_responds_within_a_generous_latency_bound(store):
     duration_ms = (time.perf_counter() - start) * 1000
 
     assert duration_ms < 1000
+
+
+async def test_only_tasks_of_the_same_tenant_are_related(store, other_store):
+    """#841: a near-identical task in another tenant is never returned."""
+    await store.upsert(
+        "task-deploy-prod", embed(task_text("Push the DB migration out to prod", ""))
+    )
+    await store.upsert(
+        "task-deploy-staging", embed(task_text("Push the DB migration out to staging", ""))
+    )
+    await other_store.upsert(
+        "task-theirs", embed(task_text("Push the DB migration out to prod", ""))
+    )
+
+    results = await find_related(store, "task-deploy-prod", threshold=0.0)
+
+    assert [r.task_id for r in results] == ["task-deploy-staging"]

@@ -1,7 +1,6 @@
 {{- define "resonance-flow.inbox.dbInitScript" -}}
 {{- $datasource := .Values.components.inbox.config.data.datasource }}
-{{- $database := .Values.postgresql.auth.database }}
-create-inbox-user.sh: |
+create-inbox-database.sh: |
   #!/bin/bash
   (
     set -euo pipefail
@@ -15,16 +14,16 @@ create-inbox-user.sh: |
     # init scripts, so exit would abort its whole init.
     INBOX_DB_PASSWORD_FILE=/etc/resonance-flow/secrets/inbox-db/password
     if [ -s "$INBOX_DB_PASSWORD_FILE" ]; then
-      # Owns the subchart's existing database rather than a new one. pgcrypto is
-      # created here as superuser so V1's CREATE EXTENSION IF NOT EXISTS is a no-op.
+      # pgcrypto is created here as superuser so V1's CREATE EXTENSION IF NOT EXISTS
+      # is a no-op.
       psql -v ON_ERROR_STOP=1 -v inbox_pw="$(cat "$INBOX_DB_PASSWORD_FILE")" --username postgres <<'EOSQL'
         CREATE USER {{ $datasource.username }} WITH PASSWORD :'inbox_pw';
-        ALTER DATABASE {{ $database }} OWNER TO {{ $datasource.username }};
-        \connect {{ $database }}
+        CREATE DATABASE {{ $datasource.database }} OWNER {{ $datasource.username }};
+        \connect {{ $datasource.database }}
         CREATE EXTENSION IF NOT EXISTS pgcrypto;
   EOSQL
     else
-      echo "inbox-db-credentials not provided - skipping Inbox's user" >&2
+      echo "inbox-db-credentials not provided - skipping Inbox's database" >&2
     fi
   )
 {{- end -}}

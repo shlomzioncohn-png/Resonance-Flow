@@ -151,7 +151,18 @@ class SqlQueryLoggingListenerTest {
     // ---- parameters ----
 
     @Test
+    void afterQuery_includeParametersNotConfigured_keepsThePlaceholders() throws Exception {
+        QueryInfo query = query("select * from otp_requests where code_hash = ?",
+                List.of(setObject(1, "a9f3c2")));
+
+        listener.afterQuery(execution(5, true), List.of(query));
+
+        assertThat(capture.messages()).containsExactly("select * from otp_requests where code_hash = ?");
+    }
+
+    @Test
     void afterQuery_withParameters_inlinesThemIntoTheSql() throws Exception {
+        properties.setIncludeParameters(true);
         QueryInfo query = query("select * from tasks where status = ? and priority > ?",
                 List.of(setObject(1, "OPEN"), setObject(2, 3)));
 
@@ -199,6 +210,7 @@ class SqlQueryLoggingListenerTest {
 
     @Test
     void afterQuery_batchWithSeveralParameterSets_logsOneLinePerSet() throws Exception {
+        properties.setIncludeParameters(true);
         QueryInfo query = query("insert into tasks (title) values (?)",
                 List.of(setObject(1, "first")), List.of(setObject(1, "second")));
 
@@ -291,6 +303,7 @@ class SqlQueryLoggingListenerTest {
 
     @Test
     void afterQuery_valueThatMentionsOutbox_doesNotHideTheLine() throws Exception {
+        properties.setIncludeParameters(true);
         QueryInfo query = query("select * from tasks where title = ?", List.of(setObject(1, "fix the outbox")));
 
         listener.afterQuery(execution(2, true), List.of(query));

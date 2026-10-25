@@ -9,9 +9,6 @@ contract identical to the system-wide boundary with Chain ("MIND scores, it does
 not decide").
 """
 
-from collections.abc import Callable
-from functools import partial
-
 from pydantic import BaseModel, ConfigDict
 
 from mind.evaluation.interfaces import (
@@ -80,8 +77,8 @@ class EvaluationOutput(BaseModel):
     - `groups`: one report per scenario group (e.g. `same_tier`, `cross_tier`).
     - `roles`: one report per `persona.role`, split out of `combined` (see
       `split_by_role`), so they always add up to it.
-    - `original_set`: the report over every scenario except the `hierarchy_decides`
-      group, i.e. the set as it was before the hierarchy group was added (#507), so the three
+    - `original_set`: the report over every group except `hierarchy_decides`, i.e.
+      the set as it was before the hierarchy group was added (#507), so the three
       numbers (original set, hierarchy group, everything) are each one line. None
       when the personas directory has no `hierarchy_decides` group.
     """
@@ -144,54 +141,39 @@ def run(model: RankingModel, scenarios: list[PersonaEvaluationScenario]) -> Repo
     )
 
 
-def subset_report(
-    scenarios: list[PersonaEvaluationScenario],
-    report: Report,
-    predicate: Callable[[PersonaEvaluationScenario], bool],
-) -> Report:
-    """A new `Report` over just the scenarios `predicate` selects, built from
-    `report`'s own `scenario_results` instead of re-running the model, so it
-    stays exact even for a non-deterministic model. `scenarios` must be the
-    list `report` was run on, in the same order (raises `ValueError` if not).
-    """
-    pairs: list[tuple[PersonaEvaluationScenario, ScenarioResult]] = []
-    for scenario, result in zip(scenarios, report.scenario_results, strict=True):
-        if scenario.scenario_id != result.scenario_id:
-            raise ValueError(
-                f"scenarios and report are out of order: {scenario.scenario_id!r} "
-                f"vs {result.scenario_id!r}"
-            )
-        if predicate(scenario):
-            pairs.append((scenario, result))
-
-    return Report(
-        model_name=report.model_name,
-        total_scenarios=len(pairs),
-        correct_top1=sum(result.passed for _, result in pairs),
-        top1_accuracy=top1_accuracy(
-            [result.predicted_top_task_id for _, result in pairs],
-            [scenario for scenario, _ in pairs],
-        ),
-        scenario_results=[result for _, result in pairs],
-    )
-
-
 def split_by_role(
     scenarios: list[PersonaEvaluationScenario], report: Report
 ) -> dict[str, Report]:
     """Split an existing `report` into one `Report` per `persona.role`, keyed and
     ordered by role name.
 
-    Built via `subset_report` instead of re-running the model, so the per-role
-    numbers always add up to the combined one. `scenarios` must be the list
-    `report` was run on, in the same order. A role with no scenario gets no
-    entry (`validate_personas` warns about that separately).
+    Built from the report's own `scenario_results` instead of re-running the
+    model, so the per-role numbers always add up to the combined one.
+    `scenarios` must be the list `report` was run on, in the same order. A role
+    with no scenario gets no entry (`validate_personas` warns about that
+    separately).
     """
-    roles = sorted({scenario.persona.role for scenario in scenarios})
+    by_role: dict[str, list[tuple[PersonaEvaluationScenario, ScenarioResult]]] = {}
+    for scenario, result in zip(scenarios, report.scenario_results, strict=True):
+        if scenario.scenario_id != result.scenario_id:
+            raise ValueError(
+                f"scenarios and report are out of order: {scenario.scenario_id!r} "
+                f"vs {result.scenario_id!r}"
+            )
+        by_role.setdefault(scenario.persona.role, []).append((scenario, result))
+
+    # Accuracy goes through `metrics.top1_accuracy`, like `run()` does, so a change of
+    # metric updates the combined and the per-role numbers together.
     return {
-        role: subset_report(scenarios, report, partial(_has_role, role=role)) for role in roles
+        role: Report(
+            model_name=report.model_name,
+            total_scenarios=len(pairs),
+            correct_top1=sum(result.passed for _, result in pairs),
+            top1_accuracy=top1_accuracy(
+                [result.predicted_top_task_id for _, result in pairs],
+                [scenario for scenario, _ in pairs],
+            ),
+            scenario_results=[result for _, result in pairs],
+        )
+        for role, pairs in sorted(by_role.items())
     }
-
-
-def _has_role(scenario: PersonaEvaluationScenario, role: str) -> bool:
-    return scenario.persona.role == role

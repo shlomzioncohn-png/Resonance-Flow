@@ -9,7 +9,6 @@
     <artifactId>resonance-flow</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
-
     <name>Resonance Flow - Multi-Module Project</name>
     <description>Intelligent Work Prioritization Platform</description>
 

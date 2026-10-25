@@ -122,20 +122,22 @@ history-per-deal-id is always exactly one row long, the current state. `JsonDeal
 `HubSpotDealRepository` already produce single-row histories today for any deal with no recorded
 transitions yet; this is that same case, just the only case, by design, for now.
 
-**`stageChangedAt` source — `LastStageChangeDate`, falling back to `LastModifiedDate`.**
-`LastStageChangeDate` is a nullable Opportunity field that appears to track exactly "when this
-Opportunity last moved to its current stage" — **moderate confidence only**: every official
-Salesforce doc page I could reach for the Opportunity field list returned a loading shell to
-automated fetching (`developer.salesforce.com/.../salesforce_field_reference_Opportunity.htm` 403'd
-directly), so this is corroborated only via a third-party-generated REST API type definition
-(OpenFin's Salesforce integration types: `LastStageChangeDate: null | string`), not a direct
-Salesforce doc quote. **If it turns out not to exist on the target org** (wrong API version, or my
-read is simply wrong), `SalesforceDealRepository` falls back to `Opportunity.LastModifiedDate` —
-with a real, documented imprecision: `LastModifiedDate` bumps on **any** field edit, not just a
-stage change, so a deal whose `Description` was edited would look like its stage "just changed"
-even though it didn't. Verify `LastStageChangeDate`'s existence against a real org before trusting
-it in production — the Developer Edition check in §8 (`.../sobjects/Opportunity/describe`) is the
-way to do that cheaply.
+**`stageChangedAt` source — `LastStageChangeDate`, with a per-row `CreatedDate` fallback.**
+**Verified 2026-10-14 against a real Salesforce Developer Edition org (API v68.0):**
+`LastStageChangeDate` exists and is set whenever an Opportunity's stage changes - but it is
+`null` for an Opportunity that has never changed stage (true for all 20 seeded records in that
+org). Before this was caught, `SalesforceDealRepository.toDeal()` read only this field, so
+`stageChangedAt` came back `null` for every brand-new deal, `Deal`'s constructor's
+`requireNonNull` threw, and the record was silently skipped (`skippedAtRead`) - every brand-new
+deal was dropped. **Fix:** when the configured field is null/blank on a row, `toDeal()` falls back
+to that row's `CreatedDate` - a deal that has never changed stage has been in its current stage
+since it was created. **Not** `LastModifiedDate`: that field bumps on any field edit, not just a
+stage change, and using it as the fallback would break stalled-deal detection for a deal that was
+edited but never moved. If `CreatedDate` is also missing, the row is still skipped and counted in
+`skippedAtRead`, same as before this fix. This is unrelated to the separate, still-available
+escape hatch of switching `bridge.crm.salesforce.stage-changed-at-field` /
+`SALESFORCE_STAGE_CHANGED_AT_FIELD` to `LastModifiedDate` wholesale, for a deployer who finds the
+configured field itself absent from the org's schema entirely (not the case verified here).
 
 **Full history — opt-in, off by default, for future features.** Reading every stage transition
 (mirroring HubSpot's/JSON's append-only model) is still a real, implementable mode — gated behind
@@ -191,7 +193,7 @@ corroborated by a second independent query against the same documented behavior.
 | `crmAccountSlug` | left `null` | same as `HubSpotDealRepository` — nothing downstream reads it; `DealToTaskMapper` only reads `stage`/`closeDate`/`title`/`dealId` per `HubSpotDealRepository`'s own class Javadoc |
 | `sourceUrl` | `{instance_url}/{OpportunityId}` | classic-style record URL; Salesforce transparently redirects it to the Lightning URL |
 | `createdAt` | `Opportunity.CreatedDate` | |
-| `stageChangedAt` | `Opportunity.LastStageChangeDate`, falling back to `LastModifiedDate` | see §2 for the confidence caveat and the `LastModifiedDate` fallback's imprecision. Under `load-history: true`, this instead comes from the specific `OpportunityHistory.CreatedDate` row, same as HubSpot's per-history-entry timestamp |
+| `stageChangedAt` | `Opportunity.LastStageChangeDate`, with a `CreatedDate` fallback when that field is null/blank | see §2 for the 2026-10-14 live verification and the fallback rule (never `LastModifiedDate`). Under `load-history: true`, this instead comes from the specific `OpportunityHistory.CreatedDate` row, same as HubSpot's per-history-entry timestamp |
 
 **Stage mapping — metadata-based, not label-based**, to avoid `HubSpotStageMapping`'s exact-label
 weakness (audit finding F6: a renamed or custom stage label fails the whole sync). `OpportunityStage`
@@ -249,10 +251,19 @@ policy choice, not a Salesforce-documented convention, kept as the default and m
 
 ## 4. `sourceRef`
 
-`"crm:salesforce:<OpportunityId>"` — distinct from HubSpot's `"crm:<id>"` (unchanged). `SourceType`
-stays `CRM_DEAL` for both; nothing downstream (`DealToTaskMapper`, Inbox's dedup key) needs a new
-source type, since `sourceRef` alone already disambiguates HubSpot deals from Salesforce
-Opportunities even if the two systems ever reused the same raw id.
+`"crm:salesforce:<OpportunityId>"` — distinct from HubSpot's `"crm:hubspot:<id>"` and the JSON
+fixture's bare `"crm:<id>"`. `SourceType` stays `CRM_DEAL` for every source; nothing downstream
+(`DealToTaskMapper`, Inbox's dedup key) needs a new source type, since `sourceRef` alone already
+disambiguates HubSpot deals from Salesforce Opportunities even if the two systems ever reused the
+same raw id.
+
+**Update 2026-10-19 (team lead decision):** HubSpot and Salesforce run together now, not XOR (§6)
+— one company, every CRM tool active at once, one tenant (`CRM_ORGANIZATION_ID`) for all of them.
+If the same business deal exists in both systems, Bridge publishes it twice, once per source, as
+two Tasks with distinct `sourceRef`s — there is no cross-CRM business-level deduplication in
+Bridge, by design; that's explicitly out of scope here. The working assumption is that downstream
+consumption (Mind indexing tasks off Inbox's `task.created` event) can handle or itself reconcile
+two Tasks referring to the same real-world deal — **not yet confirmed with the Mind team.**
 
 ## 5. Robustness
 
@@ -301,17 +312,16 @@ free.
 ## 6. Profiles
 
 Same convention as `HubSpotDealRepository` (`teams/bridge/CLAUDE.md` §5): `SalesforceDealRepository`
-is `@Repository @Profile("salesforce") @Primary`. One CRM profile is expected to be active per
-deployment (`hubspot` XOR `salesforce`, mirroring the doc's "one CRM per deployment" framing).
+is `@Repository @Profile("salesforce")`.
 
-**Startup check for both active:** Spring would likely already fail context startup if `hubspot`
-and `salesforce` were both active, since two `@Primary` beans would exist for `DealRepository` —
-but that failure (`NoUniqueBeanDefinitionException`) names Spring's own bean machinery, not the
-actual mistake. Add an explicit, CRM-domain-specific check — a small bean (same shape as
-`CrmLaneConfig.requireValidTenantIdForKafka`) that reads `Environment.matchesProfiles("hubspot")`
-and `Environment.matchesProfiles("salesforce")` and throws a clear `IllegalStateException` naming
-both profiles if both are true — so the failure message is actionable instead of a generic Spring
-ambiguity error.
+**Update 2026-10-19 (team lead decision): `hubspot` and `salesforce` are additive, not XOR.** One
+company uses every CRM tool at once — `SPRING_PROFILES_ACTIVE=kafka,hubspot,salesforce` is the
+expected production shape. Neither `DealRepository` implementation is `@Primary` anymore (it only
+ever existed to break a tie Spring would otherwise refuse to resolve when exactly one CRM profile
+was expected); there is no startup check rejecting both profiles together either — the "one CRM
+per deployment" framing this section originally proposed, and the matching startup check, are both
+gone. `CrmSyncService` (`teams/bridge/CLAUDE.md` §10) is what actually runs every active source
+each cycle, sequentially, isolating one source's failure from the rest.
 
 ## 7. Future real-time (design only — no implementation)
 
@@ -355,7 +365,12 @@ pattern HubSpot's own future webhook path would use `fetchDeal` for.
   (no cache field, no constructor-time `OpportunityStage` fetch), one `Deal` per Opportunity,
   `fetchDeal` cases mirroring Part A's HubSpot tests (200 → correct `Deal`, "not found" → empty via
   a zero-record result rather than a 404, two calls never reusing a cached result, the
-  `LastModifiedDate` fallback when `LastStageChangeDate` isn't queried/available).
+  `LastModifiedDate` fallback when `LastStageChangeDate` isn't queried/available). **Resolved
+  2026-10-14:** this bullet originally anticipated a `LastModifiedDate` fallback test; the live
+  verification against a real org found the actual gap was `LastStageChangeDate` itself coming
+  back `null` for never-changed deals, not missing entirely - the real fix and its tests are a
+  per-row `CreatedDate` fallback (§2), covered by `SalesforceDealRepositoryTest`'s dedicated
+  fallback cases and one `CrmSalesforceLaneIntegrationTest` stalled-bump case.
 - **`SalesforceDealRepositoryTest` (`load-history: true`)**: oldest-first history per
   `OpportunityId`, `latestPerDeal()`, `skippedAtRead` on a bad/unresolvable history row, and
   specifically the label-rename case from §2 (an old history row's label no longer matches any
@@ -380,7 +395,13 @@ defaults, made configurable). What's left:
    for the optional manual check in §8 and for confirming `LastStageChangeDate` actually exists
    (§2) before this ships anywhere real. Nothing to decide now; flagging so it isn't forgotten
    once `SalesforceClient`/`SalesforceDealRepository` exist and need something to run against.
+   **Resolved 2026-10-14:** a free Developer Edition org was provisioned and used for exactly this
+   check - see §2.
 2. Once an org is provisioned: confirm whether it has an External Client App or only legacy
    Connected Apps available (§1), and whether `LastStageChangeDate` is really present on that org's
    Opportunity object (§2) — both affect setup instructions and the `stageChangedAt` fallback path,
    respectively, but neither blocks writing `SalesforceClient`/`SalesforceDealRepository` now.
+   **Resolved 2026-10-14, the `LastStageChangeDate` half:** the field exists and is populated on
+   stage change, but is `null` on a never-changed Opportunity - not the "doesn't exist at all"
+   case this question anticipated. See §2 for the actual fallback fix this led to. The External
+   Client App vs. Connected App half is still open - not checked as part of this fix.

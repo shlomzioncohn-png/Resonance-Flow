@@ -20,10 +20,14 @@ same change.
 
 ### `GET /health`
 
-Liveness/readiness check for Relay to monitor. Deliberately cheap — it
-never touches the vector store, a model, or any other downstream
-dependency. A 200 means "the MIND process is up and serving HTTP
-requests", nothing more.
+Liveness/readiness check for Relay to monitor (#481). A `200` means
+start-up completed successfully: the config file loaded, and the vector
+store opened and was found migrated. It doesn't re-check those
+dependencies per request — Relay's chart uses this same path for the
+liveness probe, so a check that failed on a database blip would restart
+every MIND pod. A start-up that fails (missing or broken config,
+unreachable or unmigrated database) stops the process with a clear error
+instead of serving, so Relay sees no answer at all in that case.
 
 **Response — `200 OK`**
 
@@ -37,7 +41,7 @@ requests", nothing more.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `status` | string | Always `"ok"` when this endpoint responds at all. There is no degraded state today — see "Open decisions" below. |
+| `status` | string | `"ok"` with `200`; `"not_ready"` with `503`. |
 | `version` | string | MIND's package version (`mind.__version__`), so Relay can tell which build is running. |
 | `uptime_seconds` | number | Seconds since the process started. |
 
@@ -45,8 +49,9 @@ requests", nothing more.
 
 | Code | When |
 |---|---|
-| `200` | The process is up. This is the only code `/health` returns today. |
-| `5xx` | Would only happen if the process is failing to serve HTTP at all — Relay's own connection/timeout handling detects that case, not a status code from us. |
+| `200` | Start-up completed successfully; MIND accepts work. |
+| `503` | Start-up hasn't completed, or shutdown has begun. Same body, with `"status": "not_ready"`. |
+| *(no response)* | The process isn't serving HTTP — including a start-up that failed and exited. Relay's own connection/timeout handling detects that case. |
 
 ### `GET /v1/tasks/{task_id}/related`
 
@@ -161,9 +166,10 @@ Plan for future business endpoints:
 
 - Auth scheme for cross-team calls (none yet — every endpoint above
   assumes no auth).
-- Whether `/health` splits into liveness vs. readiness once MIND has real
-  dependencies to be unready about (e.g. `/health/live` vs.
-  `/health/ready`).
+- Whether `/health` splits into liveness vs. readiness (e.g.
+  `/health/live` vs. `/health/ready`), so readiness could re-check
+  dependencies per request without liveness restarting pods. Needs the
+  chart's `components.mind` probes changed too (Relay).
 - Deprecation notice window (see versioning plan, step 5).
 
 This list is scoped to the API contract specifically (things Relay and

@@ -1,11 +1,16 @@
 # CI applies an all-components-off overlay first (setup-service-infra), so only
 # list what this service needs enabled - everything else is already off.
+# The frontend doesn't talk to Kafka. With kafka off, the chart also skips the
+# global wait-for-kafka initContainer.
 components:
   lens-frontend:
     enabled: true
 kafka:
-  enabled: true
+  enabled: false
 minio:
   enabled: false
 postgresql:
+  enabled: false
+# Kafka maintenance CronJob - nothing for it to talk to here.
+pipeConsumerGroupSweep:
   enabled: false

@@ -1,0 +1,73 @@
+"""Reads Bridge's landed objects from MinIO: the `ObjectReader` of #349.
+
+Only a missing key becomes `ObjectNotFound`, the same line Bridge's own
+MinioObjectStorageClient draws. Anything else, a wrong bucket included,
+propagates: skipping it would skip every object.
+
+At most `max_bytes` + 1 bytes are fetched, whatever the event's size_bytes
+says: one byte past the limit is how an object over it is told apart, and
+memory never holds more.
+"""
+
+from typing import Any, Protocol
+from urllib.parse import urlsplit
+
+from minio import Minio
+from minio.error import S3Error
+
+from mind.config import ObjectStorageSettings
+from mind.ingestion.event_objects import ObjectNotFound, ObjectTooLarge
+
+
+class _GetObject(Protocol):
+    """The one call this reader makes; `minio.Minio` has it, so do the test fakes."""
+
+    def get_object(self, bucket_name: str, object_name: str, *, length: int = 0) -> Any: ...
+
+
+class MinioObjectReader:
+    def __init__(self, client: _GetObject, bucket: str, *, max_bytes: int) -> None:
+        self._client = client
+        self._bucket = bucket
+        self._max_bytes = max_bytes
+
+    def __call__(self, object_key: str) -> bytes:
+        # On an error status the SDK reads the body and releases the
+        # connection itself before raising: no response, nothing to release.
+        try:
+            response = self._client.get_object(self._bucket, object_key, length=self._max_bytes + 1)
+        except S3Error as e:
+            if e.code == "NoSuchKey":
+                raise ObjectNotFound(object_key) from e
+            if e.code == "InvalidRange":
+                return b""  # S3 refuses any byte range of an empty object
+            raise
+        # The SDK hands back an open HTTP response: released even when the
+        # read fails midway, or the pool runs dry after enough bad reads.
+        try:
+            # Bounded here too, not only by the Range header: a server that
+            # ignores it would otherwise send the whole object into memory.
+            content: bytes = response.read(self._max_bytes + 1)
+        finally:
+            response.close()
+            response.release_conn()
+        if len(content) > self._max_bytes:
+            raise ObjectTooLarge(object_key)
+        return content
+
+
+def minio_endpoint(url: str) -> tuple[str, bool]:
+    """Split Bridge-style `http://localhost:9000` into ("localhost:9000", False):
+    the SDK wants host and TLS apart, Bridge's setting is one URL."""
+
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        raise ValueError(f"object storage endpoint must be an http(s) URL, got {url!r}")
+    return parts.netloc, parts.scheme == "https"
+
+
+def minio_reader(settings: ObjectStorageSettings | None = None) -> MinioObjectReader:
+    settings = settings or ObjectStorageSettings()  # type: ignore[call-arg]  # from env
+    host, secure = minio_endpoint(settings.endpoint)
+    client = Minio(host, settings.access_key, settings.secret_key.get_secret_value(), secure=secure)
+    return MinioObjectReader(client, settings.bucket, max_bytes=settings.max_object_bytes)

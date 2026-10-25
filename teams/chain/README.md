@@ -8,7 +8,7 @@ The dependency/constraint update flow is split by domain (#649): `DependencyEdge
 (`addDependency`, `addDependencies`, `removeDependency`), `TaskEligibilityService`
 (`onTaskStatusChanged`, `recalculateTaskEligibility`, `getTaskEligibility`) and
 `ConstraintEligibilityService` (`onConstraintAdded`, `onConstraintStatusChanged`), sharing
-`TaskCounterUpdater` and `GraphLock`, against the Postgres-backed repositories (the in-memory
+`PriorityScoreService` and `GraphLock`, against the Postgres-backed repositories (the in-memory
 repositories and `MockDataConfig` were removed on 2026-10-15; Postgres is the only persistence).
 `TaskEligibilityService` and `TaskTraversalService` are plain Spring beans wired by constructor
 injection. Chain also
@@ -30,7 +30,8 @@ open follow-up, not done as part of this merge. **Postgres-backed implementation
 - Java 21
 - Spring Boot 3.3.13 (Maven)
 - Spring Kafka, with Confluent Protobuf (de)serialization against a Schema Registry
-- Lombok (`Task`/`TaskDependency` accessors/builder/equals-hashCode; `Constraint`'s
+- Lombok (`Task`/`TaskDependency` accessors/builder/equals-hashCode, `TaskEntity` accessors,
+  `@RequiredArgsConstructor`/`@Slf4j` in services and handlers; `Constraint`'s
   equals/hashCode are hand-written, see the 2026-09-08 fixes below)
 - Docker / Docker Compose
 
@@ -60,6 +61,7 @@ app-code change needed. Inbox's own Postgres password isn't wired this way yet (
 |---|---|---|
 | `task.dependencies.proposed` | consume (Mind) | `addDependency` |
 | `task.dependencies.removed` | consume (Mind) | `removeDependency` |
+| `task.score.proposed` | consume (Mind) | `onScoreProposed` |
 | `task.status.updated` | consume (Inbox) | `onTaskStatusChanged` |
 | `task.scheduling.updated` | produce | consumed by Inbox |
 
@@ -91,20 +93,21 @@ src/main/java/com/rnd/chain/
 │                           # / TransactionRunner, Postgres*Repository /
 │                           # JpaTransactionRunner (real impls), entity/ (JPA entities), jpa/
 │                           # (Spring Data interfaces); ConstraintRepository +
-│                           # PostgresConstraintRepository (JDBC, issue #378)
-├── dto/                    # Task, TaskDependency, TaskStatus, Constraint, ApiError,
+│                           # PostgresConstraintRepository (JDBC, issue #378);
+│                           # ConstraintHistoryRepository + PostgresConstraintHistoryRepository
+│                           # (JDBC, issue #815; no in-memory impl)
+├── dto/                    # Task, TaskDependency, TaskStatus, Constraint, ConstraintHistoryEntry, ApiError,
 │                           # TaskResponse, TaskTraceResponse, ProcessedEvent (idempotency
 │                           # claim record)
 ├── events/                 # Kafka consume/publish infrastructure - see below
-│   ├── TaskCreatedEventHandler.java / TaskUpdatedEventHandler.java /
-│   │   TaskCompletedEventHandler.java /
+│   ├── TaskUpdatedEventHandler.java / TaskCompletedEventHandler.java /
 │   │   DependencyProposedEventHandler.java   # one @KafkaListener per inbound topic
 │   ├── ChainEventProcessingTemplate.java     # shared claim/logging skeleton
 │   ├── EventFields.java                      # UUID / Timestamp parsing shared by the handlers
 │   ├── ChainProtobufKafkaConfig.java         # Protobuf consumer/producer factories
 │   ├── EventPublisher.java / KafkaEventPublisher.java
 │   ├── ChainEventTopicsProperties.java
-│   ├── ChainTransientProcessingException.java / ReferencedTaskNotFoundException.java
+│   ├── ChainTransientProcessingException.java
 │   ├── NonRetryableEventException.java / InboxTaskStatusMapper.java
 │   ├── ProcessedEventStore.java / PostgresProcessedEventStore.java
 │   └── payloads/
@@ -116,7 +119,8 @@ src/main/java/com/rnd/chain/
 │                           # #580, see "Tenant isolation" below)
 └── config/                 # InfrastructureConfig - Clock bean;
                             # ConstraintRepositoryConfig - the real Postgres-backed
-                            # ConstraintRepository bean (issue #378)
+                            # ConstraintRepository (issue #378) and ConstraintHistoryRepository
+                            # (issue #815) beans
 src/main/resources/application.yml
 src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_history,
                                   # V3 task_constraint - issue #378, V4 unresolved_dependencies
@@ -124,7 +128,11 @@ src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_
                                   # V6 task.tenant_id + same-tenant trigger, V7 dependency_history
                                   # REJECTED action - V6/V7 issue #580, V8 task.confidence/priority_score (#445),
                                   # V9 task_state_history - issue #773,
-                                  # V10 processed_events - Kafka event dedup claims)
+                                  # V10 processed_events - Kafka event dedup claims,
+                                  # V11 task readiness view + indexes,
+                                  # V12 constraint_history - issue #815,
+                                  # V13 drops unresolved_dependencies - replaced by placeholder tasks,
+                                  # V14 task.tier - issue #864)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskDependencyServicePostgresIntegrationTest,
@@ -133,7 +141,8 @@ src/test/java/com/rnd/chain/
 │                           # tests (PostgresTaskRepositoryContractTest/Test, PostgresTaskDependencyRepositoryTest,
 │                           # PostgresDependencyHistoryRepositoryTest - need a real Postgres reachable, see
 │                           # "Tests" below); PostgresConstraintRepositoryTest and
-│                           # PostgresConstraintRepositoryConcurrencyTest (issue #378, @Tag("postgres"))
+│                           # PostgresConstraintRepositoryConcurrencyTest (issue #378, @Tag("postgres"));
+│                           # PostgresConstraintHistoryRepositoryTest (issue #815, @Tag("postgres"))
 ├── dto/ConstraintTest.java, TaskTest.java, TaskDependencyTest.java,
 │                           # TaskTestFixtures.java (shared Task.Builder defaults)
 ├── events/                 # ChainEventProcessingTemplateTest, InboxTaskStatusMapperTest,
@@ -155,6 +164,7 @@ Ancestors has no `/transitive` variant - the ancestor chain already is the trans
 | GET | `/tasks/{taskId}/dependencies/transitive` | All (transitive) dependencies |
 | GET | `/tasks/{taskId}/dependencies/history` | Dependency change history |
 | GET | `/tasks/{taskId}/state-history` | Status / blocking history, filterable by time range |
+| GET | `/tasks/{taskId}/constraints/history` | Constraint history, filterable by time range |
 | GET | `/tasks/{taskId}/dependents` | Direct dependents |
 | GET | `/tasks/{taskId}/dependents/transitive` | All (transitive) dependents |
 | GET | `/tasks/{taskId}/ancestors` | Full ancestor chain (hierarchy) |
@@ -170,47 +180,66 @@ Traversal routes return `TaskResponse` lists, except:
 - `/blockers` returns `TaskAvailability`
 - `/dependencies/history` returns `PageResponse<DependencyHistoryResponse>`
 - `/state-history` returns `PageResponse<TaskStateHistoryResponse>`
+- `/constraints/history` returns `PageResponse<ConstraintHistoryResponse>`
+
+Every `TaskResponse` list is built by `TaskTraversalService.toResponses` from one `findAllById` task
+query plus one `task_readiness` query, in the order the ids were collected. An id with no task, or a
+task with no `task_readiness` row (e.g. soft-deleted between the two queries), is skipped.
 
 An unknown task id returns `404` with an `ApiError` body; an invalid (non-UUID) `taskId` returns `400`.
 
 ## Kafka event infrastructure
 
-Chain consumes four Protobuf topics and publishes one Protobuf topic. Each inbound topic has its
+Chain consumes three Protobuf topics and publishes one Protobuf topic. Each inbound topic has its
 own `@KafkaListener` handler, and the handlers share the claim/logging skeleton in
 `ChainEventProcessingTemplate`.
 
 | Topic | Producer | Handler | Idempotency | Retries before `.errors` |
 | --- | --- | --- | --- | --- |
-| `task.created` | Inbox | `TaskCreatedEventHandler` | state-based (no event id) | 3 attempts, 2s apart |
-| `task.updated` | Inbox | `TaskUpdatedEventHandler` | state-based, last-write-wins on `updated_at` | 3 attempts, 2s apart |
+| `task.updated` | Inbox | `TaskUpdatedEventHandler` | state-based, last-write-wins on `updated_at`; `DONE` is not applied (see Idempotency) | 3 attempts, 2s apart |
 | `task.completed` | Inbox | `TaskCompletedEventHandler` | state-based; Kafka record timestamp compared to stored `updated_at`, never written | 3 attempts, 2s apart |
 | `task.dependencies.proposed` | Mind | `DependencyProposedEventHandler` | `event_id` claim in `ProcessedEventStore` | 3 attempts, 2s apart |
+| `task.score.proposed` | Mind | `TaskScoreProposedEventHandler` | `event_id` claim in `ProcessedEventStore` | 3 attempts, 2s apart |
 
 **Retry and dead-lettering**: retries are non-blocking, via `@RetryableTopic`, so a message waiting
 to retry never stalls the rest of its partition. Every exception is retried except
 `NonRetryableEventException` (malformed messages, cycles), which goes straight to `<topic>.errors`.
 Retries are bounded (see the table), so an unexpected bug costs a few delayed attempts before it
-lands on `<topic>.errors`. A typical retried case is `ReferencedTaskNotFoundException`, raised when
-a referenced task has not arrived yet (not on `task.dependencies.proposed`, which creates placeholders).
+lands on `<topic>.errors`. A typical retried case is a `task.completed` for a task Chain has not seen yet.
 
 **Offsets**: auto-commit is disabled and each listener uses `AckMode.RECORD`. An offset is committed
 only after its record is handled or handed to its retry/DLT topic, so a crash mid-processing
 redelivers the record instead of losing it.
 
-**Idempotency**: `task.dependencies.proposed` is deduplicated by `event_id`. The claim is released if
-the handler fails, so a retry can process the event again. `task.created`, `task.updated` and `task.completed` carry no
+**Idempotency**: `task.dependencies.proposed` and `task.score.proposed` are deduplicated by `event_id`. The claim is released if
+the handler fails, so a retry can process the event again. `task.updated` and `task.completed` carry no
 event id, so they rely on their state changes being safe to repeat. `task.completed` has no
 timestamp either, so its Kafka record timestamp is compared against the stored `updated_at` (to
 ignore a completion that arrives after a reopen) but never written to it; this is interim until
-Inbox adds `completed_at` to the event. `TaskStateReconciliationService` likewise never writes
-`updated_at` when it corrects counters, so it can't make a genuine `task.updated` look stale. Claims are stored in
+Inbox adds `completed_at` to the event. A task finishes, and its dependents are released, only through
+`task.completed`: `task.updated` with status `DONE` never changes an existing task's status or
+`updated_at`, so it can't make a later `task.completed` look stale (only its tenant check still runs).
+If the task is unknown, that `DONE` event creates it as `PENDING` with `updated_at` one second before the
+event's (`TaskEligibilityService.DONE_EVENT_UPDATED_AT_SKEW`): the following `task.completed` still applies,
+while an older `task.updated` is still rejected. Reopening (`DONE` back to `PENDING`/`ACTIVE`) still
+arrives on `task.updated` and blocks the dependents again. Claims are stored in
 the `processed_events` table by `PostgresProcessedEventStore` (an atomic `INSERT ... ON CONFLICT DO
 NOTHING`), so they survive restarts and are shared by every instance. See `ProcessedEventStore`'s
 Javadoc for what a claim does and doesn't guarantee.
 
 **Status mapping**: `InboxTaskStatusMapper` collapses Inbox's 8 task statuses into Chain's 3.
-`DONE`, `CANCELLED` and `REJECTED` map to `DONE`, because all three release dependents. `IN_PROGRESS`
+`DONE`, `CANCELLED` and `REJECTED` map to `DONE`, because all three release dependents. The mapping is
+not what releases a `DONE` task, though: `task.updated` intercepts Inbox's `DONE` before the mapper, and
+only `task.completed` releases it. `CANCELLED` and `REJECTED` still release through `task.updated`. `IN_PROGRESS`
 maps to `ACTIVE`, and every other status maps to `PENDING`.
+
+**Tier (Issue #864)**: `task.updated` may carry an optional `tier` (strategic / tactical / operational).
+Chain stores only the latest one in `task.tier` (V14, nullable, CHECK on the three values). It is not exposed
+in any API and has no effect on `priority_score` or `is_available`. `InboxTaskTierMapper` reads it only
+when `hasTier()`; a missing, `UNSPECIFIED` or unrecognized tier maps to null. Merge rule: an event with a tier
+replaces the stored one, an event without a tier keeps it, so a stored tier can never be cleared. The tier is
+written in the same transaction and under the same newest-wins check as the status, both when the task is
+created from `task.updated` and when it already exists. A tier-only change writes no `task_state_history` row.
 
 **Publishing**: the only publisher for `task.scheduling.updated` is `KafkaSchedulingUpdatePublisher`
 (`com.rnd.chain.events` - the same package as the consumers, see #543), used by `SchedulingUpdateService`. It maps `TaskSchedulingUpdatedEvent` to the
@@ -223,7 +252,8 @@ maps to `ACTIVE`, and every other status maps to `PENDING`.
 reads as "leave the stored value unchanged". `KafkaEventPublisher` (flat JSON, no envelope) was removed under #543 - it had no production caller.
 
 **Schemas**: the `.proto` sources come from the repo's [`shared/proto/`](../../shared/proto)
-(`task-created-event`, `task-updated-event`, `task-dependencies-proposed-event`,
+(`task-updated-event` and `task-score-proposed-event`, with the enums they import from `task-created-event`, and
+`task-dependencies-proposed-event`,
 `scheduling-updated-event`). Messages are
 validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock registry
 (`mock://...`), so no registry process is needed.
@@ -232,10 +262,10 @@ validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock
 
 | Property | Purpose | Default |
 | --- | --- | --- |
-| `chain.kafka.topics.task-created` (env `TASK_CREATED_TOPIC`) | Topic consumed for `task.created` | `task.created` |
 | `chain.kafka.topics.task-updated` (env `TASK_UPDATED_TOPIC`) | Topic consumed for `task.updated` | `task.updated` |
 | `chain.kafka.topics.task-completed` (env `TASK_COMPLETED_TOPIC`) | Topic consumed for `task.completed` | `task.completed` |
 | `chain.kafka.topics.dependencies-proposed` (env `DEPENDENCIES_PROPOSED_TOPIC`) | Topic consumed for `task.dependencies.proposed` | `task.dependencies.proposed` |
+| `chain.kafka.topics.score-proposed` (env `SCORE_PROPOSED_TOPIC`) | Topic consumed for `task.score.proposed` | `task.score.proposed` |
 | `chain.kafka.topics.scheduling-updated` (env `CHAIN_SCHEDULING_UPDATED_TOPIC`) | Topic published to for `task.scheduling.updated` | `task.scheduling.updated` |
 | `KAFKA_BOOTSTRAP_SERVERS` (env var, not `chain.*`) | Kafka broker(s) address | `localhost:9092` |
 | `chain.kafka.consumer-group-id` (env `KAFKA_CONSUMER_GROUP_ID`) | Consumer group ID | `chain-service` |
@@ -253,9 +283,15 @@ template starts from those properties, so the same settings apply everywhere.
 `priority_score` is Mind's per-task importance score, adjusted by Chain's own feasibility state
 (dependencies, constraints), stored on `Task` and published on `task.scheduling.updated` alongside
 `is_available`. It is `null` until Mind has scored the task; Mind clearing a score clears it again.
-Computed by `PriorityScoreService` (pure function, no repository access) and wired into
-`TaskEligibilityService`, which gathers its inputs from the dependency graph and publishes whenever
-either `priority_score` or `is_available` changes.
+Computed by `PriorityScoreService.compute` (a pure function, no repository access).
+`PriorityScoreService.recomputePriorityScoreAndPublish` gathers its inputs from the dependency graph and
+`task_readiness`, persists the result and queues a publish whenever either `priority_score` or
+`is_available` changes; `DependencyEdgeService` and `TaskEligibilityService` call it.
+
+Readiness (`blocking_count`, `open_constraint_count`, `is_ready`) is no longer stored on `Task`/`TaskEntity`
+(#917 PR 2) and the columns were dropped from the `task` table by V16 (#917 PR 3); the `task_readiness` view is the only source. `SchedulingUpdateService.requestPublishAfterCommit`
+reads `is_available` from the view inside the transaction and hands it to the after-commit publish; a task
+with no view row throws `IllegalStateException`. API responses read the same view.
 
 ### Formula
 
@@ -326,8 +362,8 @@ the profile didn't override the build's own value). CI runs them too now, agains
 
 None of `TaskEligibilityService`/`DependencyEdgeService`/`ConstraintEligibilityService` call
 `SchedulingUpdateService` directly or synchronously. Every trigger
-(`TaskCounterUpdater.recomputePriorityScoreAndPublish`) instead calls
-`requestPublishAfterCommit(taskId)`, which:
+(`PriorityScoreService.recomputePriorityScoreAndPublish`) instead calls
+`SchedulingUpdateService.requestPublishAfterCommit(taskId, listener)`, which:
 
 - Binds a `Set<UUID>` to the current transaction via `TransactionSynchronizationManager` and adds
   `taskId` to it - a task touched several times in one transaction (e.g. `addDependencies`'s batch
@@ -342,9 +378,10 @@ None of `TaskEligibilityService`/`DependencyEdgeService`/`ConstraintEligibilityS
   mutator that forgot `@Transactional`, which would otherwise desync Inbox's copy of
   `priority_score`/`is_available` permanently and silently). This is why every public mutator on
   `TaskEligibilityService`, `DependencyEdgeService`, `ConstraintEligibilityService`, and
-  `TaskCounterUpdater` itself is `@Transactional` (issue #649 split
+  `PriorityScoreService` itself is `@Transactional` (issue #649 split
   `TaskEligibilityService`'s original `addDependency`/`removeDependency`/`onScoreProposed` out
-  into the first two of those), and why `SchedulingPublishTransactionalCoverageTest` exists: a
+  into the first two of those; `onScoreProposed` now lives on `PriorityScoreService`), and why
+  `SchedulingPublishTransactionalCoverageTest` exists: a
   reflection-based guardrail covering all four classes that fails the build if a future public
   mutator is added without `@Transactional`, since that failure mode is otherwise silent at
   runtime.
@@ -362,17 +399,20 @@ same methods a real transaction manager calls, exposed for exactly this kind of 
 `testsupport/TestTransactions.java` (`runCommitted`/`runRolledBack`) - used both by the ~15
 pre-#445-Phase-3 tests that asserted synchronous publish behavior (updated to simulate a commit
 around the call) and by the new tests that specifically prove the commit/rollback/dedup behavior
-(`TaskEligibilityServiceTest`'s "Phase 3" section at the bottom of the file).
+(`PriorityScoreServicePostgresTest`, plus the hand-simulated `SchedulingUpdateServiceTest`).
 
-### Not yet wired (tracked separately from #445)
+### `task.score.proposed`
 
-- **`task.score.proposed` consumer**: `TaskEligibilityService.onScoreProposed` exists and is
-  covered by its own tests, but nothing calls it yet from a `@KafkaListener` - that's #386, pending
-  Mind's contract.
-- ~~**Publish format**: #545~~ - done (merged from `main`, see "Kafka event infrastructure" above):
-  `KafkaSchedulingUpdatePublisher` publishes real Protobuf against the registered
-  `shared/proto/scheduling-updated-event.proto`, with a per-event `event_id`. Covered end-to-end by
-  `SchedulingUpdatedEventContractTest` and `SchedulingUpdatePublishIntegrationTest` (a real broker).
+`TaskScoreProposedEventHandler` stores Mind's `mind_score`, `confidence` and `tier` on the task via
+`PriorityScoreService.onScoreProposed`, which recomputes `priority_score` and publishes
+`task.scheduling.updated`. `mind_score` and `confidence` are rounded to two decimals (so `0.8f` is
+stored as `0.8`); a value outside [0, 1], NaN or an `InvalidRequestException` goes to `.errors`
+without retry. A task Chain hasn't seen yet is created as a PENDING placeholder in the event's
+`tenant_id`; a task stored with a different tenant is rejected to `.errors` (a null stored tenant is
+backfilled). The tier is stored in the same `task.tier` column as the one from `task.updated`, with the
+same merge rule: an unspecified `tier` leaves the stored tier unchanged. `scored_at` is stored in
+`task.scored_at` (V15): an event scored earlier than the stored value is ignored (no write, no
+publish), and an event without `scored_at` is applied and keeps the stored value. `factors` is ignored.
 
 ## Running locally with Maven
 
@@ -867,13 +907,12 @@ action in `TaskDependencyService` was **not** removed - see "Dependency graph pe
 Append-only table `task_state_history` (V9) for status changes and blocking transitions. This
 schema, `TaskStateHistoryEntry`/`TaskStateEventType` and `TaskStateHistoryRepository`
 (Postgres) landed in #773. Rows are written (#774) in the same transaction as the
-change, via `TaskStateHistoryRecorder` (independent of `TaskCounterUpdater`, which is slated for
-removal): `TaskEligibilityService` records status changes (`onTaskStatusChangedIfNewer`,
+change, via `TaskStateHistoryRecorder` (its blocking values come from the `task_readiness`
+view, not from stored task columns): `TaskEligibilityService` records status changes (`onTaskStatusChangedIfNewer`,
 `onTaskStatusChanged`, `onTaskCompleted`) and the blocking transitions of dependents it releases
 or re-blocks; `DependencyEdgeService` records the blocking transition of an edge add/remove.
 A stale/duplicate event, or one that leaves the status or the
-0/positive state of `blocking_count` unchanged, writes nothing. `TaskStateReconciliationService`
-corrections are not recorded yet. Read access is the endpoint below (#775).
+0/positive state of `blocking_count` unchanged, writes nothing. Read access is the endpoint below (#775).
 
 ### Schema
 
@@ -951,6 +990,34 @@ the JSON:
   (in-memory + `PostgresTaskStateHistoryRepository`); `TaskStateHistoryResponse` is the API-layer
   DTO, kept separate from the domain `TaskStateHistoryEntry`.
 
+## Constraint history read endpoint (Issue #875)
+
+```
+GET /tasks/{taskId}/constraints/history?from=2026-10-01T00:00:00Z&to=2026-11-01T00:00:00Z&page=0&size=20
+```
+
+Same parameters, defaults and `400` cases as the state-history endpoint above (`from` inclusive,
+`to` exclusive, `size` 1..100). Returns a `PageResponse<ConstraintHistoryResponse>`, newest first;
+`previousStatus` is omitted for `CREATED` entries.
+
+- `404` only when `taskId` is unknown to both the tasks and the constraint history, same policy as
+  `TaskStateHistoryService`. A task that exists with no history, or a deleted task that left history,
+  returns `200`.
+- Code: `ConstraintHistoryController` -> `ConstraintHistoryService` -> `ConstraintHistoryRepository`
+  (paged `findByTaskId(taskId, from, to, page, size)` and `existsByTaskId`, JDBC in
+  `PostgresConstraintHistoryRepository`). The unpaged `findByTaskId(taskId)` is kept.
+- Not run yet (no local Postgres): `mvn test -Ppostgres-integration -Dtest=PostgresConstraintHistoryRepositoryTest`
+  and the two new `getTaskEligibility_returnsReadinessView_*` tests in `TaskEligibilityServiceTest`.
+
+## Dependency-flow health analytics (`analytics/flow_health/`)
+
+A separate Python project next to the Java service (not part of the Maven build or the Docker image)
+that will flag unhealthy dependency patterns from `dependency_history` and `task_state_history`.
+Today: a synthetic history generator (rows shaped like those two tables plus a ground-truth key of planted
+diseases), and from its CSV files a feature step (task, edge and chain features) with one KMeans clustering of the tasks,
+the "normal behaviour" the detectors will compare against. No detectors, no model, no endpoint, nothing written to
+Postgres yet. See `analytics/flow_health/README.md`.
+
 ## Constraint persistence (Issue #378)
 
 `ConstraintRepository` / `PostgresConstraintRepository` (in `repository/`) give `Constraint` a
@@ -1026,8 +1093,8 @@ Full test suite (47 tests, `mvn clean test`) passes.
 
 ## Tenant isolation (Issue #580)
 
-`task.tenant_id` (V6 migration) is populated from Inbox's `task.created`/`task.updated` events
-(`TaskCreatedEventHandler`/`TaskUpdatedEventHandler` -> `TaskEligibilityService`) - Inbox owns
+`task.tenant_id` (V6 migration) is populated from Inbox's `task.updated` events
+(`TaskUpdatedEventHandler` -> `TaskEligibilityService`) - Inbox owns
 tenancy, Chain never originates a tenant assignment. This is a deliberate decision by Chain, not
 a documented spec requirement (the Inbox/Chain ownership spec doesn't mention tenants at all) -
 recorded here for that reason. Whether/how Chain's own read APIs (`/ancestors`, `/descendants`,
@@ -1076,7 +1143,7 @@ not a mismatch.
 
 **Placeholders on `task.dependencies.proposed`.** The event always carries `tenant_id`; one without it is
 malformed and goes straight to `.errors`. A missing source or target task is created as a `PENDING`
-placeholder in that tenant (`updatedAt` = epoch, counters 0) inside the graph lock, and the edge is
+placeholder in that tenant (`updatedAt` = epoch) inside the graph lock, and the edge is
 recorded right away. An existing task is never overwritten, and one in a different tenant rejects the
 whole event (no retry, nothing created). A later `task.updated` replaces the placeholder's state.
 

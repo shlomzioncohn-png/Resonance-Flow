@@ -13,14 +13,14 @@ genuinely cross-team is either an HTTP/Kafka contract or lives under `shared/` (
 Teams with a service under `teams/` today: **bridge** (source adapters & ingestion — GitHub, CRM,
 unstructured intake, meeting/doc hand-off), **Chain** (dependency graph, task selection &
 constraints), **inbox** (canonical Task data model & the backend APIs other teams build on),
-**relay** (event bus / service communication). **mind** and **lens-bff** / **lens-frontend** /
-**lens-gateway** already have CI workflows and a `components.<team>` block in the shared Helm
-chart's values, but no source tree under `teams/` in this repo yet.
+**mind** (Python; proposes task dependencies and priority scores to Chain), **lens**
+(`gateway`, `bff`, `frontend` + Storybook — the user-facing side), **relay** (event bus /
+service communication, the shared Helm chart and CI/CD; its service is `notification_delivery`).
 
 ## Commands
 
-Everything below is run from inside a given team's directory (`teams/<team>/`) — there is no
-root-level build.
+Everything below is run from inside a given team's directory (`teams/<team>/`). The root
+`pom.xml` only aggregates `teams/lens/gateway`; it is not a build for the other services.
 
 ```bash
 mvn test                      # unit + slice tests
@@ -33,14 +33,17 @@ docker compose up --build     # containerized run
 docker compose down           # stop (add -v to also drop named volumes)
 ```
 
-**JVM versions differ per team — check `pom.xml` before assuming:**
+**Versions differ per service — check `pom.xml` / `pyproject.toml` / `package.json` before assuming:**
 
-| Team | Java | Spring Boot |
+| Service | Language | Framework |
 |---|---|---|
-| bridge | 21 | 3.3.13 |
-| inbox | 21 | 3.3.13 |
-| Chain | 21 | 3.3.13 |
-| relay | 11 | 2.7.18 |
+| bridge | Java 21 | Spring Boot 3.3.13 |
+| inbox | Java 21 | Spring Boot 3.3.13 |
+| Chain | Java 21 | Spring Boot 3.3.13 |
+| relay `notification_delivery` | Java 21 | Spring Boot 3.3.13 |
+| lens `bff`, `gateway` | Java 21 | Spring Boot 3.4.0 |
+| lens `frontend` | Node | see its `package.json` |
+| mind | Python ≥ 3.12 | see its `pyproject.toml` |
 
 (`teams/inbox/README.md` still describes Java 11 / Spring Boot 2.7.18 — that's stale; its `pom.xml`
 and `teams/inbox/CLAUDE.md` are current and authoritative.)
@@ -76,12 +79,12 @@ inside a team's own folder.
 - **Chain** owns the dependency graph and task selection/availability. `is_available` and
   `priority_score` on a task are Chain's computed values, delivered to inbox on
   `task.scheduling.updated` and only materialized (never computed) there.
-- **relay** is the event bus / service-communication layer; still a foundation skeleton.
+- **relay** is the event bus / service-communication layer: `notification_delivery` pushes task
+  notifications to users over WebSocket, and Relay owns the Kafka schemas, the shared Helm chart
+  and the CI/CD.
 - Every registered Kafka `.proto` schema lives once, in `shared/proto/` (Relay-owned). Services
   build against it via a `shared` named Docker build context — see `shared/proto/README.md`.
   Don't copy those files into a team's `src/main/proto/`.
-- **mind** and **lens-*** are consumers/producers referenced by CI and Helm values but not yet
-  present as code in this repo.
 
 ### Deployment model (Helm + ArgoCD, GitOps)
 
@@ -114,15 +117,17 @@ inside a team's own folder.
 Some cross-team infra that individual teams' docs/configs already reference does not exist in this
 repo yet. Don't assume it's there — check first:
 
-- No root-level `docker-compose.yml` exists yet. `teams/inbox/CLAUDE.md` describes one providing
-  the shared Postgres instance; only per-team `teams/*/docker-compose.yml` files exist today.
+- The root `docker-compose.yml` runs the shared Postgres (+ pgAdmin), the lens services, and
+  chain, bridge and inbox — but no Kafka. Each team also has its own `docker-compose.yml`.
 - Kafka for local dev currently only exists inside `teams/inbox/docker-compose.yml`
   (single-node, KRaft mode). Other teams that need a broker (bridge, relay) don't have one wired
   into their own compose files yet.
 
 ## Team-specific standards
 
-`teams/inbox/CLAUDE.md` is the only per-team `CLAUDE.md` in the repo today and is binding for all
+Per-team `CLAUDE.md` files load automatically for work inside that directory:
+`teams/inbox/CLAUDE.md`, `teams/bridge/CLAUDE.md`, `teams/chain/CLAUDE.md` and
+`teams/lens/frontend/CLAUDE.md`. Inbox's is the full development standard and is binding for all
 work under `teams/inbox/` — it covers the canonical schema/spec documents to check before touching
 a field or enum, controller→service→repository layering, REST/Kafka rules, exception shape,
-logging, and testing conventions. No other team has published an equivalent standard yet.
+logging, and testing conventions.

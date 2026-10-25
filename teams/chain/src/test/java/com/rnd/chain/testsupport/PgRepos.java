@@ -10,7 +10,6 @@ import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TransactionRunner;
-import com.rnd.chain.repository.UnresolvedDependencyRepository;
 import jakarta.persistence.EntityManager;
 import org.springframework.stereotype.Component;
 
@@ -29,7 +28,6 @@ public class PgRepos {
     private static TaskDependencyRepository dependencyRepository;
     private static ConstraintRepository constraintRepository;
     private static DependencyHistoryRepository historyRepository;
-    private static UnresolvedDependencyRepository unresolvedRepository;
     private static GraphLock graphLock;
     private static TransactionRunner transactionRunner;
     private static ProcessedEventStore processedEventStore;
@@ -37,14 +35,13 @@ public class PgRepos {
     private static EntityManager entityManager;
 
     public PgRepos(TaskRepository tasks, TaskDependencyRepository dependencies, ConstraintRepository constraints,
-                   DependencyHistoryRepository history, UnresolvedDependencyRepository unresolved,
+                   DependencyHistoryRepository history,
                    GraphLock lock, TransactionRunner runner, ProcessedEventStore processedEvents,
                    TaskStateHistoryRepository stateHistory, EntityManager em) {
         taskRepository = tasks;
         dependencyRepository = dependencies;
         constraintRepository = constraints;
         historyRepository = history;
-        unresolvedRepository = unresolved;
         graphLock = lock;
         transactionRunner = runner;
         processedEventStore = processedEvents;
@@ -76,10 +73,6 @@ public class PgRepos {
         return historyRepository;
     }
 
-    public static UnresolvedDependencyRepository unresolved() {
-        return unresolvedRepository;
-    }
-
     public static GraphLock graphLock() {
         return graphLock;
     }
@@ -104,8 +97,6 @@ public class PgRepos {
 
     private static Task rebuild(Task t, UUID tenant, UUID parent) {
         return Task.builder().id(t.getId()).parentTaskId(parent).tenantId(tenant).status(t.getStatus())
-                .isReady(t.isReady()).blockingCount(t.getBlockingCount())
-                .openConstraintCount(t.getOpenConstraintCount())
                 .estimatedDurationMin(t.getEstimatedDurationMin()).score(t.getScore())
                 .confidence(t.getConfidence()).priorityScore(t.getPriorityScore())
                 .createdAt(t.getCreatedAt() != null ? t.getCreatedAt() : java.time.LocalDateTime.now())

@@ -82,10 +82,11 @@ public class TenantService {
         Tenant tenant = findTenantOrThrow(id);
         tenantAuthorization.assertWithinScope(tenantAuthorization.scopeOf(actor), tenant);
 
+        Map<String, Object> before = auditSnapshot(tenant);
         tenantMapper.applyUpdate(tenant, request);
         Tenant saved = tenantRepository.save(tenant);
-        auditService.createAuditLog("TENANT_UPDATED", "Tenant", saved.getId(), saved,
-                actor, auditSnapshot(saved), null);
+        auditService.createUpdateAuditLog("TENANT_UPDATED", "Tenant", saved.getId(), saved,
+                actor, before, auditSnapshot(saved), null);
         return tenantMapper.toResponseDto(saved);
     }
 
@@ -96,10 +97,11 @@ public class TenantService {
         User actor = findActorOrThrow(actorId);
         Tenant tenant = findTenantOrThrow(id);
 
+        Map<String, Object> before = auditSnapshot(tenant);
         tenantMapper.applyStatusChange(tenant, TenantStatus.valueOf(request.getStatus()));
         Tenant saved = tenantRepository.save(tenant);
-        auditService.createAuditLog("TENANT_STATUS_UPDATED", "Tenant", saved.getId(), saved,
-                actor, auditSnapshot(saved), null);
+        auditService.createUpdateAuditLog("TENANT_STATUS_UPDATED", "Tenant", saved.getId(), saved,
+                actor, before, auditSnapshot(saved), null);
         return tenantMapper.toResponseDto(saved);
     }
 

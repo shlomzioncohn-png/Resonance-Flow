@@ -9,7 +9,7 @@ accuracy number already published against the old content.
 
 `compute_personas_checksum` hashes the combined content of every scenario file
 (not `scenario.schema.json` — that's a generated artifact, not part of the
-approved set) and of `eval/hierarchy/nodes.json`: scenario tasks point into
+approved set) and of every file in `eval/hierarchy/`: scenario tasks point into
 `nodes.json` through `parent_task_id`, so a silent edit to a node's importance
 changes what a hierarchy-aware model sees as much as an edit to a scenario does.
 `tests/test_personas_checksum.py` asserts the result against the
@@ -26,7 +26,6 @@ import hashlib
 import sys
 from pathlib import Path
 
-from mind.evaluation.hierarchy import NODES_FILENAME
 from mind.evaluation.personas import HIERARCHY_DIR, PERSONAS_DIR, SCHEMA_FILENAME
 
 CHECKSUM_PATH = PERSONAS_DIR / "personas.sha256"
@@ -47,11 +46,9 @@ def compute_personas_checksum(
     content, in a fixed sorted order so the result doesn't depend on
     filesystem iteration order.
 
-    When `hierarchy_dir` is given, its `nodes.json` is hashed after the
-    scenarios, tagged with a leading NUL byte. No real relative path (as
-    produced by `Path.relative_to(...).as_posix()`) can start with a NUL
-    byte, so this entry's bytes can never equal a scenario entry's, no
-    matter what a scenario group is named.
+    When `hierarchy_dir` is given, its `*.json` files are hashed the same way
+    after the scenarios, each path prefixed with `hierarchy/` so a node file can
+    never hash the same as a scenario file with the same relative name.
 
     `read_text` already normalizes line endings to `\n`, so the checksum is the
     same on a Windows (CRLF) and a Linux (LF) checkout.
@@ -72,8 +69,9 @@ def compute_personas_checksum(
         hierarchy_path = Path(hierarchy_dir)
         if not hierarchy_path.is_dir():
             raise FileNotFoundError(f"Hierarchy directory not found: {hierarchy_path}")
-        content = (hierarchy_path / NODES_FILENAME).read_text(encoding="utf-8")
-        digest.update(b"\0hierarchy\0" + content.encode("utf-8") + b"\0")
+        for node_path in sorted(hierarchy_path.rglob("*.json")):
+            relative = node_path.relative_to(hierarchy_path).as_posix()
+            digest.update(_entry(f"hierarchy/{relative}", node_path))
 
     return digest.hexdigest()
 

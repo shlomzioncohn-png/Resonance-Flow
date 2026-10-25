@@ -620,9 +620,9 @@ reading a third of the set.
 
 ## Publishing the score to Chain (#357)
 
-A separate process, like the index consumer: it reads Inbox's `task.created`
-and `task.updated`, scores each task with this model, and publishes
-`task.score.proposed` to Chain.
+Runs inside MIND's API process (#920): it reads Inbox's `task.created` and
+`task.updated`, scores each task with this model, and publishes
+`task.score.proposed` to Chain. See "Running inside the API" below.
 
 | File | Role |
 |---|---|
@@ -630,7 +630,7 @@ and `task.updated`, scores each task with this model, and publishes
 | `score_event.py` | `ScoreResult` → `TaskScoreProposed` (`contracts/`). |
 | `kafka_sink.py` | `TaskScoreProposed` → shared/proto's `TaskScoreProposedEvent`, published keyed by `task_id`. |
 | `score_publisher.py` | The handlers, and when to publish. |
-| `score_publisher_runner.py` | The process: one consumer thread per topic. |
+| `score_publisher_runner.py` | Starts it from the API: one consumer thread per topic, plus the rescore worker. |
 
 The payload, as agreed with Chain on #133: `event_id`, `tenant_id`, `task_id`,
 `mind_score` (the **`base_score`**, never the blocked-adjusted `score`: blocking
@@ -653,18 +653,22 @@ When a score is published:
   redelivery (a malformed id, a result without `base_score`, a score outside
   0..1, a model bug for one task). Propagating it would kill the process on the
   same message forever, so it is logged with the task id and skipped. Only a
-  failure to send to Kafka propagates, so that message is retried. Anything the
+  failure to send to Kafka propagates: it ends that run of the consumer with
+  the message uncommitted, and the thread runs again after a short wait and
+  reads it again (see "Running inside the API"). A re-score whose send fails is
+  queued back the same way. Anything the
   model raises counts as permanent, so a model must not raise on a transient
   failure (#474 already requires falling back to the baseline score).
 - **When propagation changes a score without an Inbox event** (#474:
-  `HierarchicalRankingModel` detects its own `base_score` moved for some
-  task), it asks Chain for that task's direct children and calls
-  `ScorePublisher.rescore(child_id)` for each. That only queues the id, so it
-  is safe from anywhere, including from inside the model's own `score()`. A
-  worker thread scores each queued child again with the publisher's own
-  model — `score_publisher_runner.py` wires `HierarchicalRankingModel` in as
-  that model, replacing the baseline here only, in production; R1's harness
-  still scores the unmodified baseline for comparison — on its newest state,
+  `ScorePublisher._cascade` detects the just-sent `mind_score` moved by at
+  least `_CASCADE_CHANGE_TOLERANCE`), it asks Chain for that task's direct
+  children and calls `ScorePublisher.rescore(child_id)` for each. That only
+  queues the id, so it is safe from anywhere, including from inside the
+  model's own `score()`. A worker thread scores each queued child again
+  with the publisher's own model — `score_publisher_runner.py` wires
+  `HierarchicalRankingModel` in as that model, replacing the baseline here
+  only, in production; R1's harness still scores the unmodified baseline
+  for comparison — on its newest state,
   under the same lock as the event handlers. A request for a task already
   queued is dropped, and a re-score whose score is unchanged is not sent, so a
   cycle in the hierarchy cannot flood Chain; propagation only asks a child's
@@ -674,12 +678,74 @@ When a score is published:
   of this integration, `ScorePublisher.cached_task(task_id)`, is how
   `ChainAncestorSource` re-scores an ancestor's own state — see *Hierarchical
   propagation* above.
-- **The lock is held while the model scores**, so a model that calls the network
-  (#474's `ChainHierarchyClient`) holds up the other topic meanwhile. Not yet
-  measured against a live Chain; revisit if that turns out to matter.
+- **The lock is held while the model scores** (#474's `ChainHierarchyClient.get_ancestors`),
+  so a slow Chain holds up the other topic meanwhile, bounded by
+  `MIND_CHAIN__TIMEOUT_SECONDS` -- `_cascade`'s own call does not add to this,
+  since round-9 moved it outside the lock. See *Known limitations* above.
 
 What was last published lives in memory, so a restart re-publishes each task
 once on its next event. A score is not re-sent just because time passes.
+
+## Running inside the API (#920)
+
+The publisher runs in background threads of MIND's API, the way Chain's and
+Inbox's Kafka consumers run inside their own services, so it deploys with the
+API and needs no entry of its own in Relay's chart.
+
+- **Started from the API's lifespan** (`api/main.py`) by `start_score_publisher()`,
+  **only when Kafka is configured** (the chart's config file sets
+  `kafka.bootstrap_servers` and `kafka.schema_registry_url`). Locally and in
+  tests, with no kafka section, the API starts without it and
+  `app.state.score_publisher` is `None`. Only one of the two keys set is a
+  broken config (#481): start-up stops with a `ConfigFileError` naming the
+  missing key, before any thread starts.
+- **Stopped on shutdown**: the consumers end within a second and leave their
+  group cleanly, instead of Kafka waiting for a session timeout.
+- **A failed thread runs again on its own, and never takes the API down.** The
+  threads run through `messaging/background.py`'s `BackgroundThreads`: when a
+  run raises (a Kafka send failure), it is logged and run again after a wait
+  that doubles each time, 1 s up to 60 s, as the `task.created` listener does.
+  Each run of a consumer builds a new one, so the uncommitted message is read
+  again: the recovery a pod restart would give, without one. There is no
+  `os._exit`, and the retries do not give up.
+- **`app.state.score_publisher.healthy`** is false only if a thread has died,
+  which the retries should never let happen. A Kafka outage, including Kafka
+  being down when the API starts, stays healthy and is retried inside the
+  thread. That makes it safe for liveness (#481's `/health/live`): a broker
+  that is down never restarts the API, nor loops a pod that starts without it.
+  Recovery does not depend on it. It is `None` when Kafka isn't configured.
+- **A thread that keeps failing is visible, not silent.** A bad message at the
+  head of a topic, or a wrong setting, fails on every run, so it never
+  recovers and Chain gets no scores from that topic, while `healthy` stays
+  true. `app.state.score_publisher.retrying` names the threads that failed
+  and have not recovered since. A thread recovers by handling a message or
+  finishing a re-score, or by running 10 minutes with nothing to do and no
+  new failure; not by merely running a while, since a send to a broker that
+  is down blocks for up to 5 minutes before it fails. Each failure is logged
+  as a WARNING; once the wait between runs reaches 60 s, every retry is
+  logged at ERROR: `background: thread <name> keeps failing (<n> times in a
+  row); running it again every 60.0s`. So a short outage isn't an alert, and
+  a stuck thread is.
+- **One consumer group per topic:** `mind-score-publisher-task-created` and
+  `mind-score-publisher-task-updated`. In one shared group, every retry of
+  one topic's consumer (it leaves the group and joins again) would rebalance
+  the other topic's consumer too. New groups start from the beginning of
+  their topic (`auto.offset.reset: earliest`).
+- **The publisher's lock is held during the Kafka send.** It keeps each task's
+  events in order, and a score recorded only once it was sent. So while a
+  send hangs, the other two threads wait on it and don't show in `retrying`.
+  A hung send fails only after about 5 minutes (librdkafka's
+  `message.timeout.ms`); from then on that thread is in `retrying`. Its
+  ERROR starts at the 7th failure in a row, when the wait reaches 60 s:
+  about 36 minutes after the send first hung (7 x 5 min + 63 s of waits).
+- **MIND must run as one replica (`replicaCount: 1`) with one uvicorn worker.**
+  The publisher keeps its state in memory: a second copy would split the
+  topics between two states, and the stale-event and loop checks would break.
+  Raise it with Mind before scaling the API.
+
+`BackgroundThreads` is generic: any Kafka consumer of MIND can run inside the
+API the same way, with a target of the form
+`lambda stop: consumer.run(Message, handle, stop=stop)`.
 
 ## Running it
 
