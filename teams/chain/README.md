@@ -1154,6 +1154,27 @@ REST and Mind paths respectively), `TaskUpdatedEventHandlerTest` (tenant mismatc
 `NonRetryableEventException`, not retried), `TaskRepositoryContractTest` (`tenantId` round-trips
 through `save`/`findById` for both the in-memory and Postgres implementations).
 
+## Tenant context and task ownership (Issue #956)
+
+Every `/tasks/**` request must carry `X-Tenant-Id` (a UUID). `TenantInterceptor` (registered in
+`WebConfig`) rejects a missing or malformed value with 400 in the `ApiError` format, before any
+controller runs; validation lives only in `TenantContext`.
+
+- **Exempt paths:** `WebConfig.TENANT_EXEMPT_PATHS`, currently **empty** - fail-closed, so a new
+  endpoint under `/tasks` requires the header by default. The only known caller is lens-bff. Add a
+  path only for a concrete internal caller, documented here with the caller and reason. The list
+  is path-only: the first exemption must also add a method check to the interceptor. An exempt
+  path has no tenant, so it cannot check task ownership.
+- **Ownership:** each `/tasks/{taskId}/...` controller calls
+  `TaskOwnershipService.requireTaskInTenant(taskId, tenantId)` first. A task of another tenant, or
+  one whose `tenant_id` is still null, fails with the same 404 as a missing task. The interceptor
+  only guarantees the header; a new endpoint must still call the ownership check itself.
+- **Not covered:** the second task id of `POST`/`DELETE /tasks/{taskId}/dependencies` is not
+  checked against the tenant (tracked separately), nor is `GET /tenants/{tenantId}/dependency-graph`,
+  which takes the tenant from its path.
+
+Tests: `TenantContextTest`, `TenantInterceptorTest`, `TaskOwnershipServiceTest`.
+
 ## Transactional graph lock
 
 The in-JVM `dependencyGraphLock` (`synchronized`) used by `DependencyEdgeService` and `TaskEligibilityService` is gone: it released before

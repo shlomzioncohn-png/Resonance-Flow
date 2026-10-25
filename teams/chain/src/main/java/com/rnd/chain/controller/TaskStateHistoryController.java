@@ -2,6 +2,9 @@ package com.rnd.chain.controller;
 
 import com.rnd.chain.dto.PageResponse;
 import com.rnd.chain.service.TaskStateHistoryService;
+import com.rnd.chain.tenant.TaskOwnershipService;
+import com.rnd.chain.tenant.TenantContext;
+import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,13 +19,12 @@ import java.util.UUID;
 /** Read-only access to a task's status / blocking history (Issue #775). */
 @RestController
 @RequestMapping("/tasks")
+@RequiredArgsConstructor
 public class TaskStateHistoryController {
 
     private final TaskStateHistoryService taskStateHistoryService;
-
-    public TaskStateHistoryController(TaskStateHistoryService taskStateHistoryService) {
-        this.taskStateHistoryService = taskStateHistoryService;
-    }
+    private final TenantContext tenantContext;
+    private final TaskOwnershipService taskOwnershipService;
 
     /** {@code from} is inclusive, {@code to} exclusive, both ISO-8601 instants; omitted means open. */
     @GetMapping("/{taskId}/state-history")
@@ -33,6 +35,7 @@ public class TaskStateHistoryController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         return ResponseEntity.ok(
                 taskStateHistoryService.getHistory(taskId, from, to, page, size)
                         .map(TaskStateHistoryResponse::from));
