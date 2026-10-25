@@ -110,6 +110,14 @@ jobs:
           echo "Schema Registry did not come up in time." >&2
           exit 1
 
+      - name: Build the schema canonicalizer
+        run: |
+          docker run --rm \
+            -v "$PWD:/workspace" -w /workspace/teams/relay/schema-canonicalize \
+            -v "${HOME:-$RUNNER_TEMP}/.m2:/root/.m2" \
+            maven:3.9.9-eclipse-temurin-21 \
+            mvn -B -q package
+
       - name: Seed registry with base-branch schema versions
         run: bash teams/relay/ci/seed-registry.sh "${{ steps.base.outputs.sha }}"
 
