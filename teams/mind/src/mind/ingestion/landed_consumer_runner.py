@@ -22,7 +22,7 @@ import threading
 from typing import Any
 from uuid import UUID
 
-from mind.config import LandedConsumerSettings, get_settings
+from mind.config import DeadlineSettings, LandedConsumerSettings, get_settings
 from mind.contracts import RawObjectEvent
 from mind.embeddings.base import SearchResult
 from mind.embeddings.duplicate_detection import find_duplicate
@@ -126,6 +126,9 @@ def main() -> None:
         extract=lambda item: extractor.extract(item.text, item.source_type, item.item_key),
         find_duplicate=_find_duplicate,
         sender=flow,
+        # Read once at start: a bad zone or working week stops the runner here,
+        # not on the first deadline (#960).
+        deadline_settings=DeadlineSettings(),
     )
 
     def _on_items(event: RawObjectEvent, items: list[ExtractionItem]) -> None:
