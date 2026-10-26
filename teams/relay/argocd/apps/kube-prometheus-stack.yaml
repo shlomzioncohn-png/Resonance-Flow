@@ -15,6 +15,10 @@ spec:
       targetRevision: 92.4.0
       helm:
         releaseName: monitoring
+        # Shared-cluster-only settings (Grafana's Ingress), kept with the
+        # resonance-flow chart's in one file. valuesObject below wins over it.
+        valueFiles:
+          - $values/teams/relay/helm/resonance-flow/environments/shared.yaml
         valuesObject:
           prometheus:
             prometheusSpec:
@@ -47,6 +51,15 @@ spec:
               existingSecret: grafana-admin
               userKey: admin-user
               passwordKey: admin-password
+            # See the resonance-flow chart's README "Dashboards".
+            sidecar:
+              dashboards:
+                folderAnnotation: grafana_folder
+                provider:
+                  foldersFromFilesStructure: true
+                # This chart's own dashboards.
+                annotations:
+                  grafana_folder: kubernetes
             resources:
               requests:
                 cpu: 50m
@@ -65,6 +78,10 @@ spec:
     - repoURL: https://github.com/KamaTechOrg/Resonance-Flow.git
       targetRevision: main
       path: teams/relay/monitoring
+    # $values for the chart's valueFiles. A ref-only source deploys nothing.
+    - repoURL: https://github.com/KamaTechOrg/Resonance-Flow.git
+      targetRevision: main
+      ref: values
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
