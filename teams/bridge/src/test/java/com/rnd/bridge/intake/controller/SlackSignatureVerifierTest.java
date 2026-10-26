@@ -23,7 +23,7 @@ class SlackSignatureVerifierTest {
 
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final SlackSignatureVerifier verifier =
-            new SlackSignatureVerifier(new SlackApiProperties(null, "kamatech", List.of(), SIGNING_SECRET), clock);
+            new SlackSignatureVerifier(new SlackApiProperties(null, List.of(), SIGNING_SECRET), clock);
 
     @Test
     void validSignatureAccepted() {
