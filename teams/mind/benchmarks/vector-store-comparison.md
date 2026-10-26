@@ -370,14 +370,14 @@ headroom before <300ms would even become a concern, and the one recall
 miss is attributable to the embedding model's inherent limits on a hard
 paraphrase, not to index accuracy.
 
-**Open, not settled here:** review flagged (via `EXPLAIN`) that at this
+**Resolved by #475 below:** review flagged (via `EXPLAIN`) that at this
 10,000-row scale, with `hnsw.ef_search = 400`, Postgres's planner may
-choose a sequential scan over the HNSW index for this query shape --
-not independently re-verified yet. If true, the latency numbers above
-don't actually validate the HNSW index at this scale; they'd just show
-that 10,000 rows is small enough for a seq scan to also be fast. Needs
-an `EXPLAIN ANALYZE` run against the real benchmark table to confirm
-before treating "no index change needed" as settled.
+choose a sequential scan over the HNSW index for this query shape. Confirmed
+with a real `EXPLAIN ANALYZE` against a 10,000-row table (see "Live-path
+latency under load" below): the planner does use the HNSW index at this
+scale -- `Index Scan using ..._embedding_hnsw_idx`, not a seq scan. (At a
+much smaller scale, ~50 rows, it does choose a bitmap/seq scan instead --
+expected, and not a concern at the 10,000-row target.)
 
 ## Foundation Gate benchmark (week 3)
 
@@ -460,5 +460,131 @@ The benchmark still uses synthetic filler data (random word-soup), not
 real task text -- the original issue asked for the real FUNSD dataset.
 Not switched over in this PR; flagging rather than fixing, since it
 changes what the recall numbers above actually measure.
+
+## Live-path latency under load (#475)
+
+The two validations above both measure `PgTenantStore.search()` directly.
+That skips two round trips the live endpoint (`GET /v1/tasks/{task_id}/related`,
+#472) actually makes before `search()` even runs: `VectorIndex.tenant_of()`
+and `VectorStore.get_vector()`. Neither run under concurrency, and neither
+has writes happening at the same time the real index consumer would be
+making them. Measuring an isolated, read-only, single-threaded call to
+`search()` alone is measuring a faster path than production ships --
+exactly what #475 asks not to do. This re-measures through the actual
+live path, under conditions closer to production.
+
+Script: [`related_tasks_live_path_benchmark.py`](related_tasks_live_path_benchmark.py)
+(raw results: `related_tasks_live_path_benchmark_results.json`, gitignored
+-- regenerate by re-running the script). Its own table
+(`task_embeddings_benchmark_475`), dropped after the run.
+
+### What is actually measured
+
+Each of the 300 measured calls times exactly one invocation of
+`mind.api.v1.router.get_related_tasks(task_id, index)` -- the literal
+function FastAPI calls for that route, not a hand-written query. One call
+is 5 round trips to Postgres: `tenant_of()` (1), `get_vector()` (1), then
+`search()`'s own 3 (two `SET` statements for `hnsw.ef_search` /
+`hnsw.iterative_scan`, then the `ORDER BY embedding <=> ... LIMIT k`
+itself) -- plus Python-side threshold filtering, no further I/O. No
+embedding happens in this path: `get_related_tasks` starts from a task's
+*already-stored* vector, not fresh text.
+
+Not driven through a running HTTP server or ASGI transport: the app's own
+lifespan (`api/main.py`) also starts Kafka consumers and the score
+publisher, neither of which bears on vector-search latency, and both of
+which would make this benchmark need a Kafka broker just to start. Calling
+the router function directly runs the exact same code the live endpoint
+runs; the one thing skipped is the loopback socket hop into uvicorn,
+whose overhead for a local call is itself sub-millisecond.
+
+### Dataset: 10,000 rows, 0 real, 100% synthetic
+
+No real Mind task corpus exists at this scale to load, so every row is
+synthetic -- stated plainly, not glossed over. Not random word-soup
+either (gibberish or near-identical strings cluster in embedding space in
+ways real task text never does, which would make a latency number
+measured against them not representative -- flagged in review): row text
+comes from [`synthetic_task_seeds.py`](synthetic_task_seeds.py), built on
+realistic task descriptions an LLM (Gemini) wrote, saved under
+[`synthetic_task_seeds_raw/`](synthetic_task_seeds_raw/) (committed --
+see `.gitignore`'s exception for it). Currently 1,647 unique seed entries
+spanning several work domains (software engineering/bug triage, sales,
+finance/procurement, HR/payroll, facilities, compliance, logistics,
+customer support, events), not just one.
+
+1,647 seeds don't reach 10,000 rows on their own, so `expand_to()` cycles
+through a fixed shuffle of them, reusing each about 6 times. The first
+use of each seed is exactly what the LLM wrote; every reuse after that is
+re-textured -- a different name, date, ticket id, number, and (since most
+titles contain none of those) an occasional leading-verb synonym swap and
+bracketed tag -- so reusing the corpus several times over doesn't itself
+produce near-duplicate rows. Checked, not assumed: of the 10,000 expanded
+rows, 8,148 have a unique title and 9,727 have a unique full text.
+Deterministic (`seed=475` by default): anyone re-running `expand_to(10_000)`
+gets the same 10,000 rows.
+
+### Conditions
+
+- **Warm**: 20 queries run and are discarded before measurement starts.
+- **Concurrent**: 20 `get_related_tasks()` calls in flight at once
+  (`asyncio.Semaphore`), not one request at a time.
+- **Writes in flight**: a background task continuously upserts rows for
+  the whole measured window, the way the real index consumer would.
+  Confirmed, not assumed to have run: the result records
+  `writes_during_measurement` (50 in the run below) -- a real count, not
+  zero.
+- **Varied queries**: each of the 300 measured calls targets a different,
+  randomly chosen task_id out of the 10,000 loaded -- not one query
+  repeated, which would measure a cache rather than the index.
+
+### Results (10,000 rows, 1,647-seed multi-domain corpus)
+
+| avg (ms) | p50 (ms) | p95 (ms) | p99 (ms) | max (ms) |
+|---:|---:|---:|---:|---:|
+| 123.90 | 120.83 | 161.45 | 189.45 | 200.39 |
+
+**<300ms p95 target: PASS**, with roughly 139ms (46%) of headroom left --
+comfortable, but nowhere near the ~18x headroom the isolated `search()`-only
+number above suggested. The full live path (5 round trips, 20-way
+concurrency, a writer competing for the same connection pool) costs
+roughly 10x what an isolated `search()` call does; the earlier number was
+real but was never the thing #475 asks to prove.
+
+**HNSW confirmed in use at this scale**, not assumed: `EXPLAIN (ANALYZE,
+FORMAT TEXT)` against the live 10,000-row table returns
+`Index Scan using task_embeddings_benchmark_475_embedding_hnsw_idx`, not
+a sequential or bitmap scan -- resolving the open question flagged above.
+(At a much smaller scale tested during development, ~50 rows, the planner
+instead chose a bitmap scan over the tenant_id index -- the right call at
+that size, and not a concern at the 10,000-row target.)
+
+### Breaking point and diagnosis
+
+Not explored past 10,000 rows in this pass: the target is comfortably met
+(46% headroom), and with only one scale tested there is no second data
+point yet to extrapolate a breaking point from. Where the time goes at
+10,000 rows is not a mystery, though -- it is the 5 round trips per call
+above, under contention from concurrency and a competing writer, not the
+vector search itself (the HNSW scan alone, per `EXPLAIN ANALYZE`, is
+single-digit milliseconds). A later pass that re-runs this at 50,000 and
+100,000 rows would show whether that per-call cost grows with table size
+or stays flat (HNSW's own query cost is expected to scale roughly
+`O(log n)`, so the round-trip/contention overhead, not the index, is the
+more likely bottleneck as scale grows) -- not done here to keep this PR's
+scope to what #475 asks for at the stated floor.
+
+### Known limitations
+
+- **The seed corpus is multi-domain but still far smaller than 10,000**:
+  1,647 unique scenarios, each reused ~6 times with re-texturing. More
+  domains narrow the gap further but do not close it completely; a
+  production corpus this size would have far more independent scenarios.
+- **The `EXPLAIN ANALYZE` plan was captured with a fixed, synthetic query
+  vector** (not a literal replay of one of the 300 measured queries) --
+  representative of the same query shape and scale, not a replay.
+- **Connection-pool size (25) and concurrency (20) are this benchmark's
+  own choices**, not derived from a measured production concurrency
+  profile, which does not exist yet to measure.
 
 ---
