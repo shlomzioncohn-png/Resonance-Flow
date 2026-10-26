@@ -92,3 +92,17 @@ def test_a_near_cycle_on_a_blocker_that_had_already_finished_is_not_flagged():
     events = _history(("T", "X", "ADDED", 0), ("T", "Y", "ADDED", 0), ("T", "X", "REMOVED", 5), ("T", "X", "ADDED", 12))
     assert len(detect(events, CFG, {"X": T0 + timedelta(days=20)})) == 1
     assert detect(events, CFG, {"X": T0 + timedelta(days=8)}) == []  # X finished before it came back
+
+
+def test_a_flapping_edge_counts_only_when_its_blocker_is_itself_slow():
+    events = _history(*_flapping("A", "B", [0, 3, 6, 9, 12]))
+    assert len(detect(events, CFG, None, {"B": 4.0})) == 1       # the bar is inclusive
+    assert detect(events, CFG, None, {"B": 3.9}) == []           # a healthy task that was re-planned
+    assert detect(events, CFG, None, {}) == []                   # an unknown blocker does not qualify
+    assert len(detect(events, CFG, None, None)) == 1             # no ratios given: no such condition
+
+
+def test_a_near_cycle_also_needs_a_slow_blocker():
+    events = _history(("T", "X", "ADDED", 0), ("T", "Y", "ADDED", 0), ("T", "X", "REMOVED", 5), ("T", "X", "ADDED", 12))
+    assert len(detect(events, CFG, None, {"X": 9.0})) == 1
+    assert detect(events, CFG, None, {"X": 1.0}) == []

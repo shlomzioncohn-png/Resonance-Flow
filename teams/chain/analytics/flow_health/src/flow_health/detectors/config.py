@@ -27,6 +27,7 @@ class RecurringCycleConfig:
     high_min_transitions: int = 8
     tight_cv: float = 0.3
     pair_min_return_days: float = 1.0
+    min_blocker_active_ratio: float = 4.0
 
 
 @dataclass(frozen=True)

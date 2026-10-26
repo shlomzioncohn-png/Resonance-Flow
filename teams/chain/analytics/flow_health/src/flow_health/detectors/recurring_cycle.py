@@ -57,11 +57,11 @@ def _active_at(history: list[tuple[pd.Timestamp, str]], moment: pd.Timestamp) ->
     return active
 
 
-def _edge_flags(histories, cfg) -> list[tuple[float, Flag]]:
+def _edge_flags(histories, cfg, slow_blocker) -> list[tuple[float, Flag]]:
     out = []
     for (task, target), events in histories.items():
         transitions = len(events) - 1  # the first ADDED only creates the edge
-        if transitions < cfg.min_transitions:
+        if transitions < cfg.min_transitions or not slow_blocker(target):
             continue
         stats = _gap_stats([at for at, _ in events])
         if not cfg.min_median_gap_days <= stats["median_gap_days"] <= cfg.max_median_gap_days:
@@ -78,7 +78,7 @@ def _edge_flags(histories, cfg) -> list[tuple[float, Flag]]:
     return out
 
 
-def _pair_flags(histories, flagged: set[tuple[str, str]], cfg) -> list[tuple[float, Flag]]:
+def _pair_flags(histories, flagged: set[tuple[str, str]], cfg, slow_blocker) -> list[tuple[float, Flag]]:
     """Near-cycle: two edges of one task were live together, one was removed and came back after a while.
     Edges already flagged on their own are left out, so one problem is not reported twice."""
     by_task: dict[str, list[tuple[str, str]]] = {}
@@ -88,7 +88,7 @@ def _pair_flags(histories, flagged: set[tuple[str, str]], cfg) -> list[tuple[flo
     for task, keys in by_task.items():
         for broken in keys:
             events = histories[broken]
-            if broken in flagged or len(events) < 3:
+            if broken in flagged or len(events) < 3 or not slow_blocker(broken[1]):
                 continue
             for i in range(len(events) - 2):
                 (t_add, a1), (t_rem, a2), (t_back, a3) = events[i:i + 3]
@@ -114,15 +114,22 @@ def _pair_flags(histories, flagged: set[tuple[str, str]], cfg) -> list[tuple[flo
 
 
 def detect(dependency_history: pd.DataFrame, cfg: RecurringCycleConfig,
-           done_at: Mapping[str, pd.Timestamp] | None = None) -> list[Flag]:
+           done_at: Mapping[str, pd.Timestamp] | None = None,
+           blocker_ratio: Mapping[str, float] | None = None) -> list[Flag]:
     """`dependency_history`: ADDED / REMOVED rows with task_id, depends_on_task_id, action, created_at, sequence.
-    `done_at`: when each finished task reached DONE; events on an edge after its target finished are ignored."""
+    `done_at`: when each finished task reached DONE; events on an edge after its target finished are ignored.
+    `blocker_ratio`: task_id -> `active_ratio_to_tier_project`; an edge counts only when the task it points at is itself
+    at least `min_blocker_active_ratio` (a blocker that stays stuck). None: no such condition."""
     if dependency_history.empty:
         return []
     histories = _edge_histories(dependency_history, done_at or {})
-    edges = _edge_flags(histories, cfg)
+
+    def slow_blocker(task_id: str) -> bool:
+        return blocker_ratio is None or blocker_ratio.get(task_id, 0.0) >= cfg.min_blocker_active_ratio
+
+    edges = _edge_flags(histories, cfg, slow_blocker)
     flagged = {tuple(f.entity_ids[0].split(">")) for _, f in edges}
-    found = edges + _pair_flags(histories, flagged, cfg)
+    found = edges + _pair_flags(histories, flagged, cfg, slow_blocker)
     found = list({f.flag_id: (v, f) for v, f in reversed(found)}.values())  # one flag per id (first occurrence wins)
     found.sort(key=lambda item: item[1].flag_id)
     scores = percentile_scores([v for v, _ in found], [f.flag_id for _, f in found])

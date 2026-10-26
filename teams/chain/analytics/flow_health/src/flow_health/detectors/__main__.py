@@ -19,8 +19,9 @@ def run_detectors(tasks: pd.DataFrame, dependency_history: pd.DataFrame, chains:
                   cfg: DetectorConfig, clusters: pd.DataFrame | None = None,
                   done_at: dict[str, pd.Timestamp] | None = None) -> list[Flag]:
     """All three detectors, one after the other. Merging them into one ranked list is the next task."""
+    blocker_ratio = tasks.set_index("task_id")[cfg.chronic_blocker.ratio_column].to_dict()
     return (chronic_blocker.detect(tasks, cfg.chronic_blocker, clusters)
-            + recurring_cycle.detect(dependency_history, cfg.recurring_cycle, done_at)
+            + recurring_cycle.detect(dependency_history, cfg.recurring_cycle, done_at, blocker_ratio)
             + slow_chain.detect(chains, tasks, cfg.slow_chain))
 
 
