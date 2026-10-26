@@ -20,11 +20,15 @@ PROTO_DIR="${REPO_ROOT}/shared/proto"
 REGISTRY_URL="${SCHEMA_REGISTRY_URL:-http://localhost:8081/apis/ccompat/v6}"
 
 source "${SCRIPT_DIR}/_load-schema-policy.sh"
+source "${SCRIPT_DIR}/_canonicalize.sh"
 
 if [ -z "$ADDED_ROWS" ]; then
   echo "No rows added to schema-subjects.tsv relative to ${BASE_REF} - nothing to register."
   exit 0
 fi
+
+CANON_DIR="$(mktemp -d)"
+trap 'rm -rf "$CANON_DIR"' EXIT
 
 # Keeps going after a failure, so one run surfaces every broken row.
 FAILED=0
@@ -37,7 +41,8 @@ while IFS=$'\t' read -r FILE SUBJECT; do
   elif [ ! -f "${PROTO_DIR}/${FILE}" ]; then
     echo "'${FILE}' not found under shared/proto."
     FAILED=1
-  elif ! SCHEMA_REGISTRY_URL="$REGISTRY_URL" bash "${SCRIPT_DIR}/register-schema.sh" "${PROTO_DIR}/${FILE}" "${SUBJECT}"; then
+  elif ! canonicalize "$PROTO_DIR" "$FILE" "${CANON_DIR}/${FILE}" \
+       || ! SCHEMA_REGISTRY_URL="$REGISTRY_URL" bash "${SCRIPT_DIR}/register-schema.sh" "${CANON_DIR}/${FILE}" "${SUBJECT}"; then
     FAILED=1
   fi
   echo

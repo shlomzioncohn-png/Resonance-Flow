@@ -72,7 +72,7 @@ export const palette: PaletteOptions = {
   },
   text: {
     primary: colorTokens.slate[900],
-    secondary: colorTokens.slate[500],
+    secondary: colorTokens.slate[600],
     disabled: colorTokens.slate[400],
   },
   divider: 'rgba(15, 23, 42, 0.08)',

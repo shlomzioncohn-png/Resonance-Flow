@@ -50,6 +50,9 @@ jobs:
           cp teams/relay/ci/check-schema-compatibility.sh teams/relay/ci/register-schema.sh teams/relay/ci/_schema-references.sh teams/relay/schema-sync-hook/files/ci/
           cp teams/relay/ci/schema-subjects.tsv teams/relay/schema-sync-hook/files/
 
+      - name: Fetch main so the push only sends new commits
+        run: git fetch --no-tags origin main
+
       # PAT, not GITHUB_TOKEN - see service-update-manifest.yaml. No-op when nothing changed.
       - name: Open a PR with the synced copies
         uses: peter-evans/create-pull-request@v7

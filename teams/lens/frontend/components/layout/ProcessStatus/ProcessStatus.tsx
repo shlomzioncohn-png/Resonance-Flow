@@ -63,12 +63,11 @@ export default function ProcessStatus({ stages, title = 'Process Status' }: Proc
           aria-label={title}
         >
           {stages.map((stage, index) => {
-            const isLight = index === 0;
             const customColor = stage.color ? { main: stage.color, bg: stage.color, text: stage.color } : null;
             const colors = customColor || getDefaultColor(index);
             const mainColor = customColor?.main || colors.main;
-            const bgColor = isLight ? mainColor : colors.bg;
-            const textColor = isLight ? theme.palette.text.primary : colors.text;
+            const bgColor = colors.bg;
+            const textColor = colors.text;
 
             return (
               <Card

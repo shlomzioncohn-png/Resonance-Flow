@@ -6,7 +6,7 @@ import Sidebar from './Sidebar';
 // localStorage on mount - seed it before the story renders and clear it after,
 // so a role never leaks into the next story.
 const ROLE_STORAGE_KEY = 'lens.role';
-const withRole = (role: 'manager' | 'employee') => () => {
+const withRole = (role: 'TENANT_ADMIN' | 'EMPLOYEE') => () => {
   window.localStorage.setItem(ROLE_STORAGE_KEY, role);
   return () => window.localStorage.removeItem(ROLE_STORAGE_KEY);
 };
@@ -40,7 +40,7 @@ export const Default: Story = {
 };
 
 export const ManagerRole: Story = {
-  beforeEach: withRole('manager'),
+  beforeEach: withRole('TENANT_ADMIN'),
   parameters: { nextjs: { navigation: { pathname: '/manager/workload' } } },
   play: async ({ canvas }) => {
     await expect(await canvas.findByRole('link', { name: 'Workload' })).toBeVisible();
@@ -49,7 +49,7 @@ export const ManagerRole: Story = {
 };
 
 export const EmployeeRole: Story = {
-  beforeEach: withRole('employee'),
+  beforeEach: withRole('EMPLOYEE'),
   parameters: { nextjs: { navigation: { pathname: '/employee' } } },
   play: async ({ canvas }) => {
     await expect(await canvas.findByRole('link', { name: 'My Tasks' })).toBeVisible();
