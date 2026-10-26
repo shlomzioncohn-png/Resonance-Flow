@@ -19,6 +19,7 @@ import com.rnd.bridge.intake.service.ChatSourceRecordMapper;
 import com.rnd.bridge.intake.service.IntakeLandingService;
 import com.rnd.bridge.intake.service.SourceRecordRefMapper;
 import com.rnd.bridge.raw.RawObjectValidator;
+import com.rnd.bridge.raw.TestTenantId;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawSourceType;
 import com.rnd.bridge.scoping.AllowlistScopingFilter;
@@ -44,7 +45,7 @@ import org.junit.jupiter.api.Test;
  */
 class ThreadRootEditChannelGroupTest {
 
-    private static final String TENANT_ID = "kamatech";
+    private static final String TENANT_ID = TestTenantId.VALID;
     private static final String CHAT_ID = "C1";
     private static final String ROOT_ID = "2000.100";
     private static final String REPLY_ID = "2000.200";

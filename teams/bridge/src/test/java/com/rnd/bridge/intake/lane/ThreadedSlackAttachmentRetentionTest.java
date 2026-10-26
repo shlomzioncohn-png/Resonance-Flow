@@ -21,6 +21,7 @@ import com.rnd.bridge.intake.service.ChatSourceRecordMapper;
 import com.rnd.bridge.intake.service.IntakeLandingService;
 import com.rnd.bridge.intake.service.SourceRecordRefMapper;
 import com.rnd.bridge.raw.RawObjectValidator;
+import com.rnd.bridge.raw.TestTenantId;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -50,7 +51,7 @@ import org.mockito.ArgumentCaptor;
  */
 class ThreadedSlackAttachmentRetentionTest {
 
-    private static final String TENANT_ID = "kamatech";
+    private static final String TENANT_ID = TestTenantId.VALID;
     private static final String CHAT_ID = "chat-a";
     private static final String THREAD_ID = "1000.0";
 

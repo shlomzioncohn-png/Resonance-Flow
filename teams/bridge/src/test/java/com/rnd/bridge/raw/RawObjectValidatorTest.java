@@ -98,7 +98,7 @@ class RawObjectValidatorTest {
         // requireNonEmpty(objects), which would have blocked every DELETE_REVIEW event from ever
         // reaching Kafka through the real (non-mocked) validator.
         RawObjectEvent event = RawObjectEvent.create(
-                RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+                RawSourceType.SLACK, TestTenantId.VALID, Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
                 List.of(), Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 1, ChangeType.DELETE_REVIEW, List.of());
 
         assertThatCode(() -> validator.validate(event)).doesNotThrowAnyException();
