@@ -100,15 +100,35 @@ team's sync.
   Traefik exposes its own metrics, per router. Kafka consumer-group lag comes
   from the chart's `kafka-exporter` subchart - see the chart's README.
 - **Alert rules.** The platform's PrometheusRules live in the `resonance-flow`
-  chart - see its [README](../helm/resonance-flow/README.md#alerting). Default
-  rules for components not scraped here (etcd, controller-manager, scheduler,
-  kube-proxy, Windows) are turned off in `defaultRules`.
+  chart - see its [README](../helm/resonance-flow/README.md#alerting).
 
-Nothing here has an Ingress. Reach Prometheus and Alertmanager with:
+- **Grafana.** On, with the Prometheus and Alertmanager datasources the chart
+  provisions. Its dashboard sidecar loads any ConfigMap labelled
+  `grafana_dashboard: "1"` from any namespace - that's how the `resonance-flow`
+  chart ships its alert dashboard.
+- **Grafana's admin login.** From the `grafana-admin` Secret (`admin-user`,
+  `admin-password`), which the app's second source,
+  `teams/relay/monitoring/grafana-admin-secret-hook.yaml`, creates in a
+  PreSync hook with a random 32-char password - so `sources`, not `source`
+  (ArgoCD ≥ 2.6). Same pattern as the chart's `_db-credentials-hook.tpl`: the
+  Job creates the Secret through the API, so ArgoCD neither tracks nor prunes
+  it, and a later sync keeps an existing non-empty password (an empty one is
+  replaced). It's not a rendered Secret because ArgoCD renders offline: the
+  Grafana chart's own random password would change on every refresh. To
+  rotate it, delete the Secret and sync.
+
+Nothing here has an Ingress. Reach Prometheus, Alertmanager and Grafana with:
 
 ```bash
 kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-prometheus 9090:9090
 kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-alertmanager 9093:9093
+kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80
+```
+
+Grafana's admin password:
+
+```bash
+kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d
 ```
 
 ## Scope

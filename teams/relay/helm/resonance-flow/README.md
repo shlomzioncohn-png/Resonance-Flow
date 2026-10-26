@@ -238,16 +238,41 @@ teams' kind CI; `helm template` needs
   and `minio.persistence` are off, so there's no PVC and no
   `kubelet_volume_stats_*` series to match. It starts working once either is
   turned on - no rule change needed.
-- **Default rules.** kube-prometheus-stack's own rules for components that
-  aren't scraped here (etcd, controller-manager, scheduler, kube-proxy, Windows)
-  are turned off in `teams/relay/argocd/apps/kube-prometheus-stack.yaml`. Its
-  other defaults (e.g. `KubePodCrashLooping`) stay on cluster-wide, with no
-  `team` label.
+- **Default rules.** kube-prometheus-stack only renders its rules for a
+  component it scrapes, so with `kubeEtcd`, `kubeScheduler`,
+  `kubeControllerManager` and `kubeProxy` off in
+  `teams/relay/argocd/apps/kube-prometheus-stack.yaml` (and Windows monitoring
+  off by default) their rules don't exist - turning a component on brings its
+  rules back. Its other defaults (e.g. `KubePodCrashLooping`) stay on
+  cluster-wide, with no `team` label.
+
+### Viewing alerts in Grafana
+
+Grafana (`teams/relay/argocd/README.md` "Monitoring" for access) shows them in
+two places:
+
+- **Alerting → Alert rules**, data source *Prometheus*: every rule from
+  `resonance-flow-alerts`, with its state (Normal / Pending / Firing), labels,
+  `summary` annotation, query and `for`. Grafana reads these from Prometheus;
+  nothing is copied into Grafana.
+- **Dashboards → Resonance-Flow / Platform alerts**
+  (`dashboards/platform-alerts.json`, shipped by
+  `templates/grafana-dashboards.yaml` with the same CRD check): firing and
+  pending counts, a state timeline per alert, and a table of active alerts
+  with their labels, filterable by `team`. It's built on Prometheus's `ALERTS`
+  series filtered to `team!=""`, so it shows exactly the rules here (the
+  kube-prometheus-stack defaults have no `team`) and picks up new ones with
+  no dashboard change. An alert drops out of `ALERTS` once it resolves - a
+  gap in the timeline.
+
+Edit the dashboard JSON in git, not in the Grafana UI: the sidecar overwrites
+UI changes.
 
 ### Testing a rule by hand
 
 On the shared cluster, after the rule is merged to `main`. Watch it go
-pending → firing at `http://localhost:9090/alerts` (port-forward in
+pending → firing, then back to Normal once you undo the trigger, in Grafana
+(above) or at `http://localhost:9090/alerts` (port-forward in
 `teams/relay/argocd/README.md` "Monitoring"). For anything that changes a
 resource ArgoCD manages (scaling inbox or Kafka), turn off auto-sync first -
 on `root` too, or it restores `resonance-flow`'s sync policy:
