@@ -9,7 +9,7 @@ import Chip from '@mui/material/Chip';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import PageContainer from '@/components/layout/PageContainer';
-import ManagerKpiTiles from '@/components/layout/ManagerKpiTiles';
+import ManagerKpiTiles from './ManagerKpiTiles';
 import DependencyGraph from '@/components/ui/DependencyGraph';
 import { useDependencyGraph } from '@/hooks/useDependencyGraph';
 import { useManagerKpis } from '@/hooks/useManagerKpis';

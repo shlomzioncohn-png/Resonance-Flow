@@ -33,8 +33,17 @@ from mind.evaluation.personas import (
     load_personas,
     validate_personas,
 )
+from mind.scoring.ancestor_source import FixtureAncestorSource
+from mind.scoring.hierarchical_model import HierarchicalRankingModel
 from mind.scoring.hierarchy import load_hierarchy
 from mind.scoring.segmented_model import SegmentedRankingModel
+
+#: Checked against --model before anything fallible (personas, hierarchy)
+#: loads, so a typo fails fast. Must match `models`' keys below.
+_MODEL_CHOICES = frozenset(
+    {"dummy", "nearest-deadline", "skip-blocked-nearest-deadline", "longest-description", "segmented",
+     "hierarchical"}
+)
 
 
 def _summary_lines(label: str, report: Report) -> str:
@@ -59,11 +68,12 @@ def _report_json(output: EvaluationOutput) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run evaluation harness on ranking models.")
     parser.add_argument(
-        "--model", type=str, default="dummy",
+        "--model", type=str, default="dummy", choices=sorted(_MODEL_CHOICES),
         help="Model to evaluate: 'dummy' (constant score, plumbing only), "
              "'nearest-deadline', 'skip-blocked-nearest-deadline' or 'longest-description' "
              "(the cheap baselines from eval/personas/README.md's 'Cheap-baseline scores' table), "
-             "or 'segmented' (R2's segmented-ranking baseline, #354 — the one #486 records).",
+             "or 'segmented' (R2's segmented-ranking baseline, #354 — the one #486 records), "
+             "or 'hierarchical' (#474: R2's baseline plus propagation over --hierarchy).",
     )
     parser.add_argument(
         "--personas", type=str, default="eval/personas",
@@ -108,21 +118,11 @@ def main() -> None:
              "touched the persona set (git log -1 --format=%%H -- eval/personas "
              "eval/hierarchy).",
     )
+    # --model is validated by argparse's own choices=, before anything else
+    # (personas, hierarchy) can fail, so a typo is never masked.
     args = parser.parse_args()
     if args.record_baseline is None and (args.model_commit or args.persona_set_commit):
         parser.error("--model-commit / --persona-set-commit only apply with --record-baseline")
-
-    models: dict[str, RankingModel] = {
-        "dummy": DummyModel(),
-        "nearest-deadline": NearestDeadlineModel(),
-        "skip-blocked-nearest-deadline": SkipBlockedNearestDeadlineModel(),
-        "longest-description": LongestDescriptionModel(),
-        "segmented": SegmentedRankingModel(),
-    }
-    try:
-        model = models[args.model]
-    except KeyError:
-        raise ValueError(f"Unknown model: {args.model!r}. Choices: {sorted(models)}") from None
 
     personas_path = Path(args.personas)
 
@@ -180,6 +180,17 @@ def main() -> None:
             print(f"  - {error}")
         print("-----------------------------------\n")
         sys.exit(1)
+
+    models: dict[str, RankingModel] = {
+        "dummy": DummyModel(),
+        "nearest-deadline": NearestDeadlineModel(),
+        "skip-blocked-nearest-deadline": SkipBlockedNearestDeadlineModel(),
+        "longest-description": LongestDescriptionModel(),
+        "segmented": SegmentedRankingModel(),
+        "hierarchical": HierarchicalRankingModel(FixtureAncestorSource(fixture)),
+    }
+    # Safe: args.model is one of choices=sorted(_MODEL_CHOICES), which must match these keys.
+    model = models[args.model]
 
     # One report per scenario group (a subdirectory of the personas dir), plus a combined one.
     group_dirs = sorted(p for p in personas_path.iterdir() if p.is_dir())

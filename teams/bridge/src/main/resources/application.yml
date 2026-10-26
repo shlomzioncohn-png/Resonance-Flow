@@ -97,12 +97,6 @@ bridge:
   # KafkaPayloadPublisher (see esti/inbox-kafka-ingestion-contract) - one
   # topic for every source, never a per-lane one.
   structured-tasks-topic: ${BRIDGE_STRUCTURED_TASKS_TOPIC:bridge.structured.tasks}
-  kafka:
-    # Confluent Schema Registry for bridgeTaskEventKafkaTemplate's KafkaProtobufSerializer (see
-    # BridgeTaskKafkaConfig). The localhost default is for local/dev only - any real environment
-    # must override SCHEMA_REGISTRY_URL to the shared registry Relay owns.
-    schema-registry:
-      url: ${SCHEMA_REGISTRY_URL:http://localhost:8081}
   manual-sync:
     enabled: false
   # Deployment-wide tenant for lanes whose sources carry no tenant (GitHub, Jira).

@@ -68,7 +68,7 @@ Rules:
 
 - Exactly the keys these instructions list. Never add a key, not even one
   that seems useful.
-- Never output priority, owner or deadline. Other stages handle those, and
+- Never output priority or owner. Other stages handle those, and
   inventing them here corrupts their input.
 - When `dependency_mentions` is not empty, `has_dependencies` is true. It may
   be true with an empty list,
