@@ -189,6 +189,11 @@ public class RealDriveSourceReader implements DriveSourceReader {
             return toTrashedSourceRecord(file);
         }
         byte[] content = fetchContent(drive, file);
+        // SourceRecord.mimeType must describe content, not the original file - a native Google
+        // file's content bytes are the EXPORT_MIME_TYPE export, never file.getMimeType() itself.
+        String contentMimeType = DriveFileStateReconciler.isNativeGoogleFile(file.getMimeType())
+                ? EXPORT_MIME_TYPE
+                : file.getMimeType();
         String owner = file.getOwners() == null || file.getOwners().isEmpty()
                 ? null
                 : file.getOwners().get(0).getEmailAddress();
@@ -198,7 +203,7 @@ public class RealDriveSourceReader implements DriveSourceReader {
         return new SourceRecord(
                 RawSourceType.DRIVE, tenantId.value(), file.getId(), state.correlationId(),
                 occurredAt, owner, owner == null ? List.of() : List.of(owner), file.getName(),
-                file.getDescription(), content, file.getMimeType(), null, 0, 0, List.of(), state.revision())
+                file.getDescription(), content, contentMimeType, null, 0, 0, List.of(), state.revision())
                 .withSourceRef(file.getId());
     }
 

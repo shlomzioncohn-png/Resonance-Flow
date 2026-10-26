@@ -158,6 +158,7 @@ class RealDriveSourceReaderTest {
 
         assertThat(result.records()).hasSize(1);
         assertThat(result.records().get(0).rawContent()).isEqualTo(expectedBytes);
+        assertThat(result.records().get(0).mimeType()).isEqualTo("text/plain");
         verify(files, Mockito.never()).get("doc1");
     }
 
