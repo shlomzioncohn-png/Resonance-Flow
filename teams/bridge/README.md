@@ -316,7 +316,8 @@ item's `scope_decision` and attaches the optional `classification` object it was
 a whole; it never extracts tasks, people, dates or priority - that stays with Mind.
 
 1. **Rules first** (free, deterministic, `decided_by: RULE`): a meeting shorter than
-   `min-meeting-duration` → `TEST`; a document whose pages were *all* checked and are all
+   `min-meeting-duration` (default 30s) → `TEST`; a meeting with a single participant (distinct
+   people, so rejoins count once; unknown counts never trigger it) → `TEST`; a document whose pages were *all* checked and are all
    blank → `BLANK`. An empty transcript is deliberately *not* a rule - it means transcription
    failed, not that the meeting was empty.
 2. **Model second**, only for what the rules didn't settle (`decided_by: MODEL`): a meeting is

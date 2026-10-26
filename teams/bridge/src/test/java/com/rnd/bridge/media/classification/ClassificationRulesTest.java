@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.rnd.bridge.media.classification.document.DocumentScan;
 import com.rnd.bridge.media.meeting.MeetingMetadata;
+import com.rnd.bridge.media.meeting.ParticipantActivity;
 import com.rnd.bridge.raw.model.Classification;
 import com.rnd.bridge.raw.model.ClassifierInfo;
 import com.rnd.bridge.raw.model.DecidedBy;
@@ -56,6 +57,53 @@ class ClassificationRulesTest {
     }
 
     @Test
+    void meetingWithASingleParticipantIsATest() {
+        MeetingMetadata metadata = metadataWith(List.of(participant("u1", "Esther")), null);
+
+        Classification result = rules.classifyMeeting(new MeetingClassificationInput(metadata, REAL_TRANSCRIPT)).orElseThrow();
+
+        assertThat(result.decidedBy()).isEqualTo(DecidedBy.RULE);
+        assertThat(result.category().value()).isEqualTo(MeetingCategory.TEST);
+        assertThat(result.reason()).isEqualTo("meeting had a single participant");
+    }
+
+    @Test
+    void participantWhoRejoinedStillCountsAsOne() {
+        // Zoom lists one entry per join session.
+        MeetingMetadata metadata = metadataWith(
+                List.of(participant("u1", "Esther"), participant("u1", "Esther")), null);
+
+        Classification result = rules.classifyMeeting(new MeetingClassificationInput(metadata, REAL_TRANSCRIPT)).orElseThrow();
+
+        assertThat(result.category().value()).isEqualTo(MeetingCategory.TEST);
+    }
+
+    @Test
+    void platformCountOfOneIsATestWhenThereIsNoParticipantList() {
+        MeetingMetadata metadata = metadataWith(List.of(), 1);
+
+        assertThat(rules.classifyMeeting(new MeetingClassificationInput(metadata, REAL_TRANSCRIPT)))
+                .map(c -> c.category().value())
+                .contains(MeetingCategory.TEST);
+    }
+
+    @Test
+    void meetingWithTwoParticipantsIsLeftForTheModel() {
+        MeetingMetadata metadata = metadataWith(
+                List.of(participant("u1", "Esther"), participant("u2", "Malki")), null);
+
+        assertThat(rules.classifyMeeting(new MeetingClassificationInput(metadata, REAL_TRANSCRIPT))).isEmpty();
+    }
+
+    @Test
+    void unknownParticipantCountIsLeftForTheModel() {
+        // BBB's sidecar carries no participant data - unknown must never be treated as one.
+        MeetingMetadata metadata = metadataWith(List.of(), null);
+
+        assertThat(rules.classifyMeeting(new MeetingClassificationInput(metadata, REAL_TRANSCRIPT))).isEmpty();
+    }
+
+    @Test
     void meetingWithNoMetadataAndNoTranscriptIsLeftUndecided() {
         assertThat(rules.classifyMeeting(new MeetingClassificationInput(null, null))).isEmpty();
     }
@@ -79,6 +127,17 @@ class ClassificationRulesTest {
                 : new DocumentScan(outcome, 10, 5, List.of());
 
         assertThat(rules.classifyDocument(scan)).isEmpty();
+    }
+
+    /** A 30-minute meeting - long enough that only the participant rule can decide it. */
+    private static MeetingMetadata metadataWith(List<ParticipantActivity> participants, Integer participantsCount) {
+        return new MeetingMetadata("1", "Sprint planning", null, Instant.parse("2026-10-11T09:00:00Z"),
+                Instant.parse("2026-10-11T09:30:00Z"), participants, null, null, null, null,
+                participantsCount, null, null, null, null);
+    }
+
+    private static ParticipantActivity participant(String userId, String name) {
+        return new ParticipantActivity(null, name, null, null, userId, null, null, null, null, null, null);
     }
 
     private static MeetingMetadata metadata(Instant startedAt, Instant endedAt) {

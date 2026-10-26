@@ -26,7 +26,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class ClassificationRules {
 
-    static final String RULES_VERSION = "v2";
+    static final String RULES_VERSION = "v3";
 
     private final Duration minMeetingDuration;
 
@@ -39,6 +39,10 @@ public class ClassificationRules {
         if (duration.isPresent() && duration.get().compareTo(minMeetingDuration) < 0) {
             return Optional.of(ruleVerdict(MeetingCategory.TEST,
                     "meeting shorter than " + minMeetingDuration.toSeconds() + "s"));
+        }
+        if (input.metadata() != null
+                && input.metadata().distinctParticipantCount().orElse(0) == 1) {
+            return Optional.of(ruleVerdict(MeetingCategory.TEST, "meeting had a single participant"));
         }
         return Optional.empty();
     }
