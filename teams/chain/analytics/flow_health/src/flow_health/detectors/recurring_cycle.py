@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import statistics
+from collections.abc import Mapping
 
 import pandas as pd
 
@@ -34,10 +35,17 @@ def _fmt(days: float) -> str:
     return f"{days:.1f}".removesuffix(".0")
 
 
-def _edge_histories(deps: pd.DataFrame) -> dict[tuple[str, str], list[tuple[pd.Timestamp, str]]]:
+def _edge_histories(deps: pd.DataFrame, done_at: Mapping[str, pd.Timestamp]) -> dict[tuple[str, str], list[tuple[pd.Timestamp, str]]]:
+    """Events of each edge up to the moment its target finished: an edge that is put back on a task that is already
+    DONE blocks nothing, so those events are not part of a blocker that keeps coming back."""
     ordered = deps.sort_values(["created_at", "sequence"], kind="stable")
-    return {key: list(zip(g["created_at"], g["action"]))
-            for key, g in ordered.groupby(["task_id", "depends_on_task_id"], sort=True)}
+    histories = {}
+    for key, g in ordered.groupby(["task_id", "depends_on_task_id"], sort=True):
+        finished = done_at.get(key[1])
+        events = [(at, action) for at, action in zip(g["created_at"], g["action"]) if finished is None or at < finished]
+        if events:
+            histories[key] = events
+    return histories
 
 
 def _active_at(history: list[tuple[pd.Timestamp, str]], moment: pd.Timestamp) -> bool:
@@ -105,11 +113,13 @@ def _pair_flags(histories, flagged: set[tuple[str, str]], cfg) -> list[tuple[flo
     return out
 
 
-def detect(dependency_history: pd.DataFrame, cfg: RecurringCycleConfig) -> list[Flag]:
-    """`dependency_history`: ADDED / REMOVED rows with task_id, depends_on_task_id, action, created_at, sequence."""
+def detect(dependency_history: pd.DataFrame, cfg: RecurringCycleConfig,
+           done_at: Mapping[str, pd.Timestamp] | None = None) -> list[Flag]:
+    """`dependency_history`: ADDED / REMOVED rows with task_id, depends_on_task_id, action, created_at, sequence.
+    `done_at`: when each finished task reached DONE; events on an edge after its target finished are ignored."""
     if dependency_history.empty:
         return []
-    histories = _edge_histories(dependency_history)
+    histories = _edge_histories(dependency_history, done_at or {})
     edges = _edge_flags(histories, cfg)
     flagged = {tuple(f.entity_ids[0].split(">")) for _, f in edges}
     found = edges + _pair_flags(histories, flagged, cfg)

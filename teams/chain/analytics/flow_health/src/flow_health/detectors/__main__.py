@@ -10,16 +10,17 @@ import pandas as pd
 from ..features import build_timeline
 from ..loaders import CsvLoader
 from . import chronic_blocker, recurring_cycle, slow_chain
-from .chain_paths import extract_paths
+from .chain_paths import extract_paths, finish_times
 from .common import PATTERNS, Flag, write_flags
 from .config import DetectorConfig, load_config
 
 
 def run_detectors(tasks: pd.DataFrame, dependency_history: pd.DataFrame, chains: pd.DataFrame,
-                  cfg: DetectorConfig, clusters: pd.DataFrame | None = None) -> list[Flag]:
+                  cfg: DetectorConfig, clusters: pd.DataFrame | None = None,
+                  done_at: dict[str, pd.Timestamp] | None = None) -> list[Flag]:
     """All three detectors, one after the other. Merging them into one ranked list is the next task."""
     return (chronic_blocker.detect(tasks, cfg.chronic_blocker, clusters)
-            + recurring_cycle.detect(dependency_history, cfg.recurring_cycle)
+            + recurring_cycle.detect(dependency_history, cfg.recurring_cycle, done_at)
             + slow_chain.detect(chains, tasks, cfg.slow_chain))
 
 
@@ -41,8 +42,9 @@ def main(argv: list[str] | None = None) -> int:
     clusters = pd.read_csv(cluster_file) if cluster_file.is_file() else None
 
     cfg = load_config(args.config)
-    chains = extract_paths(build_timeline(ds), cfg.slow_chain)
-    flags = run_detectors(tasks, ds.dependency_history, chains, cfg, clusters)
+    timeline = build_timeline(ds)
+    chains = extract_paths(timeline, cfg.slow_chain)
+    flags = run_detectors(tasks, ds.dependency_history, chains, cfg, clusters, finish_times(timeline))
     out = args.out or args.features / "flags.json"
     write_flags(flags, out, {"seed": args.seed, "as_of": ds.as_of.isoformat(), "data": str(args.data),
                              "counts": {pattern: sum(f.pattern == pattern for f in flags) for pattern in PATTERNS}})

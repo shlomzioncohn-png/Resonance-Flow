@@ -79,3 +79,16 @@ def test_score_is_a_percentile_and_two_runs_give_the_same_output():
 
 def test_empty_history_no_flags():
     assert detect(_history(), CFG) == []
+
+
+def test_events_after_the_blocker_finished_do_not_count():
+    events = _history(*_flapping("A", "B", [0, 3, 6, 9, 12]))
+    assert len(detect(events, CFG, {"B": T0 + timedelta(days=13)})) == 1  # B finished after the last switch
+    assert detect(events, CFG, {"B": T0 + timedelta(days=4)}) == []       # B finished early: only 1 switch happened while it was open
+    assert len(detect(events, CFG, {})) == 1                              # nothing known to be finished
+
+
+def test_a_near_cycle_on_a_blocker_that_had_already_finished_is_not_flagged():
+    events = _history(("T", "X", "ADDED", 0), ("T", "Y", "ADDED", 0), ("T", "X", "REMOVED", 5), ("T", "X", "ADDED", 12))
+    assert len(detect(events, CFG, {"X": T0 + timedelta(days=20)})) == 1
+    assert detect(events, CFG, {"X": T0 + timedelta(days=8)}) == []  # X finished before it came back

@@ -13,6 +13,12 @@ PATH_COLUMNS = ["sink_task_id", "task_ids", "chain_length", "end_to_end_days", "
 _DAY = 86400.0
 
 
+def finish_times(tl: Timeline) -> dict:
+    """task_id -> the moment the task reached DONE (tasks that never did are absent)."""
+    seg = tl.status_segments
+    return seg.loc[seg["status"] == "DONE"].set_index("task_id")["start"].to_dict()
+
+
 def extract_paths(tl: Timeline, cfg: SlowChainConfig) -> pd.DataFrame:
     """Paths of `min_length`..`max_length` tasks, root first, taken from the maximal paths of the graph.
 
@@ -26,7 +32,7 @@ def extract_paths(tl: Timeline, cfg: SlowChainConfig) -> pd.DataFrame:
     first hop is the first task's own work, each next hop runs from one DONE to the next, so the hops add up to the total.
     """
     seg = tl.status_segments
-    done_at = seg.loc[seg["status"] == "DONE"].set_index("task_id")["start"].to_dict()
+    done_at = finish_times(tl)
     first_active = seg.loc[seg["status"] == "ACTIVE"].groupby("task_id")["start"].min().to_dict()
 
     targets_of, dependents_of = defaultdict(set), defaultdict(set)
