@@ -464,13 +464,12 @@ Kafka credentials must change them there, or recreate the Secret.
 
 ### MIND's LLM key
 
-The chart doesn't create the LLM key, since it comes from the provider. Create it once per
-cluster before setting `components.mind.config.llm.provider`:
-
-```bash
-kubectl -n resonance-flow create secret generic resonance-flow-mind-llm \
-  --from-literal=gemini-api-key=<key> --from-literal=deepseek-api-key=<key>
-```
+The chart doesn't create the LLM key, since it comes from the provider. The keys are the
+repository secrets `GEMINI_API_KEY` and `DEEPSEEK_API_KEY`, and the
+`.github/workflows/mind-llm-secret.yaml` workflow (run by hand, "Run workflow") writes the
+ones that are set into the `resonance-flow-mind-llm` Secret on the shared cluster, through
+the `KUBECONFIG` repository secret, then restarts MIND. Run it again after changing a key.
+The shared cluster's provider is set in `environments/shared.yaml`.
 
 Only the chosen provider's key is needed. The Secret is mounted optionally at
 `/etc/resonance-flow/secrets/llm/`, and MIND reads `<provider>-api-key` from there. When a
