@@ -60,6 +60,8 @@ public class RealDriveSourceReader implements DriveSourceReader {
     /** Default export target for native Google files - cheapest, most directly usable by
      * downstream text processing (Mind); trades away preserved formatting. */
     private static final String EXPORT_MIME_TYPE = "text/plain";
+    private static final String FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
+    private static final String SHORTCUT_MIME_TYPE = "application/vnd.google-apps.shortcut";
     private static final String LIST_FIELDS = "nextPageToken, files(id, name, description, mimeType, "
             + "modifiedTime, owners, size, headRevisionId, version)";
     private static final String CHANGES_FIELDS = "nextPageToken, newStartPageToken, "
@@ -137,7 +139,10 @@ public class RealDriveSourceReader implements DriveSourceReader {
             FileList page = listPage(drive, pageToken);
             if (page.getFiles() != null) {
                 for (File file : page.getFiles()) {
-                    records.add(toSourceRecord(drive, file));
+                    SourceRecord record = toSourceRecord(drive, file);
+                    if (record != null) {
+                        records.add(record);
+                    }
                 }
             }
             pageToken = page.getNextPageToken();
@@ -173,7 +178,10 @@ public class RealDriveSourceReader implements DriveSourceReader {
                         // of scope for this pass - see ROADMAP.md §3.3.
                         continue;
                     }
-                    records.add(toSourceRecord(drive, change.getFile()));
+                    SourceRecord record = toSourceRecord(drive, change.getFile());
+                    if (record != null) {
+                        records.add(record);
+                    }
                 }
             }
             pageToken = page.getNextPageToken();
@@ -188,7 +196,24 @@ public class RealDriveSourceReader implements DriveSourceReader {
         if (Boolean.TRUE.equals(file.getTrashed())) {
             return toTrashedSourceRecord(file);
         }
-        byte[] content = fetchContent(drive, file);
+        if (isNonExportableNativeType(file.getMimeType())) {
+            log.warn("Skipping Drive file - mimeType is not exportable: fileId={}, mimeType={}",
+                    file.getId(), file.getMimeType());
+            return null;
+        }
+        byte[] content;
+        try {
+            content = fetchContent(drive, file);
+        } catch (DriveFileNotExportableException e) {
+            log.warn("Skipping Drive file - export rejected as not exportable: fileId={}, mimeType={}",
+                    file.getId(), file.getMimeType());
+            return null;
+        }
+        // SourceRecord.mimeType must describe content, not the original file - a native Google
+        // file's content bytes are the EXPORT_MIME_TYPE export, never file.getMimeType() itself.
+        String contentMimeType = DriveFileStateReconciler.isNativeGoogleFile(file.getMimeType())
+                ? EXPORT_MIME_TYPE
+                : file.getMimeType();
         String owner = file.getOwners() == null || file.getOwners().isEmpty()
                 ? null
                 : file.getOwners().get(0).getEmailAddress();
@@ -198,7 +223,7 @@ public class RealDriveSourceReader implements DriveSourceReader {
         return new SourceRecord(
                 RawSourceType.DRIVE, tenantId.value(), file.getId(), state.correlationId(),
                 occurredAt, owner, owner == null ? List.of() : List.of(owner), file.getName(),
-                file.getDescription(), content, file.getMimeType(), null, 0, 0, List.of(), state.revision())
+                file.getDescription(), content, contentMimeType, null, 0, 0, List.of(), state.revision())
                 .withSourceRef(file.getId());
     }
 
@@ -229,8 +254,38 @@ public class RealDriveSourceReader implements DriveSourceReader {
                 return drainToBytes(drive.files().export(file.getId(), EXPORT_MIME_TYPE).executeMediaAsInputStream());
             }
             return drainToBytes(drive.files().get(file.getId()).executeMediaAsInputStream());
+        } catch (GoogleJsonResponseException e) {
+            if (isFileNotExportable(e)) {
+                throw new DriveFileNotExportableException(e);
+            }
+            throw new UncheckedIOException("Failed to fetch Drive file content for " + file.getId(), e);
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to fetch Drive file content for " + file.getId(), e);
+        }
+    }
+
+    /** Folders and shortcuts share the application/vnd.google-apps.* prefix with real native
+     * Google docs (isNativeGoogleFile treats the whole prefix as exportable) but files.export
+     * rejects them with a 403 fileNotExportable - "Export only supports Docs Editors files" -
+     * known up front from the mimeType alone, so these are skipped before ever calling export. */
+    private static boolean isNonExportableNativeType(String mimeType) {
+        return FOLDER_MIME_TYPE.equals(mimeType) || SHORTCUT_MIME_TYPE.equals(mimeType);
+    }
+
+    /** Safety net for any other native Google type files.export rejects the same way (403,
+     * reason fileNotExportable) that isNonExportableNativeType doesn't already know about by
+     * mimeType alone. */
+    private static boolean isFileNotExportable(GoogleJsonResponseException e) {
+        return e.getStatusCode() == 403
+                && e.getDetails() != null
+                && e.getDetails().getErrors() != null
+                && e.getDetails().getErrors().stream()
+                        .anyMatch(error -> "fileNotExportable".equals(error.getReason()));
+    }
+
+    private static final class DriveFileNotExportableException extends RuntimeException {
+        DriveFileNotExportableException(GoogleJsonResponseException cause) {
+            super(cause);
         }
     }
 

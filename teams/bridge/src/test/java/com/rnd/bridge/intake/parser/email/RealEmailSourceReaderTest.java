@@ -17,12 +17,17 @@ import com.google.api.services.gmail.model.ListHistoryResponse;
 import com.google.api.services.gmail.model.ListMessagesResponse;
 import com.google.api.services.gmail.model.Message;
 import com.google.api.services.gmail.model.MessagePart;
+import com.google.api.services.gmail.model.MessagePartBody;
 import com.google.api.services.gmail.model.MessagePartHeader;
 import com.google.api.services.gmail.model.Profile;
 import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.intake.config.BridgeTenantId;
+import com.rnd.bridge.intake.model.SourceRecord;
+import com.rnd.bridge.raw.model.Role;
 import java.io.IOException;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -88,7 +93,7 @@ class RealEmailSourceReaderTest {
 
         EmailReadResult result = reader().read(ReadCursor.full());
 
-        assertThat(result.records()).hasSize(1);
+        assertThat(result.records()).hasSize(2);
         assertThat(result.nextHistoryId()).isEqualTo("100");
         assertThat(result.records().get(0).sourceRef()).isEqualTo("<m1@mail.gmail.com>");
         verify(history, never()).list(any());
@@ -131,7 +136,7 @@ class RealEmailSourceReaderTest {
 
         EmailReadResult result = reader().read(new ReadCursor(null, "100"));
 
-        assertThat(result.records()).hasSize(1);
+        assertThat(result.records()).hasSize(2);
         assertThat(result.nextHistoryId()).isEqualTo("200");
         verify(historyRequest).setStartHistoryId(new BigInteger("100"));
         verify(messages, never()).list(any());
@@ -156,7 +161,7 @@ class RealEmailSourceReaderTest {
 
         EmailReadResult result = reader().read(new ReadCursor(null, "999"));
 
-        assertThat(result.records()).hasSize(1);
+        assertThat(result.records()).hasSize(2);
         assertThat(result.nextHistoryId()).isEqualTo("300");
         verify(historyRequest).setStartHistoryId(new BigInteger("999"));
     }
@@ -241,5 +246,113 @@ class RealEmailSourceReaderTest {
     private static GoogleJsonResponseException expiredHistoryIdException() {
         HttpResponseException.Builder builder = new HttpResponseException.Builder(404, "Not Found", new HttpHeaders());
         return new GoogleJsonResponseException(builder, null);
+    }
+
+    private static MessagePart textPart(String mimeType, String text) {
+        String encoded = Base64.getUrlEncoder().encodeToString(text.getBytes(StandardCharsets.UTF_8));
+        return new MessagePart().setMimeType(mimeType).setBody(new MessagePartBody().setData(encoded));
+    }
+
+    private static Message messageWithHeadersAndParts(String id, List<MessagePartHeader> headers,
+                                                        List<MessagePart> parts) {
+        MessagePart payload = new MessagePart().setHeaders(headers).setParts(parts);
+        return new Message().setId(id).setInternalDate(1_700_000_000_000L).setPayload(payload);
+    }
+
+    private static List<MessagePartHeader> standardHeaders(String from, String to, String cc, String subject,
+                                                             String date) {
+        List<MessagePartHeader> headers = new java.util.ArrayList<>(List.of(
+                new MessagePartHeader().setName("From").setValue(from),
+                new MessagePartHeader().setName("To").setValue(to),
+                new MessagePartHeader().setName("Subject").setValue(subject),
+                new MessagePartHeader().setName("Date").setValue(date),
+                new MessagePartHeader().setName("Message-ID").setValue("<" + from + "@mail.gmail.com>")));
+        if (cc != null) {
+            headers.add(new MessagePartHeader().setName("Cc").setValue(cc));
+        }
+        return headers;
+    }
+
+    private EmailReadResult readSingleMessage(Message message) throws IOException {
+        Gmail.Users.Messages.List listRequest = mock(Gmail.Users.Messages.List.class, Mockito.RETURNS_SELF);
+        Gmail.Users.Messages.Get getRequest = mock(Gmail.Users.Messages.Get.class, Mockito.RETURNS_SELF);
+        when(messages.list("me")).thenReturn(listRequest);
+        when(listRequest.execute()).thenReturn(new ListMessagesResponse()
+                .setMessages(List.of(new Message().setId(message.getId()))));
+        when(messages.get("me", message.getId())).thenReturn(getRequest);
+        when(getRequest.execute()).thenReturn(message);
+        when(getProfileRequest.execute()).thenThrow(new IOException("profile lookup unavailable"));
+        return reader().read(ReadCursor.full());
+    }
+
+    @Test
+    void readableBodyContainsHeadersAndPlainText() throws IOException {
+        Message message = messageWithHeadersAndParts("m1",
+                standardHeaders("ruth@kamatech.org", "hadas@kamatech.org", "malki@kamatech.org", "PR review", "Tue, 1 Jan 2026 10:00:00 +0000"),
+                List.of(textPart("text/plain", "Please review the PR.")));
+
+        EmailReadResult result = readSingleMessage(message);
+        SourceRecord body = result.records().get(0);
+
+        assertThat(body.body())
+                .contains("From: ruth@kamatech.org")
+                .contains("To: hadas@kamatech.org")
+                .contains("Cc: malki@kamatech.org")
+                .contains("Subject: PR review")
+                .contains("Date: Tue, 1 Jan 2026 10:00:00 +0000")
+                .contains("Please review the PR.");
+    }
+
+    @Test
+    void htmlOnlyBodyIsStrippedToPlainTextWhenNoTextPlainPartExists() throws IOException {
+        Message message = messageWithHeadersAndParts("m1",
+                standardHeaders("ruth@kamatech.org", "hadas@kamatech.org", null, "subject", "date"),
+                List.of(textPart("text/html", "<p>Hello <b>world</b></p>")));
+
+        EmailReadResult result = readSingleMessage(message);
+        SourceRecord body = result.records().get(0);
+
+        assertThat(body.body()).contains("Hello world").doesNotContain("<p>").doesNotContain("<b>");
+    }
+
+    @Test
+    void multipleTextPlainPartsAreAllConcatenatedNotJustTheFirst() throws IOException {
+        Message message = messageWithHeadersAndParts("m1",
+                standardHeaders("ruth@kamatech.org", "hadas@kamatech.org", null, "subject", "date"),
+                List.of(textPart("text/plain", "first part"), textPart("text/plain", "second part")));
+
+        EmailReadResult result = readSingleMessage(message);
+        SourceRecord body = result.records().get(0);
+
+        assertThat(body.body()).contains("first part").contains("second part");
+    }
+
+    @Test
+    void hebrewTextRoundTripsThroughTheReadableBody() throws IOException {
+        Message message = messageWithHeadersAndParts("m1",
+                standardHeaders("ruth@kamatech.org", "hadas@kamatech.org", null, "ארוחת ערב", "date"),
+                List.of(textPart("text/plain", "בואי נקבע ארוחת ערב משפחתית בשישי")));
+
+        EmailReadResult result = readSingleMessage(message);
+        SourceRecord body = result.records().get(0);
+
+        assertThat(body.body())
+                .contains("Subject: ארוחת ערב")
+                .contains("בואי נקבע ארוחת ערב משפחתית בשישי");
+    }
+
+    @Test
+    void sourceMetadataRecordCarriesTheRawMessageJsonAndRole() throws IOException {
+        Message message = messageWithHeadersAndParts("m1",
+                standardHeaders("ruth@kamatech.org", "hadas@kamatech.org", null, "subject", "date"),
+                List.of(textPart("text/plain", "hello")));
+
+        EmailReadResult result = readSingleMessage(message);
+
+        assertThat(result.records()).hasSize(2);
+        SourceRecord metadata = result.records().get(1);
+        assertThat(metadata.objectRole()).isEqualTo(Role.SOURCE_METADATA);
+        assertThat(metadata.mimeType()).isEqualTo("application/json");
+        assertThat(new String(metadata.rawContent(), StandardCharsets.UTF_8)).isEqualTo(message.toString());
     }
 }
