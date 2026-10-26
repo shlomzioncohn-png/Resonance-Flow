@@ -106,6 +106,7 @@ public class RealDriveSourceReader implements DriveSourceReader {
             if (e.getStatusCode() == 410 && token != null) {
                 // Expired startPageToken - the only way back is a full baseline resync.
                 log.info("Drive changes read got 410 on stored startPageToken - falling back to baseline resync");
+                log.warn("Drive start page token expired (410) - falling back to baseline resync");
                 try {
                     DriveReadResult result = readBaseline();
                     logResult("baseline (post-410 fallback)", result);

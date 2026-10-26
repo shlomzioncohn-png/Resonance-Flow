@@ -9,6 +9,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.google.api.client.googleapis.json.GoogleJsonResponseException;
 import com.google.api.client.http.HttpHeaders;
 import com.google.api.client.http.HttpResponseException;
@@ -37,6 +40,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.slf4j.LoggerFactory;
 
 /**
  * Covers the syncToken lifecycle in RealCalendarSourceReader.readPages/read: full vs.
@@ -140,14 +144,27 @@ class RealCalendarSourceReaderTest {
         Events freshPage = new Events().setItems(List.of(event("e1"))).setNextSyncToken("sync-token-fresh");
         when(fullResyncRequest.execute()).thenReturn(freshPage);
 
-        CalendarReadResult result = reader().read(new ReadCursor(null, "expired-token"));
+        Logger readerLogger = (Logger) LoggerFactory.getLogger(RealCalendarSourceReader.class);
+        ListAppender<ILoggingEvent> logs = new ListAppender<>();
+        logs.start();
+        readerLogger.addAppender(logs);
+        try {
+            CalendarReadResult result = reader().read(new ReadCursor(null, "expired-token"));
 
-        assertThat(result.records()).hasSize(1);
-        verify(incrementalRequest).setSyncToken("expired-token");
-        // The recovery request is a full sync, not a continuation of the expired token.
-        verify(fullResyncRequest, never()).setSyncToken(any());
-        verify(fullResyncRequest, never()).setOrderBy(any());
-        assertThat(result.nextSyncToken()).isEqualTo("sync-token-fresh");
+            assertThat(result.records()).hasSize(1);
+            verify(incrementalRequest).setSyncToken("expired-token");
+            // The recovery request is a full sync, not a continuation of the expired token.
+            verify(fullResyncRequest, never()).setSyncToken(any());
+            verify(fullResyncRequest, never()).setOrderBy(any());
+            assertThat(result.nextSyncToken()).isEqualTo("sync-token-fresh");
+
+            assertThat(logs.list)
+                    .anyMatch(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN
+                            && e.getFormattedMessage()
+                                    .equals("Calendar sync token expired (410) - falling back to full resync"));
+        } finally {
+            readerLogger.detachAppender(logs);
+        }
     }
 
     @Test

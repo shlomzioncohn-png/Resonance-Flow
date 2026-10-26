@@ -107,6 +107,7 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
             if (e.getStatusCode() == 410 && syncToken != null) {
                 // Expired syncToken - the only way back is a full sync from scratch.
                 log.info("Calendar incremental read got 410 on stored syncToken - falling back to full resync");
+                log.warn("Calendar sync token expired (410) - falling back to full resync");
                 try {
                     CalendarReadResult result = readPages(null);
                     logResult("full (post-410 fallback)", result);

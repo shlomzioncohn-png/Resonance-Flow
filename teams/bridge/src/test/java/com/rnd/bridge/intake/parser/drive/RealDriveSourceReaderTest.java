@@ -8,6 +8,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.google.api.client.googleapis.json.GoogleJsonResponseException;
 import com.google.api.client.http.HttpHeaders;
 import com.google.api.client.http.HttpResponseException;
@@ -31,6 +34,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.slf4j.LoggerFactory;
 
 /**
  * Covers RealDriveSourceReader.read(ReadCursor)'s two modes (full files.list baseline when
@@ -301,9 +305,22 @@ class RealDriveSourceReaderTest {
         when(listRequest.execute()).thenReturn(new FileList().setFiles(List.of()));
         stubStartPageToken("fresh-start-token");
 
-        DriveReadResult result = reader().read(new ReadCursor(null, "expired-token"));
+        Logger readerLogger = (Logger) LoggerFactory.getLogger(RealDriveSourceReader.class);
+        ListAppender<ILoggingEvent> logs = new ListAppender<>();
+        logs.start();
+        readerLogger.addAppender(logs);
+        try {
+            DriveReadResult result = reader().read(new ReadCursor(null, "expired-token"));
 
-        assertThat(result.nextToken()).isEqualTo("fresh-start-token");
+            assertThat(result.nextToken()).isEqualTo("fresh-start-token");
+
+            assertThat(logs.list)
+                    .anyMatch(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN
+                            && e.getFormattedMessage()
+                                    .equals("Drive start page token expired (410) - falling back to baseline resync"));
+        } finally {
+            readerLogger.detachAppender(logs);
+        }
     }
 
     // --- Full read -> real DriveFileStateReconciler path (headRevisionId never populated for ---
