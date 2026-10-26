@@ -12,6 +12,11 @@ resulting decision into the relevant README or an ADR.
   under `pipeline-baseline-482/<run-id>/`. Embedding and vector queries not
   measured yet, and every score degraded (no Chain): read its limitations
   before using a number from it.
+- `serving-reliability-482.md` — #482: Mind's longest job (ASR at and past
+  its 600 s cap, repeated in one process) and the deployed API under
+  concurrent requests with `/health` probed; reproduced by
+  `serving_reliability.py`.
+  Laptop numbers; flags the API's memory (453 MB of a 512Mi limit).
 - `ocr-asr-benchmark.md` — OCR: 5 configs benchmarked (Tesseract psm 3/6/11,
   PaddleOCR mobile/server); Tesseract `--psm 11` chosen on latency and memory,
   with the accuracy trade (PaddleOCR is ~2.7x more accurate) documented. ASR:
