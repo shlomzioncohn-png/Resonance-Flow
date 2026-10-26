@@ -33,6 +33,8 @@ from functools import lru_cache
 from pydantic import BaseModel, ValidationError
 
 from mind.config import MonitoringSettings
+from mind.observability.context import current_context
+from mind.observability.sink import JsonlSink, default_process_name
 
 logger = logging.getLogger("mind.observability")
 
@@ -113,6 +115,11 @@ class ModelCallRecord:
     # without its ancestors because Chain could not be asked. Its result is
     # not the full path's, so it is counted apart rather than passed off as one.
     degraded: bool = False
+    # Which item, Inbox task and stage the call was made for (#482), from the
+    # context it was recorded in (observability/context.py); None outside one.
+    item: str | None = None
+    task: str | None = None
+    stage: str | None = None
     timestamp: float = field(default_factory=time.time)
 
 
@@ -136,6 +143,28 @@ def monitoring_settings() -> MonitoringSettings:
             "invalid MIND_MONITORING__* settings, using the defaults for all of them: %s", exc
         )
         return MonitoringSettings.model_construct()
+
+
+_sink: JsonlSink | None = None
+_sink_built = False
+_sink_lock = threading.Lock()
+
+
+def calls_sink() -> JsonlSink | None:
+    """This process's JSONL file (#482), or None when MIND_MONITORING__CALLS_DIR is not set.
+
+    Built once, on the first recorded call, under a lock: two threads must not
+    open the same file twice. Like the limits, read once per process.
+    """
+    global _sink, _sink_built
+    with _sink_lock:
+        if not _sink_built:
+            settings = monitoring_settings()
+            if settings.calls_dir is not None:
+                process = settings.process_name or default_process_name()
+                _sink = JsonlSink(settings.calls_dir, process)
+            _sink_built = True
+        return _sink
 
 
 def _limits(kind: CallKind | None) -> tuple[float | None, float | None]:
@@ -424,6 +453,12 @@ def _count(value: int | None) -> str:
     return _NOT_APPLICABLE if value is None else str(value)
 
 
+def _context_suffix(record: ModelCallRecord) -> str:
+    """` stage=... item=... task=...` for the fields the call's context set; "" outside one."""
+    fields = (("stage", record.stage), ("item", record.item), ("task", record.task))
+    return "".join(f" {name}={value}" for name, value in fields if value is not None)
+
+
 def log_summary() -> ModelCallSummary:
     """Log the summary, one line per call name, and return it.
 
@@ -510,6 +545,7 @@ def record_call(
     decisions"), swap the storage here -- call sites do not change.
     """
     global _total_calls
+    context = current_context()
     record = ModelCallRecord(
         model_name=model_name,
         duration_ms=duration_ms,
@@ -520,6 +556,9 @@ def record_call(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         degraded=degraded,
+        item=context.item,
+        task=context.task,
+        stage=context.stage,
     )
     check = check_limits(record)
     with _lock:
@@ -532,7 +571,7 @@ def record_call(
     llm_applies = _llm_measures_apply(record.kind)
     logger.info(
         "model_call model_name=%s kind=%s status=%s duration_ms=%.1f cpu_seconds=%s "
-        "prompt_tokens=%s completion_tokens=%s cost_usd=%s%s",
+        "prompt_tokens=%s completion_tokens=%s cost_usd=%s%s%s",
         record.model_name,
         record.kind or "-",
         record.status,
@@ -541,9 +580,14 @@ def record_call(
         _shown(record.prompt_tokens, llm_applies, "unreported"),
         _shown(record.completion_tokens, llm_applies, "unreported"),
         _shown(record.cost, llm_applies, "unpriced", ".6f"),
-        # Only when set, so every line a full-path call logs is unchanged.
+        # Each only when set, so a line recorded outside any context, on the
+        # full path, is unchanged.
         " degraded=true" if record.degraded else "",
+        _context_suffix(record),
     )
+    sink = calls_sink()
+    if sink is not None:
+        sink.write(record)  # never raises: a failed write is counted and logged
     _warn_if_over(record, check)
     if summary_due:
         log_summary()
@@ -569,8 +613,12 @@ def _reset_for_tests() -> None:
     tests/test_observability.py's autouse fixture, which calls this
     before every test.
     """
-    global _total_calls
+    global _total_calls, _sink, _sink_built
     with _lock:
         _records.clear()
         _totals.clear()
         _total_calls = 0
+    with _sink_lock:
+        if _sink is not None:
+            _sink.close()
+        _sink, _sink_built = None, False

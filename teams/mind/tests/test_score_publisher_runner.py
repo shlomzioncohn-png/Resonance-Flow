@@ -16,6 +16,7 @@ from mind.config_file import ConfigFileError
 from mind.messaging.config import MessagingSettings
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
+from mind.observability.context import CallContext, current_context, item_ref
 from mind.observability.recording import RecordedScorer, RecordingClient
 from mind.observability.tracking import CallKind, CallStatus, _reset_for_tests, get_recent_calls
 from mind.scoring import score_publisher_runner as runner
@@ -232,3 +233,52 @@ def test_stop_halts_every_thread(started):
 
     assert all(c.ended.is_set() for c in _FakeConsumer.built)
     assert not running.healthy
+
+
+# --- #482: each score attributed to its task and item ------------------------------------
+
+_TENANT = "550e8400-e29b-41d4-a716-446655440000"
+_TASK = "4d0c6f2a-8b1e-4c3d-9a7f-1e2b3c4d5e6f"
+_SOURCE_REF = "bridge:6f1c1f9e-0000-4000-8000-000000000001"
+
+
+@pytest.mark.parametrize(
+    ("message_type", "event"),
+    [
+        (
+            TaskCreatedEvent,
+            TaskCreatedEvent(id=_TASK, tenant_id=_TENANT, source_ref=_SOURCE_REF),
+        ),
+        (
+            TaskUpdatedEvent,
+            TaskUpdatedEvent(task_id=_TASK, tenant_id=_TENANT, source_ref=_SOURCE_REF),
+        ),
+    ],
+)
+def test_a_task_events_calls_are_attributed_to_its_task_and_item(monkeypatch, message_type, event):
+    seen: list[CallContext] = []
+
+    class Consumer:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def run(self, message_type, handler, *, idle_timeout=None, stop) -> int:
+            handler(event, None)
+            return 1
+
+    monkeypatch.setattr(runner, "ProtobufConsumer", Consumer)
+    target = runner._consume(
+        KAFKA, "task.created", message_type, lambda e: seen.append(current_context())
+    )
+
+    target(threading.Event(), lambda: None)
+
+    # The same item the landed runner named, from the same source_ref.
+    assert seen == [CallContext(item=item_ref(_TENANT, _SOURCE_REF), task=_TASK, stage="score")]
+    assert current_context() == CallContext()
+
+
+def test_an_event_without_a_source_ref_is_still_scored_with_its_task_only():
+    event = TaskCreatedEvent(id=_TASK, tenant_id=_TENANT)  # proto3: source_ref ""
+    with runner._score_context(event) as context:
+        assert context == CallContext(task=_TASK, stage="score")

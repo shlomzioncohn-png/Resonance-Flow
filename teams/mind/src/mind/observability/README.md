@@ -66,9 +66,14 @@ price per token. Every field and log key carries its unit (`cpu_seconds`,
   `log_summary()` logs it on demand, e.g. at the end of a batch run or a
   benchmark.
 - Storage is currently an in-memory ring buffer (last 10k calls) plus an
-  INFO-level log line per call. When a metrics backend is chosen (see the
+  INFO-level log line per call, and -- with `MIND_MONITORING__CALLS_DIR`
+  set -- one JSON line per call in a file of the process's own (`sink.py`,
+  #482; "The JSONL file" below). When a metrics backend is chosen (see the
   team README's "Open decisions"), only `tracking.py`'s storage needs to
   change -- call sites stay the same.
+- `context.py` (#482) -- `call_context(item=, task=, stage=)` attributes every
+  call recorded inside the block; record_call() reads it, so no call site
+  passes it. See "Item, task and stage" below.
 
 ## Status of #479 (cost and latency monitoring)
 
@@ -140,6 +145,8 @@ and defaults: `config.MonitoringSettings`, and `.env.example`.
 | `MIND_MONITORING__LLM_MAX_DURATION_MS` | 10000 | same, LLM |
 | `MIND_MONITORING__LLM_MAX_COST_USD` | 0.02 | LLM call dearer than this: `MODEL_CALL_EXPENSIVE` |
 | `MIND_MONITORING__SUMMARY_EVERY_N_CALLS` | 100 | log the summary every N calls; 0 or `none` = never |
+| `MIND_MONITORING__CALLS_DIR` | unset | also write every call to `<dir>/model-calls-<process>-<pid>.jsonl` (#482) |
+| `MIND_MONITORING__PROCESS_NAME` | the script's name | `<process>` in that file's name and on each line; `[A-Za-z0-9_.-]{1,64}` |
 
 `none` turns a limit off (an empty value is rejected). **An invalid value
 never breaks a model call:** the settings fall back to all their defaults
@@ -275,3 +282,80 @@ running without Chain -- the #359 demo stack has none, and sets no
 `MIND_CHAIN__BASE_URL` -- records every score as degraded, each after a
 failed `chain-ancestors` request. That is the expected state there, not a
 fault, and a baseline measured there must say so.
+
+### Item, task and stage
+
+Each record carries the context it was recorded in (`context.py`), so one
+item's calls can be added up across both processes. Ids only, never content:
+
+| Field | What it is | Set by |
+|---|---|---|
+| `item` | `item_ref(tenant_id, source_ref)`: the first 16 hex digits of a SHA-256 of the tenant and the `source_ref` Mind sends Inbox for the item's tasks. Not the `source_ref` itself (a mail id, a Slack link) | the landed runner, from the Bridge event (`source_ref_for_inbox`); the API, from the `source_ref` that comes back on task.created / task.updated. The same value on both sides |
+| `task` | Inbox's task id (UUID) | task.created / task.updated handlers |
+| `stage` | which handler did the work, one of `context.STAGES` | the runners |
+
+The stages, all set where messages are handled -- in
+`landed_consumer_runner.py` and `score_publisher_runner.py` -- so no handler
+changed:
+
+| Stage | Process | Covers |
+|---|---|---|
+| `landed` | landed runner | one `bridge.raw.landed` item, whatever has no finer stage |
+| `to_text` | landed runner | reading its objects and turning them into text: OCR, ASR |
+| `extraction` | landed runner | the LLM calls that turn the text into tasks |
+| `duplicate_check` | landed runner | each candidate task against the index (embedding, vector query) |
+| `task_created` | landed runner | Inbox's task.created reply: indexing, dependency resolution |
+| `score` | API | one task.created / task.updated scored, its Chain requests included |
+
+`call_context` refuses anything but these shapes (ValueError);
+`message_context`, which the runners use, leaves a missing or malformed field
+out instead -- a message is never failed for its attribution. A context is a
+`ContextVar`: it reaches asyncio tasks and `asyncio.to_thread` started inside
+it, and no other thread.
+
+**Not attributed:** the publisher's rescore worker re-scores outside any
+message (task, item and stage are null); the duplicate check runs before
+Inbox has a task id, so its calls have an item but no task.
+
+### The JSONL file
+
+With `MIND_MONITORING__CALLS_DIR` set, every record_call() is also appended to
+`<calls_dir>/model-calls-<process>-<pid>.jsonl`: UTF-8, one JSON object per
+line, `\n`-terminated, flushed as written. Format `mind.model_call/1` -- every
+key on every line:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `schema` | string | `"mind.model_call/1"` |
+| `ts` | string | when the call was recorded, ISO 8601 UTC, microseconds |
+| `process` | string | `MIND_MONITORING__PROCESS_NAME`, or the script's name |
+| `pid` | int | the writing process |
+| `model_name` | string | the call name (the summary's `call_name`) |
+| `kind` | string \| null | `ocr`, `asr`, `llm`, `embedding`, `vector_query`, `scoring`, `chain`; null if recorded without one |
+| `status` | string | `success` or `error` |
+| `duration_ms` | number | wall time, rounded to 3 decimals |
+| `cpu_s` | number \| null | CPU seconds |
+| `cost_usd` | number \| null | US dollars |
+| `prompt_tokens`, `completion_tokens` | int \| null | as the LLM provider reported them |
+| `degraded` | bool | succeeded on a fallback path |
+| `item`, `task`, `stage` | string \| null | the context above |
+
+A null measure is either unknown or not applicable, and `kind` says which,
+by the same rules as the summary: CPU applies to OCR, ASR, embedding and
+scoring; tokens and dollars to LLM; vector queries and Chain have latency
+only.
+
+**One file per process, never a shared one.** Appending to one file from two
+processes is not safe everywhere -- on Windows the C runtime's append mode
+seeks to the end and then writes, so two processes can overwrite each other.
+A file per process has one writer; inside it a lock keeps each line whole
+across threads. A restarted process gets a new pid, so a new file. A reader
+takes every `*.jsonl` in the directory. Tested with two processes writing
+4 x 250 calls each at once (`tests/observability/test_sink.py`).
+
+**A failed write never fails a call.** An OSError (disk full, no permission,
+the directory gone) is counted, logged as `MODEL_CALL_SINK_FAILED` the first
+time and every 100th after, and the call is still in the in-memory ledger
+and the log. The file is opened again on the next write. The file and its
+directory are created on the first call, so a process that records nothing
+leaves no empty file.

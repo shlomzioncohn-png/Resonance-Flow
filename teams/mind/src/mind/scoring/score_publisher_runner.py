@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from threading import Event
 from typing import Any
@@ -43,6 +44,7 @@ from mind.messaging.background import BackgroundThreads, Progress, Target
 from mind.messaging.config import MessagingSettings, load_settings
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
+from mind.observability.context import CallContext, message_context
 from mind.observability.recording import (
     RecordedScorer,
     RecordingClient,
@@ -183,6 +185,22 @@ def start_score_publisher(
 
 # Any: each handler takes its own topic's event type, which run() has
 # already deserialized into exactly that type.
+def _score_context(event: object) -> AbstractContextManager[CallContext]:
+    """The score and Chain calls of one task event, attributed to its task and
+    item (#482): the item from the source_ref Mind sent Inbox, which comes back
+    on both task.created and task.updated. The rescore worker's re-scores run
+    outside any message, so they carry no context."""
+    if isinstance(event, TaskCreatedEvent):
+        task_id = event.id
+    elif isinstance(event, TaskUpdatedEvent):
+        task_id = event.task_id
+    else:
+        return message_context(stage="score")
+    return message_context(
+        stage="score", tenant_id=event.tenant_id, source_ref=event.source_ref, task=task_id
+    )
+
+
 def _consume(
     settings: MessagingSettings,
     topic: str,
@@ -193,7 +211,8 @@ def _consume(
         def _handler(event: object, msg: object) -> None:
             # No try/except: a Kafka error must end the loop with the offset
             # uncommitted. BackgroundThreads logs it and runs this again.
-            handle(event)
+            with _score_context(event):
+                handle(event)
             # Handled (or skipped as one that can never be scored): the thread
             # is moving again.
             progress()
