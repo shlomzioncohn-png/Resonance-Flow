@@ -114,6 +114,21 @@ class ModelMediaClassifierTest {
     }
 
     @Test
+    void longTranscriptExcerptKeepsTheOpeningAndASliceFromTheMiddle() {
+        String spoken = "a".repeat(1000) + "b".repeat(1000) + "c".repeat(1000);
+
+        String excerpt = ModelMediaClassifier.excerptOf(spoken, 1000);
+
+        assertThat(excerpt).startsWith("a".repeat(500) + "\n[...]\n");
+        assertThat(excerpt).contains("b".repeat(500)).doesNotContain("c");
+    }
+
+    @Test
+    void shortTranscriptIsSentWhole() {
+        assertThat(ModelMediaClassifier.excerptOf("hello there", 1000)).isEqualTo("hello there");
+    }
+
+    @Test
     void reasonIsCleanedToOnePlainLine() {
         chatClient.reply = verdict("PLANNING").replace("generic reason", "line one\\n\\u0000line\\u200B two");
 

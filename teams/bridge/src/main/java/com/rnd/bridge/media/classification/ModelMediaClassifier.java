@@ -214,7 +214,7 @@ public class ModelMediaClassifier {
             metadata.distinctParticipantCount()
                     .ifPresent(count -> text.append("Participants: ").append(count).append('\n'));
         }
-        String excerpt = TRANSCRIPT_TAG.matcher(truncate(spoken, properties.transcriptExcerptChars())).replaceAll(" ");
+        String excerpt = TRANSCRIPT_TAG.matcher(excerptOf(spoken, properties.transcriptExcerptChars())).replaceAll(" ");
         text.append("Transcript excerpt:\n<transcript>\n").append(excerpt).append("\n</transcript>");
         return text.toString();
     }
@@ -300,6 +300,21 @@ public class ModelMediaClassifier {
         } catch (IOException e) {
             throw new IllegalStateException("Failed to re-encode page image as PNG", e);
         }
+    }
+
+    /**
+     * The opening and a slice from the middle, half the budget each, when the transcript is longer
+     * than the budget. The opening alone is often greetings and mic checks, which made real
+     * meetings look like TEST or SOCIAL.
+     */
+    static String excerptOf(String spoken, int maxChars) {
+        if (spoken.length() <= maxChars) {
+            return spoken;
+        }
+        int half = maxChars / 2;
+        int middleStart = Math.max(half, (spoken.length() - half) / 2);
+        return spoken.substring(0, half) + "\n[...]\n"
+                + spoken.substring(middleStart, middleStart + (maxChars - half));
     }
 
     private static String truncate(String text, int maxChars) {
