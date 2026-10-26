@@ -74,13 +74,16 @@ price per token. Every field and log key carries its unit (`cpu_seconds`,
 - `context.py` (#482) -- `call_context(item=, task=, stage=)` attributes every
   call recorded inside the block; record_call() reads it, so no call site
   passes it. See "Item, task and stage" below.
-- `report.py` (#482) -- `python -m mind.observability.report [CALLS_DIR]
-  [--out FILE]`: a run's breakdown by stage and by item, from every
-  `*.jsonl` in CALLS_DIR (default `$MIND_MONITORING__CALLS_DIR`). Known and
+- `report.py` (#482, #484) -- `python -m mind.observability.report [DIR ...]
+  [--since 7d] [--out FILE]`: the cost and latency report, over one run or
+  many, from every `*.jsonl` under each DIR (default
+  `$MIND_MONITORING__CALLS_DIR`, else `demo_flow/runs/`). Totals and cost
+  per item, by stage and by model, p50/p95/max, the runs compared. Known and
   unknown costs apart, dollars and CPU seconds never added, Chain requests
   never added to the scores they are inside, degraded scores reported apart
   -- and a stage with no record listed as not measured, never as zero. The
   #359 demo writes it to `runs/<run-id>/report.md` at the end of every run.
+  See "Status of #484" below.
 
 ## Status of #479 (cost and latency monitoring)
 
@@ -229,8 +232,8 @@ counts, and an unknown cost stays `None` instead of `0.0`:
 - A failed LLM call is recorded as unpriced, but some failures are billed
   (`MAX_TOKENS`, a blocked answer). R2 tracks that on her side; until then an
   LLM `cost_usd_total` can undercount them.
-- In-memory and per-process; resets on restart. The readable week-8 report
-  is a separate issue.
+- In-memory and per-process; resets on restart. The readable report reads
+  the JSONL files instead: "Status of #484" below.
 
 ## Status of #482 (the full flow, stage by stage)
 
@@ -366,3 +369,134 @@ time and every 100th after, and the call is still in the in-memory ledger
 and the log. The file is opened again on the next write. The file and its
 directory are created on the first call, so a process that records nothing
 leaves no empty file.
+
+## Status of #484 (a cost and latency report a person can read)
+
+A command, not a dashboard: no Prometheus, Grafana or time-series database
+-- a metrics backend is Relay's platform territory, and out of scope here.
+The report reads what `record_call()` already writes to the JSONL files
+(above) and prints Markdown.
+
+### Running it
+
+From `teams/mind/`, with the venv active (`source .venv/bin/activate`, or
+`.venv\Scripts\activate` on Windows):
+
+```
+python -m mind.observability.report                    # every demo run
+python -m mind.observability.report --since 7d         # the last week's
+python -m mind.observability.report benchmarks/pipeline-baseline-482 --out report.md
+```
+
+| Argument | Default | Effect |
+|---|---|---|
+| `DIR ...` | `$MIND_MONITORING__CALLS_DIR`, else `demo_flow/runs/` | one run (a directory holding `*.jsonl`), or a directory searched for runs; several may be given |
+| `--since` | everything | only calls recorded in the last `30m` / `24h` / `7d` / `2w`, or since a date (`2026-10-20`, UTC unless it names a zone) |
+| `--out` | stdout | write the report to a file |
+| `--title` | `Mind: per-stage latency and cost` | the report's heading |
+
+It reads files only, so the same command run again after a change, over
+the same runs plus the new one, gives the same numbers for the old runs and
+a new row in "Runs compared". That is what makes it monitoring rather than a
+one-off measurement.
+
+### Which calls it reads
+
+- **A run** is a directory holding `*.jsonl` -- one file per process, as
+  `sink.py` writes them. Its name is the directory's, or its parent's for a
+  `calls/` folder (`runs/<run-id>/calls/`, the demo's layout).
+- **A run found twice** -- a demo run copied into `benchmarks/` -- is read
+  once, from the first DIR it is found under, and the report lists the
+  other path. Pass the copy you mean first.
+- **An item is (run, `item_ref`).** The demo sends the same items every run,
+  so the same `item_ref` comes back in each; reading it alone would merge
+  them into one item.
+- **`--since` cuts by when each call was recorded** (`ts`), not by run: a
+  run that started before the cut is only partly in, and the report says
+  how many calls were left out.
+
+### What it reports
+
+| Section | Answers |
+|---|---|
+| What was read | which runs, files, how many calls, the time window |
+| Totals and cost per item | what it all cost; per item by item type, median and mean; what 10,000 such items would cost |
+| Where the cost goes, by stage | each stage's share of the dollars, the CPU seconds and the wall time |
+| Latency and cost, by stage and call | p50, p95 and max per stage and call name, with its CPU seconds, dollars and tokens |
+| By model | every call of a model across stages, with CPU seconds and dollars per call |
+| Scoring: full and degraded | how many scores had Chain's ancestors, and how long the fallback took |
+| Per item | a row per item (left out above 50 items: the per-type figures stand for them) |
+| Runs compared | per run: items, errors, degraded scores, cost per item, p95 of ASR / OCR / LLM / scoring -- did a change help or hurt |
+| How reliable these numbers are | what was not measured, and every figure to read with care |
+
+**Item type** is read off which local models ran on the item: `audio` (ASR
+ran), `scan` (OCR ran), both, or `text` (neither). It drives the per-type
+rows, because an audio item costs many times a text one, and a total over a
+mix says little about another mix.
+
+### The two kinds of cost
+
+- **Dollars** -- LLM calls only, at the provider's published price per token
+  (`extraction/providers/pricing.py`). Real money.
+- **CPU seconds** -- OCR, ASR, embedding and scoring. Machine time, not a
+  bill, and never turned into dollars: Mind does not pay for its machine by
+  the call, and a dollar rate for it would be an invented one. The
+  10,000-item figure gives it in CPU-hours.
+
+The two are never added, in any row or total.
+
+**Cost per item and the 10,000-item figure.** Per item is the dollars and
+the CPU seconds of that item's own calls (a Chain request inside a score
+counted once). The 10,000-item figure is the mean per item times 10,000 --
+the mean, not the median, because totals grow with the mean. It is an
+estimate at this data's mix of item types, and the report says so.
+
+### What it labels as unreliable
+
+- A stage with no record: **not measured, not zero** -- today embedding and
+  vector queries (waiting for R3), and OCR's CPU on Windows.
+- A total with any unpriced LLM call or unmeasured CPU is followed by the
+  count it is missing (`+ 2 unmeasured`); a per-item figure with such a gap
+  is marked `>=`. Both are lower bounds.
+- Degraded scores, whose latency is the fallback path's.
+- Stage/call rows with fewer than 20 calls, where p95 is close to the max
+  and says little on its own.
+- Calls with no item (the rescore worker): in the totals, in no per-item
+  figure.
+- Lines that are not `mind.model_call/1`, runs found twice, and calls left
+  out by `--since`.
+- The 10,000-item figure, as an estimate.
+
+### The ring buffer
+
+`tracking.py` keeps the last 10,000 calls in memory, and the last 10,000
+durations per call name behind `/debug/model-calls`' p50/p95. A long run
+evicts its early calls from both -- but **the report reads neither.** It
+reads the JSONL files, which keep every call, so a 1,000-item run (or a
+100,000-call one) is reported whole. A process run without
+`MIND_MONITORING__CALLS_DIR` writes no file, and is not in the report at
+all: set it for any run you mean to report on. Tested with 10,050 lines in
+one file.
+
+### Tests
+
+`tests/observability/test_report.py`: the #482 rules above, and for #484
+reading a directory of runs, a run found twice, an item per run, `--since`
+(every unit, a date, a bad value, the CLI), the default directory, more
+lines than the ring buffer holds, max latency, the by-model table, cost per
+item and the 10,000-item figure, the `>=` marks, item types, the runs
+compared, and the small-sample and many-items cases.
+
+### Not done yet
+
+- **The 1,000-item run** (#483) -- the second headline dataset. It waits for
+  #483; the report needs no change for it, only the run's directory.
+- **The written conclusion** -- the most expensive stage, the cost per item,
+  anything trending badly -- goes in `benchmarks/` once both datasets are
+  in. From the two #482 demo runs (6 items): ASR is nearly all of the
+  measured CPU (~39 CPU s a meeting) and 64% of the wall time; an item costs ~$0.0044 in
+  LLM calls whatever its type.
+- **Cost per ASR minute** -- the JSONL file does not record the audio's
+  length, so the report gives CPU seconds per recording, not per minute.
+  `benchmarks/serving-reliability-482/asr-long.json` has a long recording's
+  measurement to read it against.
