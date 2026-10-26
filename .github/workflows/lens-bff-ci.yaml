@@ -45,57 +45,36 @@ jobs:
       contents: read
 
     env:
-      CHART_DIR: teams/relay/helm/resonance-flow
-      RELEASE: lens-bff-rt
-      NAMESPACE: lens-bff-rt
-      KIND_CLUSTER: lens-bff-rt-${{ github.run_id }}-${{ github.run_attempt }}
-      IMAGE_TAG: local-${{ github.run_id }}-${{ github.run_attempt }}
+      RELEASE: lens-bff
+      NAMESPACE: lens-bff
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: ./.github/actions/free-runner-disk
-
-      - uses: azure/setup-helm@v5
-
-      - name: Use this job's own kubeconfig
-        run: echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
-
-      - name: Create kind cluster
-        uses: helm/kind-action@v1
+      - uses: ./.github/actions/setup-service-infra
         with:
-          cluster_name: ${{ env.KIND_CLUSTER }}
-
-      - name: Fetch chart dependencies
-        run: helm dependency build "$CHART_DIR"
-
-      - uses: ./.github/actions/install-yq
-
-      - name: Build all-components-off overlay
-        run: |
-          echo "CHART_ALL_OFF=$RUNNER_TEMP/components-all-off.yaml" >> "$GITHUB_ENV"
-          yq '{"components": (.components | map_values({"enabled": false}))}' "$CHART_DIR/values.yaml" > "$RUNNER_TEMP/components-all-off.yaml"
+          service_name: lens-bff
 
       - name: Build and load the lens-bff and inbox images
         run: |
-          docker build -t "lens-bff:$IMAGE_TAG" teams/lens/bff
-          docker build -t "inbox:$IMAGE_TAG" teams/inbox --build-context shared=shared
-          kind load docker-image "lens-bff:$IMAGE_TAG" --name "$KIND_CLUSTER"
-          kind load docker-image "inbox:$IMAGE_TAG" --name "$KIND_CLUSTER"
+          docker build -t "lens-bff:$KIND_IMAGE_TAG" teams/lens/bff
+          docker build -t "inbox:$KIND_IMAGE_TAG" teams/inbox --build-context shared=shared
+          kind load docker-image "lens-bff:$KIND_IMAGE_TAG" --name "$KIND_CLUSTER"
+          kind load docker-image "inbox:$KIND_IMAGE_TAG" --name "$KIND_CLUSTER"
 
       - name: Deploy chart with lens-bff + inbox enabled
         run: |
           helm upgrade --install "$RELEASE" "$CHART_DIR" \
-            -f "$CHART_DIR/values.yaml" \
+            -f "$CHART_VALUES" \
             -f "$CHART_ALL_OFF" \
-            --set components.lens-bff.enabled=true \
+            -f "$CHART_DIR/values/values-lens-bff.yaml" \
             --set components.lens-bff.image.repository=lens-bff \
-            --set components.lens-bff.image.tag="$IMAGE_TAG" \
+            --set components.lens-bff.image.tag="$KIND_IMAGE_TAG" \
             --set components.lens-bff.image.pullPolicy=Never \
             --set components.lens-bff.env.INBOX_MOCK_ENABLED=false \
             --set components.inbox.enabled=true \
             --set components.inbox.image.repository=inbox \
-            --set components.inbox.image.tag="$IMAGE_TAG" \
+            --set components.inbox.image.tag="$KIND_IMAGE_TAG" \
             --set components.inbox.image.pullPolicy=Never \
             --set components.schema-registry.enabled=true \
             --set postgresql.enabled=true \
