@@ -294,7 +294,9 @@ bridge:
       # v4: content-is-data rule against prompt injection; transcript fenced in <transcript>.
       # v5: Hebrew/English transcripts, concrete TEST cues, opening-minutes caution, a high bar
       # for TEST/SOCIAL confidence (they are excluded), category kept separate from quality.
-      prompt-version: v5
+      # v6: document categories defined one per line, Hebrew scans, a high bar for ADVERTISEMENT,
+      # scan-specific quality and sensitivity examples.
+      prompt-version: v6
       # Which model, which key, fallback and limits: bridge.ai.usages.media-meeting /
       # media-document below (the shared AI infrastructure), not here.
     zoom:

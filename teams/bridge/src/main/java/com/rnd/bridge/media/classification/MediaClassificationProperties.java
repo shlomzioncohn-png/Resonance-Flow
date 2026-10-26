@@ -28,7 +28,7 @@ public record MediaClassificationProperties(
         @DefaultValue({"TEST", "SOCIAL"}) Set<MeetingCategory> excludedMeetingCategories,
         @DefaultValue({"BLANK", "ADVERTISEMENT"}) Set<DocumentCategory> excludedDocumentCategories,
         @DefaultValue Documents documents,
-        @DefaultValue("v5") String promptVersion) {
+        @DefaultValue("v6") String promptVersion) {
 
     public MediaClassificationProperties {
         if (!(minConfidenceToExclude >= 0.0 && minConfidenceToExclude <= 1.0)) {

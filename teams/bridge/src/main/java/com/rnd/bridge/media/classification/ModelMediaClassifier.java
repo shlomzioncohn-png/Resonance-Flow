@@ -22,8 +22,9 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Duration;
-import java.util.Arrays;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -134,15 +135,58 @@ public class ModelMediaClassifier {
             quality POOR; a real meeting with noisy audio keeps its real category, with quality POOR.
             """;
 
+    /**
+     * One line per category the model may answer - every DocumentCategory except BLANK, which only
+     * the pixel rule decides. Checked complete at class load, so a new enum value can't silently
+     * reach the model undefined.
+     */
+    static final Map<DocumentCategory, String> DOCUMENT_CATEGORY_DEFINITIONS = documentCategoryDefinitions();
+
     private static final String DOCUMENT_PROMPT = SHARED_RULES + """
 
-            The item is a scanned document, given as images of its first non-blank pages.
-            categories: %s.
-              OTHER: none of the above fits.
-            """.formatted(Arrays.stream(DocumentCategory.values())
-                    .filter(category -> category != DocumentCategory.BLANK)
-                    .map(Enum::name)
-                    .collect(Collectors.joining(", ")));
+            The item is a scanned document, given as images of its first non-blank pages - a
+            sample, not always the whole document. It may be in Hebrew, English or both; the
+            category is the kind of document, whatever its language.
+            categories:
+            %s
+            ADVERTISEMENT items are dropped from the pipeline, so a real work document wrongly
+            labeled one is lost. Give ADVERTISEMENT a category_confidence of 0.8 or more only when
+            the page is clearly promotional; a vendor quote, price list or offer addressed to us
+            is work, not an advertisement.
+            quality for a scan: POOR when it is blurred, skewed, cut off, low-resolution or partly
+            covered but still readable; UNREADABLE when its text cannot be made out at all.
+            sensitivity for a scan: HIGH for an ID card or passport, a payslip, a medical record,
+            bank or card details, or a contract naming an individual's salary or termination.
+            """.formatted(DOCUMENT_CATEGORY_DEFINITIONS.entrySet().stream()
+                    .map(entry -> "  " + entry.getKey().name() + ": " + entry.getValue())
+                    .collect(Collectors.joining("\n")));
+
+    private static Map<DocumentCategory, String> documentCategoryDefinitions() {
+        Map<DocumentCategory, String> definitions = new EnumMap<>(DocumentCategory.class);
+        definitions.put(DocumentCategory.LETTER, "formal correspondence addressed to a person or organization.");
+        definitions.put(DocumentCategory.FORM, "a form with fields to fill in, filled or blank.");
+        definitions.put(DocumentCategory.EMAIL, "a printed email, with From/To/Subject headers.");
+        definitions.put(DocumentCategory.HANDWRITTEN, "mostly handwritten notes, not a filled-in form.");
+        definitions.put(DocumentCategory.ADVERTISEMENT, "promotional material: a flyer, brochure or ad.");
+        definitions.put(DocumentCategory.SCIENTIFIC_REPORT, "a technical or research report, often internal.");
+        definitions.put(DocumentCategory.SCIENTIFIC_PUBLICATION, "a published paper or journal article.");
+        definitions.put(DocumentCategory.SPECIFICATION, "a technical specification, data sheet or requirements document.");
+        definitions.put(DocumentCategory.FILE_FOLDER, "a folder cover, tab or label page, not the content inside.");
+        definitions.put(DocumentCategory.NEWS_ARTICLE, "a newspaper or magazine article.");
+        definitions.put(DocumentCategory.BUDGET, "a budget, financial plan or table of figures.");
+        definitions.put(DocumentCategory.INVOICE, "an invoice, receipt or bill.");
+        definitions.put(DocumentCategory.PRESENTATION, "presentation slides.");
+        definitions.put(DocumentCategory.QUESTIONNAIRE, "a survey or list of questions to answer.");
+        definitions.put(DocumentCategory.RESUME, "a CV or resume.");
+        definitions.put(DocumentCategory.MEMO, "a short internal note, often headed To/From/Subject or \"Memo\".");
+        definitions.put(DocumentCategory.OTHER, "none of the above fits.");
+        for (DocumentCategory category : DocumentCategory.values()) {
+            if (category != DocumentCategory.BLANK && !definitions.containsKey(category)) {
+                throw new IllegalStateException("No prompt definition for DocumentCategory." + category);
+            }
+        }
+        return definitions;
+    }
 
     private final LlmClients llmClients;
     private final ObjectMapper objectMapper;

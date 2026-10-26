@@ -217,6 +217,30 @@ class ModelMediaClassifierTest {
     }
 
     @Test
+    void everyDocumentCategoryTheModelMayAnswerHasADefinitionInThePrompt() {
+        chatClient.reply = verdict("MEMO");
+
+        classifier.classifyDocument(ClassificationTestSupport.contentScan(1, 1));
+
+        for (DocumentCategory category : DocumentCategory.values()) {
+            if (category == DocumentCategory.BLANK) {
+                continue;
+            }
+            assertThat(chatClient.systemPrompt).contains(
+                    category.name() + ": " + ModelMediaClassifier.DOCUMENT_CATEGORY_DEFINITIONS.get(category));
+        }
+    }
+
+    @Test
+    void documentPromptMentionsHebrewAndTheAdvertisementBar() {
+        chatClient.reply = verdict("MEMO");
+
+        classifier.classifyDocument(ClassificationTestSupport.contentScan(1, 1));
+
+        assertThat(chatClient.systemPrompt).contains("Hebrew", "ADVERTISEMENT items are dropped");
+    }
+
+    @Test
     void blankVerdictOnAPageWithContentIsRecordedAsOther() {
         chatClient.reply = verdict("BLANK");
 
