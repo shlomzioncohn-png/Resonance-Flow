@@ -228,10 +228,11 @@ curl -X POST http://localhost:8080/api/bridge/media/run
 Each platform has its own folder and its own `source_type`; both share the same meeting handling
 (transcript and metadata sidecars, meeting categories).
 
-To have the folders polled automatically instead, set `BRIDGE_MEDIA_SCHEDULE_ENABLED=true`
-(interval `BRIDGE_MEDIA_SCHEDULE_INTERVAL`, default `PT2M`): `MediaIntakeScheduler` runs the same
-intake on a fixed delay, so a file dropped into a folder lands within one interval. A manual run
-and a scheduled run never overlap - the second one waits.
+To have the folders polled automatically instead, set `BRIDGE_MEDIA_SYNC_CRON_ENABLED=true`
+(schedule `BRIDGE_MEDIA_SYNC_CRON_EXPRESSION`, default `0 */5 * * * ?`, every 5 minutes):
+`MediaSyncJob` runs the same intake through the shared `SyncJob` mechanism (`SyncJobScheduler`),
+like the CRM and Email/Calendar/Drive syncs, so a file dropped into a folder lands within one
+interval. A manual run and a scheduled run never overlap - the second one waits.
 
 Each successfully uploaded file is moved into an `uploaded/` subfolder of wherever it came from,
 so re-triggering the endpoint only picks up genuinely new files instead of re-landing (and
