@@ -6,11 +6,12 @@ documented and reasoned about (e.g. the week-1 vector-store choice, the
 managed-API-vs-local-model spike). Keep raw run outputs here; write the
 resulting decision into the relevant README or an ADR.
 
-- `pipeline-baseline-482.md` — **preliminary**, single-run latency and cost
-  baseline of the full #359 demo flow (#482), per stage and per item, with its
-  raw JSONL and report under `pipeline-baseline-482/<run-id>/`. Embedding and
-  vector queries not measured yet, and every score degraded (no Chain): read
-  its limitations before using a number from it.
+- `pipeline-baseline-482.md` — **preliminary** latency and cost baseline of
+  the full #359 demo flow (#482), one run per arrival order (natural,
+  slack-first), per stage and per item, with each run's raw JSONL and report
+  under `pipeline-baseline-482/<run-id>/`. Embedding and vector queries not
+  measured yet, and every score degraded (no Chain): read its limitations
+  before using a number from it.
 - `ocr-asr-benchmark.md` — OCR: 5 configs benchmarked (Tesseract psm 3/6/11,
   PaddleOCR mobile/server); Tesseract `--psm 11` chosen on latency and memory,
   with the accuracy trade (PaddleOCR is ~2.7x more accurate) documented. ASR:
