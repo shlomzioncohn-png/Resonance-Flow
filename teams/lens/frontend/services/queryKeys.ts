@@ -12,6 +12,7 @@ import type { WorkspaceRequest } from './workspaceApi';
 export const taskKeys = {
   all: ['tasks'] as const,
   detail: (taskId: string) => [...taskKeys.all, 'detail', taskId] as const,
+  activity: (taskId: string) => [...taskKeys.all, 'activity', taskId] as const,
   recommendation: (request: WorkspaceRequest) =>
     [...taskKeys.all, 'recommendation', request] as const,
   /** The projects of the signed-in employee's own tasks (My Workspace's Project filter). */
