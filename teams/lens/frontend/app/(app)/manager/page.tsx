@@ -11,6 +11,7 @@ import Typography from '@mui/material/Typography';
 import PageContainer from '@/components/layout/PageContainer';
 import ManagerKpiTiles from './ManagerKpiTiles';
 import DependencyGraph from '@/components/ui/DependencyGraph';
+import WorkInsights from '@/components/ui/WorkInsights';
 import { useDependencyGraph } from '@/hooks/useDependencyGraph';
 import { useManagerKpis } from '@/hooks/useManagerKpis';
 import { getErrorMessage } from '@/services/api';
@@ -60,6 +61,7 @@ export default function ManagerDashboardPage() {
       description="What needs your attention across the team."
     >
       <Stack spacing={3}>
+        <WorkInsights />
         <ManagerKpiTiles
           kpis={kpis.data}
           loading={kpis.isPending}
