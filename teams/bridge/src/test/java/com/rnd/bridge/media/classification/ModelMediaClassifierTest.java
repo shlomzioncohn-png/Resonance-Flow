@@ -66,6 +66,31 @@ class ModelMediaClassifierTest {
     }
 
     @Test
+    void headcountIsDistinctPeopleSoARejoinCountsOnce() {
+        chatClient.reply = verdict("PLANNING");
+        MeetingMetadata rejoined = new MeetingMetadata("1", "Sprint planning", null,
+                Instant.parse("2026-10-11T09:00:00Z"), Instant.parse("2026-10-11T09:30:00Z"),
+                List.of(new ParticipantActivity("a", "Dana Levi", null, null),
+                        new ParticipantActivity("a", "Dana Levi", null, null),
+                        new ParticipantActivity("b", "Yossi Cohen", null, null)));
+
+        classifier.classifyMeeting(new MeetingClassificationInput(rejoined, TRANSCRIPT));
+
+        assertThat(chatClient.userText).contains("Participants: 2", "Duration: 30 minutes");
+    }
+
+    @Test
+    void shortMeetingDurationIsSentInSecondsNotZeroMinutes() {
+        chatClient.reply = verdict("TEST");
+        MeetingMetadata shortCall = new MeetingMetadata("1", "Quick check", null,
+                Instant.parse("2026-10-11T09:00:00Z"), Instant.parse("2026-10-11T09:00:50Z"), List.of());
+
+        classifier.classifyMeeting(new MeetingClassificationInput(shortCall, TRANSCRIPT));
+
+        assertThat(chatClient.userText).contains("Duration: 50 seconds").doesNotContain("0 minutes");
+    }
+
+    @Test
     void transcriptIsFencedAndCannotCloseItsOwnFence() {
         chatClient.reply = verdict("PLANNING");
         String hostile = "WEBVTT\n\n1\n00:00:01.000 --> 00:00:04.000\n"

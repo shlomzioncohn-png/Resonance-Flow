@@ -198,17 +198,32 @@ public class ModelMediaClassifier {
         if (topic != null && !topic.isBlank()) {
             text.append("Topic: ").append(truncate(topic.strip(), MAX_TOPIC_CHARS)).append('\n');
         }
-        if (metadata != null && metadata.startedAt() != null && metadata.endedAt() != null) {
-            text.append("Duration: ")
-                    .append(Duration.between(metadata.startedAt(), metadata.endedAt()).toMinutes())
-                    .append(" minutes\n");
-        }
-        if (metadata != null && metadata.participants() != null && !metadata.participants().isEmpty()) {
-            text.append("Participants: ").append(metadata.participants().size()).append('\n');
+        durationOf(metadata).ifPresent(duration -> text.append("Duration: ").append(describe(duration)).append('\n'));
+        if (metadata != null) {
+            metadata.distinctParticipantCount()
+                    .ifPresent(count -> text.append("Participants: ").append(count).append('\n'));
         }
         String excerpt = TRANSCRIPT_TAG.matcher(truncate(spoken, properties.transcriptExcerptChars())).replaceAll(" ");
         text.append("Transcript excerpt:\n<transcript>\n").append(excerpt).append("\n</transcript>");
         return text.toString();
+    }
+
+    /** Same source as ClassificationRules: start/end timestamps when both exist, else Zoom's whole minutes. */
+    private static Optional<Duration> durationOf(MeetingMetadata metadata) {
+        if (metadata == null) {
+            return Optional.empty();
+        }
+        if (metadata.startedAt() != null && metadata.endedAt() != null) {
+            return Optional.of(Duration.between(metadata.startedAt(), metadata.endedAt()));
+        }
+        return Optional.ofNullable(metadata.durationMinutes()).map(Duration::ofMinutes);
+    }
+
+    /** Seconds below two minutes - "0 minutes" for a 50-second call tells the model nothing. */
+    private static String describe(Duration duration) {
+        return duration.compareTo(Duration.ofMinutes(2)) < 0
+                ? duration.toSeconds() + " seconds"
+                : duration.toMinutes() + " minutes";
     }
 
     /** The classifier recorded is the model that actually answered - after a fallback, not the primary. */
