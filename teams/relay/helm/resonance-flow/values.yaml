@@ -186,6 +186,8 @@ components:
         whisper_model: base.en
       object_storage:
         bucket: bridge-raw
+      inbox:
+        url: http://resonance-flow-inbox:80
       kafka:
         producer:
           task_creation_requested_topic: task.creation.requested
@@ -194,6 +196,7 @@ components:
     secret:
       create: false
     kafkaSasl: true
+    inboxActorId: "00000000-0000-0000-0000-000000000003"
   lens-bff:
     enabled: true
     replicaCount: 1
