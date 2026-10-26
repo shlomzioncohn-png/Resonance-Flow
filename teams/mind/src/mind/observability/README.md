@@ -9,22 +9,29 @@ price per token. Every field and log key carries its unit (`cpu_seconds`,
 `cost_usd`, `duration_ms`).
 
 - `record_call(model_name, duration_ms, cost, *, kind, status, cpu_s,
-  prompt_tokens, completion_tokens)` -- every model integration (OCR, ASR,
-  LLM extraction, and later embeddings and scoring) calls this once per
-  model invocation. Do not log model calls any other way; this is the one
+  prompt_tokens, completion_tokens, degraded)` -- every model integration
+  (OCR, ASR, LLM extraction, embeddings, scoring) and every other stage of
+  the full flow (vector queries, Chain requests) calls this once per
+  invocation. Do not log them any other way; this is the one
   source of truth the benchmarking work (see `benchmarks/README.md`) and
   any future cost dashboard will read from. Today: OCR (`ocr.py`), ASR
-  (`asr.py`) and LLM extraction (`extractor.py`); see "Status of #479"
-  below.
+  (`asr.py`), LLM extraction (`extractor.py`), scoring and Chain requests
+  (`recording.py`, wired in `score_publisher_runner.py`); see "Status of
+  #479" and "Status of #482" below.
   - `cost` is the dollar cost of an **LLM** call, or **`None` for
     unpriced** (unknown model, no usage reported). Never pass 0.0 to mean
     "don't know": a report must be able to tell unpriced from free. OCR/ASR
     calls pass `None` -- their cost is `cpu_s`.
   - `cpu_s` is the CPU seconds an **OCR/ASR** call used; the token counts
     are as the LLM provider reported them.
-  - `kind` is `CallKind.OCR` / `ASR` / `LLM`, and decides which measures
-    apply; `status` is `CallStatus.ERROR` when the call raised -- failed
-    calls are recorded too, they are often the slowest.
+  - `kind` is `CallKind.OCR` / `ASR` / `LLM` / `EMBEDDING` / `SCORING` /
+    `VECTOR_QUERY` / `CHAIN`, and decides which measures apply; `status` is
+    `CallStatus.ERROR` when the call raised -- failed calls are recorded
+    too, they are often the slowest.
+  - `degraded=True` marks a call that succeeded on a fallback path, so its
+    result is not the full path's (a score without its ancestors because
+    Chain could not be asked). Counted as `degraded_count`, apart from
+    errors.
   Everything after `cost` is optional, so an existing call site keeps
   working unchanged.
 - Model calls are recorded here, not with `api/instrumentation.py`'s
@@ -43,7 +50,13 @@ price per token. Every field and log key carries its unit (`cpu_seconds`,
   so a page measured in a Linux container took ~1.1 s wall but ~3.6 s of
   CPU. And it is process-wide -- accurate while one call runs at a time, as
   in MIND's consumers; two overlapping calls in one process are each charged
-  for both.
+  for both. `CpuClock(this_thread_only=True)` counts the calling thread's
+  CPU only: scoring uses it, since it runs in the API next to other threads.
+- `recording.py` (#482) -- records a stage from the outside, so the code it
+  measures is not edited: `RecordingClient`, an `httpx.Client` that records
+  each request (ERROR on a raise or a non-2xx, re-raised/returned
+  unchanged), and `RecordedScorer`, which records each `score()` and marks
+  it `degraded` when a `RecordingClient` request inside it failed.
 - `get_recent_calls(limit=None)` -- read back what's been recorded so far.
   For tests/debugging, not a metrics backend.
 - `model_call_summary()` -- the aggregate, per call name, since the process
@@ -204,3 +217,61 @@ counts, and an unknown cost stays `None` instead of `0.0`:
   LLM `cost_usd_total` can undercount them.
 - In-memory and per-process; resets on restart. The readable week-8 report
   is a separate issue.
+
+## Status of #482 (the full flow, stage by stage)
+
+### What each stage records
+
+| Stage | `kind` | Call name | Latency | Compute cost | Recorded by |
+|---|---|---|---|---|---|
+| Scoring (`HierarchicalRankingModel.score`, in the API) | `scoring` | `hierarchical-ranking` | `duration_ms`, Chain requests inside it included | `cpu_s`: this thread's CPU | `RecordedScorer`, wired in `score_publisher_runner.py` |
+| Chain's traversal API (`ChainHierarchyClient`, R3's) | `chain` | `chain-ancestors`, `chain-children` | `duration_ms`, the whole request | n/a | `RecordingClient`, the client's HTTP client |
+| Embedding (`embeddings.embed`/`embed_batch`, R3's) | `embedding` | -- | -- | -- | **not yet**: waits for R3 (below) |
+| Vector query (`PgTenantStore.search`, R3's) | `vector_query` | -- | -- | -- | **not yet**: waits for R3 (below) |
+
+Tokens and dollars apply to none of them. No stage has a duration limit
+yet: a limit waits for the baseline #482 measures, as the OCR/ASR
+CPU-seconds limit does. A score's row includes the Chain requests made
+inside it; the `chain-*` rows break it down, they are not added to it.
+
+The scoring and Chain stages are recorded from the outside -- the model is
+wrapped, and the Chain client gets an HTTP client built with the same base
+URL and timeout -- so neither R1's publisher nor R3's model or client
+changed. Embedding and vector queries can only be timed inside R3's
+`embeddings/` code; that change is proposed to R3, not made.
+
+### When Chain cannot be asked
+
+`ChainHierarchyClient` swallows every failure -- refused, timed out, a
+non-2xx, a body of the wrong shape -- logs a WARNING, and returns `[]`, as
+#474 requires. With no ancestors, `HierarchicalRankingModel` scores the
+task with the baseline alone: the same score, `hierarchy` contribution 0.0
+and reasoning a root task gets. The published payload cannot tell the two
+apart (tested: `tests/observability/test_recording.py`).
+
+The ledger can:
+
+- each failed request is a `chain-*` call with status `error` (a refused
+  connection, a timeout -- recorded at about the 0.2 s timeout, not the
+  server's full time -- or a non-2xx);
+- the score it happened in is `success` with `degraded=true`, counted in
+  `degraded_count`; a root task's score, with Chain answering `[]`, is not.
+
+Not marked degraded:
+
+- a 2xx whose body Chain's client then rejects (not JSON, not a list).
+  `RecordingClient` records it as a success; the client's own WARNING is the
+  only trace;
+- an ancestor Chain named but this process has not seen since start-up, or
+  one the baseline could not score: `ChainAncestorSource` leaves it out of
+  the mean and logs a WARNING. Chain answered, so the score is not the
+  Chain fallback, but it is a partial one.
+
+A failure in another thread, or one outside a score (the rescore cascade's
+`/children`), never marks a score.
+
+`ChainAncestorSource` asks Chain for every task, root or not. So Mind
+running without Chain -- the #359 demo stack has none, and sets no
+`MIND_CHAIN__BASE_URL` -- records every score as degraded, each after a
+failed `chain-ancestors` request. That is the expected state there, not a
+fault, and a baseline measured there must say so.

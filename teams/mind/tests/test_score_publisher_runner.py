@@ -7,6 +7,7 @@ import time
 from types import SimpleNamespace
 from typing import ClassVar
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -15,7 +16,10 @@ from mind.config_file import ConfigFileError
 from mind.messaging.config import MessagingSettings
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
+from mind.observability.recording import RecordedScorer, RecordingClient
+from mind.observability.tracking import CallKind, CallStatus, _reset_for_tests, get_recent_calls
 from mind.scoring import score_publisher_runner as runner
+from mind.scoring.chain_hierarchy_client import ChainHierarchySettings
 from mind.scoring.score_publisher import ScorePublisher
 from mind.scoring.score_publisher_runner import start_score_publisher
 
@@ -188,6 +192,36 @@ def test_the_consumers_get_the_same_kafka_settings(started):
 
     assert _wait_until(lambda: len(_FakeConsumer.built) == 2)
     assert all(c.settings is KAFKA for c in _FakeConsumer.built)
+
+
+def test_every_score_and_chain_request_is_recorded(started):
+    # #482: the model and the Chain client are wrapped from the outside.
+    running, _ = started
+    publisher = running.publisher
+
+    assert isinstance(publisher._model, RecordedScorer)  # what ScorePublisher scores with
+    assert isinstance(publisher._children_client._client, RecordingClient)
+
+
+def test_the_recorded_chain_client_keeps_its_settings_and_falls_back(monkeypatch):
+    _reset_for_tests()
+    settings = ChainHierarchySettings(base_url="http://chain.test", timeout_seconds=0.2)
+
+    def chain_down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    client = runner._recorded_chain_client(settings, httpx.MockTransport(chain_down))
+
+    assert client.get_ancestors("task-1") == []  # #474's fallback, unchanged
+    [call] = get_recent_calls()
+    assert (call.model_name, call.kind, call.status) == (
+        "chain-ancestors",
+        CallKind.CHAIN,
+        CallStatus.ERROR,
+    )
+    http_client = client._client
+    assert str(http_client.base_url) == "http://chain.test"
+    assert http_client.timeout == httpx.Timeout(0.2)
 
 
 def test_stop_halts_every_thread(started):
