@@ -28,5 +28,9 @@ data:
         task_creation_requested_topic: {{ $cfg.kafka.producer.task_creation_requested_topic | quote }}
     service:
       log_level: {{ $cfg.service.log_level | quote }}
+    {{- with $cfg.inbox }}
+    inbox:
+      url: {{ .url | quote }}
+    {{- end }}
 {{- end }}
 {{- end }}

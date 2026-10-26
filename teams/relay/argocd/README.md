@@ -30,11 +30,11 @@ dedicated project is needed for this repo's scope.
 | File                     | Purpose                                                                 |
 |--------------------------|--------------------------------------------------------------------------|
 | `root-app.yaml`          | App-of-apps bootstrap `Application` - manages everything under `apps/` |
-| `argocd-cm-patch.yaml`   | Restores the `argoproj.io/Application` health check ArgoCD dropped in 1.8 (with a fix for a "Missing" status edge case) - kept in case a future child `Application` needs sync-wave gating on another `Application`'s health; nothing under `apps/` currently uses more than one wave |
-| `apps/resonance-flow.yaml` | `Application` syncing the [`resonance-flow`](../helm/resonance-flow) chart (all teams' services, including the Kafka/Postgres/MinIO subcharts), with [`environments/shared.yaml`](../helm/resonance-flow/environments/shared.yaml) layered on top for shared-cluster-only settings |
-| `apps/traefik.yaml`      | `Application` installing the Traefik ingress controller (namespace `traefik`, ingress class `traefik`) that serves the chart's Ingress |
-| `apps/kube-prometheus-stack.yaml` | `Application` installing cluster monitoring (Prometheus Operator, Prometheus, Alertmanager, node-exporter, kube-state-metrics) into namespace `monitoring` - see [Monitoring](#monitoring) |
-
+| `argocd-cm-patch.yaml`   | Restores the `argoproj.io/Application` health check ArgoCD dropped in 1.8 (with a fix for a "Missing" status edge case). Without it the sync-waves below don't wait for the previous wave to be Healthy |
+| `apps/resonance-flow.yaml` | Wave `0`. `Application` syncing the [`resonance-flow`](../helm/resonance-flow) chart (all teams' services, including the Kafka/Postgres/MinIO subcharts and Schema Registry), with [`environments/shared.yaml`](../helm/resonance-flow/environments/shared.yaml) layered on top for shared-cluster-only settings |
+| `apps/schema-sync-hook.yaml` | Wave `1`. `Application` running the [`schema-sync-hook`](../schema-sync-hook) Job that checks and registers `shared/proto` schemas; it needs the Schema Registry from wave `0` to be up |
+| `apps/kube-prometheus-stack.yaml` | Wave `3`. `Application` installing cluster monitoring (Prometheus Operator, Prometheus, Alertmanager, node-exporter, kube-state-metrics) into namespace `monitoring` - see [Monitoring](#monitoring) |
+| `apps/traefik.yaml`      | Wave `4`. `Application` installing the Traefik ingress controller (namespace `traefik`, ingress class `traefik`) that serves the chart's Ingress |
 ## Onboarding your team's service
 
 There is nothing to add here. Once your team's CI writes a
@@ -100,15 +100,35 @@ team's sync.
   Traefik exposes its own metrics, per router. Kafka consumer-group lag comes
   from the chart's `kafka-exporter` subchart - see the chart's README.
 - **Alert rules.** The platform's PrometheusRules live in the `resonance-flow`
-  chart - see its [README](../helm/resonance-flow/README.md#alerting). Default
-  rules for components not scraped here (etcd, controller-manager, scheduler,
-  kube-proxy, Windows) are turned off in `defaultRules`.
+  chart - see its [README](../helm/resonance-flow/README.md#alerting).
 
-Nothing here has an Ingress. Reach Prometheus and Alertmanager with:
+- **Grafana.** On, with the Prometheus and Alertmanager datasources the chart
+  provisions. Its dashboard sidecar loads any ConfigMap labelled
+  `grafana_dashboard: "1"` from any namespace - that's how the `resonance-flow`
+  chart ships its alert dashboard.
+- **Grafana's admin login.** From the `grafana-admin` Secret (`admin-user`,
+  `admin-password`), which the app's second source,
+  `teams/relay/monitoring/grafana-admin-secret-hook.yaml`, creates in a
+  PreSync hook with a random 32-char password - so `sources`, not `source`
+  (ArgoCD ≥ 2.6). Same pattern as the chart's `_db-credentials-hook.tpl`: the
+  Job creates the Secret through the API, so ArgoCD neither tracks nor prunes
+  it, and a later sync keeps an existing non-empty password (an empty one is
+  replaced). It's not a rendered Secret because ArgoCD renders offline: the
+  Grafana chart's own random password would change on every refresh. To
+  rotate it, delete the Secret and sync.
+
+Nothing here has an Ingress. Reach Prometheus, Alertmanager and Grafana with:
 
 ```bash
 kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-prometheus 9090:9090
 kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-alertmanager 9093:9093
+kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80
+```
+
+Grafana's admin password:
+
+```bash
+kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d
 ```
 
 ## Scope

@@ -1,0 +1,19 @@
+{{/* Grafana dashboards (dashboards/) - see README.md "Alerting". kube-prometheus-stack's
+Grafana sidecar loads any ConfigMap labelled grafana_dashboard: "1". Same CRD check as
+prometheusrules.yaml, so not in teams' kind CI. */}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule" }}
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: {{ include "resonance-flow.fullname" . }}-grafana-dashboards
+  labels:
+    {{- include "resonance-flow.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+
+data:
+  {{- range $path, $_ := .Files.Glob "dashboards/*.json" }}
+  {{ base $path }}: |-
+    {{- $.Files.Get $path | nindent 4 }}
+  {{- end }}
+{{- end }}

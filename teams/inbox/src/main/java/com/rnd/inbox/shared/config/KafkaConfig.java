@@ -10,6 +10,7 @@ import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializerConfig;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializerConfig;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
@@ -62,6 +63,9 @@ public class KafkaConfig {
             @Value("${kafka.schema-registry.url}") String schemaRegistryUrl) {
         Map<String, Object> props = kafkaProperties.buildProducerProperties();
         props.put(AbstractKafkaSchemaSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
+        // Relay registers the schemas from shared/proto; publish against those, never register our own copy.
+        props.put(KafkaProtobufSerializerConfig.AUTO_REGISTER_SCHEMAS, false);
+        props.put(KafkaProtobufSerializerConfig.USE_LATEST_VERSION, true);
         return new DefaultKafkaProducerFactory<>(props, new StringSerializer(), new KafkaProtobufSerializer());
     }
 

@@ -42,6 +42,9 @@ jobs:
         run: |
           yq -i ".components.${{ inputs.service_name }}.image.repository = \"${{ inputs.image_repository }}\" | .components.${{ inputs.service_name }}.image.tag = \"${{ inputs.image_tag }}\"" "$CHART_VALUES"
 
+      - name: Fetch main so the push only sends new commits
+        run: git fetch --no-tags origin main
+
       # No-op when nothing changed (same tag redeployed).
       - name: Open a PR with the manifest update
         uses: peter-evans/create-pull-request@v7

@@ -2,7 +2,7 @@
 Mind's creation pipeline on it, end to end: each landed item to text, each
 text to a task, each new task to `task.creation.requested`, and Inbox's
 `task.created` reply matched and indexed. Own process, like
-score_publisher_runner.
+index_consumer_runner.
 
 Three threads, one `TaskCreationFlow`: the pending store is in memory, so the
 sender (this consumer) and the task.created listener must share it, and so
@@ -57,9 +57,8 @@ def _log_items(event: RawObjectEvent, items: list[ExtractionItem]) -> None:
     # logs travel further than the content was meant to.
     for item in items:
         logger.info(
-            "landed: %s %s ready for extraction, %d chars",
+            "landed: %s ready for extraction, %d chars",
             event.correlation_id,
-            item.item_key,
             len(item.text),
         )
 

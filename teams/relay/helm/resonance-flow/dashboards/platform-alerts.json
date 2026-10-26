@@ -1,0 +1,192 @@
+{
+  "uid": "resonance-flow-platform-alerts",
+  "title": "Resonance-Flow / Platform alerts",
+  "description": "State of the resonance-flow chart's PrometheusRules (every alert carrying a team label). Rule definitions, annotations and history: Alerting > Alert rules.",
+  "tags": ["resonance-flow", "alerts"],
+  "timezone": "utc",
+  "editable": false,
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "time": { "from": "now-6h", "to": "now" },
+  "links": [
+    {
+      "title": "Alert rules (Prometheus)",
+      "type": "link",
+      "icon": "bell",
+      "url": "/alerting/list?search=datasource:Prometheus%20label:team=~.%2B"
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "team",
+        "label": "Team",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(ALERTS{team!=\"\"}, team)", "refId": "team" },
+        "definition": "label_values(ALERTS{team!=\"\"}, team)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" },
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Firing",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(ALERTS{alertstate=\"firing\", team=~\"$team\"}) or vector(0)",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Pending",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(ALERTS{alertstate=\"pending\", team=~\"$team\"}) or vector(0)",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 3,
+      "type": "text",
+      "title": "",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 4 },
+      "options": {
+        "mode": "markdown",
+        "content": "An alert shows here only while it's **Pending** or **Firing**; once its condition clears it's **Resolved** and drops out. Rule definitions, `summary` annotations and the full rule list (including rules at **Normal**): **Alerting → Alert rules**, data source *Prometheus* (link at the top right)."
+      }
+    },
+    {
+      "id": 4,
+      "type": "state-timeline",
+      "title": "Alert state over time",
+      "description": "Firing / Pending per alert and team. A gap is Normal or Resolved.",
+      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 10 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(max by (alertname, team) (ALERTS{alertstate=\"firing\", team=~\"$team\"}) * 2) or max by (alertname, team) (ALERTS{alertstate=\"pending\", team=~\"$team\"})",
+          "legendFormat": "{{alertname}} ({{team}})",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "transparent" },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": { "text": "Pending", "color": "orange", "index": 0 },
+                "2": { "text": "Firing", "color": "red", "index": 1 }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "never",
+        "mergeValues": true,
+        "alignValue": "left",
+        "rowHeight": 0.8,
+        "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Active alerts",
+      "description": "Every Pending / Firing alert with its labels.",
+      "gridPos": { "x": 0, "y": 14, "w": 24, "h": 10 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "ALERTS{team=~\"$team\"}",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "Value": true, "__name__": true },
+            "indexByName": { "alertname": 0, "alertstate": 1, "severity": 2, "team": 3 }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "alertstate" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "firing": { "text": "Firing", "color": "red", "index": 0 },
+                      "pending": { "text": "Pending", "color": "orange", "index": 1 }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "sortBy": [{ "displayName": "alertstate", "desc": false }] }
+    }
+  ]
+}

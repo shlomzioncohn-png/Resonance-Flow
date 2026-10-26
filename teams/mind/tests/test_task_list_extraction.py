@@ -222,15 +222,14 @@ def test_grounding_reads_only_the_text_the_model_was_sent() -> None:
     assert "invented_source_ref" in [p.reason for p in task.confidence.penalties]
 
 
-def test_a_meeting_is_grounded_against_all_of_what_it_sent() -> None:
-    """Past 8000 characters, but inside a meeting's own cap, the model saw it."""
+def test_an_item_is_grounded_against_all_of_what_it_sent() -> None:
+    """Past 8000 characters, where it was once cut, but inside the cap: the
+    model saw it."""
 
-    text = "Please book the lab for the prototype test. " + "x" * MAX_CONTENT_CHARS + " DES-2214"
+    text = "Please book the lab for the prototype test. " + "x" * 20_000 + " DES-2214"
     provider = ScriptedProvider(answer_of({**LAB, "source_ref": "DES-2214"}))
 
-    outcome = BasicExtractor(provider, sleep=lambda _seconds: None).extract(
-        text, SourceType.MEETING
-    )
+    outcome = BasicExtractor(provider, sleep=lambda _seconds: None).extract(text, SourceType.EMAIL)
 
     assert isinstance(outcome, ExtractionSuccess)
     [task] = outcome.tasks

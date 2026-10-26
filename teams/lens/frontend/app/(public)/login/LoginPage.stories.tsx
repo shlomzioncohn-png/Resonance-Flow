@@ -23,7 +23,7 @@ export const Default: Story = {};
 
 export const ManagerSignsIn: Story = {
   play: async ({ canvas, userEvent }) => {
-    await userEvent.type(canvas.getByLabelText(/username/i), 'manager1');
+    await userEvent.type(canvas.getByLabelText(/email/i), 'manager1');
     await userEvent.type(canvas.getByLabelText(/password/i), 'manager1');
     await userEvent.click(canvas.getByRole('button', { name: 'Sign in' }));
 
@@ -33,7 +33,7 @@ export const ManagerSignsIn: Story = {
 
 export const EmployeeSignsIn: Story = {
   play: async ({ canvas, userEvent }) => {
-    await userEvent.type(canvas.getByLabelText(/username/i), 'employee1');
+    await userEvent.type(canvas.getByLabelText(/email/i), 'employee1');
     await userEvent.type(canvas.getByLabelText(/password/i), 'employee1');
     await userEvent.click(canvas.getByRole('button', { name: 'Sign in' }));
 
@@ -43,7 +43,7 @@ export const EmployeeSignsIn: Story = {
 
 export const WrongPassword: Story = {
   play: async ({ canvas, userEvent }) => {
-    await userEvent.type(canvas.getByLabelText(/username/i), 'manager1');
+    await userEvent.type(canvas.getByLabelText(/email/i), 'manager1');
     await userEvent.type(canvas.getByLabelText(/password/i), 'wrong-password');
     await userEvent.click(canvas.getByRole('button', { name: 'Sign in' }));
 
@@ -60,7 +60,7 @@ export const GatewayUnreachable: Story = {
     msw.use(http.post('*/api/auth/login', () => HttpResponse.error()));
   },
   play: async ({ canvas, userEvent }) => {
-    await userEvent.type(canvas.getByLabelText(/username/i), 'manager1');
+    await userEvent.type(canvas.getByLabelText(/email/i), 'manager1');
     await userEvent.type(canvas.getByLabelText(/password/i), 'manager1');
     await userEvent.click(canvas.getByRole('button', { name: 'Sign in' }));
 
