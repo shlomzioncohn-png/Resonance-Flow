@@ -1,0 +1,44 @@
+name: Chain analytics CI
+
+# Tests of the dependency-flow health analytics project (teams/chain/analytics/flow_health). It is a plain Python
+# project: not built into Chain's image and not deployed, so there is no CD half.
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "teams/chain/analytics/**"
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "teams/chain/analytics/**"
+      - ".github/workflows/chain-analytics-ci.yaml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: chain-analytics-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: teams/chain/analytics/flow_health
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+          cache-dependency-path: teams/chain/analytics/flow_health/pyproject.toml
+
+      - name: Install
+        run: pip install -e ".[dev,analysis]"
+
+      - name: Test
+        run: pytest -q

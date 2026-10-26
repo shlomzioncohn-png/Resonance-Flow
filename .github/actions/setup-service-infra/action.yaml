@@ -87,8 +87,7 @@ runs:
         SVC=$(kubectl -n "$SERVICE" get svc \
           -l "app.kubernetes.io/instance=$SERVICE,app.kubernetes.io/name=postgresql,app.kubernetes.io/component=primary" \
           -o jsonpath='{.items[?(@.spec.clusterIP!="None")].metadata.name}')
-        # From the live Secret/values, so it can't drift from what was installed.
-        PG_PASSWORD=$(kubectl -n "$SERVICE" get secret "$SVC" -o jsonpath='{.data.postgres-password}' | base64 -d)
+        PG_PASSWORD=$(kubectl -n "$SERVICE" get secret resonance-flow-postgres-db-credentials -o jsonpath='{.data.password}' | base64 -d)
         PG_DATABASE=$(helm get values "$SERVICE" -n "$SERVICE" --all -o yaml | yq eval '.postgresql.auth.database // ""' -)
         if [ -z "$SVC" ] || [ -z "$PG_PASSWORD" ] || [ -z "$PG_DATABASE" ]; then
           echo "Couldn't resolve Postgres Service/password/database (svc='$SVC', db='$PG_DATABASE')" >&2
@@ -97,34 +96,16 @@ runs:
         echo "::add-mask::$PG_PASSWORD"
         # @uri is query-style (space -> "+"); libpq reads "+" literally, so use %20.
         PG_PASSWORD_URI=$(PW="$PG_PASSWORD" yq -n 'strenv(PW) | @uri | sub("\+"; "%20")')
-        # ":5432" with no local port: the OS picks a free one at bind time, so two
-        # jobs on one host can never get the same port. kubectl logs which one it
-        # got ("Forwarding from 127.0.0.1:<port> -> <pod port>").
-        PF_LOG="$RUNNER_TEMP/postgres-port-forward.log"
-        # Create it now: the background job's redirect may not have run yet when
-        # sed first reads it, and a missing file would fail this step (-e).
-        : > "$PF_LOG"
-        kubectl -n "$SERVICE" port-forward "svc/$SVC" :5432 > "$PF_LOG" 2>&1 &
-        PF_PID=$!
-        for i in $(seq 1 30); do
-          PG_PORT=$(sed -n 's/^Forwarding from 127\.0\.0\.1:\([0-9][0-9]*\) -> .*/\1/p' "$PF_LOG" | head -n 1)
-          if [ -n "$PG_PORT" ] && (echo > "/dev/tcp/127.0.0.1/$PG_PORT") >/dev/null 2>&1; then
-            # libpq's standard PG* vars + a URL (password URL-encoded) for the test step.
-            {
-              echo "PGHOST=127.0.0.1"
-              echo "PGPORT=$PG_PORT"
-              echo "PGUSER=postgres"
-              echo "PGPASSWORD=$PG_PASSWORD"
-              echo "PGDATABASE=$PG_DATABASE"
-              echo "TEST_DATABASE_URL=postgresql://postgres:$PG_PASSWORD_URI@127.0.0.1:$PG_PORT/$PG_DATABASE"
-            } >> "$GITHUB_ENV"
-            exit 0
-          fi
-          if ! kill -0 "$PF_PID" 2>/dev/null; then
-            echo "Postgres port-forward to svc/$SVC exited:" >&2; cat "$PF_LOG" >&2
-            exit 1
-          fi
-          sleep 2
-        done
-        echo "Postgres port-forward to svc/$SVC never became reachable:" >&2; cat "$PF_LOG" >&2
-        exit 1
+        source "${{ github.action_path }}/../../scripts/port-forward.sh"
+        tcp_open() { (echo > "/dev/tcp/127.0.0.1/$LOCAL_PORT") >/dev/null 2>&1; }
+        # Stays running for the rest of the job, for the test step.
+        port_forward_until "$SERVICE" "svc/$SVC" 5432 "$RUNNER_TEMP/postgres-port-forward.log" 30 2 tcp_open
+        # libpq's standard PG* vars + a URL (password URL-encoded) for the test step.
+        {
+          echo "PGHOST=127.0.0.1"
+          echo "PGPORT=$LOCAL_PORT"
+          echo "PGUSER=postgres"
+          echo "PGPASSWORD=$PG_PASSWORD"
+          echo "PGDATABASE=$PG_DATABASE"
+          echo "TEST_DATABASE_URL=postgresql://postgres:$PG_PASSWORD_URI@127.0.0.1:$LOCAL_PORT/$PG_DATABASE"
+        } >> "$GITHUB_ENV"

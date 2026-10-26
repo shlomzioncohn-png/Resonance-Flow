@@ -47,7 +47,7 @@ jobs:
         # The event's base.sha is fine here: HEAD is the event's merge commit, so the pair is consistent.
         run: |
           if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD \
-             | grep -qE '^shared/proto/|^teams/relay/(ci|schema-sync-hook)/|^\.github/workflows/relay-schema-ci\.yaml$'; then
+             | grep -qE '^shared/proto/|^teams/relay/(ci|schema-sync-hook|schema-canonicalize)/|^\.github/workflows/relay-schema-ci\.yaml$'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "Relay schema / chart / ci files changed — running the checks."
           else
@@ -109,6 +109,14 @@ jobs:
           done
           echo "Schema Registry did not come up in time." >&2
           exit 1
+
+      - name: Build the schema canonicalizer
+        run: |
+          docker run --rm \
+            -v "$PWD:/workspace" -w /workspace/teams/relay/schema-canonicalize \
+            -v "${HOME:-$RUNNER_TEMP}/.m2:/root/.m2" \
+            maven:3.9.9-eclipse-temurin-21 \
+            mvn -B -q package
 
       - name: Seed registry with base-branch schema versions
         run: bash teams/relay/ci/seed-registry.sh "${{ steps.base.outputs.sha }}"

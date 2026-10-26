@@ -28,7 +28,7 @@ from mind.extraction.parsing import (
     read_rejected_answer,
 )
 from mind.extraction.prompts import (
-    content_cap,
+    MAX_CONTENT_CHARS,
     extraction_prompt,
     repair_prompt,
     system_prompt,
@@ -62,9 +62,10 @@ class ExtractionItem:
     text: str
     source_type: SourceType
 
-    # The intake event's `object_key`: the one stored object this text came
-    # from. Deliberately not `correlation_id`, which a source body shares
-    # with its attachments and so cannot say *which* of them failed.
+    # What the caller calls this text, handed back on both outcomes. For a
+    # Bridge item it is the arrival's `correlation_id`: its files are joined
+    # into this one text (#349), so a failure names the item, not which of
+    # its files caused it. The eval passes the meeting id.
     item_key: str | None = None
 
 
@@ -265,7 +266,7 @@ class BasicExtractor:
         # schema without it would fail every answer it received.
         system = system_prompt(self._config.classify)
         # What the model can see, and so all that grounding may accept.
-        seen = text[: content_cap(source_type)]
+        seen = text[:MAX_CONTENT_CHARS]
         schema = response_model(self._config.classify)
         user = extraction_prompt(source_type, text)
 
