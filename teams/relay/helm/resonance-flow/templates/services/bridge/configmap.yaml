@@ -6,7 +6,8 @@
 {{- $_ := set $config.spring.kafka "bootstrap-servers" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $.Values.dependencies "name" "kafka")) }}
 
 {{- $_ := set $config.spring.kafka.properties "sasl.jaas.config" (include "resonance-flow.kafkaSaslJaasConfig" (dict "root" $ "password" "${kafka.password}")) }}
-{{- $_ := set $config.bridge "kafka" (dict "schema-registry" (dict "url" (printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "schema-registry"))))) }}
+{{- /* The one Schema Registry setting every Bridge Protobuf producer reads (#1011). */ -}}
+{{- $_ := set $config.spring.kafka.properties "schema.registry.url" (printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "schema-registry"))) }}
 {{- $objectStorageConfig := deepCopy $component.objectStorage }}
 {{- $_ := set $objectStorageConfig "endpoint" (printf "http://%s" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "object-storage"))) }}
 {{- $_ := set $config "minio" $objectStorageConfig }}
