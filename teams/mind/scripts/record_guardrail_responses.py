@@ -69,9 +69,15 @@ def _record(case: dict[str, Any], provider: LLMProvider) -> dict[str, Any]:
     if isinstance(outcome, ExtractionSuccess):
         observed: dict[str, Any] = {
             "kind": "success",
-            "title": outcome.fields.title,
-            "confidence": outcome.confidence.value,
-            "penalties": [p.reason for p in outcome.confidence.penalties],
+            # Empty when the model answered "no task here" (#690).
+            "tasks": [
+                {
+                    "title": task.fields.title,
+                    "confidence": task.confidence.value,
+                    "penalties": [p.reason for p in task.confidence.penalties],
+                }
+                for task in outcome.tasks
+            ],
             "schema_attempts": outcome.schema_attempts,
         }
     else:

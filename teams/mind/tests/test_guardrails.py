@@ -169,20 +169,23 @@ def _replay_extraction(case_id: str) -> tuple[str, dict[str, Any]]:
 
     if not isinstance(result, ExtractionSuccess):
         return "graceful_failure", {"reason": result.reason}
-    details = {"title": result.fields.title, "confidence": result.confidence.value}
-    outcome = "low_confidence" if result.confidence.value < case["threshold"] else "silent"
-    return outcome, details
+    if not result.tasks:
+        # An empty task list (#690) is the extractor saying "no task here": the
+        # typed "nothing to extract" answer, which is what graceful means here.
+        return "graceful_failure", {"tasks": []}
+
+    tasks = [(task.fields.title, task.confidence.value) for task in result.tasks]
+    # One confident task is enough to be silent: each one reaches Inbox on its own.
+    top = max(confidence for _, confidence in tasks)
+    outcome = "low_confidence" if top < case["threshold"] else "silent"
+    return outcome, {"tasks": tasks}
 
 
-# Observed against the live model on the first recording (see the recorded files):
-# a task invented from small talk, and a Hebrew task silently translated to English,
-# both above the 0.5 audit marker. The extraction confidence scores extraction
-# quality, not whether a task exists or is in scope. Only the first is a finding
-# to fix; the second is out of scope by the English-only decision.
-_NO_TASK_FINDING = (
-    "finding (#488): extraction has no 'no task here' outcome, so small talk becomes "
-    "a task at confidence >= 0.5; to be handled in #690"
-)
+# no_action_items was a finding before #690: one task per text, so small talk
+# became "Catch up next week" at 0.855. Since #690 the extractor can answer with
+# an empty list, and the re-recorded answer does, so it is an ordinary passing
+# case now. non_english_text still comes out as a silently translated task above
+# the 0.5 audit marker; that is out of scope by the English-only decision.
 _ENGLISH_ONLY_LIMITATION = (
     "accepted limitation: the pipeline is English-only by decision, so non-English "
     "content is documented, not a finding to fix"
@@ -192,10 +195,7 @@ _ENGLISH_ONLY_LIMITATION = (
 @pytest.mark.parametrize(
     "case_id",
     [
-        pytest.param(
-            "no_action_items",
-            marks=pytest.mark.xfail(strict=True, raises=AssertionError, reason=_NO_TASK_FINDING),
-        ),
+        "no_action_items",
         pytest.param(
             "non_english_text",
             marks=pytest.mark.xfail(

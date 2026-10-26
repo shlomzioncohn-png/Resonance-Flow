@@ -7,18 +7,18 @@ R1's week-8 audit. It checks two things:
 
 Each owner builds the confidence for her own component. This audit only checks that it is there. Nothing in another owner's component is changed here. Every gap is reported to its owner (see [Reported](#reported)).
 
-Audited against `main` at `f22b8bc7`, 2026-10-19. Updated after mentor review on PR #866.
+Audited against `main` at `f22b8bc7`, 2026-10-19. Updated after mentor review on PR #866. Re-checked against `main` at `6de5b86f`, 2026-10-26, after R2's #690 (a list of tasks per text) and R3's dependency publishing (#355) landed.
 
 ## 1. Confidence per inference point
 
 | Inference | Owner | Confidence | Where |
 |---|---|---|---|
-| Extraction: title, description | R2 | Yes, on every task produced. `ExtractionFailure` carries none, but no task is produced either. | `extraction/extractor.py:189`, `extraction/confidence.py:181` |
+| Extraction: title, description | R2 | Yes, on every task produced. Since #690 an answer is a list of tasks, and each `ExtractedTask` carries its own confidence. An empty list and `ExtractionFailure` carry none, but no task is produced either. | `extraction/extractor.py:79-88` (`ExtractedTask`), `extraction/confidence.py:184` |
 | Classification: tier, urgency | R2 (#360) | **No.** The values are nullable (the model returns `null` when unsure), but there is no per-field confidence, and the overall `confidence` ignores them. #360 is open and deferred. | `extraction/models.py:183-188`; no field in `contracts/task_creation_requested.py` |
 | Owner candidates | R2 (#360) | **No.** Owner is not extracted at all: `suggested_owner_user_id`, `suggested_owner_confidence` and `candidate_assignees` exist in the contract but are always empty. #360 is open and deferred. | `contracts/task_creation_requested.py:72-86`; nothing in `extraction/` sets them |
 | Effort estimate | R2 (#352) | Yes, whenever an estimate is returned: 0.9 when stated, 0.4 when inferred. Not calibrated yet. Minutes without a basis are forced to inferred, and a basis without minutes is dropped, so an estimate never leaves without a confidence. | `confidence.py:243`, `assembly.py:83`, `models.py:293-308` |
 | Duplicate detection | R3 (#476) | **No.** `find_duplicate` returns the best match above a 0.761 threshold as a `SearchResult`, which carries only raw cosine `similarity`. Duplicate confidence is part of #476, and that part is in reserve. | `embeddings/duplicate_detection.py:10-22`, `embeddings/base.py:15-24`, `config.py` (`duplicate_similarity_threshold`) |
-| Dependency edges | R3 (#476) | **Not yet.** Results carry only raw cosine `similarity`. #476 (required) has not started. | `embeddings/dependency_resolution.py:45` |
+| Dependency edges | R3 (#476) | **A field, but not yet a confidence.** Since #355, each published `DependencyEdge` carries `confidence`, but it is the raw cosine `similarity` copied in as is. #476 asks for the opposite: a confidence derived from the distance to the threshold, not raw closeness. #476 is still open. | `dependencies/publisher.py:101-102`, `contracts/task_dependencies_proposed.py:17` |
 | Related-task search | R3 (#476) | **Not yet.** Same as above. | `embeddings/related_tasks.py:22` |
 | OCR, per word | R4 (#449) | Yes, passed through from tesseract (0-100): `mean_confidence` over every word, plus `low_confidence_words` and `low_confidence_count` below 60. This meets #449 step 2 ("at minimum a count or a list of them"). | `multimodal/ocr.py:182-183`, `330-332` |
 | ASR, per segment | R4 (#478) | Yes, passed through from Whisper: `avg_logprob`, `compression_ratio` and `no_speech_prob` per segment, plus `confidence = exp(avg_logprob)` (0-1, the same number out of log space). | `multimodal/asr.py:210-229` |
@@ -44,7 +44,7 @@ Outcomes:
 
 | Case | Component | Input | Acceptable | Observed |
 |---|---|---|---|---|
-| `no_action_items` | extraction | Small talk, no action item | failure, or confidence < 0.5 | **silent**: invented task "Catch up next week", confidence **0.855** |
+| `no_action_items` | extraction | Small talk, no action item | failure, or confidence < 0.5 | **graceful** since #690: an empty task list. Before #690 it was **silent**: invented task "Catch up next week", confidence **0.855**. |
 | `noise_scan` | OCR | Pixel noise, no text (seed 488) | `NO_TEXT_RECOGNIZED`, or mean < 60 | **low confidence**: 2 junk "words" (`oe`, `fe`), mean **23.39**, both flagged low |
 | `crosstalk_audio` | ASR | Clean fixture mixed with itself, 1 s delayed. The reference goes through the same gain and padding without the copy, so only the overlap differs. | lower than the reference | **partial**: mean **0.747 → 0.549**, but **no** segment flagged low. The text is garbled: "...to the Phrenae report by the Friday's team by F" |
 
@@ -67,15 +67,17 @@ The extraction confidence starts at 0.95 and deducts for weaknesses in the answe
 - a missing description;
 - a missing or invented source reference.
 
-It scores the **quality of an extraction**. It does not score whether the text contains a task at all. Every word of "Catch up next week" appears in the source text, so title grounding deducted nothing; only the missing description cost anything.
+It scores the **quality of an extraction**. It does not score whether the text contains a task at all.
 
-There is also no way to answer "no task here". `title` is required, and a placeholder title is sent back for repair (`models.py:366-371`). So a model that correctly declines ends as `ExtractionFailure(invalid_output)`, which looks the same as malformed JSON. Include and exclude rules about what counts as a task cannot cover every case on their own. Small talk with a casual "let's catch up" is exactly the kind of input that slips through, and it came out as a task.
+On the first recording (2026-10-19), the extractor returned exactly one task per text, and there was no way to answer "no task here". Small talk became "Catch up next week" at 0.855. Every word of that title appears in the source, so title grounding deducted nothing; only the missing description cost anything. This was reported as a finding for R2's #690.
 
-**Finding:** the pipeline has no "no task in this content" outcome. A task invented from small talk reaches the contract's `confidence` field looking trustworthy. It belongs to R2's #690, where extraction moves from one task per text to a list, and an empty list is the natural "no task" answer.
+#690 changed the answer to a list of tasks, and an empty list now means "no task here". On the re-recording against the same model (2026-10-26), small talk came back as an empty list. **The finding is resolved by #690.** The case now passes as an ordinary test, so a regression would fail it.
+
+The scorer itself is unchanged. If the model does propose a task from small talk, its confidence still will not say so. The guard is now the model's ability to return an empty list, not the score.
 
 ### The contrast between R2 and R4
 
-R4's confidence comes from the model itself (tesseract, Whisper), so it drops when the model is unsure, even when the model invents text. R2's confidence is a heuristic over the shape of the answer, so it stays high when the LLM is confident and wrong.
+R4's confidence comes from the model itself (tesseract, Whisper), so it drops when the model is unsure, even when the model invents text. R2's confidence is a heuristic over the shape of the answer, so it stays high when the LLM is confident and wrong. On the first recording that showed up as the invented task. Since #690, the model's empty list is the guard instead.
 
 ### What the OCR and ASR results mean
 
@@ -98,13 +100,14 @@ Nothing on `main` passes OCR or ASR confidence into extraction yet (the #349 con
 
 | Finding | Reported to | Where |
 |---|---|---|
-| Extraction has no "no task here" outcome, so small talk becomes a confident task | R2, to be handled in #690 | _pending Yonit's confirmation_ |
+| Extraction had no "no task here" outcome, so small talk became a confident task | R2, #690 | **Resolved by #690**: re-recorded 2026-10-26, small talk now returns an empty task list |
 
 Not reported, because nothing differs from a written requirement:
 
 - Classification and owner confidence: #360 covers it and is deferred.
 - Duplicate-detection confidence: part of #476, in reserve.
-- Dependency-edge and related-task confidence: #476 requires it and has not started. That is pending work, not a deviation.
+- Dependency-edge confidence: since #355 the field is the raw cosine similarity copied in, which is exactly what #476 says to avoid. #476 is open and covers it, so this is pending work under R3's own issue, not a new report.
+- Related-task confidence: #476 requires it and has not started. That is pending work, not a deviation.
 - Non-English content: an accepted limitation (see above).
 - OCR and ASR not running in CI: neither #449 nor #478 requires it.
 
@@ -113,7 +116,7 @@ Not reported, because nothing differs from a written requirement:
 - The extraction results come from **one** recorded run of one live model (provider, model and date are in `eval/guardrails/recorded/*.json`). The tests replay that run deterministically, but another run or model may answer differently.
 - The cross-talk case overlaps the **same voice** with itself, which is likely easier than two different speakers.
 - **CI installs neither tesseract nor Whisper**, so the OCR and ASR cases skip there, as R4's own pipeline tests do. They run locally only.
-- **R3 is partial.** #476 had not started at the time of this audit, so duplicate detection, dependency edges and related search have no confidence to audit, and there is no adversarial case for them. Re-check when #476 lands.
+- **R3 is partial.** #476 has not started, so duplicate detection and related search have no confidence to audit, and dependency edges carry raw similarity in place of one. There is no adversarial case for R3. Re-check when #476 lands.
 - Out of scope: cost and latency (#484).
 
 ## 6. How to run
@@ -124,7 +127,7 @@ pytest tests/test_guardrails.py -v -rsx -s
 ```
 
 - `-s` prints one `[guardrail]` line per case with the observed values, pass or fail.
-- The extraction cases are `xfail(strict=True)`: the finding (or the accepted limitation) stays visible on every run, and the test turns into a failure the day a change makes it pass, so this report gets updated.
+- `non_english_text` is `xfail(strict=True)`: the accepted limitation stays visible on every run, and the test turns into a failure the day a change makes it pass, so this report gets updated. `no_action_items` passes since #690.
 - The OCR cases need the tesseract binary. The ASR cases need the Whisper `base.en` weights in `models/whisper/base.en/` (see `models/README.md`).
 - A failure caused by the local environment, such as a broken tesseract or weights that fail their pinned hash, skips the case rather than reporting a finding. The input is not what failed.
 - To re-record the extraction answers against a live model, run `scripts/record_guardrail_responses.py`. It needs a key, so it is manual only.

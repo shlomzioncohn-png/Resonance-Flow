@@ -1,7 +1,7 @@
 {
   "description": "Guardrail / adversarial eval set for #488. Separate from eval/personas/: the persona set tests ranking correctness on realistic scenarios, this set feeds deliberately bad input to each ML-inference point and checks for graceful failure. Expected behaviour was written before any case was run.",
   "outcomes": {
-    "graceful_failure": "The component returned its own typed failure result instead of output.",
+    "graceful_failure": "The component returned its own typed failure result, or (extraction, #690) an empty task list, instead of output.",
     "low_confidence": "The component returned output, but its confidence is below the case's threshold.",
     "partial": "Confidence reacted (lower than the clean reference) but stayed above the threshold. Documented, not asserted.",
     "silent": "Output with confidence at or above the threshold: confident-looking output from garbage or out-of-scope input.",
