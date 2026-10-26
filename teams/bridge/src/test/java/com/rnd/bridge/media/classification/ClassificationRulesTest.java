@@ -104,6 +104,40 @@ class ClassificationRulesTest {
     }
 
     @Test
+    void shortMeetingWithANearEmptyTranscriptIsATest() {
+        MeetingMetadata metadata = metadata(Instant.parse("2026-10-11T09:00:00Z"), Instant.parse("2026-10-11T09:02:00Z"));
+        String micCheck = "WEBVTT\n\n1\n00:00:01.000 --> 00:00:04.000\nשומעים אותי? אחת שתיים\n";
+
+        Classification result = rules.classifyMeeting(new MeetingClassificationInput(metadata, micCheck)).orElseThrow();
+
+        assertThat(result.category().value()).isEqualTo(MeetingCategory.TEST);
+        assertThat(result.reason()).isEqualTo("short meeting with only 4 transcribed words");
+    }
+
+    @Test
+    void shortMeetingWithAnEmptyTranscriptIsNotATest() {
+        // Nothing transcribed means transcription failed - never evidence of an empty meeting.
+        MeetingMetadata metadata = metadata(Instant.parse("2026-10-11T09:00:00Z"), Instant.parse("2026-10-11T09:02:00Z"));
+
+        assertThat(rules.classifyMeeting(new MeetingClassificationInput(metadata, "WEBVTT\n"))).isEmpty();
+    }
+
+    @Test
+    void longMeetingWithASparseTranscriptIsLeftForTheModel() {
+        MeetingMetadata metadata = metadata(Instant.parse("2026-10-11T09:00:00Z"), Instant.parse("2026-10-11T09:30:00Z"));
+        String sparse = "WEBVTT\n\n1\n00:00:01.000 --> 00:00:04.000\nok let's start\n";
+
+        assertThat(rules.classifyMeeting(new MeetingClassificationInput(metadata, sparse))).isEmpty();
+    }
+
+    @Test
+    void sparseTranscriptWithUnknownDurationIsLeftForTheModel() {
+        String sparse = "WEBVTT\n\n1\n00:00:01.000 --> 00:00:04.000\nok let's start\n";
+
+        assertThat(rules.classifyMeeting(new MeetingClassificationInput(null, sparse))).isEmpty();
+    }
+
+    @Test
     void meetingWithNoMetadataAndNoTranscriptIsLeftUndecided() {
         assertThat(rules.classifyMeeting(new MeetingClassificationInput(null, null))).isEmpty();
     }

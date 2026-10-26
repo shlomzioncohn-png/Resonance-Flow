@@ -317,7 +317,8 @@ a whole; it never extracts tasks, people, dates or priority - that stays with Mi
 
 1. **Rules first** (free, deterministic, `decided_by: RULE`): a meeting shorter than
    `min-meeting-duration` (default 30s) → `TEST`; a meeting with a single participant (distinct
-   people, so rejoins count once; unknown counts never trigger it) → `TEST`; a document whose pages were *all* checked and are all
+   people, so rejoins count once; unknown counts never trigger it) → `TEST`; a meeting under 3 minutes whose transcript has
+   1–14 words → `TEST`; a document whose pages were *all* checked and are all
    blank → `BLANK`. An empty transcript is deliberately *not* a rule - it means transcription
    failed, not that the meeting was empty.
 2. **Model second**, only for what the rules didn't settle (`decided_by: MODEL`): a meeting is
