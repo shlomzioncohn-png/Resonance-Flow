@@ -21,10 +21,17 @@ def _files(directory: Path) -> list[Path]:
     return sorted(p for p in directory.iterdir() if p.is_file() and p.name != SEAL_NAME)
 
 
-def seal(directory: Path, seed: int) -> dict:
-    record = {"seed": seed, "files": {p.name: _sha256(p) for p in _files(directory)}}
+def seal(directory: Path, seed: int, generator_version: str) -> dict:
+    record = {"seed": seed, "generator_version": generator_version,
+              "files": {p.name: _sha256(p) for p in _files(directory)}}
     (directory / SEAL_NAME).write_text(json.dumps(record, indent=2), encoding="utf-8")
     return record
+
+
+def sealed_version(directory: Path) -> str | None:
+    """The generator version a directory was written with, or None if it has no seal."""
+    seal_file = directory / SEAL_NAME
+    return json.loads(seal_file.read_text(encoding="utf-8")).get("generator_version") if seal_file.is_file() else None
 
 
 def verify(directory: Path) -> list[str]:

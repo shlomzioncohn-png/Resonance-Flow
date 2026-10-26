@@ -38,9 +38,11 @@ type does not change any other task's ids or behaviour (each disease and each ta
 
 **The eval set is sealed.** Every file the generator writes is fingerprinted in `SEAL.json` (SHA-256 of each file).
 Develop only against `data/dev`; do not open `data/eval` until the final evaluation, and run
-`python -m flow_health.generator --verify data/eval` first: it reports any file that was edited, added or removed.
+`python -m flow_health.generator --verify data/eval` first (it also says if the sealed data came from an older generator version): it reports any file that was edited, added or removed.
 The seed alone is not proof of "untouched", because the same seed gives different data once the generator's
-code changes, so a sealed set has to be regenerated and re-sealed (and the evaluation redone) after such a change.
+code changes. That is what `GENERATOR_VERSION` (`generator/version.py`, written to `manifest.json` and `SEAL.json`) is for: a test
+fails whenever the data a seed produces changes without a version bump, and a sealed set has to be regenerated and
+re-sealed (and the evaluation redone) after one.
 
 ## What it produces (per set)
 
@@ -59,7 +61,7 @@ table; there is no migration, and nothing here touches Chain's real tables:
 | `tasks.csv` | analysis input: per task `task_id`, `created_at`, `project_id` |
 | `task_meta.csv` | analysis input: per task `task_id` and `tier` (blank when unknown). Chain's tables have no tier column, so it lives here |
 | `answer_key_tasks.csv` | **answer key**: per task `true_tier`, project `archetype`, `kind` (`normal`, `slow_legit`, `control_chain`, ...), `disease_id`, `control_id` |
-| `manifest.json` | seed, config, counts, `as_of` (the "now" of the analysis), held-out types |
+| `manifest.json` | `generator_version`, seed, config, counts, `as_of` (the "now" of the analysis), held-out types |
 
 `ground_truth.*`, `healthy_controls.csv` and `answer_key_tasks.csv` are for evaluation only. The model's input is the two history tables plus `tasks.csv` and `task_meta.csv`.
 
@@ -102,7 +104,7 @@ When a group has too few peers the comparison widens step by step (the `level` f
 without a tier it drops the tier.
 
 **Diseases**, three severities each (`subtle`, `moderate`, `severe`), judged against the root's own
-tier (`peer_typical_days` in the ground truth). About a third of the hold-based ones are still **ongoing** when the history ends.
+tier (`peer_typical_days` in the ground truth). Each starts at a random point between 3% and 88% of the history, so patterns appear at the beginning, the middle and the end alike; one that cannot finish in time is still **ongoing** when the history ends (and a few of the hold-based ones are planted that way on purpose).
 
 | Type | What is planted | subtle / moderate / severe |
 |---|---|---|

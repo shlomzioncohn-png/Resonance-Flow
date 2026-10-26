@@ -13,6 +13,7 @@ from .diseases import DISEASE_TYPES
 from .model import World
 from .peers import UNKNOWN_TIER, PeerIndex
 from .seal import seal
+from .version import GENERATOR_VERSION
 from .severity import SeverityScorer
 from .visibility import Visibility
 from .simulation import History
@@ -125,6 +126,7 @@ def write_dataset(out_dir: Path, cfg: GeneratorConfig, world: World, history: Hi
 
     sick = {tid for d in world.diseases for tid in d.task_ids}
     manifest = {
+        "generator_version": GENERATOR_VERSION,
         "seed": cfg.seed,
         "history_start": cfg.start,
         "as_of": cfg.end,  # "now" for the analysis: open blocks are measured up to here
@@ -168,5 +170,5 @@ def write_dataset(out_dir: Path, cfg: GeneratorConfig, world: World, history: Hi
     _write_csv(out_dir / "ground_truth.csv",
                ["disease_id", "type", "severity", "severity_score", "severity_level", "tier", "in_stage_a", "visible_in_data", "visible_from", "not_visible_because", "element_type", "task_id", "depends_on_task_id", "role",
                 "window_start", "window_end", "ongoing_at_end"], rows)
-    seal(out_dir, cfg.seed)  # last: fingerprints everything written above
+    seal(out_dir, cfg.seed, GENERATOR_VERSION)  # last: fingerprints everything written above
     return manifest

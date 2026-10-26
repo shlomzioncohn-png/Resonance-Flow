@@ -93,6 +93,16 @@ def test_a_pattern_that_starts_just_before_the_end_is_not_yet_visible():
     assert late and all(observed[i]["not_visible_because"] == "too_recent" for i in late)
 
 
+def test_every_stage_a_disease_type_starts_along_the_whole_timeline_not_only_at_the_end(full):
+    span = (full.config.end - full.config.start).total_seconds()
+    for name in ("chronic_blocking", "recurring_blocker", "slow_chain"):
+        fifths = Counter(min(int((d.start - full.config.start).total_seconds() / span * 5), 4)
+                         for d in full.world.diseases if d.type == name)
+        assert fifths[0] >= 1 and fifths[3] + fifths[4] >= 1  # some at the beginning, some late
+        assert len([f for f in fifths.values() if f]) >= 4  # spread over most of the timeline
+        assert max(fifths.values()) <= 0.6 * sum(fifths.values())  # no single stretch holds most of them
+
+
 # ---- 3. the evaluation set is sealed ----
 
 def test_a_written_dataset_is_sealed_and_untouched(tmp_path):
@@ -137,5 +147,42 @@ def test_the_command_seals_both_sets_and_can_verify_them(tmp_path, capsys):
 
 def test_a_directory_without_a_seal_does_not_verify(tmp_path):
     assert verify(tmp_path) == [f"{tmp_path}: no {SEAL_NAME}"]
-    seal(tmp_path, 1)
+    seal(tmp_path, 1, "0")
     assert verify(tmp_path) == []
+
+
+# ---- the generator version ----
+
+GOLDEN_VERSION = "1.0.0"
+GOLDEN_DIGEST = "18cfda8c96a7880134f9a1bfecea9bcb35a4002e5b29f78a9b21d2121f697fa0"  # of the SMALL dataset below
+
+
+def test_manifest_and_seal_record_the_generator_version(tmp_path):
+    from flow_health.generator import GENERATOR_VERSION
+
+    data = generate(SMALL)
+    write_dataset(tmp_path, SMALL, data.world, data.history)
+    assert json.loads((tmp_path / "manifest.json").read_text())["generator_version"] == GENERATOR_VERSION
+    assert json.loads((tmp_path / SEAL_NAME).read_text())["generator_version"] == GENERATOR_VERSION
+
+
+def test_the_version_is_bumped_whenever_the_data_a_seed_gives_changes(tmp_path):
+    """If this fails you changed what the generator produces: bump GENERATOR_VERSION (version.py), then set
+    GOLDEN_VERSION and GOLDEN_DIGEST here to the new values, and re-seal / regenerate the evaluation set."""
+    import hashlib
+
+    from flow_health.generator import GENERATOR_VERSION
+
+    data = generate(SMALL)
+    write_dataset(tmp_path, SMALL, data.world, data.history)
+    files = json.loads((tmp_path / SEAL_NAME).read_text())["files"]
+    digest = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
+    assert (GENERATOR_VERSION, digest) == (GOLDEN_VERSION, GOLDEN_DIGEST)
+
+
+def test_verify_says_so_when_the_code_is_newer_than_the_seal(tmp_path, capsys, monkeypatch):
+    data = generate(SMALL)
+    write_dataset(tmp_path, SMALL, data.world, data.history)
+    monkeypatch.setattr("flow_health.generator.__main__.GENERATOR_VERSION", "9.9.9")
+    assert generate_cli(["--verify", str(tmp_path)]) == 0
+    assert "sealed with generator 1.0.0, this code is 9.9.9" in capsys.readouterr().out

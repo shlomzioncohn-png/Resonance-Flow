@@ -7,7 +7,8 @@ from pathlib import Path
 
 from . import GeneratorConfig, generate, validate
 from .export import write_dataset
-from .seal import verify
+from .seal import sealed_version, verify
+from .version import GENERATOR_VERSION
 
 DEFAULT_EVAL_SEED = 4242
 
@@ -33,6 +34,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.verify:
         problems = [e for d in args.verify for e in verify(d)]
         print(*(problems or ["untouched"]), sep="\n")
+        for d in args.verify:
+            if sealed_version(d) not in (None, GENERATOR_VERSION):
+                print(f"{d}: sealed with generator {sealed_version(d)}, this code is {GENERATOR_VERSION}; "
+                      "regenerating would give different data")
         return 1 if problems else 0
     if args.seed == args.eval_seed:
         p.error("--seed and --eval-seed must differ, otherwise eval shares its healthy data with dev")
