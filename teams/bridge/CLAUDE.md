@@ -58,15 +58,22 @@ predates this abstraction and does not use it (see §6).
   between that rename and this fix was silently rejected by Inbox's `@NotBlank` validation on
   `tenantId` (see §6) — `Task.organizationId` is deliberately NOT renamed to match, see above.
 
-**Do not conflate these or serialize `Task` directly onto Kafka** — that was `GitHubKafkaProducer`'s
-approach and it does not conform to the contract (§6). Build `BridgeTaskEventDto.from(task)` for
-anything Kafka-bound.
+**Do not conflate these or serialize `Task` directly onto Kafka** — that was the old lane
+producers' approach (`GitHubKafkaProducer`/`JiraKafkaProducer`, since deleted) and it did not
+conform to the contract (§6). Anything Kafka-bound goes through the shared
+`KafkaPayloadPublisher` → `StructuredTaskEventMapper` (Protobuf `StructuredTaskEvent`).
 
 `organizationId` on `Task` is `null` by default from `AbstractTaskMapper` (no lane has a general
 tenant-id source) — a subclass overrides `AbstractTaskMapper.organizationId()` only once it has
-an actual value, never a made-up one. `DealToTaskMapper` is the only override today, backed by
-`${bridge.crm.organization-id}` / `CRM_ORGANIZATION_ID` — one static value standing in for one
-account until Inbox supports resolving it per deal from `Deal.crmAccountSlug()`.
+an actual value, never a made-up one. Two configured values exist today, both fed by the same
+`CRM_ORGANIZATION_ID` env var (one deployment = one Inbox tenant):
+
+- `${bridge.crm.organization-id}` → `DealToTaskMapper` (CRM only — one static value standing in
+  for one account until Inbox supports resolving it per deal from `Deal.crmAccountSlug()`).
+- `${bridge.organization-id}` → `GitHubIssueMapper`, `GitHubPullRequestMapper`, `JiraIssueMapper`
+  (sources carry no tenant; the deployment-wide value stands in). Blank means "not configured"
+  and maps to `null`, preserving the contract gap for local `LoggingPayloadPublisher` runs — set
+  `CRM_ORGANIZATION_ID` before running any lane under the `kafka` profile.
 
 `DealToTaskMapper.toUrgency` also adds +1 (before the 1..5 clamp) for a deal in an open stage
 (`PROSPECT`/`QUALIFIED`/`PROPOSAL`/`NEGOTIATION`) that's sat in that stage at least
@@ -83,23 +90,30 @@ candidate); profile active → both beans exist, `@Primary` breaks the tie.
 
 | Concern | Default | Profile override |
 |---|---|---|
-| CRM deal source | `JsonDealRepository` (synthetic fixture) | `hubspot` → `HubSpotDealRepository` (live HubSpot API); `salesforce` → `SalesforceDealRepository` (live Salesforce REST API) |
-| CRM task publisher | `LoggingPayloadPublisher<Task>` (logs, publishes nowhere) | `kafka` → `KafkaPayloadPublisher` (real Kafka via `BridgeTaskEventDto`) |
+| CRM deal source | `JsonDealRepository` (synthetic fixture, active only when neither `hubspot` nor `salesforce` is) | `hubspot` → `HubSpotDealRepository` (live HubSpot API); `salesforce` → `SalesforceDealRepository` (live Salesforce REST API) — **additive**, both can be active together |
+| Task publisher (all lanes: CRM, GitHub, Jira) | `LoggingPayloadPublisher<Task>` (logs, publishes nowhere) | `kafka` → `KafkaPayloadPublisher` (real Kafka, Protobuf `StructuredTaskEvent` to `bridge.structured.tasks`) |
 
 Don't add a new switch without this pattern — a bespoke `if/else` in a `@Bean` method or a second
-mechanism will fight `@Primary` resolution. `hubspot` and `salesforce` are mutually exclusive, not
-stackable the way `kafka` is: both repository beans are independently `@Primary` within their own
-profile, so Spring has no tiebreaker if both are active at once. `CrmLaneConfig.dealToTaskMapper`
-fails startup with a clear `IllegalStateException` naming both profiles if that happens (same
-shape as the kafka/tenant-id check, §7) — see §10 for the Salesforce source specifically.
+mechanism will fight `@Primary` resolution.
+
+**Update 2026-10-19 (team lead decision): `hubspot` and `salesforce` now stack, the same way
+`kafka` does — one company uses every CRM tool at once, one tenant (`CRM_ORGANIZATION_ID`) for all
+of them.** Neither repository bean is `@Primary` anymore (that only ever existed to break a tie
+Spring would otherwise refuse to resolve when exactly one CRM source profile was expected).
+`CrmSyncService` (`crm.CrmSyncService`, not `CrmLaneConfig`) is what actually runs every active
+`DealRepository` each cycle — sequentially, one snapshot/`asOf` per source, catching one source's
+failure without blocking the rest; `CrmSyncJob`/`CrmBridgeController` both delegate to it (see
+§10). There is no "exactly one CRM profile" rule anymore and no startup check rejecting both
+being active together — that check existed and is gone.
 
 ## 6. Known gaps — don't silently "fix" these without asking
 
-- **`GitHubKafkaProducer` predates the Inbox Kafka contract and doesn't match it.** It publishes
-  the raw `Task` (snake_case, lowercase enums, no `eventId`), to whatever `spring.kafka.topic`
-  resolves to (currently `bridge.test` in `application.yml`, not `bridge.structured.tasks`). Do
-  not use it as a reference for new Kafka work — use the contract doc and `KafkaPayloadPublisher`
-  instead.
+- **Lane-specific Kafka producers — resolved, not a gap anymore.** `GitHubKafkaProducer` and
+  `JiraKafkaProducer` (raw `Task` serialization, wrong topics, no Schema Registry) were deleted;
+  every lane now injects the shared `PayloadPublisher<Task>`, which is `KafkaPayloadPublisher`
+  under the `kafka` profile (bean in `BridgeTaskKafkaConfig`) — Protobuf `StructuredTaskEvent` to
+  `bridge.structured.tasks`, blocking per record, callers catch `PublishException`/`ValidationException`
+  per record so one bad task can't fail a batch.
 - **`SourceType.MANUAL` — investigated, not a gap.** Inbox's Kafka contract lists `MANUAL` in the
   shared `sourceType` enum, which raised the question of whether Bridge's `SourceType` was missing
   a value. It isn't: per Inbox's own data schema spec, `MANUAL` denotes a task typed directly into
@@ -183,10 +197,19 @@ shape as the kafka/tenant-id check, §7) — see §10 for the Salesforce source 
   `` `C:\Program Files\JetBrains\IntelliJ IDEA <version>\plugins\maven\lib\maven3\bin\mvn.cmd` ``
   (find the exact `<version>` dir under `C:\Program Files\JetBrains\` — it changes with IDE
   updates).
-- **Default JDK breaks Mockito.** `.jdks\openjdk-26.0.1` (found via `$env:USERPROFILE\.jdks`) is
-  too new for this Spring Boot/Mockito version — `@Spy` fields fail to initialize. Use JDK 23 at
-  `C:\Program Files\Java\jdk-23` instead (`$env:JAVA_HOME` + prepend `bin` to `$env:PATH`); it
-  compiles the pom's `java.version=21` target fine and Mockito works normally under it.
+- **Default JDK breaks Mockito.** Whatever JDK `$env:USERPROFILE\.jdks` currently resolves to as
+  "default" has repeatedly turned out to be too new for this Spring Boot/Mockito version —
+  `@Spy`/inline-mock initialization fails (`Could not modify all classes ...`), seen first against
+  `openjdk-26.0.1`, then again against `openjdk-24` once that became the `.jdks` default (2026-10-18)
+  — this is a recurring pattern with "whatever's newest," not a one-time fact about build 26
+  specifically. **`C:\Program Files\Java\jdk-23` no longer exists on this machine** (checked
+  2026-10-18) — the JDK that actually works today is **JDK 21** at
+  `C:\Program Files\Eclipse Adoptium\jdk-21.0.12.8-hotspot` (`$env:JAVA_HOME` + prepend `bin` to
+  `$env:PATH`); it compiles the pom's `java.version=21` target fine and Mockito works normally
+  under it. **Don't trust a hardcoded path here going forward** — if this one also stops existing,
+  find a JDK 21 via `Get-ChildItem "C:\Program Files" -Recurse -Filter java.exe -ErrorAction
+  SilentlyContinue` (or the Bash/`find` equivalent) rather than assuming the last-known-good path
+  is still there; this is the second time it's moved.
 - **`protobuf-maven-plugin`'s `protoc.exe` fails on a non-ASCII checkout path.** If the repo sits
   under a path containing non-ASCII characters (this machine's checkout is under a Hebrew-named
   folder), `mvn compile`/`test` fails with `PROTOC FAILED: ...: warning: directory does not
@@ -257,12 +280,14 @@ suite (126 tests, 0 failures — see §7):
   (`CrmLaneConfig.dealToTaskMapper`, CRM-lane audit finding F5).
 - **Snapshot-per-sync, latest-state-per-deal (added 2026-10-06, audit findings F1/F2/F14/F9).**
   `DealRepository.snapshot()` performs one fresh fetch and returns an immutable `DealSnapshot`
-  (`asOf`, full history, `latestPerDeal()`, `skippedAtRead`). `CrmBridgeController` and
-  `CrmSyncJob` each take exactly one snapshot per run and call
-  `crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf())` — never the old
-  `ReadCursor`/`ReadCursor.full()` overload, which would let the deals and `asOf` come from two
-  separate fetches. `CrmSourceReader.read()` also returns `latestPerDeal()`, so the generic
-  `AbstractIntakeLane.run(ReadCursor, Instant)` path (used by `CrmLaneIntegrationTest`) agrees.
+  (`asOf`, full history, `latestPerDeal()`, `skippedAtRead`). **Update 2026-10-19:** `CrmSyncService`
+  (not `CrmBridgeController`/`CrmSyncJob` directly anymore — see §10) takes exactly one snapshot
+  per *source* per run and calls `crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf())`
+  — never the old `ReadCursor`/`ReadCursor.full()` overload, which would let the deals and `asOf`
+  come from two separate fetches. `CrmSourceReader.read()` still returns `latestPerDeal()` too, but
+  is single-source only now (it throws if more than one `DealRepository` is active) and is
+  exercised only by `CrmLaneIntegrationTest`'s generic `AbstractIntakeLane.run(ReadCursor, Instant)`
+  path, not by either real entry point.
   **`DealRepository` has only `snapshot()` now** — the five old per-instance-cached finder methods
   (`asOf()`, `findAll()`, …) were deprecated, then removed outright (2026-10-06, same day): nothing
   called them except their own test suite, and leaving a cache field on `HubSpotDealRepository`
@@ -281,10 +306,13 @@ suite (126 tests, 0 failures — see §7):
   approach §10's Salesforce fix already used, so that failure mode is gone — a renamed/custom
   label with valid metadata just resolves correctly.
   `SyncJobScheduler`'s shared `catch (RuntimeException e) { log.error(...) }` (every `SyncJob`'s
-  failure handling, not just CRM's — see §9.4) and
-  `CrmBridgeController.handleSnapshotFailure` (a 503 with the exception's message, not the
-  framework's default message-less 500) still apply to what genuinely can't be isolated to one
-  stage (§11's FAIL STARTUP / FAIL RUN rows).
+  failure handling, not just CRM's — see §9.4) still applies to a pipeline/stage-level problem
+  severe enough to fail an entire source's `snapshot()` call (§11's FAIL STARTUP / FAIL RUN rows)
+  — but per-source failure isolation (one source's exception never blocking the others) is
+  `CrmSyncService`'s job now, not a controller-level exception handler (§10;
+  `CrmBridgeController`'s old `handleSnapshotFailure` is gone — a source failing entirely is just
+  one more `CrmSourceResult` with a non-null `error`, not a thrown exception reaching the
+  controller).
   Only a CRM-only `CrmTaskValidator` (wraps the shared `TaskValidator`, adds tenant-UUID/
   `sourceRef` checks) is new for F5 — the shared `TaskValidator` itself is unchanged, since
   GitHub/JIRA/`TaskEnrichmentConsumer` share it directly and never set a tenant id.
@@ -314,22 +342,126 @@ suite (126 tests, 0 failures — see §7):
   Bean wiring in `CrmLaneConfig` follows the default/profile-override convention (§5): fixture vs.
   `hubspot`, logging vs. `kafka` publisher.
 - **`CrmBridgeController`** — `POST /bridge/crm/sync`, the (currently only) trigger for a CRM
-  sync run. No auth (documented gap, not solved here). No single-flight guard against concurrent
-  POSTs (harmless today with the logging publisher; not once Kafka is the default).
-- **Kafka publish path** — `KafkaPayloadPublisher` (kafka profile) builds `BridgeTaskEventDto`
-  from `Task` (via `BridgeTaskEventDto.from(task)`) and publishes to
-  `${bridge.structured-tasks-topic:bridge.structured.tasks}` — the real Inbox contract shape
-  (camelCase, `UPPER_SNAKE_CASE` enums, fresh `eventId`), **not** the same path
-  `GitHubKafkaProducer` uses (§6 — that one is a known, separate gap, untouched).
+  sync run; delegates to `CrmSyncService.syncAll()` (2026-10-19, see §10) rather than reading a
+  `DealRepository` itself. The response keeps the original top-level sums
+  (`read`/`published`/`rejected`/`errors`/`skippedAtRead`, now summed across every active source)
+  and adds `sources[]`, one entry per source; 200 if at least one source succeeded, 503 only if
+  every source failed that cycle. No auth (documented gap, not solved here). No single-flight
+  guard against concurrent POSTs (harmless today with the logging publisher; not once Kafka is
+  the default).
+- **Kafka publish path** — `KafkaPayloadPublisher` (kafka profile, bean in `BridgeTaskKafkaConfig`,
+  shared by every lane) maps `Task` to Protobuf `StructuredTaskEvent` via `StructuredTaskEventMapper`
+  and publishes to `${bridge.structured-tasks-topic:bridge.structured.tasks}` — the real Inbox
+  contract shape (fresh `eventId`, Schema Registry serialization).
 - **`.env.example`** documents `CRM_ORGANIZATION_ID` as a per-environment real UUID Inbox
   (Ayala) still needs to hand back for dev/staging/prod — placeholder value is not usable as-is.
 
 ### 9.3 What's done — enrichment scaffolding (Stage 3, first slice only)
-
 New package `com.rnd.bridge.enrichment`, built 2026-09-06 on `ruth/llm-enrichment`, committed
 (`bb84a69`), merged into `ruth/bridge-core` via PR #286 (§9.1 item 3):
 
-- `DueDateSuggestion`, `SeveritySuggestion`, `DependencySuggestion` (+ `DependencyRelation` enum:
+- `DueDateSuggestion`, `SeveritySuggestion`, `DependencySuggestion` (+ `DependencyRelation` Checking whether Task.snoozedUntil/TaskStatus.SNOOZED still exist in the working tree (our side removed the mapping; main kept the field):
+
+Command Select-String in …\Resonance-Flow
+
+Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\model\Task.java" -Pattern "snoozed|SNOOZED"; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\model\TaskStatus.java" -Pattern "SNOOZED"; "=== mapper method in worktree ==="; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java" -Pattern "toSnoozedUntil|SNOOZED" -Context 3,3; "=== abstract ==="; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\AbstractTaskMapper.java" -Pattern "snoozed"
+\Task.java" -Pattern "snoozed|SNOOZED"; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\model\TaskStatus.java" -Pattern "SNOOZED"; "=== mapper method in worktree ==="; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java" -Pattern "toSnoozedUntil|SNOOZED" -Context 3,3; "=== abstract ==="; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\AbstractTaskMapper.java" -Pattern "snoozed"
+=== mapper method in worktree ===
+
+  teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java:41:    public static TaskStatus toTaskStatus(DealStage stage) {
+  teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java:42:        return switch (stage) {
+  teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java:43:            case PROSPECT, QUALIFIED, PROPOSAL, NEGOTIATION -> TaskStatus.NEW;
+> teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java:44:            // Not SNOOZED: Inbox requires snoozed_until, and a Deal has no resume date to give it.
+  teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java:45:            case ON_HOLD -> TaskStatus.NEW;
+  teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java:46:            case CLOSED_WON -> TaskStatus.DONE;
+  teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java:47:            case CLOSED_LOST -> TaskStatus.CANCELLED;
+=== abstract ===
+
+The first grep output was cut — verifying whether Task.snoozedUntil still exists in the working tree, since tests still reference it:
+
+Command Select-String in …\Resonance-Flow
+
+Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\model\Task.java" -Pattern "snoozed" | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }; "===status==="; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\model\TaskStatus.java" -Pattern "SNOOZED" | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }; "===mapper ctor call==="; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\AbstractTaskMapper.java" -Pattern "snoozed" | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }
+_.Line.Trim())" }; "===status==="; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\model\TaskStatus.java" -Pattern "SNOOZED" | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }; "===mapper ctor call==="; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\AbstractTaskMapper.java" -Pattern "snoozed" | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }
+===status===
+===mapper ctor call===
+
+The semantic conflict: our commit removed snoozedUntil/SNOOZED, but main's updated tests still reference them — that would break compilation. Fixing the three test files:
+
+Main's newer code still uses snoozedUntil/SNOOZED — which our commit deleted. I need to check every place the new main code references them so the merged code compiles:
+
+Command git, Select-Object, Measure-Object in …\Resonance-Flow
+
+"=== snoozed refs in main source (working tree) ==="; git grep -n "snoozedUntil\|toSnoozedUntil\|SNOOZED" -- "teams/bridge/src/main/java" | Select-Object -First 20; "=== new Task( calls count check ==="; git grep -rn "new Task(" -- "teams/bridge/src" | Measure-Object | Select-Object Count
+=== snoozed refs in main source (working tree) ===
+teams/bridge/src/main/java/com/rnd/bridge/crm/mapper/DealToTaskMapper.java:44:            // Not SNOOZED: Inbox requires snoozed_until, and a Deal has no resume date to give it.
+=== new Task( calls count check ===
+
+Count
+-----
+   43
+
+Command git, Select-String, Select-Object in …\Resonance-Flow
+
+"=== our commit's changes to Task/TaskStatus (f2f03c55 vs its base? use the commit) ==="; git show 92edf44b -- teams/bridge/src/main/java/com/rnd/bridge/task/model/Task.java teams/bridge/src/main/java/com/rnd/bridge/task/model/TaskStatus.java | Select-String "^[-+].*snoozed|^[-+].*SNOOZED"; "=== all new Task( call sites with arg lines ==="; git grep -rn "new Task(" -- "teams/bridge/src" | Select-Object -First 50
+=== our commit's changes to Task/TaskStatus (f2f03c55 vs its base? use the commit) ===
+
+-        Instant snoozedUntil,
+-    SNOOZED,
+=== all new Task( call sites with arg lines ===
+teams/bridge/src/main/java/com/rnd/bridge/task/AbstractTaskMapper.java:123:        return new Task(
+teams/bridge/src/main/java/com/rnd/bridge/task/enrichment/TaskEnrichmentConsumer.java:72:        return new Task(
+teams/bridge/src/main/java/com/rnd/bridge/task/enrichment/TaskEnrichmentConsumer.java:94:        return new Task(
+teams/bridge/src/test/java/com/rnd/bridge/crm/CrmTaskValidatorTest.java:23:        return new Task(
+teams/bridge/src/test/java/com/rnd/bridge/crm/CrmTaskValidatorTest.java:90:        return new Task(tenantId, t.projectId(), t.title(), t.description(), t.status(), t.urgency(),
+teams/bridge/src/test/java/com/rnd/bridge/crm/CrmTaskValidatorTest.java:96:        return new Task(t.organizationId(), t.projectId(), t.title(), t.description(), t.status(), t.urgency(),
+teams/bridge/src/test/java/com/rnd/bridge/crm/CrmTaskValidatorTest.java:102:        return new Task(t.organizationId(), t.projectId(), title, t.description(), t.status(), t.urgency(),
+teams/bridge/src/test/java/com/rnd/bridge/publish/LoggingPayloadPublisherTest.java:20:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/publish/kafka/KafkaPayloadPublisherTest.java:63:        return new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/BridgeTaskEventDtoInboxContractTest.java:107:        return new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/BridgeTaskEventDtoTest.java:54:        return new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventInboxMappingTest.java:33:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:41:        return new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:47:        return new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:151:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:175:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:193:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:230:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:256:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:266:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:275:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:289:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:301:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:310:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:320:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:330:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:340:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:349:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:359:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:368:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:415:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:449:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:484:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:521:        Task task = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventWireFormatTest.java:84:        Task minimal = new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventWireFormatTest.java:122:        return new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/TaskValidatorTest.java:23:        return new Task(
+teams/bridge/src/test/java/com/rnd/bridge/task/TaskValidatorTest.java:74:        return new Task(t.organizationId(), t.projectId(), t.title(), t.description(), t.status(), urgency,
+teams/bridge/src/test/java/com/rnd/bridge/task/TaskValidatorTest.java:80:        return new Task(t.organizationId(), t.projectId(), t.title(), t.description(), t.status(), t.urgency(),
+teams/bridge/src/test/java/com/rnd/bridge/task/TaskValidatorTest.java:86:        return new Task(t.organizationId(), t.projectId(), t.title(), t.description(), t.status(), t.urgency(),
+teams/bridge/src/test/java/com/rnd/bridge/task/TaskValidatorTest.java:92:        return new Task(t.organizationId(), t.projectId(), t.title(), t.description(), status, t.urgency(),
+teams/bridge/src/test/java/com/rnd/bridge/task/TaskValidatorTest.java:98:        return new Task(t.organizationId(), t.projectId(), title, t.description(), t.status(), t.urgency(),
+teams/bridge/src/test/java/com/rnd/bridge/task/model/TaskSerializationTest.java:39:        return new Task(
+
+Our commit removed snoozedUntil/SNOOZED, but main's updated tests still use them — semantic conflict that won't compile. Checking the Task record arity mismatch across test call sites:
+
+Command Select-String, Select-Object, Get-Content in …\Resonance-Flow
+
+36 x 10
+Task now has 15 fields (we removed snoozedUntil), but main's updated tests may still construct 16-arg Tasks. Checking which files our commit touched vs. which contain stale call sites:
+
+Command git, Select-String in …\Resonance-Flow
+"=== files oenum:
   `BLOCKS`/`BLOCKED_BY`/`FIXES`/`RELATES_TO`) — each carries its own `confidence` (`double`,
   0.0–1.0, never null) and a `rationale` string. `SeveritySuggestion.label` is a free-text token
   (e.g. "P0", "critical"), deliberately **not** `task.model.Tier` — Tier is an org-scope axis
@@ -382,9 +514,9 @@ that brief, not a linked spec.
      - **GitHub**: `GitHubSyncScheduler` (`@Scheduled`, default cron `0 0 2 * * ?`, gated by
        `@EnableScheduling` in `GitHubSchedulerConfig`) exists, but is **disabled by default**
        (`github.sync.cron.enabled: ${GITHUB_SYNC_CRON_ENABLED:false}`, not set true anywhere in
-       `.env.example` or any profile yml). Even if enabled, it publishes through
-       `GitHubKafkaProducer`, which is the known-stale gap from §6 (wrong topic, wrong wire
-       shape) — so enabling it today would not correctly reach Inbox anyway. **Not migrated to
+       `.env.example` or any profile yml). It publishes through the shared `PayloadPublisher<Task>`
+       (`KafkaPayloadPublisher` under the `kafka` profile) — the correct Protobuf path to
+       `bridge.structured.tasks` since the lane producers were unified. **Not migrated to
        `SyncJob`** (2026-10-12) — GitHub/Jira are Hadas's own schedulers, and `GitHubSyncScheduler`
        is reactive (`Mono`-based) rather than returning `IntakeResult`, unlike every `SyncJob`;
        left exactly as-is, the owner's call.
@@ -435,9 +567,10 @@ that brief, not a linked spec.
 
 ## 10. Salesforce CRM source
 
-`SalesforceDealRepository` (`@Repository @Profile("salesforce") @Primary`) is the third
-`DealRepository` implementation, alongside `JsonDealRepository` (default) and
-`HubSpotDealRepository` (`hubspot`). Full design rationale lives in
+`SalesforceDealRepository` (`@Repository @Profile("salesforce")`) is the third `DealRepository`
+implementation, alongside `JsonDealRepository` (default, active only when neither `hubspot` nor
+`salesforce` is) and `HubSpotDealRepository` (`hubspot`) — all three can be registered at once now
+(§5's 2026-10-19 update). Full design rationale lives in
 `teams/bridge/docs/crm-salesforce-design.md` — this section is the short version plus the things
 most likely to trip someone up.
 
@@ -448,9 +581,10 @@ most likely to trip someone up.
   refreshed *reactively* on a `401` (refreshed once, triggering call retried once — a second `401`
   after a genuinely fresh token is fatal, not looped).
 - **`dealId` is always the bare `Opportunity.Id` — never prefixed.** Per-source `sourceRef` needs
-  go through `Deal.sourceRefPrefix` instead (defaults to `"crm:"` in the builder and for
-  HubSpot/JSON, both of which never set it; `SalesforceDealRepository` sets it to
-  `"crm:salesforce:"`). `DealToTaskMapper.toSourceRef` is `deal.sourceRefPrefix() + deal.dealId()`
+  go through `Deal.sourceRefPrefix` instead (defaults to `"crm:"` in the builder — JSON never sets
+  it; `HubSpotDealRepository` sets it to `"crm:hubspot:"`; `SalesforceDealRepository` sets it to
+  `"crm:salesforce:"` — distinct per source so the same raw id from two CRMs never collides).
+  `DealToTaskMapper.toSourceRef` is `deal.sourceRefPrefix() + deal.dealId()`
   — no per-source branch in the mapper, and `dealId()` is the same bare value everywhere, so
   `fetchDeal(deal.dealId())` always round-trips. Don't reintroduce a prefixed `dealId` to solve a
   future per-source `sourceRef` need — extend `sourceRefPrefix` (or add a sibling field) instead.
@@ -485,9 +619,24 @@ most likely to trip someone up.
   a short per-second bucket like HubSpot's `429`, so backing off cannot make it succeed sooner.
   `500`/`502`/`503`/`504` and transport failures (connect/read timeout, DNS/IO errors) **are**
   retried with exponential backoff, same as `HubSpotClient`.
-- **`hubspot` and `salesforce` are mutually exclusive profiles** — see §5's table note. Both active
-  at once fails startup with an `IllegalStateException` naming both, from
-  `CrmLaneConfig.dealToTaskMapper` (`CrmLaneConfigTest.failsToStartWhenBothHubspotAndSalesforceProfilesAreActive`).
+- **`hubspot` and `salesforce` now stack — team lead decision, 2026-10-19: one company, every CRM
+  tool active at once.** Both profiles can be active together
+  (`SPRING_PROFILES_ACTIVE=kafka,hubspot,salesforce`); neither repository bean is `@Primary`
+  anymore (see §5). `CrmSyncService` runs every active `DealRepository` each cycle, sequentially,
+  one snapshot/`asOf` per source, catching a source's `RuntimeException` and continuing with the
+  rest — a HubSpot outage never blocks Salesforce's publish, or vice versa. `CrmSyncJob`/
+  `CrmBridgeController` both delegate to it instead of talking to a `DealRepository` directly; the
+  HTTP response's `sources[]` carries one entry per source, and the endpoint only returns 503 if
+  **every** source failed that cycle (200 if at least one succeeded). There is no longer a startup
+  check rejecting both profiles together — that check, and the "exactly one CRM profile" rule it
+  enforced, are both gone.
+- **If the same business deal exists in both HubSpot and Salesforce, Bridge publishes both as
+  separate Tasks** — `crm:hubspot:<id>` and `crm:salesforce:<id>` are always distinct `sourceRef`s
+  (== Inbox's dedup key) by construction, even for the same underlying deal. Business-level
+  deduplication across CRM sources is explicitly out of Bridge's scope; the working assumption is
+  that downstream consumption (Mind indexing tasks off Inbox's `task.created` event) can tolerate
+  or itself reconcile two Tasks for one real-world deal — **not yet confirmed with the Mind
+  team.**
 - **No Salesforce org exists for this work yet** (design doc §9) — everything above is verified
   against `SalesforceClient`/`SalesforceDealRepository`'s own test suites
   (`MockWebServer`-backed, no live calls), not against a real org. **Update 2026-10-14: the
@@ -546,3 +695,27 @@ surfaces `skippedAtRead` in `CrmSyncResponse`'s JSON body.
 `bridge.crm.hubspot.max-skipped-ratio` is **HubSpot-only for now** — Salesforce's per-record skip
 (§10) has no equivalent aggregate threshold yet. Out of scope for this task; flagged as a
 candidate for the same guard later.
+
+## 12. Shared AI infrastructure (`com.rnd.bridge.ai`, added 2026-10-20)
+
+Every model (LLM) call in Bridge goes through `LlmClients.forUsage("<usage>")` - see
+`src/main/java/com/rnd/bridge/ai/README.md` for the five-line usage example, the settings and the
+design (Registry + Decorator chain + Strategy per provider). Don't write another HTTP client for a
+model; add a usage instead.
+
+- Settings: `bridge.ai.*` - `providers` (each key once), `models` (the one shared list), optional
+  `usages` overrides. "usage", not "profile": Spring's `@Profile` already means something else here
+  (§5).
+- **Free only, by design** (`bridge.ai.free-only: true`): startup fails if any listed model isn't
+  `free: true`. The real guarantee is a Gemini key from a project with no billing.
+- PII redaction (email/phone/Israeli ID/card/IBAN) applies to the text sent to the model only -
+  never to what Bridge publishes (Mind reads `RawObjectEvent` unredacted, agreed with Mind's
+  team, who chose on 2026-10-19 to keep separate LLM implementations rather than share one).
+- **Free-tier budget:** Gemini's free tier allows ~20 requests/day per model per project, shared by
+  every usage on it - keep the usages' `daily-call-limit`s summing to at most that. Thinking is
+  off (`reasoning-effort: none`), replies capped (`max-output-tokens`). A 429 asking to wait
+  longer than 30s is a spent quota: not retried, and that model fails fast until the reset.
+- Media classification is the first user (usages `media-meeting`, `media-document`).
+  `BRIDGE_MEDIA_CLASSIFIER_API_KEY` still works as a fallback for `BRIDGE_AI_GEMINI_API_KEY`.
+- Not done yet: the Helm side (mounting the key into the cluster) - deliberately last, with relay,
+  once everything works locally. `EnrichmentService` (§9.3) is a natural next user.

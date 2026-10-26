@@ -2,7 +2,7 @@ package com.rnd.bridge;
 
 import com.rnd.bridge.intake.config.CalendarImportProperties;
 import com.rnd.bridge.intake.config.ChatSessionProperties;
-import com.rnd.bridge.intake.config.GmailImportProperties;
+import com.rnd.bridge.intake.config.DriveImportProperties;
 import com.rnd.bridge.intake.config.GoogleOAuthProperties;
 import com.rnd.bridge.intake.config.ScopingProperties;
 import com.rnd.bridge.intake.config.SlackApiProperties;
@@ -10,6 +10,7 @@ import com.rnd.bridge.intake.config.WhatsAppImportProperties;
 import java.time.Clock;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import com.rnd.bridge.ai.AiProperties;
 import com.rnd.bridge.media.classification.MediaClassificationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -24,8 +25,9 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
     SlackApiProperties.class,
     GoogleOAuthProperties.class,
     CalendarImportProperties.class,
-    GmailImportProperties.class,
-    MediaClassificationProperties.class
+    DriveImportProperties.class,
+    MediaClassificationProperties.class,
+    AiProperties.class
 })
 public class BridgeApplication {
 

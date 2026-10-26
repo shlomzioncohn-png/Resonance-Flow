@@ -137,6 +137,9 @@ components:
       - name: mind-llm-credentials
         mountPath: /etc/resonance-flow/secrets/llm
         readOnly: true
+      - name: kafka-sasl-credentials
+        mountPath: /etc/resonance-flow/secrets/kafka-sasl
+        readOnly: true
     dependencySecretVolumes:
       - name: object-storage-credentials
         dependencyName: object-storage
@@ -150,6 +153,9 @@ components:
         secret:
           secretName: resonance-flow-mind-llm
           optional: true
+      - name: kafka-sasl-credentials
+        secret:
+          secretName: resonance-flow-kafka-sasl-credentials
     # Mounted as config.yaml at /etc/resonance-flow/config/ - keys are what MIND reads.
     config:
       vector_store:
@@ -191,6 +197,8 @@ components:
       - name: notification-delivery
         port: 80
     config:
+      server:
+        port: 8082
       inbox:
         service:
           url: http://resonance-flow-inbox:80
@@ -216,7 +224,15 @@ components:
     service: *defaultService
     resources: *defaultResources
     <<: *defaultHealthProbes
-    env: {}
+    env:
+      # Required so BridgeTaskKafkaConfig's Protobuf producer (and the
+      # KafkaPayloadPublisher bean) activate - without it everything falls
+      # back to LoggingPayloadPublisher and nothing reaches Inbox.
+      SPRING_PROFILES_ACTIVE: "kafka"
+      # Deployment must --set a real Inbox tenant UUID (blank fails CrmLaneConfig's
+      # kafka-profile startup check by design). Feeds both bridge.crm.organization-id
+      # and bridge.organization-id (GitHub/Jira) via application.yml.
+      CRM_ORGANIZATION_ID: ""
     objectStorage:
       bucket: "bridge-raw"
     config:
@@ -225,10 +241,8 @@ components:
           import:
             - "configtree:/etc/resonance-flow/secrets/object-storage/"
             - "configtree:/etc/resonance-flow/secrets/kafka/"
+            - "configtree:/etc/resonance-flow/secrets/bridge-db/"
         kafka:
-          # GitHub currently publishes to bridge.github.tasks.
-          # Issue #275 will decide whether to use the shared topic instead.
-          topic: "bridge.github.tasks"
           properties:
             security.protocol: "SASL_PLAINTEXT"
             sasl.mechanism: "PLAIN"
@@ -246,6 +260,12 @@ components:
         target:
           project: "${JIRA_TARGET_PROJECT:}"
       bridge:
+        postgres:
+          # Separate control-plane state from Inbox's tasks database.
+          # The URL is resolved in Bridge's ConfigMap from its PostgreSQL dependency.
+          database: bridge
+          user: bridge
+          password: "${password}"
         structured-tasks-topic: "bridge.structured.tasks"
         crm:
           organization-id: "${CRM_ORGANIZATION_ID:}"
@@ -283,7 +303,7 @@ components:
           zoom-recordings-dir: "${BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR:}"
           bbb-recordings-dir: "${BRIDGE_MEDIA_BBB_RECORDINGS_DIR:}"
           scanned-docs-dir: "${BRIDGE_MEDIA_SCANNED_DOCS_DIR:}"
-          tenant-id: "${BRIDGE_MEDIA_TENANT_ID:kamatech}"
+          tenant-id: "${BRIDGE_TENANT_ID:00000000-0000-0000-0000-000000000001}"
           min-file-size-bytes: "${BRIDGE_MEDIA_MIN_FILE_SIZE_BYTES:1}"
     volumeMounts:
       - name: object-storage-credentials
@@ -291,6 +311,9 @@ components:
         readOnly: true
       - name: kafka-credentials
         mountPath: /etc/resonance-flow/secrets/kafka
+        readOnly: true
+      - name: bridge-db-credentials
+        mountPath: /etc/resonance-flow/secrets/bridge-db
         readOnly: true
     dependencySecretVolumes:
       - name: object-storage-credentials
@@ -300,14 +323,23 @@ components:
             path: minio.access-key
           - key: root-password
             path: minio.secret-key
+    volumes:
+      - name: bridge-db-credentials
+        secret:
+          secretName: resonance-flow-bridge-db-credentials
       - name: kafka-credentials
-        dependencyName: kafka-user-passwords
-        items:
-          - key: client-passwords
-            path: kafka.password
+        secret:
+          secretName: resonance-flow-kafka-sasl-credentials
+          items:
+            - key: client-passwords
+              path: kafka.password
     dependencies:
       - name: object-storage
         port: 9000
+      - name: schema-registry
+        port: 8080
+      - name: postgresql
+        port: 5432
   lens-frontend:
     enabled: true
     replicaCount: 1
@@ -391,17 +423,23 @@ components:
     <<: *defaultHealthProbes
     # Password comes from the chain-db-credentials Secret, mounted as a file below -
     # not a literal here, not an env var; created once by the chain db-credentials
-    # hook Job, not rendered as a chart resource. secretName must match the fullname-prefixed name
-    # templates/services/chain/configmap.yaml renders (fullname resolves to the
-    # fixed "resonance-flow" release name this chart is always installed as).
+    # hook Job, not rendered as a chart resource. secretName must match the
+    # "<fullname>-chain-db-credentials" name that hook creates (_db-credentials-hook.tpl;
+    # fullname is the fixed "resonance-flow").
     volumeMounts:
       - name: chain-db-credentials
         mountPath: /etc/resonance-flow/secrets/chain-db
+        readOnly: true
+      - name: kafka-sasl-credentials
+        mountPath: /etc/resonance-flow/secrets/kafka-sasl
         readOnly: true
     volumes:
       - name: chain-db-credentials
         secret:
           secretName: resonance-flow-chain-db-credentials
+      - name: kafka-sasl-credentials
+        secret:
+          secretName: resonance-flow-kafka-sasl-credentials
     dependencies:
       - name: postgresql
         port: 5432
@@ -417,11 +455,11 @@ components:
           consumerGroupId: chain-service
           topics:
             taskSchedulingUpdated: task.scheduling.updated # produced, consumed by Inbox
-            # Consumed, Protobuf (#467): task.created/updated from Inbox, proposals from Mind.
-            taskCreated: task.created
+            # Consumed, Protobuf (#467): task.updated/completed from Inbox, proposals from Mind.
             taskUpdated: task.updated
             taskCompleted: task.completed
             dependenciesProposed: task.dependencies.proposed
+            scoreProposed: task.score.proposed
             # taskDependenciesRemoved intentionally omitted: Chain confirmed (#385 follow-up)
             # removeDependency is REST-only (Lens BFF -> Chain), no Kafka topic behind it today -
             # task.dependencies.removed was proposed but is not active. May return once #133
@@ -462,10 +500,16 @@ components:
       - name: inbox-db-credentials
         mountPath: /etc/resonance-flow/secrets/inbox-db
         readOnly: true
+      - name: kafka-sasl-credentials
+        mountPath: /etc/resonance-flow/secrets/kafka-sasl
+        readOnly: true
     volumes:
       - name: inbox-db-credentials
         secret:
           secretName: resonance-flow-inbox-db-credentials
+      - name: kafka-sasl-credentials
+        secret:
+          secretName: resonance-flow-kafka-sasl-credentials
     dependencies:
       - name: postgresql
         port: 5432
@@ -474,7 +518,9 @@ components:
     config:
       data:
         datasource:
-          # Own user, owning postgresql.auth.database - not the subchart's superuser.
+          # Own database and user - CI's tests run as postgres on postgresql.auth.database,
+          # and tables they create there would be unreadable by this user.
+          database: inbox
           username: inbox
         kafka:
           consumerGroupId: inbox-service
@@ -486,7 +532,9 @@ components:
     enabled: true
     replicaCount: 1
     image:
-      # In-memory Apicurio registry - not durable, fine for dev/CI only.
+      # In-memory Apicurio registry - not durable, fine for dev/CI only. Any restart (e.g. a
+      # liveness kill under load) drops every schema: rerun schema-sync-hook, then restart the
+      # producers - Confluent clients cache the latest version they looked up.
       repository: "apicurio/apicurio-registry-mem"
       pullPolicy: IfNotPresent
       tag: "2.5.11.Final"
@@ -580,6 +628,14 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
+    volumeMounts:
+      - name: kafka-sasl-credentials
+        mountPath: /etc/resonance-flow/secrets/kafka-sasl
+        readOnly: true
+    volumes:
+      - name: kafka-sasl-credentials
+        secret:
+          secretName: resonance-flow-kafka-sasl-credentials
     dependencies:
       - name: schema-registry
         port: 8080
@@ -609,15 +665,12 @@ kafka:
   # The client listener defaults to SASL_PLAINTEXT (chart-level, not something we chose here),
   # but nothing was ever configured to authenticate against it - every consuming service's
   # client silently failed the handshake and retried forever without ever actually connecting
-  # or crashing (verified locally). Pinning explicit client credentials here (instead of the
-  # chart's own randomly-generated ones) so every component's mounted config can reference the
-  # same known username/password - see resonance-flow.kafkaSaslJaasConfig in _helpers.tpl.
+  # or crashing (verified locally).
   sasl:
     client:
       users:
         - inbox
-      passwords:
-        - "resonance-flow-dev-sasl"
+    existingSecret: resonance-flow-kafka-sasl-credentials
   # Single combined controller+broker node (controller.replicaCount: 1, broker.replicaCount: 0
   # below) - Kafka's built-in defaults for these three (3, 3, 2) can never be satisfied with
   # only one broker, so __consumer_offsets/__transaction_state auto-creation retries forever
@@ -631,6 +684,9 @@ kafka:
   controller:
     replicaCount: 1
     controllerOnly: false
+    # Bitnami's default heap is 75% of the limit (576Mi of 768Mi), leaving too little for
+    # Kafka's off-heap memory - it got OOMKilled under load. Kafka leans on the page cache.
+    heapOpts: -XX:InitialRAMPercentage=50 -XX:MaxRAMPercentage=50
     resources:
       # 192Mi was OOMKilling the JVM before it finished KRaft storage formatting on
       # startup (verified locally - combined broker+controller needs more headroom).
@@ -662,15 +718,19 @@ minio:
       cpu: 100m
       memory: 128Mi
     limits:
-      cpu: 150m
+      # Bitnami's setup script gives each `mc` call a fixed 5s timeout; at 150m they took
+      # 4-7s, so it misread MinIO as stopped and crashed on "port already in use".
+      cpu: 300m
       memory: 192Mi
 postgresql:
   enabled: true
   architecture: standalone
   # Pinned: the subchart otherwise generates a random password and only creates the
-  # default "postgres" database. Inbox's user owns auth.database (inbox/_db-init.tpl).
+  # default "postgres" database. Only CI's test step uses auth.database - no pod does.
   auth:
-    postgresPassword: postgres
+    existingSecret: resonance-flow-postgres-db-credentials
+    secretKeys:
+      adminPasswordKey: password
     database: resonance_flow
   # Pinned: the pgvector overlay below is built for PG 18 and must match its major.
   # From bitnami/postgresql:latest, built 2026-09-20 (PG 18.6, pgvector 0.8.6).
@@ -714,6 +774,10 @@ postgresql:
         secret:
           secretName: resonance-flow-inbox-db-credentials
           optional: true
+      - name: bridge-db-credentials
+        secret:
+          secretName: resonance-flow-bridge-db-credentials
+          optional: true
     extraVolumeMounts:
       - name: pgvector
         mountPath: /opt/bitnami/postgresql/lib/vector.so
@@ -727,6 +791,9 @@ postgresql:
         readOnly: true
       - name: inbox-db-credentials
         mountPath: /etc/resonance-flow/secrets/inbox-db
+        readOnly: true
+      - name: bridge-db-credentials
+        mountPath: /etc/resonance-flow/secrets/bridge-db
         readOnly: true
     # HNSW index builds use maintenance_work_mem (64MB default) on top of
     # shared_buffers (128MB) - 192Mi left no headroom and OOMKills instead of erroring.

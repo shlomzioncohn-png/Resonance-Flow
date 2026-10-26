@@ -46,7 +46,9 @@ jobs:
           cache-dependency-path: teams/mind/pyproject.toml
 
       - name: Install
-        run: make dev
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          make dev
 
       - name: Lint (ruff + mypy)
         run: make lint
@@ -155,82 +157,30 @@ jobs:
       contents: read
 
     env:
-      CHART_DIR: teams/relay/helm/resonance-flow
-      RELEASE: mind-rt
-      NAMESPACE: mind-rt
-      # Per-run names: runners on one host share a Docker daemon, so fixed
-      # names collide when two runs overlap. Only this job uses the "mind-rt-"
-      # prefix, so run_id+run_attempt are enough here.
-      KIND_CLUSTER: mind-rt-${{ github.run_id }}-${{ github.run_attempt }}
-      KIND_IMAGE_TAG: local-${{ github.run_id }}-${{ github.run_attempt }}
+      RELEASE: mind
+      NAMESPACE: mind
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: ./.github/actions/free-runner-disk
-
-      - uses: azure/setup-helm@v5
-
-      # Own kubeconfig per job, not the shared ~/.kube/config -- otherwise a
-      # parallel job switching context makes helm here install into its cluster.
-      # (runner.temp isn't available in job-level env, hence a step.)
-      - name: Use a per-job kubeconfig
-        run: echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
-
-      - name: Create kind cluster
-        uses: helm/kind-action@v1
+      - uses: ./.github/actions/setup-service-infra
         with:
-          cluster_name: ${{ env.KIND_CLUSTER }}
+          service_name: mind
 
-      - name: Fetch chart dependencies
-        run: helm dependency build "$CHART_DIR"
+      - uses: ./.github/actions/deploy-service
+        with:
+          service_name: mind
+          service_dir: teams/mind
+          extra_build_contexts: shared=shared
+          push: 'false'
 
-      - uses: ./.github/actions/install-yq
-
-      - name: Build all-components-off overlay
+      - name: Register the schemas through Relay's schema-sync-hook
         run: |
-          echo "CHART_ALL_OFF=$RUNNER_TEMP/components-all-off.yaml" >> "$GITHUB_ENV"
-          yq '{"components": (.components | map_values({"enabled": false}))}' "$CHART_DIR/values.yaml" > "$RUNNER_TEMP/components-all-off.yaml"
-
-      # Phase 1: infra only, MIND's image isn't built yet (two-phase, like service-ci.yaml).
-      - name: Deploy chart with MIND disabled (infra only)
-        run: |
-          helm upgrade --install "$RELEASE" "$CHART_DIR" \
-            -f "$CHART_DIR/values.yaml" \
-            -f "$CHART_ALL_OFF" \
-            -f "$CHART_DIR/values/values-mind.yaml" \
-            --set components.mind.enabled=false \
-            --namespace "$NAMESPACE" --create-namespace \
-            --wait --timeout 420s
-
-      - name: Build and load the MIND image
-        working-directory: teams/mind
-        run: |
-          docker build --build-context shared=../../shared -t "mind:$KIND_IMAGE_TAG" .
-          kind load docker-image "mind:$KIND_IMAGE_TAG" --name "$KIND_CLUSTER"
-
-      # Migration now runs as mind's own initContainer (see
-      # teams/relay/helm/resonance-flow/values.yaml's components.mind.migration
-      # and _helpers.tpl's migrationInitContainer) -- no separate Pod/step
-      # needed here, or it'd run the migration twice against an empty DB.
-      - name: Deploy chart with MIND enabled
-        run: |
-          helm upgrade --install "$RELEASE" "$CHART_DIR" \
-            -f "$CHART_DIR/values.yaml" \
-            -f "$CHART_ALL_OFF" \
-            -f "$CHART_DIR/values/values-mind.yaml" \
-            --set components.mind.image.tag="$KIND_IMAGE_TAG" \
-            --namespace "$NAMESPACE"
-
-      - name: Wait for MIND deployment to be ready
-        run: kubectl -n "$NAMESPACE" rollout status deployment/resonance-flow-mind --timeout=420s
-
-      - name: Diagnose deploy failure
-        if: failure()
-        run: |
-          kubectl -n "$NAMESPACE" get pods -o wide
-          kubectl -n "$NAMESPACE" describe pods
-          kubectl -n "$NAMESPACE" logs -l app.kubernetes.io/component=mind --all-containers --tail=200 || true
+          SR_SVC=$(kubectl -n "$NAMESPACE" get svc -l app.kubernetes.io/component=schema-registry -o jsonpath='{.items[0].metadata.name}')
+          helm install schema-sync teams/relay/schema-sync-hook -n "$NAMESPACE" \
+            --set schemaRegistryUrl="http://${SR_SVC}.${NAMESPACE}.svc.cluster.local:8080/apis/ccompat/v6" \
+            --wait --wait-for-jobs --timeout 300s \
+            || { kubectl -n "$NAMESPACE" logs -l app.kubernetes.io/instance=schema-sync --tail=200; exit 1; }
 
       # Kafka's advertised.listeners is the in-cluster pod DNS name, unreachable
       # through a port-forward - run round-trip.py inside the MIND pod instead.

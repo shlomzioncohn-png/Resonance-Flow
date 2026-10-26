@@ -68,11 +68,11 @@ class TaskCompletedEventHandlerUnitTest {
     }
 
     @Test
-    void unknownTask_becomesRetryableReferencedTaskNotFound() {
+    void unknownTask_becomesTransientSoItIsRetried() {
         UUID taskId = UUID.randomUUID();
         doThrow(new TaskNotFoundException(taskId)).when(service).onTaskCompleted(any(), any());
 
-        assertThrows(ReferencedTaskNotFoundException.class,
+        assertThrows(ChainTransientProcessingException.class,
                 () -> handler.onMessage(record(taskId.toString(), true, millis(KAFKA_TIME))));
     }
 

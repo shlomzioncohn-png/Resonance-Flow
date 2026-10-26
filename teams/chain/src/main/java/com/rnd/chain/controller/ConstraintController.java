@@ -5,11 +5,15 @@ import com.rnd.chain.dto.Constraint;
 import com.rnd.chain.dto.CreateConstraintRequest;
 import com.rnd.chain.dto.UpdateConstraintStatusRequest;
 import com.rnd.chain.service.ConstraintService;
+import com.rnd.chain.tenant.TaskOwnershipService;
+import com.rnd.chain.tenant.TenantContext;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
 import jakarta.validation.Valid;
+
+import lombok.RequiredArgsConstructor;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,6 +30,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/tasks")
+@RequiredArgsConstructor
 @Tag(
         name = "Task Constraints",
         description = "Manage constraints associated with tasks"
@@ -33,12 +38,8 @@ import java.util.UUID;
 public class ConstraintController {
 
     private final ConstraintService constraintService;
-
-    public ConstraintController(
-            ConstraintService constraintService) {
-
-        this.constraintService = constraintService;
-    }
+    private final TenantContext tenantContext;
+    private final TaskOwnershipService taskOwnershipService;
 
     @Operation(
             summary = "Create task constraint",
@@ -49,6 +50,7 @@ public class ConstraintController {
             @PathVariable UUID taskId,
             @Valid @RequestBody CreateConstraintRequest request) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         Constraint createdConstraint =
                 constraintService.createConstraint(
                         taskId,
@@ -75,6 +77,7 @@ public class ConstraintController {
     public ResponseEntity<List<Constraint>> getTaskConstraints(
             @PathVariable UUID taskId) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         List<Constraint> constraints =
                 constraintService.getTaskConstraints(taskId);
 
@@ -91,6 +94,7 @@ public class ConstraintController {
             @PathVariable String constraintId,
             @Valid @RequestBody UpdateConstraintStatusRequest request) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         Constraint updatedConstraint =
                 constraintService.updateConstraintStatus(
                         taskId,

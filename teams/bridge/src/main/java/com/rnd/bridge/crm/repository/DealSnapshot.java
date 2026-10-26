@@ -9,17 +9,8 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * One fetch's worth of CRM deal data - every history row {@link DealRepository#snapshot()} saw,
- * grouped by deal, plus the instant the fetch was taken, plus how many records were skipped while
- * reading it (a deal that failed to parse - see {@code HubSpotDealRepository} - never makes it
- * into this snapshot at all). Immutable: {@link #asOf()} and every accessor here come from the
- * same fetch, so nothing here can disagree with itself the way {@code asOf()} and {@code
- * findAll()} used to when they were served from a repository field cached across separate calls
- * (see {@link DealRepository}'s deprecated finder methods, and finding F1 in the CRM-lane audit).
- * <p>
- * {@link #allDeals()} / {@link #findHistoryByDealId(String)} keep the full stage-change history
- * available for features that need it (Deal Health, stage velocity). {@link #latestPerDeal()} is
- * what a lane should actually publish - see its own Javadoc for why.
+ * One fetch's worth of CRM deal data - every history row, grouped by deal, plus {@code asOf} and
+ * {@code skippedAtRead}. Immutable: everything here comes from the same fetch, never cached across separate calls (F1).
  */
 public record DealSnapshot(
         Instant asOf,
@@ -38,15 +29,8 @@ public record DealSnapshot(
     }
 
     /**
-     * One {@link Deal} per deal id - its latest state by {@code stageChangedAt} - in the same
-     * deal-id order as {@link #dealIds()}. {@link #historyByDealId()}'s lists are stored
-     * oldest-first (see {@link DealRepository}'s own contract), so "latest" is each list's last
-     * element.
-     * <p>
-     * This is what a lane should publish: one event per deal, not one per stage transition.
-     * Publishing {@link #allDeals()} instead produces a wrong status/urgency the moment Inbox
-     * receives a later record for a {@code sourceRef} it has already seen, since Inbox's ingestion
-     * is insert-or-return-existing, not an upsert (finding F2 in the CRM-lane audit).
+     * One {@link Deal} per deal id - its latest state by {@code stageChangedAt}. Publish this, not
+     * {@link #allDeals()}: Inbox's ingestion is insert-only, so one event per deal avoids a stale re-publish (F2).
      */
     public List<Deal> latestPerDeal() {
         List<Deal> latest = new ArrayList<>(dealIds.size());

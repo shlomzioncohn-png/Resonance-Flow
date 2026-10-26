@@ -32,6 +32,7 @@ from pathlib import Path
 from benchmarks.vector_store_test_table import create_vector_store_test_table
 from mind.config import VectorStoreSettings, get_settings
 from mind.embeddings import embed, embed_batch
+from mind.embeddings.base import DEMO_TENANT_ID, VectorStore
 from mind.embeddings.pgvector_store import PgVectorStore
 
 BENCHMARK_TABLE = "task_embeddings_benchmark"
@@ -110,15 +111,15 @@ async def main() -> None:
     random.seed(87)
     # Own table, not the real task_embeddings -- dropped in finally below.
     settings = get_settings().vector_store.model_copy(update={"table": BENCHMARK_TABLE})
-    store = await _open_benchmark_store(settings)
+    index = await _open_benchmark_store(settings)
     try:
-        await _run_benchmark(store)
+        await _run_benchmark(index.for_tenant(DEMO_TENANT_ID))
     finally:
-        await store.clear()
-        await store.close()
+        await index.clear()
+        await index.close()
 
 
-async def _run_benchmark(store: PgVectorStore) -> None:
+async def _run_benchmark(store: VectorStore) -> None:
     # --- 1. Load synthetic filler (clearly id-prefixed, batch-embedded) ---
     print(f"Generating {N_FILLER} synthetic filler texts...")
     filler_texts = [fake_filler_text() for _ in range(N_FILLER)]

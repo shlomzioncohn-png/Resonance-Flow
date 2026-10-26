@@ -8,10 +8,14 @@ import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import org.springframework.stereotype.Service;
+import com.rnd.chain.dto.TaskReadinessSnapshot;
+import com.rnd.chain.repository.TaskReadinessRepository;
 
+import java.util.Map;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -43,10 +47,12 @@ public class TaskTraversalService {
 
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
+    private final TaskReadinessRepository taskReadinessRepository;
 
-    public TaskTraversalService(TaskRepository taskRepository, TaskDependencyRepository taskDependencyRepository) {
+    public TaskTraversalService(TaskRepository taskRepository, TaskDependencyRepository taskDependencyRepository, TaskReadinessRepository taskReadinessRepository) {
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
+        this.taskReadinessRepository = taskReadinessRepository;
     }
 
     /**
@@ -250,10 +256,33 @@ public class TaskTraversalService {
      * the graph is a traversal-safety case, not an error.
      */
     private List<TaskResponse> toResponses(List<UUID> ids) {
-        List<TaskResponse> result = new ArrayList<>();
-        for (UUID id : ids) {
-            taskRepository.findById(id).ifPresent(task -> result.add(TaskResponse.from(task)));
+
+        if (ids.isEmpty()) {
+            return List.of();
         }
+
+        Map<UUID, Task> tasksById = new HashMap<>();
+        for (Task task : taskRepository.findAllById(ids)) {
+            tasksById.put(task.getId(), task);
+        }
+        Map<UUID, TaskReadinessSnapshot> readinessById =
+                taskReadinessRepository.findByIds(ids);
+
+        List<TaskResponse> result =
+                new ArrayList<>();
+
+        for (UUID id : ids) {
+            Task task = tasksById.get(id);
+            TaskReadinessSnapshot readiness = readinessById.get(id);
+
+            // Skip a dangling edge, and a task deleted between the two reads (no readiness row).
+            if (task == null || readiness == null) {
+                continue;
+            }
+
+            result.add(TaskResponse.from(task, readiness));
+        }
+
         return result;
     }
 }

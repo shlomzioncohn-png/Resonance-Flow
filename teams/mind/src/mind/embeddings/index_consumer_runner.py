@@ -18,7 +18,7 @@ from typing import TypeVar, cast
 from google.protobuf.message import Message
 
 from mind.config import get_settings
-from mind.embeddings.base import VectorStore
+from mind.embeddings.base import VectorIndex
 from mind.embeddings.index_consumer import (
     handle_task_completed,
     handle_task_created,
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 _GROUP_ID = "mind-index-consumer"
 
 _EventT = TypeVar("_EventT", bound=Message)
-_Handler = Callable[[VectorStore, _EventT], Awaitable[None]]
+_Handler = Callable[[VectorIndex, _EventT], Awaitable[None]]
 
 _TOPICS: list[tuple[str, type[Message], _Handler]] = [
     ("task.created", TaskCreatedEvent, handle_task_created),
@@ -46,19 +46,21 @@ _TOPICS: list[tuple[str, type[Message], _Handler]] = [
 
 def _run_topic(topic: str, message_type: type[Message], handle: _Handler) -> None:
     loop = asyncio.new_event_loop()
-    store = PgVectorStore(get_settings().vector_store)
     try:
-        loop.run_until_complete(store.open())
+        store = PgVectorStore(get_settings().vector_store)
+        try:
+            loop.run_until_complete(store.open())
 
-        def _handler(event: object, msg: object) -> None:
-            # No try/except -- must propagate so the offset stays uncommitted.
-            # cast: run() already deserialized event into this exact type.
-            loop.run_until_complete(handle(store, cast(Message, event)))
+            def _handler(event: object, msg: object) -> None:
+                # No try/except -- must propagate so the offset stays uncommitted.
+                # cast: run() already deserialized event into this exact type.
+                loop.run_until_complete(handle(store, cast(Message, event)))
 
-        consumer = ProtobufConsumer(group_id=_GROUP_ID, topics=[topic])
-        consumer.run(message_type, _handler, idle_timeout=None)
+            consumer = ProtobufConsumer(group_id=_GROUP_ID, topics=[topic])
+            consumer.run(message_type, _handler, idle_timeout=None)
+        finally:
+            loop.run_until_complete(store.close())
     finally:
-        loop.run_until_complete(store.close())
         loop.close()
 
 

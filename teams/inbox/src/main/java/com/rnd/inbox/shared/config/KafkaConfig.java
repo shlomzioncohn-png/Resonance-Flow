@@ -5,10 +5,12 @@ import com.rnd.inbox.event.StructuredTaskEvent;
 import com.rnd.inbox.event.TaskCreationRequestedEvent;
 import com.rnd.inbox.shared.messaging.kafka.ErrorTopicPublisher;
 import com.rnd.inbox.shared.messaging.kafka.TransientProcessingException;
+import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
 import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializerConfig;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializerConfig;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
@@ -25,12 +27,15 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.kafka.support.ExponentialBackOffWithMaxRetries;
+import org.springframework.kafka.support.serializer.DeserializationException;
 import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
 import org.springframework.retry.policy.SimpleRetryPolicy;
 import org.springframework.retry.backoff.ExponentialBackOffPolicy;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.util.backoff.FixedBackOff;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -58,6 +63,9 @@ public class KafkaConfig {
             @Value("${kafka.schema-registry.url}") String schemaRegistryUrl) {
         Map<String, Object> props = kafkaProperties.buildProducerProperties();
         props.put(AbstractKafkaSchemaSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
+        // Relay registers the schemas from shared/proto; publish against those, never register our own copy.
+        props.put(KafkaProtobufSerializerConfig.AUTO_REGISTER_SCHEMAS, false);
+        props.put(KafkaProtobufSerializerConfig.USE_LATEST_VERSION, true);
         return new DefaultKafkaProducerFactory<>(props, new StringSerializer(), new KafkaProtobufSerializer());
     }
 
@@ -85,16 +93,57 @@ public class KafkaConfig {
     public ConcurrentKafkaListenerContainerFactory<String, TaskCreationRequestedEvent>
             taskCreationRequestedContainerFactory(
                     ConsumerFactory<String, TaskCreationRequestedEvent> taskCreationRequestedConsumerFactory,
-                    ErrorTopicPublisher errorTopicPublisher) {
+                    ErrorTopicPublisher errorTopicPublisher,
+                    KafkaRetryProperties kafkaRetryProperties) {
         ConcurrentKafkaListenerContainerFactory<String, TaskCreationRequestedEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(taskCreationRequestedConsumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
-        factory.setCommonErrorHandler(new DefaultErrorHandler(
-                (record, exception) -> errorTopicPublisher.publish(record, null, "VALIDATION_FAILURE",
-                        "Malformed protobuf payload: " + rootCauseMessage(exception), List.of(), 0, null),
-                new FixedBackOff(0L, 0L)));
+        factory.setCommonErrorHandler(protobufListenerErrorHandler(errorTopicPublisher, kafkaRetryProperties));
         return factory;
+    }
+
+    DefaultErrorHandler protobufListenerErrorHandler(ErrorTopicPublisher errorTopicPublisher,
+                                                     KafkaRetryProperties retryProperties) {
+        DefaultErrorHandler handler = new DefaultErrorHandler(
+                (record, exception) -> {
+                    if (isTransientFailure(exception)) {
+                        errorTopicPublisher.publish(record, null, "TECHNICAL_FAILURE",
+                                "Schema registry unavailable: " + rootCauseMessage(exception), List.of(),
+                                retryProperties.getMaxAttempts(), null);
+                    } else {
+                        errorTopicPublisher.publish(record, null, "VALIDATION_FAILURE",
+                                "Malformed protobuf payload: " + rootCauseMessage(exception), List.of(), 0, null);
+                    }
+                },
+                transientFailureBackOff(retryProperties));
+        handler.removeClassification(DeserializationException.class);
+        handler.setBackOffFunction((record, exception) -> isTransientFailure(exception)
+                ? null
+                : new FixedBackOff(0L, 0L));
+        return handler;
+    }
+
+    // Same attempts/backoff as EventProcessingTemplate's retries; max-attempts counts the first try.
+    private static ExponentialBackOffWithMaxRetries transientFailureBackOff(KafkaRetryProperties retryProperties) {
+        ExponentialBackOffWithMaxRetries backOff =
+                new ExponentialBackOffWithMaxRetries(retryProperties.getMaxAttempts() - 1);
+        backOff.setInitialInterval(retryProperties.getInitialBackoffMs());
+        backOff.setMultiplier(retryProperties.getMultiplier());
+        backOff.setMaxInterval(retryProperties.getMaxBackoffMs());
+        return backOff;
+    }
+
+    private static boolean isTransientFailure(Throwable exception) {
+        for (Throwable current = exception; current != null; current = current.getCause()) {
+            if (current instanceof IOException) {
+                return true;
+            }
+            if (current instanceof RestClientException restClientException && restClientException.getStatus() >= 500) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String rootCauseMessage(Throwable exception) {
@@ -122,15 +171,13 @@ public class KafkaConfig {
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, StructuredTaskEvent> structuredTaskContainerFactory(
             ConsumerFactory<String, StructuredTaskEvent> structuredTaskConsumerFactory,
-            ErrorTopicPublisher errorTopicPublisher) {
+            ErrorTopicPublisher errorTopicPublisher,
+            KafkaRetryProperties kafkaRetryProperties) {
         ConcurrentKafkaListenerContainerFactory<String, StructuredTaskEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(structuredTaskConsumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
-        factory.setCommonErrorHandler(new DefaultErrorHandler(
-                (record, exception) -> errorTopicPublisher.publish(record, null, "VALIDATION_FAILURE",
-                        "Malformed protobuf payload: " + rootCauseMessage(exception), List.of(), 0, null),
-                new FixedBackOff(0L, 0L)));
+        factory.setCommonErrorHandler(protobufListenerErrorHandler(errorTopicPublisher, kafkaRetryProperties));
         return factory;
     }
 
@@ -151,15 +198,13 @@ public class KafkaConfig {
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, SchedulingUpdatedEvent> schedulingUpdatedContainerFactory(
             ConsumerFactory<String, SchedulingUpdatedEvent> schedulingUpdatedConsumerFactory,
-            ErrorTopicPublisher errorTopicPublisher) {
+            ErrorTopicPublisher errorTopicPublisher,
+            KafkaRetryProperties kafkaRetryProperties) {
         ConcurrentKafkaListenerContainerFactory<String, SchedulingUpdatedEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(schedulingUpdatedConsumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
-        factory.setCommonErrorHandler(new DefaultErrorHandler(
-                (record, exception) -> errorTopicPublisher.publish(record, null, "VALIDATION_FAILURE",
-                        "Malformed protobuf payload: " + rootCauseMessage(exception), List.of(), 0, null),
-                new FixedBackOff(0L, 0L)));
+        factory.setCommonErrorHandler(protobufListenerErrorHandler(errorTopicPublisher, kafkaRetryProperties));
         return factory;
     }
 

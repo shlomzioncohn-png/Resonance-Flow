@@ -70,7 +70,7 @@ class RawObjectValidatorClassificationTest {
         RawObjectRef recording = new RawObjectRef(
                 Role.RECORDING, sourceType + "/kamatech/2026-10-11/x.mp4", "sha256:" + "a".repeat(64),
                 "audio/mp4", 10L, Modality.AUDIO);
-        return RawObjectEvent.create(sourceType, "kamatech", Instant.now(),
+        return RawObjectEvent.create(sourceType, "00000000-0000-0000-0000-000000000001", Instant.now(),
                 ScopeDecision.INCLUDED, null, null, "corr-1", 0, ChangeType.UPSERT, List.of(recording));
     }
 }

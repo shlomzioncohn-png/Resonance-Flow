@@ -1,9 +1,10 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
-
 import com.rnd.chain.testsupport.PgRepos;
 import org.junit.jupiter.api.Tag;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,12 +14,9 @@ import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.events.SchedulingUpdatePublisher;
 import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
-import com.rnd.chain.repository.ConstraintRepository;
-import com.rnd.chain.repository.DependencyHistoryRepository;
-import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.repository.TaskRepository;
-import com.rnd.chain.repository.TransactionRunner;
 import com.rnd.chain.testsupport.IncrementingClock;
 import com.rnd.chain.testsupport.TestTransactions;
 
@@ -50,6 +48,25 @@ class TaskDependencyServiceIntegrationTest {
 
     private TaskDependencyService taskDependencyService;
 
+    @Autowired
+    private TaskReadinessRepository taskReadinessRepository;
+
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
+
     @BeforeEach
     void setUp() {
 
@@ -79,17 +96,27 @@ class TaskDependencyServiceIntegrationTest {
 
         SchedulingUpdateService schedulingUpdateService =
                 new SchedulingUpdateService(
-                        schedulingPublisher);
+                        schedulingPublisher,
+                        taskReadinessRepository);
+
+        PriorityScoreService priorityScoreService =
+                new PriorityScoreService(
+                                taskRepository,
+                                dependencyRepository,
+                                taskReadinessRepository,
+                                schedulingUpdateService,
+                                new SchedulingPublishListener(
+                                taskRepository,
+                                schedulingUpdateService));
 
         DependencyEdgeService dependencyEdgeService =
                 new DependencyEdgeService(
+                        taskRepository,
                         dependencyRepository,
                         PgRepos.graphLock(),
-                        new TaskCounterUpdater(
-                                taskRepository,
-                                dependencyRepository,
-                                new PriorityScoreService(),
-                                new SchedulingPublishListener(taskRepository, schedulingUpdateService)), TaskStateHistoryFixtures.newRecorder());
+                        priorityScoreService,
+                        TaskStateHistoryFixtures.newRecorder(),
+                        taskReadinessRepository);
 
         taskDependencyService =
                 new TaskDependencyService(
@@ -129,10 +156,10 @@ class TaskDependencyServiceIntegrationTest {
 
         assertEquals(
                 1,
-                updatedTask.getBlockingCount());
+                blockingCount(updatedTask));
 
         assertFalse(
-                updatedTask.isReady());
+                isReady(updatedTask));
 
         assertEquals(
                 1,
@@ -166,10 +193,10 @@ class TaskDependencyServiceIntegrationTest {
 
         assertEquals(
                 1,
-                blockedTask.getBlockingCount());
+                blockingCount(blockedTask));
 
         assertFalse(
-                blockedTask.isReady());
+                isReady(blockedTask));
 
         schedulingPublisher.clear();
 
@@ -188,10 +215,10 @@ class TaskDependencyServiceIntegrationTest {
 
         assertEquals(
                 0,
-                updatedTask.getBlockingCount());
+                blockingCount(updatedTask));
 
         assertTrue(
-                updatedTask.isReady());
+                isReady(updatedTask));
 
         assertEquals(
                 1,
@@ -236,10 +263,10 @@ class TaskDependencyServiceIntegrationTest {
 
         assertEquals(
                 0,
-                updatedTask.getBlockingCount());
+                blockingCount(updatedTask));
 
         assertTrue(
-                updatedTask.isReady());
+                isReady(updatedTask));
 
         assertTrue(
                 schedulingPublisher
@@ -298,9 +325,6 @@ class TaskDependencyServiceIntegrationTest {
                 .parentTaskId(null)
                 .tenantId(TENANT_ID)
                 .status(status)
-                .isReady(ready)
-                .blockingCount(0)
-                .openConstraintCount(0)
                 .estimatedDurationMin(null)
                 .score(null)
                 .createdAt(now)
@@ -324,7 +348,7 @@ class TaskDependencyServiceIntegrationTest {
         }
 
         public List<TaskSchedulingUpdatedEvent>
-                getPublishedEvents() {
+        getPublishedEvents() {
 
             return publishedEvents;
         }

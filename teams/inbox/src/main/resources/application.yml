@@ -7,9 +7,10 @@ spring:
   jackson:
     property-naming-strategy: SNAKE_CASE
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:resonance_flow}?stringtype=unspecified
-    username: ${DB_USER:postgres}
-    password: ${DB_PASSWORD:postgres}
+    # Own database + own DB user, like the chart (issue #869).
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:inbox}?stringtype=unspecified
+    username: ${DB_USER:inbox}
+    password: ${DB_PASSWORD:inbox}
   flyway:
     baseline-on-migrate: true
   kafka:
@@ -47,8 +48,14 @@ inbox:
       max-backoff-ms: ${INBOX_KAFKA_RETRY_MAX_BACKOFF_MS:10000}
   sql-logging:
     enabled: ${SQL_LOG_ENABLED:true}
-    include-parameters: ${SQL_LOG_INCLUDE_PARAMETERS:true}
+    include-parameters: ${SQL_LOG_INCLUDE_PARAMETERS:false}
     slow-query-threshold-ms: ${SQL_LOG_SLOW_QUERY_THRESHOLD_MS:200}
+  work-insights:
+    window-days: ${WORK_INSIGHTS_WINDOW_DAYS:30}
+    short-max-minutes: ${WORK_INSIGHTS_SHORT_MAX_MINUTES:30}
+    medium-max-minutes: ${WORK_INSIGHTS_MEDIUM_MAX_MINUTES:120}
+    default-effort-minutes: ${WORK_INSIGHTS_DEFAULT_EFFORT_MINUTES:30}
+    due-soon-days: ${WORK_INSIGHTS_DUE_SOON_DAYS:7}
 
 kafka:
   producer:

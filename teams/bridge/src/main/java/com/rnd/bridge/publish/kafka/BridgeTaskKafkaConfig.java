@@ -5,13 +5,15 @@ import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.boot.ssl.SslBundles;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.context.annotation.Profile;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
@@ -32,9 +34,9 @@ import java.util.Map;
  * class, ignoring generic type parameters entirely. Declaring
  * {@link #bridgeTaskEventKafkaTemplate} alone makes Spring Boot skip its own
  * default bean altogether, not just add a second candidate next to it -
- * which broke {@code GitHubKafkaProducer}, {@code MediaEventPublisher} and
- * {@code PointerEventPublisher} with {@code NoSuchBeanDefinitionException}
- * at context startup ({@code BridgeApplicationTests} caught it).
+ * which broke the lane publishers (at the time {@code GitHubKafkaProducer} - since deleted -
+ * still today {@code MediaEventPublisher} and {@code PointerEventPublisher}) with
+ * {@code NoSuchBeanDefinitionException} at context startup ({@code BridgeApplicationTests} caught it).
  * {@link #kafkaTemplate} rebuilds exactly what {@code KafkaAutoConfiguration}
  * would have, from the same {@link KafkaProperties} (i.e.
  * {@code spring.kafka.producer.*}). It stays on {@link JsonSerializer} and is
@@ -68,17 +70,17 @@ import java.util.Map;
  * wildcard bean, the wildcard bean is - by the same "matches anything" logic
  * - *also* a candidate for the exact-type request, which is ambiguous
  * without a name to break the tie:
- * {@code @Qualifier("kafkaTemplate")} on {@code GitHubKafkaProducer},
+ * {@code @Qualifier("kafkaTemplate")} on
  * {@code MediaEventPublisher} and {@code PointerEventPublisher};
  * {@code @Qualifier("bridgeTaskEventKafkaTemplate")} on
- * {@code CrmLaneConfig.kafkaTaskPublisher} and {@code JiraKafkaProducer}.
+ * {@link #kafkaTaskPublisher} below.
  * <p>
  * <b>Protobuf switch (finding F3 in the CRM-lane audit / issue #567).</b>
  * {@link #bridgeTaskEventKafkaTemplate} now sends {@link StructuredTaskEvent} via Confluent's
  * {@link KafkaProtobufSerializer}, matching Inbox's {@code KafkaProtobufDeserializer} on the
  * consumer side - the two sides no longer disagree on wire format. {@code
- * schema.registry.url} is read from {@code bridge.kafka.schema-registry.url} (no hardcoded
- * default beyond the local-dev fallback in {@code application.yml}).
+ * schema.registry.url} is read from {@code spring.kafka.properties.schema.registry.url}, the one
+ * Schema Registry setting every Bridge Protobuf producer shares (RawObjectEventKafkaConfig too).
  * {@code auto.register.schemas} is explicitly {@code false}: registering the schema is Relay's
  * job (adding the {@code bridge.structured.tasks-value} row to {@code schema-subjects.tsv}, see
  * issue #567), not something this producer should do as a side effect of its first publish -
@@ -102,10 +104,12 @@ class BridgeTaskKafkaConfig {
 
     @Bean
     ProducerFactory<String, StructuredTaskEvent> bridgeTaskEventProducerFactory(
-            @Value("${spring.kafka.bootstrap-servers}") String bootstrapServers,
-            @Value("${bridge.kafka.schema-registry.url}") String schemaRegistryUrl) {
-        Map<String, Object> props = new HashMap<>();
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+            KafkaProperties kafkaProperties,
+            SslBundles sslBundles,
+            @Value("${spring.kafka.properties.schema.registry.url}") String schemaRegistryUrl) {
+        // Starts from Boot's producer props so spring.kafka.properties.* (SASL/security) apply,
+        // same as ChainProtobufKafkaConfig - overrides below must stay after it.
+        Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties(sslBundles));
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaProtobufSerializer.class);
         props.put(ProducerConfig.ACKS_CONFIG, "all");
@@ -137,22 +141,18 @@ class BridgeTaskKafkaConfig {
         return new KafkaTemplate<>(bridgeTaskEventProducerFactory);
     }
 
+    /**
+     * The single {@code PayloadPublisher<Task>} every lane (CRM, Jira, GitHub, LLM enrichment)
+     * resolves to under the {@code kafka} profile - {@code @Primary} so it beats the
+     * {@code LoggingPayloadPublisher} default. Lives here, not in a lane config, because it is
+     * shared infrastructure, not CRM-owned.
+     */
     @Bean
-    ProducerFactory<String, byte[]> protobufProducerFactory(
-            @Value("${spring.kafka.bootstrap-servers}") String bootstrapServers) {
-        Map<String, Object> props = new HashMap<>();
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
-        props.put(ProducerConfig.ACKS_CONFIG, "all");
-        props.put(ProducerConfig.RETRIES_CONFIG, 3);
-        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
-        return new DefaultKafkaProducerFactory<>(props);
-    }
-
-    @Bean
-    KafkaTemplate<String, byte[]> protobufKafkaTemplate(
-            ProducerFactory<String, byte[]> protobufProducerFactory) {
-        return new KafkaTemplate<>(protobufProducerFactory);
+    @Profile("kafka")
+    @Primary
+    KafkaPayloadPublisher kafkaTaskPublisher(
+            @Qualifier("bridgeTaskEventKafkaTemplate") KafkaTemplate<String, StructuredTaskEvent> kafkaTemplate,
+            @Value("${bridge.structured-tasks-topic:bridge.structured.tasks}") String topic) {
+        return new KafkaPayloadPublisher(kafkaTemplate, topic);
     }
 }

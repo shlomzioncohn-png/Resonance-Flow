@@ -13,6 +13,8 @@ data:
     #!/bin/sh
     set -eu
 
+    KAFKA_SASL_JAAS_CONFIG="org.apache.kafka.common.security.plain.PlainLoginModule required username=\"$KAFKA_SASL_USERNAME\" password=\"$KAFKA_SASL_PASSWORD\";"
+
     # kafka-consumer-groups.sh needs the SASL creds in a properties file, not
     # as CLI flags.
     CONF=/tmp/sweep-client.properties

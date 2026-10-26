@@ -2,6 +2,7 @@ package com.rnd.inbox.task.event;
 import com.rnd.inbox.task.model.SourceType;
 import com.rnd.inbox.task.model.Task;
 import com.rnd.inbox.task.model.TaskExtractionProvenance;
+import com.rnd.inbox.task.model.TaskFeedback;
 import com.rnd.inbox.task.model.TaskStatus;
 import com.rnd.inbox.task.model.TaskTier;
 import com.rnd.inbox.task.security.TaskRoleContext;
@@ -31,13 +32,16 @@ public final class TaskUpdatedPayload {
     private final Float suggestedOwnerConfidence;
     private final UUID ownerId;
     private final Instant updatedAt;
+    private final String feedbackText;
+    private final UUID feedbackUserId;
 
     private TaskUpdatedPayload(UUID taskId, UUID tenantId, UUID projectId, String title, String description,
                                 boolean isAvailable, SourceType sourceType, String sourceRef, TaskTier tier,
                                 TaskRoleContext roleContext, Short urgency, Integer effortEstimateMinutes,
                                 Instant deadline, TaskStatus status, TaskExtractionProvenance extractionProvenance,
                                 Float confidence, Float effortEstimateConfidence, UUID suggestedOwnerUserId,
-                                Float suggestedOwnerConfidence, UUID ownerId, Instant updatedAt) {
+                                Float suggestedOwnerConfidence, UUID ownerId, Instant updatedAt,
+                                String feedbackText, UUID feedbackUserId) {
         this.taskId = taskId;
         this.tenantId = tenantId;
         this.projectId = projectId;
@@ -59,9 +63,17 @@ public final class TaskUpdatedPayload {
         this.suggestedOwnerConfidence = suggestedOwnerConfidence;
         this.ownerId = ownerId;
         this.updatedAt = updatedAt;
+        this.feedbackText = feedbackText;
+        this.feedbackUserId = feedbackUserId;
     }
 
     public static TaskUpdatedPayload from(Task task) {
+        return from(task, null);
+    }
+
+    // feedback is null for every update that carries no feedback - the two feedback fields
+    // are then null too, and are left out of the published event.
+    public static TaskUpdatedPayload from(Task task, TaskFeedback feedback) {
         return new TaskUpdatedPayload(
                 task.getId(),
                 task.getTenant() != null ? task.getTenant().getId() : null,
@@ -83,7 +95,9 @@ public final class TaskUpdatedPayload {
                 task.getSuggestedOwnerUser() != null ? task.getSuggestedOwnerUser().getId() : null,
                 task.getSuggestedOwnerConfidence(),
                 task.getOwner() != null ? task.getOwner().getId() : null,
-                task.getUpdatedAt()
+                task.getUpdatedAt(),
+                feedback != null ? feedback.getFeedbackText() : null,
+                feedback != null ? feedback.getUser().getId() : null
         );
     }
 
@@ -169,5 +183,13 @@ public final class TaskUpdatedPayload {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public String getFeedbackText() {
+        return feedbackText;
+    }
+
+    public UUID getFeedbackUserId() {
+        return feedbackUserId;
     }
 }

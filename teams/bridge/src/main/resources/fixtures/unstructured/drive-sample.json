@@ -1,6 +1,6 @@
 [
   {
-    "tenantId": "kamatech",
+    "tenantId": "00000000-0000-0000-0000-000000000001",
     "id": "1a2b3c4d5e",
     "name": "Q3-Roadmap.docx",
     "owners": [{ "emailAddress": "hadas@kamatech.org" }],
@@ -9,12 +9,18 @@
     "description": "Project deadlines and PR review schedule"
   },
   {
-    "tenantId": "kamatech",
+    "tenantId": "00000000-0000-0000-0000-000000000001",
     "id": "9f8e7d6c5b",
     "name": "IMG_2043.jpg",
     "owners": [{ "emailAddress": "malki@kamatech.org" }],
     "mimeType": "image/jpeg",
     "modifiedTime": "2026-08-16T20:00:00Z",
     "description": null
+  },
+  {
+    "tenantId": "kamatech",
+    "id": "del-7a8b9c",
+    "name": "Old-Draft.docx",
+    "trashed": true
   }
 ]

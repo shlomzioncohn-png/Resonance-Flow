@@ -11,7 +11,7 @@ import os
 from benchmarks.vector_search_benchmark import BENCHMARK_TABLE, _open_benchmark_store
 
 from mind.config import VectorStoreSettings
-from mind.embeddings import embed
+from mind.embeddings import DEMO_TENANT_ID, embed
 
 
 async def test_benchmark_table_gets_created_and_is_usable():
@@ -19,12 +19,13 @@ async def test_benchmark_table_gets_created_and_is_usable():
         dsn=os.environ["MIND_VECTOR_STORE__DSN"],
         table=BENCHMARK_TABLE,
     )
-    store = await _open_benchmark_store(settings)  # raises RuntimeError if main()'s setup regresses
+    index = await _open_benchmark_store(settings)  # raises RuntimeError if main()'s setup regresses
+    store = index.for_tenant(DEMO_TENANT_ID)
     try:
-        await store.clear()
+        await index.clear()
         await store.upsert("smoke-task", embed("Smoke test task"))
         results = await store.search(embed("Smoke test task"), k=1)
         assert results[0].task_id == "smoke-task"
     finally:
-        await store.clear()
-        await store.close()
+        await index.clear()
+        await index.close()

@@ -13,9 +13,11 @@ import com.rnd.chain.dto.TaskTraceResponse;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
+import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.AbstractMap;
 import java.util.Arrays;
@@ -33,6 +35,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest
 @Transactional
 class TaskTraversalServiceTest {
+
+    @Autowired
+    private TaskReadinessRepository taskReadinessRepository;
 
     // ---- Dependency axis --------------------------------------------------
 
@@ -384,10 +389,10 @@ class TaskTraversalServiceTest {
 
     // ---- fixtures -----------------------------------------------------------
 
-    private static TaskTraversalService serviceOf(List<Task> tasks, List<TaskDependency> edges) {
+    private TaskTraversalService serviceOf(List<Task> tasks, List<TaskDependency> edges) {
         TaskRepository taskRepository = PgRepos.tasks(tasks);
         TaskDependencyRepository taskDependencyRepository = PgRepos.dependencies(edges);
-        return new TaskTraversalService(taskRepository, taskDependencyRepository);
+        return new TaskTraversalService(taskRepository, taskDependencyRepository, taskReadinessRepository);
     }
 
     private static List<Task> tasks(UUID... ids) {

@@ -209,7 +209,7 @@ class ChatGroupStateReconcilerTest {
     }
 
     @Test
-    void migratedRootCarriesForwardItsOriginalGroupsLandedAttachmentsAndSupersedesTheOriginalGroup() {
+    void migratedRootCarriesForwardItsOriginalGroupsLandedAttachments() {
         ChatMessage.Attachment attachment = new ChatMessage.Attachment("F1", "a.txt", "text/plain", "a".getBytes());
         ChatMessage rootWithAttachment = new ChatMessage(
                 RawSourceType.SLACK, "kamatech", "chat-a", "malki", Instant.parse("2026-08-18T09:00:00Z"),
@@ -240,13 +240,56 @@ class ChatGroupStateReconcilerTest {
         assertThat(migratedAttachmentRecord.precomputedRef()).isEqualTo(DUMMY_REF);
         assertThat(migratedAttachmentRecord.attachmentIndex()).isGreaterThan(0);
 
-        // The original group is marked superseded - its content was migrated, so it must never
-        // be independently published again - but it is NOT falsely marked published (nothing was
-        // ever actually sent to Kafka under its own correlationId).
+        // The original (channel) group is untouched - still open, unpublished, and still holds
+        // its own copy of the root (see docs/plans/slack-superseded-fix.md): the root now
+        // legitimately appears in two transcripts, the channel's own and the thread's.
         GroupState originalGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", originalGroupId).orElseThrow();
-        assertThat(originalGroup.superseded()).isTrue();
         assertThat(originalGroup.published()).isFalse();
+        assertThat(originalGroup.messages()).extracting(MessageSnapshot::messageId).containsExactly("r1");
         assertThat(originalGroup.messages().get(0).landedAttachments()).extracting("fileId").containsExactly("F1");
+    }
+
+    /**
+     * The literal acceptance test for docs/plans/slack-superseded-fix.md: previously @Disabled
+     * (see caceb819) because the channel group's own lifecycle was blocked by `superseded` once
+     * its root was threaded, permanently stranding any other real message (B here) that had
+     * already landed in the same channel group. Now that the channel group keeps living normally
+     * after its root is threaded, B stays reachable in its own still-open group.
+     */
+    @Test
+    void secondNonThreadMessageIsNotStrandedInTheOriginalChannelGroupWhenTheFirstIsLaterThreaded() {
+        // A arrives, then B shortly after (same chat, within the session gap) - both land in the
+        // same non-thread time-gap group, before that group is ever published.
+        reconciler.reconcileNonThreadedMessage(
+                message("chat-a", "malki", "2026-08-18T09:00:00Z", "message A", "a1"));
+        ChatGroupStateReconciler.RealtimeReconcileResult bResult = reconciler.reconcileNonThreadedMessage(
+                message("chat-a", "ruth", "2026-08-18T09:01:00Z", "message B", "b1"));
+        String originalGroupId = bResult.groupState().groupId();
+        assertThat(bResult.groupState().messages()).extracting(MessageSnapshot::messageId)
+                .containsExactly("a1", "b1");
+
+        // A reply to A arrives before the group was ever published - this migrates A's own
+        // content into a brand-new thread group; the original (A+B) channel group keeps living.
+        reconciler.group(List.of(
+                threadMessage("chat-a", "esti", "2026-08-18T09:05:00Z", "reply to A", "reply1", "a1")));
+
+        GroupState originalGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", originalGroupId).orElseThrow();
+
+        // B is still only sitting in the channel group - never moved into the new thread group
+        // (only the root migrates) - but that channel group remains open and publishable.
+        GroupState threadGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", "a1").orElseThrow();
+        assertThat(threadGroup.messages()).extracting(MessageSnapshot::messageId).doesNotContain("b1");
+        assertThat(originalGroup.messages()).extracting(MessageSnapshot::messageId).contains("b1");
+        assertThat(originalGroup.published()).isFalse();
+
+        // B's content must be reachable by some group that can eventually publish - here, its own
+        // still-open channel group.
+        boolean bReachableSomewhereOpen = threadGroup.messages().stream()
+                .anyMatch(m -> m.messageId().equals("b1"))
+                || originalGroup.messages().stream().anyMatch(m -> m.messageId().equals("b1"));
+        assertThat(bReachableSomewhereOpen)
+                .as("B must remain reachable by a group that can still be published")
+                .isTrue();
     }
 
     @Test
@@ -270,6 +313,59 @@ class ChatGroupStateReconcilerTest {
 
         GroupState originalGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", originalGroupId).orElseThrow();
         assertThat(originalGroup.messages().get(0).text()).isEqualTo("root question");
+    }
+
+    /**
+     * End-to-end acceptance test for docs/plans/slack-superseded-fix.md's core claim: a channel
+     * group that survives its root being threaded is genuinely still OPEN, not just "not marked
+     * dead" - a third, brand-new message must still be able to join it within the session gap,
+     * exercising isOpenForNewMessages/mergeIntoCurrentChatGroup post-fix end-to-end.
+     */
+    @Test
+    void channelGroupSurvivingThreadMigrationCanStillAcceptAGenuinelyNewThirdMessage() {
+        reconciler.reconcileNonThreadedMessage(
+                message("chat-a", "malki", "2026-08-18T09:00:00Z", "message A", "a1"));
+        reconciler.group(List.of(
+                threadMessage("chat-a", "esti", "2026-08-18T09:05:00Z", "reply to A", "reply1", "a1")));
+
+        ChatGroupStateReconciler.RealtimeReconcileResult thirdResult = reconciler.reconcileNonThreadedMessage(
+                message("chat-a", "ruth", "2026-08-18T09:10:00Z", "message C", "c1"));
+
+        // C joined the SAME channel group A originally opened, not a brand-new one - proof the
+        // channel group is still genuinely open, not merely left non-null.
+        GroupState channelGroup = thirdResult.groupState();
+        assertThat(channelGroup.messages()).extracting(MessageSnapshot::messageId).containsExactly("a1", "c1");
+    }
+
+    /**
+     * The dual-update's idempotency claim from docs/plans/slack-superseded-fix.md §2b, exercised
+     * directly rather than just inferred from the two primitives it reuses: redelivering the same
+     * root-edit event twice (simulating a Slack retry after this controller returned a 500 for
+     * the thread-publish half) must leave the exact same end state as running it once - both the
+     * thread group's own copy and the channel group's own copy of the root.
+     */
+    @Test
+    void redeliveredRootEditIsIdempotentForBothTheThreadGroupAndTheChannelGroup() {
+        ChatGroupStateReconciler.RealtimeReconcileResult rootResult = reconciler.reconcileNonThreadedMessage(
+                message("chat-a", "malki", "2026-08-18T09:00:00Z", "root question", "r1"));
+        String originalGroupId = rootResult.groupState().groupId();
+        reconciler.group(List.of(threadMessage("chat-a", "ruth", "2026-08-18T09:05:00Z", "reply", "reply1", "r1")));
+
+        ChatMessage edit = message("chat-a", "malki", "2026-08-18T09:00:00Z", "root question (edited)", "r1");
+        ChatGroupStateReconciler.RealtimeReconcileResult firstRun = reconciler.reconcileNonThreadedMessage(edit);
+        ChatGroupStateReconciler.RealtimeReconcileResult secondRun = reconciler.reconcileNonThreadedMessage(edit);
+
+        assertThat(secondRun.groupState()).isEqualTo(firstRun.groupState());
+
+        GroupState threadGroupAfter = groupStateStore.load(RawSourceType.SLACK, "kamatech", "r1").orElseThrow();
+        GroupState channelGroupAfter =
+                groupStateStore.load(RawSourceType.SLACK, "kamatech", originalGroupId).orElseThrow();
+        assertThat(threadGroupAfter.messages()).extracting(MessageSnapshot::text)
+                .containsExactlyInAnyOrder("root question (edited)", "reply");
+        assertThat(channelGroupAfter.messages()).extracting(MessageSnapshot::text)
+                .containsExactly("root question (edited)");
+        // Neither group's revision advanced a second time for the identical redelivered content.
+        assertThat(channelGroupAfter.revision()).isEqualTo(firstRun.channelGroupState().revision());
     }
 
     @Test
@@ -1209,6 +1305,235 @@ class ChatGroupStateReconcilerTest {
         assertThat(edit.groupState().revision()).isEqualTo(1);
         assertThat(edit.groupState().published()).isFalse();
         assertThat(edit.groupState().claimedRevision()).isNull();
+    }
+
+    @Test
+    void editOfAThreadRootAfterTheThreadExistsResolvesToTheThreadGroupAndAlsoUpdatesTheChannelGroup() {
+        // Regression test for the pre-existing edit bug this plan also fixes: the root's own
+        // event carries no threadId, so without resolveCurrentGroupId's direct-load-first order,
+        // findGroupIdForMessage(rootTs) would permanently resolve to the root's original channel
+        // group - see GroupStateStore.writeMessageIndex's javadoc.
+        ChatGroupStateReconciler.RealtimeReconcileResult rootResult = reconciler.reconcileNonThreadedMessage(
+                message("chat-a", "malki", "2026-08-18T09:00:00Z", "root question", "r1"));
+        String originalGroupId = rootResult.groupState().groupId();
+
+        reconciler.group(List.of(
+                threadMessage("chat-a", "ruth", "2026-08-18T09:05:00Z", "reply", "reply1", "r1")));
+
+        ChatGroupStateReconciler.RealtimeReconcileResult edit = reconciler.reconcileNonThreadedMessage(
+                message("chat-a", "malki", "2026-08-18T09:00:00Z", "root question (edited)", "r1"));
+
+        assertThat(edit.threadRouted()).isTrue();
+        assertThat(edit.groupState().groupId()).isEqualTo("r1");
+        assertThat(edit.groupState().threadId()).isEqualTo("r1");
+        GroupState threadGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", "r1").orElseThrow();
+        assertThat(threadGroup.messages()).extracting(MessageSnapshot::text)
+                .containsExactlyInAnyOrder("root question (edited)", "reply");
+
+        // The channel group's own copy of the root is also updated with the edit - it keeps
+        // living normally and must reflect the edit, not the stale pre-edit text.
+        GroupState channelGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", originalGroupId).orElseThrow();
+        assertThat(channelGroup.messages()).extracting(MessageSnapshot::text)
+                .containsExactly("root question (edited)");
+        assertThat(edit.channelGroupState()).isNotNull();
+        assertThat(edit.channelGroupState().groupId()).isEqualTo(originalGroupId);
+    }
+
+    @Test
+    void resolveCurrentGroupIdFindsAReplyThroughTheMessageIndexFallback() {
+        reconciler.group(List.of(
+                threadMessage("chat-a", "malki", "2026-08-18T09:00:00Z", "root", "r1", "r1"),
+                threadMessage("chat-a", "ruth", "2026-08-18T09:05:00Z", "reply", "reply1", "r1")));
+
+        var resolved = reconciler.resolveCurrentGroupId(RawSourceType.SLACK, "kamatech", "reply1");
+
+        assertThat(resolved).isPresent();
+        assertThat(resolved.orElseThrow().groupId()).isEqualTo("r1");
+    }
+
+    @Test
+    void removeMessageOfAnUnknownMessageIdIsANoOp() {
+        ChatGroupStateReconciler.RemovalResult result =
+                reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "never-seen");
+
+        assertThat(result.removed()).isFalse();
+        assertThat(result.groupState()).isNull();
+    }
+
+    @Test
+    void removeMessageFromANonThreadGroupLeavesRemainingMessagesAndAdvancesRevisionIfAlreadyPublished() {
+        ChatGroupStateReconciler.RealtimeReconcileResult first =
+                reconciler.reconcileNonThreadedMessage(message("chat-a", "ruth", "2026-08-18T10:00:00Z", "A", "m1"));
+        reconciler.reconcileNonThreadedMessage(message("chat-a", "ruth", "2026-08-18T10:01:00Z", "B", "m2"));
+        String groupId = first.groupState().groupId();
+        GroupState beforeRemoval = groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow();
+        groupStateStore.confirmPublished(RawSourceType.SLACK, "kamatech", groupId, beforeRemoval.revision());
+
+        ChatGroupStateReconciler.RemovalResult result = reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "m1");
+
+        assertThat(result.removed()).isTrue();
+        assertThat(result.isThreadGroup()).isFalse();
+        assertThat(result.groupState().messages()).extracting(MessageSnapshot::messageId).containsExactly("m2");
+        assertThat(result.groupState().revision()).isEqualTo(beforeRemoval.revision() + 1);
+        assertThat(result.groupState().published()).isFalse();
+    }
+
+    @Test
+    void removeMessageOfTheOnlyMessageInANonThreadGroupEmptiesIt() {
+        ChatGroupStateReconciler.RealtimeReconcileResult first =
+                reconciler.reconcileNonThreadedMessage(message("chat-a", "ruth", "2026-08-18T10:00:00Z", "A", "m1"));
+        String groupId = first.groupState().groupId();
+
+        ChatGroupStateReconciler.RemovalResult result = reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "m1");
+
+        assertThat(result.removed()).isTrue();
+        assertThat(result.groupState().messages()).isEmpty();
+        assertThat(result.groupState().groupId()).isEqualTo(groupId);
+    }
+
+    @Test
+    void removeMessageOfTheLastMessageInAThreadGroupIsReportedAsAThreadGroup() {
+        reconciler.group(List.of(threadMessage("chat-a", "malki", "2026-08-18T09:00:00Z", "root", "r1", "r1")));
+
+        ChatGroupStateReconciler.RemovalResult result = reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "r1");
+
+        assertThat(result.removed()).isTrue();
+        assertThat(result.isThreadGroup()).isTrue();
+        assertThat(result.groupState().messages()).isEmpty();
+    }
+
+    @Test
+    void removeMessageTwiceIsANoOpTheSecondTime() {
+        reconciler.reconcileNonThreadedMessage(message("chat-a", "ruth", "2026-08-18T10:00:00Z", "A", "m1"));
+
+        ChatGroupStateReconciler.RemovalResult firstRemoval =
+                reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "m1");
+        ChatGroupStateReconciler.RemovalResult secondRemoval =
+                reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "m1");
+
+        assertThat(firstRemoval.removed()).isTrue();
+        assertThat(secondRemoval.removed()).isFalse();
+        assertThat(secondRemoval.groupState().revision()).isEqualTo(firstRemoval.groupState().revision());
+    }
+
+    @Test
+    void removeMessageOfARootAfterThreadMigrationResolvesToTheThreadGroupAndAlsoUpdatesTheChannelGroup() {
+        // Deletion counterpart of editOfAThreadRootAfterTheThreadExistsResolvesToTheThreadGroup...
+        // above - the root's deletion event (message_deleted/tombstone) carries no thread_ts
+        // either, so it must be routed the same way: by resolveCurrentGroupId's direct-load,
+        // never by the stale messageId index (which still points at the channel group).
+        ChatGroupStateReconciler.RealtimeReconcileResult rootResult = reconciler.reconcileNonThreadedMessage(
+                message("chat-a", "malki", "2026-08-18T09:00:00Z", "root question", "r1"));
+        String originalGroupId = rootResult.groupState().groupId();
+        reconciler.group(List.of(threadMessage("chat-a", "ruth", "2026-08-18T09:05:00Z", "reply", "reply1", "r1")));
+
+        ChatGroupStateReconciler.RemovalResult result = reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "r1");
+
+        assertThat(result.removed()).isTrue();
+        assertThat(result.isThreadGroup()).isTrue();
+        assertThat(result.groupState().groupId()).isEqualTo("r1");
+        assertThat(result.groupState().messages()).extracting(MessageSnapshot::messageId).containsExactly("reply1");
+        // The channel group's own copy of the root is also removed - it keeps living normally
+        // and must reflect the deletion, following its own revision rules (DELETE_REVIEW/empty).
+        GroupState channelGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", originalGroupId).orElseThrow();
+        assertThat(channelGroup.messages()).isEmpty();
+        assertThat(result.channelGroupState()).isNotNull();
+        assertThat(result.channelGroupState().groupId()).isEqualTo(originalGroupId);
+    }
+
+    @Test
+    void replyDeletionViaMessageDeletedResolvesThroughTheIndexFallbackToTheThreadGroup() {
+        // message_deleted carries no thread_ts at all (unlike a reply's own message_changed
+        // edit), so a reply deletion can only be routed correctly by resolving the group first -
+        // this is resolveCurrentGroupId's index-fallback branch (replies, unlike the root, ARE
+        // indexed - see GroupStateStore.writeMessageIndex).
+        reconciler.group(List.of(
+                threadMessage("chat-a", "malki", "2026-08-18T09:00:00Z", "root", "r1", "r1"),
+                threadMessage("chat-a", "ruth", "2026-08-18T09:05:00Z", "reply", "reply1", "r1")));
+
+        ChatGroupStateReconciler.RemovalResult result =
+                reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "reply1");
+
+        assertThat(result.removed()).isTrue();
+        assertThat(result.isThreadGroup()).isTrue();
+        assertThat(result.groupState().groupId()).isEqualTo("r1");
+        assertThat(result.groupState().messages()).extracting(MessageSnapshot::messageId).containsExactly("r1");
+    }
+
+    @Test
+    void removeMessageFromAThreadGroupLeavingOtherRepliesStaysNonEmptyAndReportedAsAThreadGroup() {
+        reconciler.group(List.of(
+                threadMessage("chat-a", "malki", "2026-08-18T09:00:00Z", "root", "r1", "r1"),
+                threadMessage("chat-a", "ruth", "2026-08-18T09:05:00Z", "reply one", "reply1", "r1"),
+                threadMessage("chat-a", "esti", "2026-08-18T09:06:00Z", "reply two", "reply2", "r1")));
+
+        ChatGroupStateReconciler.RemovalResult result =
+                reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "reply1");
+
+        assertThat(result.removed()).isTrue();
+        assertThat(result.isThreadGroup()).isTrue();
+        assertThat(result.groupState().messages()).extracting(MessageSnapshot::messageId)
+                .containsExactlyInAnyOrder("r1", "reply2");
+        // Thread groups have no claim/publish-gating of their own (see
+        // ChatGroupStateReconciler's javadoc on reconcileThreaded/mergeAndMaybePublish) - the
+        // caller (SlackEventsController) builds this straight into an UPSERT SourceRecord and
+        // publishes it immediately via toSourceRecordsForPublishedGroup; proven at the mapper
+        // level by ChatSourceRecordMapperTest (non-empty GroupState -> UPSERT, unchanged).
+        List<SourceRecord> records = reconciler.toSourceRecordsForPublishedGroup(result.groupState());
+        assertThat(records.get(0).changeType()).isEqualTo(com.rnd.bridge.raw.model.ChangeType.UPSERT);
+    }
+
+    @Test
+    void sequenceTombstoneRootThenLastReplyThenStrayMessageDeletedOnRootIsANoOp() {
+        // (1) root tombstoned via message_changed/tombstone - thread group loses the root,
+        // replies remain -> UPSERT.
+        reconciler.group(List.of(
+                threadMessage("chat-a", "malki", "2026-08-18T09:00:00Z", "root", "r1", "r1"),
+                threadMessage("chat-a", "ruth", "2026-08-18T09:05:00Z", "reply", "reply1", "r1")));
+        ChatGroupStateReconciler.RemovalResult rootTombstoned =
+                reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "r1");
+        assertThat(rootTombstoned.removed()).isTrue();
+        assertThat(rootTombstoned.groupState().messages()).extracting(MessageSnapshot::messageId)
+                .containsExactly("reply1");
+
+        // (2) the last remaining reply is then deleted -> thread group empties -> DELETE_REVIEW.
+        ChatGroupStateReconciler.RemovalResult lastReplyDeleted =
+                reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "reply1");
+        assertThat(lastReplyDeleted.removed()).isTrue();
+        assertThat(lastReplyDeleted.groupState().messages()).isEmpty();
+        List<SourceRecord> deleteReviewRecords =
+                reconciler.toSourceRecordsForPublishedGroup(lastReplyDeleted.groupState());
+        assertThat(deleteReviewRecords).hasSize(1);
+        assertThat(deleteReviewRecords.get(0).changeType()).isEqualTo(com.rnd.bridge.raw.model.ChangeType.DELETE_REVIEW);
+
+        // (3) a (duplicate/delayed) message_deleted then arrives for the root's own messageId -
+        // resolveCurrentGroupId still directly finds the (now-empty) thread group by groupId,
+        // but there is no live snapshot for "r1" left to remove -> no-op, no revision bump.
+        int revisionBeforeStrayDelete = lastReplyDeleted.groupState().revision();
+        ChatGroupStateReconciler.RemovalResult strayRootDelete =
+                reconciler.removeMessage(RawSourceType.SLACK, "kamatech", "r1");
+        assertThat(strayRootDelete.removed()).isFalse();
+        assertThat(strayRootDelete.groupState().revision()).isEqualTo(revisionBeforeStrayDelete);
+    }
+
+    @Test
+    void mergingNeverProducesAnEmptyGroupWithoutGoingThroughRemoveMessage() {
+        // Documents the invariant (see ChatGroupStateReconciler.removeMessage's javadoc and
+        // docs/plans/slack-message-deleted.md §3): a persisted GroupState with revision >= 0 is
+        // never empty unless a deletion (removeMessage) produced it. Ordinary merges - new
+        // messages, edits, even a confirmed-published retry - can never shrink messages() to
+        // empty on their own (mergeSnapshots only ever appends/replaces-by-id, see its javadoc).
+        reconciler.reconcileNonThreadedMessage(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "A", "m1"));
+        ChatGroupStateReconciler.RealtimeReconcileResult edit =
+                reconciler.reconcileNonThreadedMessage(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "A (edited)", "m1"));
+        groupStateStore.confirmPublished(
+                RawSourceType.SLACK, "kamatech", edit.groupState().groupId(), edit.groupState().revision());
+        ChatGroupStateReconciler.RealtimeReconcileResult retry =
+                reconciler.reconcileNonThreadedMessage(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "A (edited)", "m1"));
+
+        assertThat(edit.groupState().messages()).isNotEmpty();
+        assertThat(retry.groupState().messages()).isNotEmpty();
+        assertThat(retry.groupState().revision()).isGreaterThanOrEqualTo(0);
     }
 
     private record GroupPointerFixture(String groupId) {

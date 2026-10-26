@@ -21,8 +21,9 @@ export interface HeaderProps {
 }
 
 const ROLE_DISPLAY = {
-  manager: { initials: 'MG', title: 'Manager' },
-  employee: { initials: 'EM', title: 'Employee' },
+  TENANT_ADMIN: { initials: 'TA', title: 'Tenant Admin' },
+  TEAM_LEAD: { initials: 'TL', title: 'Team Lead' },
+  EMPLOYEE: { initials: 'EM', title: 'Employee' },
 } as const;
 
 export default function Header({ onMenuClick }: HeaderProps) {

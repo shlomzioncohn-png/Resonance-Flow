@@ -9,6 +9,7 @@ for, before the locally-known fields are merged in.
 import logging
 import math
 import re
+from datetime import time
 from enum import StrEnum
 from typing import Self
 
@@ -16,12 +17,15 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationError,
     ValidationInfo,
+    ValidatorFunctionWrapHandler,
     field_validator,
     model_validator,
 )
 
 from mind.contracts.task_enums import RoleContext, TaskTier
+from mind.extraction.deadline import OffsetUnit, PeriodEnd, Weekday
 
 logger = logging.getLogger("mind.extraction")
 
@@ -29,6 +33,17 @@ logger = logging.getLogger("mind.extraction")
 # a runaway title usually means the model echoed the input instead of
 # summarising it, and that is worth a repair attempt.
 MAX_TITLE_LENGTH = 200
+
+# Past this a description is the content quoted back, not a summary of it
+# (#690). Dropped rather than repaired: the field is optional, and one long
+# description must not cost a repair round of a whole meeting. The prompt asks
+# for about half of this; that is what keeps the answer under the output cap,
+# since this check only runs once the answer is written.
+MAX_DESCRIPTION_LENGTH = 600
+
+# Named dependencies kept per task (#690). A task waiting on more than this
+# many named pieces of work is almost always a model listing every noun.
+MAX_MENTIONS_PER_TASK = 10
 
 # Strings an LLM emits when it means "nothing here". Normalised to None so
 # that a missing value looks missing to the confidence heuristic instead of
@@ -101,8 +116,10 @@ def _whole_number(
     # sends them to the even neighbour, so 0.5 would become 0 and 2.5 would
     # become 2. isfinite() comes first because floor() raises on inf and nan
     # rather than returning something to reject.
-    elif isinstance(value, float) and math.isfinite(value) and (
-        round_fractions or value.is_integer()
+    elif (
+        isinstance(value, float)
+        and math.isfinite(value)
+        and (round_fractions or value.is_integer())
     ):
         number = math.floor(value + 0.5)
     else:
@@ -159,6 +176,137 @@ def _usable_urgency(value: object, written: object = None) -> int | None:
     return None
 
 
+class DeadlineKind(StrEnum):
+    """The four shapes a deadline is written in, one resolver each (deadline.py)."""
+
+    # "by October 20", "on the 20th of October 2026 at 14:00"
+    DATE = "DATE"
+    # "within 72 hours", "in 3 working days", "tomorrow" (one day)
+    OFFSET = "OFFSET"
+    # "by Friday", "next Tuesday at 10:00"
+    WEEKDAY = "WEEKDAY"
+    # "today", "by the end of the week / next week / the month"
+    PERIOD_END = "PERIOD_END"
+
+
+# What each kind cannot do without. Anything else is optional: a year or a
+# time that was never written is simply absent.
+_DEADLINE_NEEDS: dict[DeadlineKind, tuple[str, ...]] = {
+    DeadlineKind.DATE: ("month", "day"),
+    DeadlineKind.OFFSET: ("amount", "unit"),
+    DeadlineKind.WEEKDAY: ("weekday",),
+    DeadlineKind.PERIOD_END: ("period",),
+}
+
+# Long enough for "by the end of the working day on Thursday the 29th"; a
+# longer "phrase" is a sentence, not the words the deadline was read from.
+MAX_DEADLINE_PHRASE_LENGTH = 100
+
+# Bounds that keep resolution inside what a calendar can count: without them
+# "within 100000000 days" or a year of 10**10 raised OverflowError out of
+# assembly and the item's message was redelivered for ever. An offset is
+# bounded by how far ahead it lands, not by its count, so "within 1440
+# minutes" (a day) passes where "in 30000 days" does not. Twenty years is far
+# past any real deadline; the bound only stops nonsense.
+MAX_DEADLINE_DAYS_AHEAD = 20 * 365
+_DAYS_PER_UNIT: dict[OffsetUnit, float] = {
+    OffsetUnit.MINUTES: 1 / (24 * 60),
+    OffsetUnit.HOURS: 1 / 24,
+    OffsetUnit.DAYS: 1,
+    OffsetUnit.WEEKS: 7,
+    # Five working days take at most seven on the calendar.
+    OffsetUnit.WORKING_DAYS: 7 / 5,
+}
+DEADLINE_YEARS = range(2000, 2201)
+
+
+class StatedDeadline(BaseModel):
+    """What the content says about when the task is due (#960), as written.
+
+    The model reports it and does no date arithmetic; it is resolved to a
+    moment later, against when the text was written (deadline.py). Internal:
+    only that moment reaches Inbox. `phrase` is the words it was read from,
+    kept so it can be checked against the content.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    phrase: str = Field(min_length=1, max_length=MAX_DEADLINE_PHRASE_LENGTH)
+    kind: DeadlineKind
+
+    # DATE. The year only when the content writes one.
+    month: int | None = Field(default=None, ge=1, le=12)
+    day: int | None = Field(default=None, ge=1, le=31)
+    year: int | None = Field(default=None, ge=DEADLINE_YEARS.start, le=DEADLINE_YEARS.stop - 1)
+    # Any kind that lands on a day, only when the content names a time:
+    # "by 12:30" (today), "by 09:00 tomorrow". Ignored on a clock offset.
+    time_of_day: time | None = None
+    # OFFSET
+    amount: int | None = Field(default=None, gt=0)
+    unit: OffsetUnit | None = None
+    # WEEKDAY
+    weekday: Weekday | None = None
+    next_week: bool = False
+    # PERIOD_END
+    period: PeriodEnd | None = None
+
+    @field_validator("kind", "unit", "weekday", "period", mode="before")
+    @classmethod
+    def words_in_any_case(cls, value: object) -> object:
+        return value.strip().upper() if isinstance(value, str) else value
+
+    @field_validator("time_of_day", mode="wrap")
+    @classmethod
+    def an_unreadable_time_costs_only_the_time(
+        cls, value: object, handler: ValidatorFunctionWrapHandler
+    ) -> time | None:
+        """ "5pm" where "17:00" was asked: the day the model read is still
+        right, so it keeps the end of the working day instead of losing the
+        whole deadline. Logged by type only: the value is the content's.
+
+        Only a written local time is read. Not a number: pydantic would take
+        17 as seventeen seconds past midnight, where the model meant 17:00.
+        Not a time with a zone ("17:00Z"): the day it lands on is the writer's,
+        and putting that zone on a local day would move it without anyone
+        seeing. Spacing around it is forgiven, as on every other field.
+        """
+
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            problems = [type(value).__name__]
+        else:
+            try:
+                result: time = handler(value.strip())
+            except ValidationError as error:
+                problems = [d["type"] for d in error.errors(include_input=False, include_url=False)]
+            else:
+                if result.tzinfo is None:
+                    return result
+                problems = ["time_with_zone"]
+        logger.warning(
+            "extraction: deadline time_of_day cannot be read (%s); keeping the deadline without it",
+            problems,
+        )
+        return None
+
+    @model_validator(mode="after")
+    def the_kind_has_what_it_needs(self) -> Self:
+        missing = [name for name in _DEADLINE_NEEDS[self.kind] if getattr(self, name) is None]
+        if missing:
+            raise ValueError(f"a {self.kind.value} deadline needs {', '.join(missing)}")
+        days_ahead = self.amount * _DAYS_PER_UNIT[self.unit] if self.amount and self.unit else 0
+        if days_ahead > MAX_DEADLINE_DAYS_AHEAD:
+            raise ValueError(f"an offset lands more than {MAX_DEADLINE_DAYS_AHEAD} days ahead")
+        # "The end of next week" written as the week's end with next_week set,
+        # where NEXT_WEEK was asked for: the right answer in a neighbouring
+        # shape, the way `friday` is FRIDAY written wrong. Read as it was meant,
+        # rather than a week early.
+        if self.period is PeriodEnd.WEEK and self.next_week:
+            self.period = PeriodEnd.NEXT_WEEK
+        return self
+
+
 class ClassificationFields(BaseModel):
     """What kind of task this is and how long it takes (#351, #352).
 
@@ -193,6 +341,37 @@ class ClassificationFields(BaseModel):
     # effort_estimate_confidence, and the overall confidence is not touched.
     effort_estimate_minutes: int | None = Field(default=None, gt=0)
     effort_estimate_basis: EffortBasis | None = None
+
+    # When the task is due, as the content says it (#960). Under the same
+    # switch as the estimate: one call, and the same rule for optional fields.
+    deadline: StatedDeadline | None = None
+
+    @field_validator("deadline", mode="wrap")
+    @classmethod
+    def an_unusable_deadline_is_null(
+        cls, value: object, handler: ValidatorFunctionWrapHandler
+    ) -> StatedDeadline | None:
+        """Null and logged rather than repaired, like the fields below: a
+        repair round risks the whole task over an optional field."""
+
+        if value is None or (
+            isinstance(value, str) and value.strip().lower() in _NULL_PLACEHOLDERS
+        ):
+            return None
+        try:
+            result: StatedDeadline | None = handler(value)
+        except ValidationError as error:
+            # Locations and error types only: the input is the content's own
+            # words, which the logs should not carry.
+            problems = [
+                (".".join(str(part) for part in detail["loc"]) or "deadline", detail["type"])
+                for detail in error.errors(include_input=False, include_url=False)
+            ]
+            logger.warning(
+                "extraction: deadline cannot be used (%s); recording it as null", problems
+            )
+            return None
+        return result
 
     @field_validator(
         "tier",
@@ -257,8 +436,7 @@ class ClassificationFields(BaseModel):
             # and ended the run instead of the item. A model answering `tier`
             # with two labels is an ordinary mistake, not a freak one.
             logger.warning(
-                "extraction: %s came back as %r, which is not a single value; "
-                "recording it as null",
+                "extraction: %s came back as %r, which is not a single value; recording it as null",
                 field,
                 written,
             )
@@ -327,9 +505,83 @@ class ExtractedFields(BaseModel):
     # Not every source carries one, so None is a normal outcome.
     source_ref: str | None = None
 
-    # Whether the task looks like it depends on or blocks another task.
+    # Whether the task looks like it depends on, or is blocked by, other work.
+    # One direction since #690: a task others wait for is not dependent.
     # Resolving the actual targets belongs to R3, not to this stage.
     has_dependencies: bool
+
+    # Short phrases naming the work this one depends on or is blocked by —
+    # never what waits for it: #834 sends each to Chain as this task's
+    # `depends_on_task_id`, so the other direction would arrive reversed. In the
+    # content's own words: "the DB upgrade" (#690, was #842). Never in the
+    # contract. They travel beside it to #834's resolver, which turns them into
+    # task ids, so a phrase that cannot be resolved there must not leave here.
+    # Checked against the content, and the rule that a mention means a
+    # dependency applied, by `grounding.ground_dependency_mentions`: the
+    # check needs the content, which this model never sees. So the rule
+    # holds on what `extract` returns (`ExtractionSuccess`), not on a bare
+    # ExtractedFields parsed or built anywhere else.
+    dependency_mentions: list[str] = []
+
+    @field_validator("dependency_mentions", mode="before")
+    @classmethod
+    def only_usable_mentions_survive(cls, value: object) -> list[str]:
+        """Keep each phrase once, and drop what is not a phrase.
+
+        Optional, so nothing here raises: an unusable mention is dropped and
+        logged rather than sending the whole answer, every task of a meeting,
+        back for repair. One empty mention used to stall #834's listener.
+        """
+
+        if value is None:
+            return []
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, list):
+            logger.warning(
+                "extraction: dependency_mentions came back as %r, which is not a list; "
+                "recording it as empty",
+                value,
+            )
+            return []
+
+        kept: list[str] = []
+        # Case-blind: "The DB upgrade" is the same mention, and the resolver
+        # would only look it up twice.
+        seen: set[str] = set()
+        for item in value:
+            if not isinstance(item, str):
+                logger.warning(
+                    "extraction: dependency mention %r is not a phrase; dropping it", item
+                )
+                continue
+            phrase = item.strip()
+            if phrase.lower() in _NULL_PLACEHOLDERS or phrase.lower() in seen:
+                continue
+            # A mention names another task, so it is held to a title's length:
+            # past that it is the content echoed back, and the resolver would
+            # match it against everything.
+            if len(phrase) > MAX_TITLE_LENGTH:
+                logger.warning(
+                    "extraction: dependency mention %r is longer than %d characters; dropping it",
+                    phrase[:60] + "...",
+                    MAX_TITLE_LENGTH,
+                )
+                continue
+            seen.add(phrase.lower())
+            kept.append(phrase)
+
+        # Each mention costs #834 a vector search. Kept rather than repaired
+        # past the cap, as everything optional here is.
+        if len(kept) > MAX_MENTIONS_PER_TASK:
+            logger.warning(
+                "extraction: %d more dependency mention(s) than the %d kept; dropping %s",
+                len(kept) - MAX_MENTIONS_PER_TASK,
+                MAX_MENTIONS_PER_TASK,
+                kept[MAX_MENTIONS_PER_TASK:],
+            )
+            kept = kept[:MAX_MENTIONS_PER_TASK]
+        return kept
 
     @field_validator("description", "source_ref", mode="after")
     @classmethod
@@ -339,6 +591,20 @@ class ExtractedFields(BaseModel):
         if value is None:
             return None
         return None if value.strip().lower() in _NULL_PLACEHOLDERS else value
+
+    @field_validator("description", mode="after")
+    @classmethod
+    def a_runaway_description_is_dropped(cls, value: str | None) -> str | None:
+        """Too long to be a summary: logged and dropped, never repaired."""
+
+        if value is not None and len(value) > MAX_DESCRIPTION_LENGTH:
+            logger.warning(
+                "extraction: description of %d characters is longer than %d; dropping it",
+                len(value),
+                MAX_DESCRIPTION_LENGTH,
+            )
+            return None
+        return value
 
     @field_validator("title", mode="before")
     @classmethod
@@ -366,10 +632,11 @@ class ExtractedFields(BaseModel):
         if isinstance(value, str) and value.strip().lower() in _NULL_PLACEHOLDERS:
             raise ValueError(
                 f"{value!r} is a placeholder, not a title; summarise the task as an action, "
-                f"and if the content truly describes no task, say so rather than filling "
-                f"the field in"
+                f"and if this entry describes no task, leave it out of the list rather "
+                f"than filling the field in"
             )
         return value
+
 
 class ExtractedFieldsWithClassification(ExtractedFields, ClassificationFields):
     """Every field asked for when classification is switched on (#351, #352).
@@ -378,6 +645,29 @@ class ExtractedFieldsWithClassification(ExtractedFields, ClassificationFields):
     either model changes here with it, which is what stops the switched-off
     and switched-on shapes from drifting apart.
     """
+
+
+# More than this from one text is a model listing every sentence, not a meeting
+# with that many commitments. Rejected and repaired rather than cut short:
+# keeping the first fifteen would drop the rest without anyone seeing it.
+MAX_TASKS_PER_TEXT = 15
+
+
+class ExtractedTasks[TaskT: ExtractedFields](BaseModel):
+    """The whole answer: every task the text describes (#690).
+
+    `TaskT` is the shape `response_model` chose, so each task in the list is
+    validated by exactly the rules a single task always was, switch on or off.
+
+    One invalid task fails the whole answer. Keeping the valid ones would
+    quietly drop the bad one, and the repair round can name it by its place in
+    the list (`tasks.1.title`). An empty list is a valid answer: a text with no
+    task in it is the normal case, not a failure.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tasks: list[TaskT] = Field(max_length=MAX_TASKS_PER_TEXT)
 
 
 def response_model(classify: bool) -> type[ExtractedFields]:

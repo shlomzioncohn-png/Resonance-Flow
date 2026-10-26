@@ -1,5 +1,6 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.testsupport.PgCleanup;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
@@ -12,14 +13,11 @@ import com.rnd.chain.repository.DependencyHistoryRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TransactionRunner;
-import com.rnd.chain.repository.UnresolvedDependencyRepository;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.DependencyEdgeService;
 import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.SchedulingUpdateService;
-import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskDependencyService;
-import com.rnd.chain.service.UnresolvedDependencyService;
 import com.rnd.mind.event.DependencyProposedEvent;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializerConfig;
@@ -73,6 +71,25 @@ import static org.mockito.Mockito.mock;
         "chain.kafka.schema-registry-url=mock://dependency-proposed-handler-test"
 })
 class DependencyProposedEventHandlerIntegrationTest {
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.rnd.chain.repository.TaskReadinessRepository taskReadinessRepository;
+
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
 
     private static final String TOPIC =
             "task.dependencies.proposed";
@@ -132,9 +149,6 @@ class DependencyProposedEventHandlerIntegrationTest {
                 .id(id)
                 .tenantId(TENANT_ID)
                 .status(TaskStatus.PENDING)
-                .isReady(true)
-                .blockingCount(0)
-                .openConstraintCount(0)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
@@ -178,7 +192,7 @@ class DependencyProposedEventHandlerIntegrationTest {
                         taskRepository
                                 .findById(taskId)
                                 .map(task ->
-                                        task.getBlockingCount() == 1)
+                                        blockingCount(task) == 1)
                                 .orElse(false));
     }
 
@@ -219,7 +233,7 @@ class DependencyProposedEventHandlerIntegrationTest {
                         taskRepository
                                 .findById(taskId)
                                 .map(task ->
-                                        task.getBlockingCount() == 1)
+                                        blockingCount(task) == 1)
                                 .orElse(false));
 
         producer.send(
@@ -236,7 +250,7 @@ class DependencyProposedEventHandlerIntegrationTest {
                         taskRepository
                                 .findById(taskId)
                                 .map(task ->
-                                        task.getBlockingCount() == 1)
+                                        blockingCount(task) == 1)
                                 .orElse(false));
     }
     @Test
@@ -366,7 +380,7 @@ void genuinelyMalformedBytes_notValidProtobufAtAll_alsoGoesStraightToTheErrorsTo
                                 .map(task -> task.getStatus() == TaskStatus.PENDING)
                                 .orElse(false)
                                 && taskRepository.findById(taskId)
-                                .map(task -> task.getBlockingCount() == 1)
+                                .map(task -> blockingCount(task) == 1)
                                 .orElse(false));
     }
 }

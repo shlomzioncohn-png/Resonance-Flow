@@ -18,10 +18,12 @@ import com.rnd.inbox.tenant.model.Tenant;
 import com.rnd.inbox.tenant.repository.TenantRepository;
 import com.rnd.inbox.user.model.User;
 import com.rnd.inbox.user.repository.UserRepository;
+import com.rnd.inbox.user.service.UserService;
 import com.rnd.inbox.user.model.UserRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
@@ -33,6 +35,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -43,6 +46,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -64,6 +68,10 @@ class TeamServiceTest {
     @Mock
     private TeamMemberService teamMemberService;
 
+    // Same for UserService: promoting an employee to team lead is its job, tested there.
+    @Mock
+    private UserService userService;
+
     @Mock
     private AuditService auditService;
 
@@ -79,7 +87,7 @@ class TeamServiceTest {
     @BeforeEach
     void setUp() {
         teamService = new TeamService(teamRepository, tenantRepository, userRepository, teamMemberService,
-                teamMapper, auditService, new TeamAuthorization());
+                userService, teamMapper, auditService, new TeamAuthorization());
 
         tenantId = UUID.randomUUID();
         tenant = new Tenant();
@@ -101,7 +109,7 @@ class TeamServiceTest {
     }
 
     @Test
-    void createTeam_whenLeadIsEmployee_promotesLeadAndEnsuresMembership() {
+    void createTeam_promotesTheLeadAndEnsuresMembershipUnderTheActor() {
         when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         User lead = userInTenant(UserRole.EMPLOYEE);
@@ -120,34 +128,10 @@ class TeamServiceTest {
         TeamResponseDto result = teamService.createTeam(request, actorId);
 
         assertThat(result.getName()).isEqualTo("Platform Team");
-        assertThat(lead.getRole()).isEqualTo(UserRole.TEAM_LEAD);
-        verify(userRepository).save(lead);
-        verify(teamMemberService).ensureMembership(any(Team.class), eq(lead));
+        verify(userService).promoteToTeamLeadIfEmployee(lead, actor);
+        verify(teamMemberService).ensureMembership(any(Team.class), eq(lead), eq(actor));
         verify(auditService).createAuditLog(eq("TEAM_CREATED"), eq("Team"), any(), eq(tenant), eq(actor),
                 any(), isNull());
-    }
-
-    @Test
-    void createTeam_whenLeadIsAlreadyTenantAdmin_doesNotDowngradeRole() {
-        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
-        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
-        User lead = userInTenant(UserRole.TENANT_ADMIN);
-        when(userRepository.findById(lead.getId())).thenReturn(Optional.of(lead));
-        when(teamRepository.save(any(Team.class))).thenAnswer(invocation -> {
-            Team team = invocation.getArgument(0);
-            team.setId(UUID.randomUUID());
-            return team;
-        });
-
-        TeamCreateRequestDto request = new TeamCreateRequestDto();
-        request.setTenantId(tenantId.toString());
-        request.setName("Platform Team");
-        request.setTeamLeadId(lead.getId().toString());
-
-        teamService.createTeam(request, actorId);
-
-        assertThat(lead.getRole()).isEqualTo(UserRole.TENANT_ADMIN);
-        verify(userRepository, never()).save(lead);
     }
 
     @Test
@@ -252,12 +236,12 @@ class TeamServiceTest {
 
         teamService.updateTeam(teamId, request, actorId);
 
-        verify(teamMemberService, never()).ensureMembership(any(), any());
-        verify(userRepository, never()).save(any());
+        verify(teamMemberService, never()).ensureMembership(any(), any(), any());
+        verifyNoInteractions(userService);
     }
 
     @Test
-    void updateTeam_whenTeamLeadIdProvided_promotesAndEnsuresMembership() {
+    void updateTeam_whenTeamLeadIdProvided_promotesAndEnsuresMembershipUnderTheActor() {
         when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
         UUID teamId = UUID.randomUUID();
         Team team = new Team();
@@ -274,8 +258,8 @@ class TeamServiceTest {
 
         teamService.updateTeam(teamId, request, actorId);
 
-        assertThat(newLead.getRole()).isEqualTo(UserRole.TEAM_LEAD);
-        verify(teamMemberService).ensureMembership(team, newLead);
+        verify(userService).promoteToTeamLeadIfEmployee(newLead, actor);
+        verify(teamMemberService).ensureMembership(team, newLead, actor);
     }
 
     @Test
@@ -313,5 +297,84 @@ class TeamServiceTest {
         TeamResponseDto result = teamService.updateTeamStatus(teamId, request, actorId);
 
         assertThat(result.getStatus()).isEqualTo(TeamStatus.ARCHIVED);
+    }
+
+    @Test
+    void updateTeamStatus_whenTeamIsInAnotherTenant_throwsForbiddenActionException() {
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+        UUID teamId = UUID.randomUUID();
+        Team team = new Team();
+        team.setTenant(new Tenant());
+        team.getTenant().setId(UUID.randomUUID());
+        team.setStatus(TeamStatus.ACTIVE);
+        when(teamRepository.findById(teamId)).thenReturn(Optional.of(team));
+
+        TeamStatusUpdateRequestDto request = new TeamStatusUpdateRequestDto();
+        request.setStatus("ARCHIVED");
+
+        assertThatThrownBy(() -> teamService.updateTeamStatus(teamId, request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(teamRepository, never()).save(any());
+    }
+
+    @Test
+    void updateTeam_auditsTheValuesFromBeforeAndAfterTheChange() {
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+        UUID teamId = UUID.randomUUID();
+        Team team = new Team();
+        team.setId(teamId);
+        team.setTenant(tenant);
+        team.setName("Old Name");
+        team.setStatus(TeamStatus.ACTIVE);
+        when(teamRepository.findById(teamId)).thenReturn(Optional.of(team));
+        when(teamRepository.save(team)).thenReturn(team);
+        User newLead = userInTenant(UserRole.TEAM_LEAD);
+        when(userRepository.findById(newLead.getId())).thenReturn(Optional.of(newLead));
+
+        TeamUpdateRequestDto request = new TeamUpdateRequestDto();
+        request.setName("New Name");
+        request.setTeamLeadId(newLead.getId().toString());
+
+        teamService.updateTeam(teamId, request, actorId);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> beforeCaptor = ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> afterCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createUpdateAuditLog(eq("TEAM_UPDATED"), eq("Team"), eq(teamId), eq(tenant), eq(actor),
+                beforeCaptor.capture(), afterCaptor.capture(), isNull());
+        assertThat(beforeCaptor.getValue())
+                .containsEntry("name", "Old Name")
+                .containsEntry("teamLeadId", null);
+        assertThat(afterCaptor.getValue())
+                .containsEntry("name", "New Name")
+                .containsEntry("teamLeadId", newLead.getId());
+    }
+
+    @Test
+    void updateTeamStatus_auditsTheStatusFromBeforeAndAfterTheChange() {
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+        UUID teamId = UUID.randomUUID();
+        Team team = new Team();
+        team.setId(teamId);
+        team.setTenant(tenant);
+        team.setStatus(TeamStatus.ACTIVE);
+        when(teamRepository.findById(teamId)).thenReturn(Optional.of(team));
+        when(teamRepository.save(team)).thenReturn(team);
+
+        TeamStatusUpdateRequestDto request = new TeamStatusUpdateRequestDto();
+        request.setStatus("ARCHIVED");
+
+        teamService.updateTeamStatus(teamId, request, actorId);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> beforeCaptor = ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> afterCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createUpdateAuditLog(eq("TEAM_STATUS_UPDATED"), eq("Team"), eq(teamId), eq(tenant),
+                eq(actor), beforeCaptor.capture(), afterCaptor.capture(), isNull());
+        assertThat(beforeCaptor.getValue()).containsEntry("status", "ACTIVE");
+        assertThat(afterCaptor.getValue()).containsEntry("status", "ARCHIVED");
     }
 }

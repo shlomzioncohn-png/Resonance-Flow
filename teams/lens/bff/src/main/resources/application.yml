@@ -1,5 +1,5 @@
 server:
-  port: ${SERVER_PORT:8082}
+  port: ${SERVER_PORT:8085}
 
 spring:
   application:
@@ -8,15 +8,20 @@ spring:
 # Inbox (task data) - see InboxClient and lens/frontend/docs/api-integration-status.md
 inbox:
   # true = in-memory mock tasks, no Inbox needed. Set false to call the real Inbox.
-  mock-enabled: ${INBOX_MOCK_ENABLED:true}
-  # Local Inbox runs on 8083 (8080/8082 are taken by our Gateway/BFF)
+  mock-enabled: ${INBOX_MOCK_ENABLED:false}
+  # Inbox runs on Docker - use localhost when BFF runs locally
   service:
-    url: ${INBOX_SERVICE_URL:http://localhost:8083}
+    url: ${INBOX_SERVICE_URL:http://localhost:8082}
   # Seeded Inbox user UUID sent as X-Actor-Id instead of the Gateway's mock "emp_001".
   # Local testing only - empty means "send the userId from the Gateway".
   dev-actor-id: ${INBOX_DEV_ACTOR_ID:}
   connect-timeout-ms: ${INBOX_CONNECT_TIMEOUT_MS:2000}
   read-timeout-ms: ${INBOX_READ_TIMEOUT_MS:10000}
+
+# Chain (dependency graph, task history) - see ChainClient. Every call sends X-Tenant-Id.
+chain:
+  service:
+    url: ${CHAIN_SERVICE_URL:http://chain-service:8081}
 
 management:
   endpoints:

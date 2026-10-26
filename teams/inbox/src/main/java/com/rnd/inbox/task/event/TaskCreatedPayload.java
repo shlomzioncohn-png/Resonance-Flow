@@ -29,6 +29,8 @@ public final class TaskCreatedPayload {
     private final TaskExtractionProvenance extractionProvenance;
     private final Float confidence;
     private final Float effortEstimateConfidence;
+    private final UUID suggestedOwnerUserId;
+    private final Float suggestedOwnerConfidence;
     private final UUID createdBy;
     private final UUID ownerId;
     private final Instant createdAt;
@@ -38,7 +40,8 @@ public final class TaskCreatedPayload {
                                 SourceType sourceType, String sourceRef, TaskTier tier, TaskRoleContext roleContext,
                                 Short urgency, Integer effortEstimateMinutes, Instant deadline, TaskStatus status,
                                 TaskExtractionProvenance extractionProvenance, Float confidence,
-                                Float effortEstimateConfidence,
+                                Float effortEstimateConfidence, UUID suggestedOwnerUserId,
+                                Float suggestedOwnerConfidence,
                                 UUID createdBy, UUID ownerId, Instant createdAt, Map<String, Object> metadata) {
         this.taskId = taskId;
         this.tenantId = tenantId;
@@ -57,6 +60,8 @@ public final class TaskCreatedPayload {
         this.extractionProvenance = extractionProvenance;
         this.confidence = confidence;
         this.effortEstimateConfidence = effortEstimateConfidence;
+        this.suggestedOwnerUserId = suggestedOwnerUserId;
+        this.suggestedOwnerConfidence = suggestedOwnerConfidence;
         this.createdBy = createdBy;
         this.ownerId = ownerId;
         this.createdAt = createdAt;
@@ -82,6 +87,8 @@ public final class TaskCreatedPayload {
                 task.getExtractionProvenance(),
                 task.getConfidence(),
                 task.getEffortEstimateConfidence(),
+                task.getSuggestedOwnerUser() != null ? task.getSuggestedOwnerUser().getId() : null,
+                task.getSuggestedOwnerConfidence(),
                 task.getCreatedBy() != null ? task.getCreatedBy().getId() : null,
                 task.getOwner() != null ? task.getOwner().getId() : null,
                 task.getCreatedAt(),
@@ -155,6 +162,14 @@ public final class TaskCreatedPayload {
 
     public Float getEffortEstimateConfidence() {
         return effortEstimateConfidence;
+    }
+
+    public UUID getSuggestedOwnerUserId() {
+        return suggestedOwnerUserId;
+    }
+
+    public Float getSuggestedOwnerConfidence() {
+        return suggestedOwnerConfidence;
     }
 
     public UUID getCreatedBy() {

@@ -1,0 +1,14 @@
+{
+  "name": "chain",
+  "description": "A simple parent -> child -> grandchild chain. Importance flows down and the expected order is obvious -- the smoke test.",
+  "graph": {
+    "nodes": [
+      {"task_id": "goal_strategic", "parent_task_id": null, "importance": 0.9, "label": "Strategic 2026 goal"},
+      {"task_id": "initiative_q4", "parent_task_id": "goal_strategic", "importance": 0.1, "label": "Q4 initiative under the goal"},
+      {"task_id": "task_under_chain", "parent_task_id": "initiative_q4", "importance": 0.3, "label": "Task under the Q4 initiative"},
+      {"task_id": "task_standalone", "parent_task_id": null, "importance": 0.3, "label": "Unrelated standalone task, same own importance as task_under_chain"}
+    ]
+  },
+  "expected_order": ["task_under_chain", "task_standalone"],
+  "notes": "Both leaves start at the identical own importance (0.3). task_under_chain must outrank task_standalone purely because of the chain beneath a strategic goal -- if this fails, nothing else will pass either. task_standalone has no parent at all, so any positive boost from initiative_q4 is enough to produce the stated order; this fixture is the smoke test, not the depth check -- 03_deep_nesting is where a one-hop-only read of the parent is deliberately made to lose to the correct full walk to the root. This order assumes the add-only combination rule (see README.md's Design decisions, \"A parent can only add, never remove\") -- under a multiplicative model (0.3*0.1*0.9=0.027) task_under_chain would lose to task_standalone's bare 0.3, flipping the order."
+}

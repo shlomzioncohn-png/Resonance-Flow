@@ -1,7 +1,9 @@
 package com.rnd.chain.repository;
 
 import com.rnd.chain.dto.PageResponse;
+import com.rnd.chain.dto.TaskStateEventType;
 import com.rnd.chain.dto.TaskStateHistoryEntry;
+import com.rnd.chain.dto.TaskStateHistoryRow;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.entity.TaskStateHistoryEntity;
 import com.rnd.chain.repository.jpa.SpringDataTaskStateHistoryJpaRepository;
@@ -14,6 +16,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /** Postgres-backed {@link TaskStateHistoryRepository} (V9 migration). */
 @Repository
@@ -56,5 +61,38 @@ public class PostgresTaskStateHistoryRepository implements TaskStateHistoryRepos
     private static TaskStateHistoryEntry toDto(TaskStateHistoryEntity e) {
         return new TaskStateHistoryEntry(e.getId(), e.getTaskId(), e.getEventType(), e.getFromStatus(),
                 e.getToStatus(), e.getBlockingCountBefore(), e.getBlockingCountAfter(), e.getCreatedAt());
+    }
+
+    @Override
+    public Map<UUID, Instant> findLatestBlockedSinceByTaskIds(List<UUID> taskIds) {
+        if (taskIds == null || taskIds.isEmpty()) {
+            return Map.of();
+        }
+
+        return jpaRepository.findLatestBlockedSinceByTaskIds(taskIds).stream()
+                .collect(Collectors.toMap(
+                        row -> (UUID) row[0],
+                        row -> ((java.sql.Timestamp) row[1]).toInstant()
+                ));
+    }
+
+    @Override
+    public List<TaskStateHistoryRow> findByTenant(UUID tenantId, Instant from, Instant to,
+                                                  List<TaskStateEventType> types, Instant afterTime,
+                                                  long afterSequence, int limit) {
+        return jpaRepository.findTenantPage(tenantId, from, to, types.stream().map(Enum::name).toList(),
+                        afterTime, afterSequence, limit).stream()
+                .map(e -> new TaskStateHistoryRow(toDto(e), e.getSequence()))
+                .toList();
+    }
+
+    @Override
+    public Map<UUID, Instant> findCurrentlyBlockedSince(UUID tenantId, List<UUID> taskIds) {
+        List<Object[]> rows = taskIds == null || taskIds.isEmpty()
+                ? jpaRepository.findCurrentlyBlockedSinceByTenant(tenantId)
+                : jpaRepository.findCurrentlyBlockedSinceByTenantAndTaskIds(tenantId, taskIds);
+        return rows.stream().collect(Collectors.toMap(
+                row -> (UUID) row[0],
+                row -> (Instant) row[1]));
     }
 }

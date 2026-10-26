@@ -30,9 +30,10 @@ dedicated project is needed for this repo's scope.
 | File                     | Purpose                                                                 |
 |--------------------------|--------------------------------------------------------------------------|
 | `root-app.yaml`          | App-of-apps bootstrap `Application` - manages everything under `apps/` |
-| `argocd-cm-patch.yaml`   | Restores the `argoproj.io/Application` health check ArgoCD dropped in 1.8 (with a fix for a "Missing" status edge case) - kept in case a future child `Application` needs sync-wave gating on another `Application`'s health; nothing under `apps/` currently uses more than one wave |
-| `apps/resonance-flow.yaml` | `Application` syncing the [`resonance-flow`](../helm/resonance-flow) chart (all teams' services, including the Kafka/Postgres/MinIO subcharts), with [`environments/shared.yaml`](../helm/resonance-flow/environments/shared.yaml) layered on top for shared-cluster-only settings |
-| `apps/traefik.yaml`      | `Application` installing the Traefik ingress controller (namespace `traefik`, ingress class `traefik`) that serves the chart's Ingress |
+| `argocd-cm-patch.yaml`   | Restores the `argoproj.io/Application` health check ArgoCD dropped in 1.8 (with a fix for a "Missing" status edge case). Without it the sync-waves below (`0` → `1` → `2`) don't wait for the previous wave to be Healthy |
+| `apps/resonance-flow.yaml` | Wave `0`. `Application` syncing the [`resonance-flow`](../helm/resonance-flow) chart (all teams' services, including the Kafka/Postgres/MinIO subcharts and Schema Registry), with [`environments/shared.yaml`](../helm/resonance-flow/environments/shared.yaml) layered on top for shared-cluster-only settings |
+| `apps/schema-sync-hook.yaml` | Wave `1`. `Application` running the [`schema-sync-hook`](../schema-sync-hook) Job that checks and registers `shared/proto` schemas; it needs the Schema Registry from wave `0` to be up |
+| `apps/traefik.yaml`      | Wave `2`. `Application` installing the Traefik ingress controller (namespace `traefik`, ingress class `traefik`) that serves the chart's Ingress |
 
 ## Onboarding your team's service
 

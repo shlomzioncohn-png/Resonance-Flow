@@ -16,6 +16,7 @@ MIND writes the handler (its business logic) and picks the topic/type:
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 
 from confluent_kafka import Consumer, KafkaException
@@ -33,9 +34,14 @@ class ProtobufConsumer:
         group_id: str,
         topics: list[str],
         settings: MessagingSettings | None = None,
+        conf_overrides: dict[str, str | int | float | bool] | None = None,
     ):
+        """`conf_overrides` replaces librdkafka config keys for this consumer only,
+        e.g. {"max.poll.interval.ms": 1_800_000} for a handler that runs for minutes."""
         self._settings = settings or load_settings()
-        self._consumer = Consumer(self._settings.consumer_conf(group_id))
+        self._settings.require_client_keys()
+        conf = self._settings.consumer_conf(group_id) | (conf_overrides or {})
+        self._consumer = Consumer(conf)
         self._consumer.subscribe(list(topics))
         self._deserializers: dict[type, ProtobufDeserializer] = {}
 
@@ -54,15 +60,22 @@ class ProtobufConsumer:
         max_messages: int | None = None,
         poll_timeout: float = 1.0,
         idle_timeout: float | None = None,
+        stop: threading.Event | None = None,
     ) -> int:
         """Poll -> deserialize -> handler -> commit, until max_messages is
-        reached, idle_timeout elapses with no message, or the process is
-        stopped. Returns the number handled."""
+        reached, idle_timeout elapses with no message, `stop` is set, or the
+        process is stopped. Returns the number handled.
+
+        `stop` lets a consumer running in a thread of a longer-lived process
+        (the API) end when that process shuts down: it is checked between
+        polls, so the loop ends within one poll_timeout, and the consumer is
+        closed and leaves its group instead of waiting for a session timeout.
+        """
         deserialize = self._deserializer(message_type)
         handled = 0
         idle = 0.0
         try:
-            while True:
+            while stop is None or not stop.is_set():
                 msg = self._consumer.poll(poll_timeout)
                 if msg is None:
                     idle += poll_timeout
@@ -80,5 +93,6 @@ class ProtobufConsumer:
                 handled += 1
                 if max_messages is not None and handled >= max_messages:
                     return handled
+            return handled
         finally:
             self._consumer.close()

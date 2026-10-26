@@ -2,7 +2,6 @@ package com.rnd.bridge.intake.config;
 
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * Config for RealSlackSourceReader. botToken is the Bot User OAuth Token (xoxb-...) obtained by
@@ -18,6 +17,6 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  */
 @ConfigurationProperties(prefix = "bridge.intake.slack")
 public record SlackApiProperties(
-        String botToken, @DefaultValue("kamatech") String tenantId, List<String> channels,
+        String botToken, List<String> channels,
         String signingSecret) {
 }

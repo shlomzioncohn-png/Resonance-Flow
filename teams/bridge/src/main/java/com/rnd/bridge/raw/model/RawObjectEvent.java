@@ -10,13 +10,16 @@ import java.util.List;
 /**
  * Published to Kafka topic bridge.raw.landed by both unstructured lanes (Malki and
  * Esther) - the contract agreed with Mind in issue #31, wire schema
- * shared/proto/raw-object-event.proto. One RawObjectEvent represents one logical item (an
- * email, a chat session, a meeting recording, a scanned document), carrying every MinIO object
- * that belongs to it - body/transcript and every attachment alike - as a list of
- * {@link RawObjectRef} entries, instead of one logical item fanning out into several separate
- * Kafka events keyed by attachment_index. object_key/content_hash/content_type/size_bytes/
- * modality live on each RawObjectRef (they are per-object, not per-logical-item); a role says
- * what each object is (see Role's javadoc).
+ * shared/proto/raw-object-event.proto. schemaVersion is still "1.0" in practice - the record
+ * shape below changed to the multi-object contract, but the version string wasn't bumped since
+ * nothing is in production yet to distinguish an old "1.0" consumer from this new shape.
+ * One RawObjectEvent represents one logical item (an email, a chat session, a meeting
+ * recording, a scanned document), carrying every MinIO object that belongs to it -
+ * body/transcript and every attachment alike - as a list of {@link RawObjectRef} entries,
+ * instead of one logical item fanning out into several separate Kafka events keyed by
+ * attachment_index. object_key/content_hash/content_type/size_bytes/modality live on each
+ * RawObjectRef (they are per-object, not per-logical-item); attachment_index/attachment_count
+ * are gone, and a role says what each object is (see Role's javadoc).
  *
  * correlationId is the stable identity of the logical item - minted once and carried
  * forward unchanged across every subsequent edit (see ChatGroupStateReconciler for the
@@ -26,8 +29,10 @@ import java.util.List;
  * revision/changeType carry chat edit/reconciliation state (see ChatGroupStateReconciler)
  * to Mind: revision is 0 for every non-chat source, which never republishes an existing
  * correlationId; a chat edit republishes the same correlationId at a higher revision.
- * changeType is UPSERT for a new object or an edit; DELETE_REVIEW is defined but not
- * emitted by any producer yet.
+ * changeType is UPSERT for a new object or an edit; DELETE_REVIEW is already emitted by the
+ * Calendar reader on event cancellation (see RealCalendarSourceReader/
+ * FixtureCalendarSourceReader) and reserved for the same whole-item-deleted case on every
+ * other source once that's built (see below) - not yet emitted by Slack/Email/Drive/WhatsApp.
  *
  * changeSignificanceScore (0-100) has no real calculation yet - every producer hardcodes
  * CURRENT_CHANGE_SIGNIFICANCE_SCORE until that logic exists.
@@ -42,14 +47,26 @@ import java.util.List;
  * see {@link Classification}. Omitted from the JSON entirely (not sent as null) when nothing
  * classified the item; set via {@link #withClassification}.
  *
- * objects must never be empty - a RawObjectEvent is only ever published once every
- * MinIO object it refers to has actually landed successfully; a partial object list is
- * never published (see UnstructuredIntakeLane/MediaIntakeOrchestrator, the two producers).
+ * objects must never be empty for changeType=UPSERT - a RawObjectEvent is only ever
+ * published once every MinIO object it refers to has actually landed successfully; a
+ * partial object list is never published (see UnstructuredIntakeLane/
+ * MediaIntakeOrchestrator, the two producers). changeType=DELETE_REVIEW is the one
+ * exception: an empty objects list there means "this logical item no longer exists."
  *
  * implements BridgePayload (see core.BridgePayload): tenantId() is satisfied by the
  * record's own tenantId component; dedupKey() is correlationId + ":" + revision - the
- * consumer dedup key Mind defined in #31 - since no single object's hash can stand in for
- * "this whole published revision of this logical item" once there can be more than one object.
+ * consumer dedup key Mind defined in #31, since unlike the old per-object contentHash, no
+ * single object's hash can stand in for "this whole published revision of this logical item"
+ * once there can be more than one object. This key is only valid as a dedup identity under two
+ * invariants, agreed with Mind (Yonit Shvarts): correlationId is stable across every revision
+ * of the same logical item, regardless of source type, and revision is strictly increasing per
+ * correlationId - never reused, never decreasing.
+ *
+ * A whole logical item being deleted (e.g. an entire Slack session/thread, not just one
+ * message edited out of it - that case is a plain revision bump with changeType=UPSERT)
+ * is published the same way a calendar cancellation already is (see
+ * RealCalendarSourceReader/FixtureCalendarSourceReader): a new revision of the same
+ * correlationId with changeType=DELETE_REVIEW and an empty objects list.
  */
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record RawObjectEvent(

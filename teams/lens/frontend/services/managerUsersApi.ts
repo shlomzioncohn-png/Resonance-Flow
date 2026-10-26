@@ -75,12 +75,16 @@ export function updateUser(id: string, fields: UserEditFields): Promise<UserDeta
   return api.patch<UserDetails>(`/api/manager/users/${id}`, fields);
 }
 
-/** No tenant here — the BFF always creates the user in the acting manager's own tenant. */
+/**
+ * No tenant here — the BFF always creates the user in the acting manager's own tenant.
+ * `email` is required and unique (Inbox's uq_users_email; 409 if taken). The form never
+ * asks for a username: it sends the email as the username.
+ */
 export interface UserCreateFields {
   displayName: string;
   firstName?: string;
   lastName?: string;
-  email?: string;
+  email: string;
   phone?: string;
   username?: string;
   role: 'MANAGER' | 'EMPLOYEE';

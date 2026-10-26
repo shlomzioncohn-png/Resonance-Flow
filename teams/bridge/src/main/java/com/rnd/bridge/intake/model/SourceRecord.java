@@ -115,7 +115,20 @@ public record SourceRecord(
         int revision,
         ChangeType changeType,
         String groupId,
-        RawObjectRef precomputedRef) {
+        RawObjectRef precomputedRef,
+        String sourceRef) {
+
+    /** A copy of this record carrying {@code sourceRef} - the source system's own identifier for
+     * the logical item (see RawObjectEvent.sourceRef's javadoc for the wire-facing contract).
+     * Only the primary (attachmentIndex() == 0) record's sourceRef is ever read -
+     * UnstructuredPayloadMapper.map() takes it from primaryOf(group), never from an attachment
+     * record - so a reader only needs to call this on the body/transcript/event/file record. */
+    public SourceRecord withSourceRef(String sourceRef) {
+        return new SourceRecord(sourceType, tenantId, naturalId, correlationId, occurredAt, sender,
+                participants, subject, body, rawContent, mimeType, attachmentFilename, attachmentFileId,
+                attachmentIndex, attachmentCount, sourceMessageIds, revision, changeType, groupId,
+                precomputedRef, sourceRef);
+    }
 
     /** Convenience constructor for every case except a Slack attachment record (which needs
      * attachmentFileId - see below) and Calendar's cancellation path - defaults attachmentFileId
@@ -140,7 +153,7 @@ public record SourceRecord(
             int revision) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
                 rawContent, mimeType, attachmentFilename, null, attachmentIndex, attachmentCount, sourceMessageIds,
-                revision, ChangeType.UPSERT, null, null);
+                revision, ChangeType.UPSERT, null, null, null);
     }
 
     /** Convenience constructor for Calendar's cancellation path - same attachmentFileId/groupId
@@ -166,7 +179,7 @@ public record SourceRecord(
             ChangeType changeType) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
                 rawContent, mimeType, attachmentFilename, null, attachmentIndex, attachmentCount, sourceMessageIds,
-                revision, changeType, null, null);
+                revision, changeType, null, null, null);
     }
 
     /** Convenience constructor for a chat transcript record built from a persisted GroupState -
@@ -192,7 +205,7 @@ public record SourceRecord(
             String groupId) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
                 rawContent, mimeType, attachmentFilename, null, attachmentIndex, attachmentCount, sourceMessageIds,
-                revision, ChangeType.UPSERT, groupId, null);
+                revision, ChangeType.UPSERT, groupId, null, null);
     }
 
     /** Convenience constructor for a Slack attachment record built from a persisted GroupState -
@@ -220,7 +233,7 @@ public record SourceRecord(
             String groupId) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
                 rawContent, mimeType, attachmentFilename, attachmentFileId, attachmentIndex, attachmentCount,
-                sourceMessageIds, revision, ChangeType.UPSERT, groupId, null);
+                sourceMessageIds, revision, ChangeType.UPSERT, groupId, null, null);
     }
 
     /** Convenience constructor for a carried-forward, already-landed attachment record (see
@@ -246,6 +259,6 @@ public record SourceRecord(
             RawObjectRef precomputedRef) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
                 rawContent, null, null, attachmentFileId, attachmentIndex, attachmentCount, sourceMessageIds,
-                revision, ChangeType.UPSERT, groupId, precomputedRef);
+                revision, ChangeType.UPSERT, groupId, precomputedRef, null);
     }
 }

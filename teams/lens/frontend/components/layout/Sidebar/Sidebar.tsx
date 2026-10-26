@@ -38,9 +38,9 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
   const sidebarHover = theme.palette.sidebar.hover;
 
   const visibleSections =
-    role === 'manager'
+    role === 'TENANT_ADMIN' || role === 'TEAM_LEAD'
       ? navSections.filter((section) => section.label !== 'Employee')
-      : role === 'employee'
+      : role === 'EMPLOYEE'
         ? navSections.filter((section) => section.label === 'Employee')
         : navSections;
 

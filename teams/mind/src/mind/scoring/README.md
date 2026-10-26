@@ -7,10 +7,11 @@ per-task priority score MIND publishes.
   feasibility, free-time matching, deciding what actually gets done — belongs to
   Chain and Inbox. The contract enforces this by not handing the model
   `free_time_minutes` or `constraints`, and nothing here reintroduces them.
-- **Hierarchy is not here at all.** The week-7 stretch (R3) propagates
-  importance down the parent chain; this baseline does not read
+- **Hierarchy is not in the baseline.** `SegmentedRankingModel` does not read
   `parent_task_id`, does not declare it on its input, and knows nothing about
-  hierarchy. That is deliberate — see *Why hierarchy is absent* below.
+  hierarchy — deliberate, see *Why hierarchy is absent* below.
+  `HierarchicalRankingModel` (#474) layers propagation on top of it,
+  unmodified, in production only — see *Hierarchical propagation* below.
 - **Explanations (#358)** are a fixed template over the score's own values, in
   `ScoreResult.reasoning` — see *Explanations* below. No LLM, and no change to
   `task.score.proposed`: consumers keep reading `factors`.
@@ -164,6 +165,163 @@ without a parent at every tier, so re-introducing the feature fails the suite.
 
 R3 does not need the field on this input either: per SPEC-R3 §5 she obtains a
 task's ancestors from Chain's dependency query API, keyed by `task_id`.
+
+## Hierarchical propagation (#474)
+
+`HierarchicalRankingModel` ([`hierarchical_model.py`](hierarchical_model.py))
+layers on top of `SegmentedRankingModel` without changing it: it calls the
+baseline for a task's own features, then adds what its ancestors contribute.
+It implements `RankingModel` (and `TaskScorer`, the live path's wider
+equivalent) exactly the baseline does, so R1's harness and `score_publisher.py`
+both run it with no special-casing.
+
+**The formula.** `base_score = 0.5*own_base + 0.5*mean(ancestor importance)`
+when the task has at least one (known) ancestor, `own_base` unchanged
+otherwise — walking every ancestor up to the root, **undiminished — no depth
+decay**. No decay rate or curve is written down anywhere in the roadmap or
+the team-role documents, so inventing one now would bake an unfounded guess
+into the one thing (#473's seven constructed graphs) that is supposed to
+have a hand-verified, defensible answer. Revisit this deliberately if real
+propagated data ever shows deep descendants overweighted — don't drift into
+it. Averaging, not summing, is a deliberate, explicit decision over an
+earlier additive design: own_base and every ancestor's importance are
+already in [0, 1], so the weighted average never leaves that range either —
+no clamping, no separate normalization step before this is used for
+anything published. One consequence worth naming: this does **not** satisfy
+`tests/propagation_fixtures/README.md`'s "a parent can only add, never
+remove" assumption, written for the additive design it describes — an
+unimportant ancestor's mean can pull a task's own high baseline down below
+it (#473's 02_branch's `task_low_1`/`task_low_2` are exactly this). All
+seven fixtures were re-checked by hand against this formula and still
+produce the stated order regardless.
+
+**Cycle: detect and refuse, not a depth limit.** A cyclic `parent_task_id`
+chain raises `CycleError` rather than looping forever —
+`tests/propagation_fixtures/06_cycle.json` is built to catch exactly a naive
+walk-the-parent-chain implementation here. `HierarchyFixture` deliberately
+does not forbid a cycle (unlike the eval's own hierarchy fixture, which
+`mind.evaluation.hierarchy` checks for one), so this package's own code has
+to defend itself regardless of what any one source happens to avoid today.
+
+**Where an ancestor's importance comes from — two sources, by necessity:**
+
+| | `FixtureAncestorSource` | `ChainAncestorSource` |
+|---|---|---|
+| used by | the evaluation harness, `#473`'s fixtures | the live path (`score_publisher_runner.py`) |
+| walks | the whole chain, in memory | the whole chain, via `/ancestors` |
+| importance | `HierarchyNode.importance` — hand-picked, already Mind's own notion of importance | each ancestor's own `base_score`, from re-scoring `ScorePublisher.cached_task(ancestor_id)` with the same baseline |
+
+Production needs a different source, not by choice: Inbox's `task.created`/
+`task.updated` never carry `parent_task_id` (`InboxTask.parent_task_id` is
+always `None`), so there is no local chain to walk — and Chain's own
+`/ancestors` has no `importance` field at all, only its own, unrelated
+`score`. `ChainAncestorSource` asks Chain for the whole ancestor chain
+(`ChainHierarchyClient.get_ancestors`, nearest-parent-first), then for each
+one re-scores `ScorePublisher.cached_task(ancestor_id)` — the ancestor's own
+last-known Inbox state — with the same baseline this model already uses,
+to get that ancestor's own `base_score`. Reading each ancestor's own value
+this way, rather than reading just the direct parent's already-propagated
+score, is a necessary change from an earlier design, not a stylistic one:
+summing an undiminished total composes recursively (a parent's own
+propagated total already contains everything above it, so reading it alone
+was equivalent to summing the whole chain), but averaging does not — a
+parent's own *mean* already baked in its own ancestors at its own 50/50
+weight, which is not the same number a grandchild's 50/50 blend with the
+*raw* grandparent value needs. There is therefore no shortcut left that
+reads fewer than every ancestor. Using Chain's own `score` instead was
+considered and rejected: it is computed by a different, unrelated
+algorithm, in a scale this formula was never checked against — mixing it in
+would mean every fixture's hand-verified arithmetic no longer describes
+what production actually does.
+
+**Fallback.** Every failure in `ChainHierarchyClient` — timeout, connection
+refused, a non-2xx, a body that isn't the expected shape — is logged and
+degrades to "no ancestors" (`get_ancestors` returns `[]`), never raised.
+With no ancestors, `ancestor_values` is exactly `[]`, so `base_score` is
+exactly `own_base` — the same number the baseline alone would have
+produced. A slow Chain fails the same way: the client's own timeout
+(`MIND_CHAIN__TIMEOUT_SECONDS`, default 0.2s — round-9 review: at the old 2s
+default, two such calls under `ScorePublisher`'s lock could cost up to 4s of
+every other task's scoring) is short on purpose, so a slow traversal
+degrades to the baseline rather than stalling the scoring loop.
+An ancestor with no cached state yet (no Inbox event reached it since
+start-up) is left out of the average rather than counted as 0 — see *Known
+limitations* below.
+
+**The rescore cascade.** A score can change without any Inbox event at all:
+an ancestor's own value moved, so every descendant's computed base is now
+stale. `ScorePublisher._score_and_send` owns this, not the model: after a
+send whose `mind_score` differs from the last one published by at least
+`_CASCADE_CHANGE_TOLERANCE` (or this is the task's first score ever), it
+asks Chain for that task's **direct children only**
+(`ChainHierarchyClient.get_direct_children`, not the full, transitive
+`/descendants`) and calls `rescore(child_id)` for each. Each child, once
+re-scored, makes the same decision for its own children — the cascade
+reaches exactly as deep as something actually changed, one level at a time,
+through the queue `rescore` already has. This correctly reaches a whole
+changed subtree even though each descendant reads its own ancestors' raw
+values directly rather than through its parent's result: a grandchild
+recomputes its own mean (which includes the changed ancestor) when its
+parent asks it to, regardless of whether the parent's *own* mind_score
+happened to move too.
+
+A fixed tolerance on the difference, not exact equality and not rounding,
+is what actually stops a cycle or a settled subtree. An earlier version
+compared `mind_score` exactly, with the trigger living inside the model's
+own `score()` rather than behind this dedup at all, so it fired on every
+call regardless of whether anything was sent. Exact equality never holds
+in practice: `mind_score` bakes in time pressure, which drifts by a tiny
+amount every single call just because real time passed, not because
+anything about the task changed. A later version rounded `mind_score`
+before comparing, which absorbed that drift but introduced its own bucket
+edges: two values a hair apart could round to different buckets (a false
+"changed"), and two values nearly `_CASCADE_CHANGE_TOLERANCE` apart could
+round to the same one (a missed real change). Comparing `abs(new - old)`
+against the tolerance directly has neither failure mode. Two tasks that
+are each other's ancestor form a contracting average (each one 50% its
+own value), so the *real* difference between rounds shrinks to nothing —
+the tolerance just has to outlast that drift to notice the real
+convergence and stop. Asking for the full subtree up front (`/descendants`)
+was considered and rejected: it would re-score everything under a changed
+goal at once, even descendants whose own score will not have moved,
+exactly the burst of work *Mind the latency* below warns against.
+
+**Known gap, not fixed here:** a cascade that reaches a task Mind has not
+scored since start-up (see *Known limitations* below) is not retried once
+that task becomes known — only once *it* is scored does its own first-score
+cascade fire, and nothing proactively asks it to score sooner.
+
+**Latency.** Production's `score()` makes one HTTP call to Chain per scored
+task (`get_ancestors`, returning the whole chain in that one call — no
+further network calls per ancestor; each one's own value is a local
+re-score of its already-cached state), plus one more (`get_direct_children`)
+on a genuine change, cascading — but, as of round-9, that second call runs
+*after* `ScorePublisher`'s lock is released, not while scoring holds it (see
+*Known limitations* below). Both go through one client, one short timeout,
+no retry (a retry here would only make a slow Chain slower; the fallback
+already handles it). **Still not measured against a live Chain** — there is
+none in this dev environment to reach, and that is the number that matters
+for the under-300ms p95 commitment. What *was* measured, with
+`benchmarks/hierarchy_propagation_latency.py`: both calls run through the
+real `ChainHierarchyClient` against an `httpx.MockTransport` serving #473's
+seven constructed graphs — no socket, no real Chain. Mean 0.43ms, p95
+0.59ms, max 1.24ms per call, 64 calls total. That number is this code
+path's *own* overhead (request construction, parsing a fake response) and
+shows Mind's side is not the bottleneck; it says nothing about real network
+round-trip time to Chain, which is the actual open question and which this
+cannot measure. The same script also runs `HierarchicalRankingModel.score()`
+against `SegmentedRankingModel.score()` on the same leaf tasks, same mock
+transport, to isolate what the whole feature adds over the baseline alone
+(not just the raw Chain calls above, but also re-scoring every ancestor
+through the baseline): mean difference 0.61ms, p95 1.14ms, over the 15 leaf
+tasks across all seven fixtures. Re-run both numbers with a real
+`ChainHierarchyClient` once this is deployed where Chain is reachable, and
+report that — not this — against the commitment. The
+harness path (`FixtureAncestorSource`) makes no network call at all — an
+in-memory walk of a graph with at most a few dozen nodes — so the
+`hierarchical` model's own harness run time is not informative about the
+live path's. See *Running it* below for how to run the harness against this
+model.
 
 ## `blocked` is a band, not a zero
 
@@ -418,12 +576,53 @@ reading a third of the set.
   package's to assert.
 - **`ASSUMED_TIER_SHIFT` was measured on synthetic tasks.** The spread on real
   extracted ones may differ; re-measure once #353 produces them.
+- **An ancestor Mind has not scored since start-up looks like "no such
+  ancestor," not "unknown."** `ChainAncestorSource` leaves an unscored
+  ancestor out of the average rather than counting it as 0 (0 would be a
+  real, wrong claim about its importance), but if *every* one of a task's
+  ancestors is still unscored, that task reads as a root — `ChainAncestorSource`
+  cannot distinguish "this task has no parent" from "it has one, but Mind
+  hasn't seen it score yet." In a chain A → B → C, this does **not**
+  reliably self-correct if B is the gap: A's change reaches B's cascade
+  attempt, but `rescore(B)` finds B unknown and drops it there — C never
+  hears about it until B itself gets scored by *its own* Inbox event (not
+  one that happens to arrive, one that genuinely does), at which point B's
+  first-ever score unconditionally cascades onward. Nothing proactively
+  retries a gap at B; it is a real, not merely theoretical, way for a
+  change to stay stuck.
+- **A failed ancestor lookup is never retried once Chain recovers.**
+  `ChainAncestorSource.ancestor_values` degrades a timeout, a 404 (not yet
+  processed), or an outage to "no ancestors" the same way it degrades a
+  genuine root — the task is scored and published without its ancestors'
+  share, and nothing re-scores it later just because Chain came back. It
+  only recovers if something else independently triggers a rescore (a real
+  change to the task's own fields, or a cascade reaching it from one of its
+  actual ancestors changing after Chain is back up).
+- **`get_ancestors` still runs while `ScorePublisher`'s lock is held.**
+  Both consumer threads and the rescore worker share one lock, and scoring
+  a task needs its ancestors' values synchronously to compute `base_score`
+  — there is no way to move that call outside the lock without changing
+  what gets scored. A slow Chain here still blocks every other task's
+  scoring meanwhile, bounded by `MIND_CHAIN__TIMEOUT_SECONDS` (0.2s default,
+  round-9 review — down from an earlier 2s). `get_direct_children`, the
+  cascade's own call, was moved outside the lock in round-9:
+  `_score_and_send` now returns the cascade's target id instead of calling
+  `_cascade` itself, so both `_publish_if_changed` and `_rescore_now` run it
+  after releasing the lock. `tests/test_hierarchical_propagation.py`'s
+  `test_a_genuinely_slow_chain_fails_fast_not_at_the_old_2s_default` proves
+  the timeout itself is enforced (against a real local socket —
+  `httpx.MockTransport` does not enforce a client's configured timeout at
+  all), not that the lock is never held during a slow call; the one
+  remaining locked call is a smaller, now-bounded version of the same
+  documented risk, not a new one. Not yet measured against a live Chain to
+  know whether even the 0.2s bound matters in practice — see *Hierarchical
+  propagation*'s own *Latency* section above.
 
 ## Publishing the score to Chain (#357)
 
-A separate process, like the index consumer: it reads Inbox's `task.created`
-and `task.updated`, scores each task with this model, and publishes
-`task.score.proposed` to Chain.
+Runs inside MIND's API process (#920): it reads Inbox's `task.created` and
+`task.updated`, scores each task with this model, and publishes
+`task.score.proposed` to Chain. See "Running inside the API" below.
 
 | File | Role |
 |---|---|
@@ -431,7 +630,7 @@ and `task.updated`, scores each task with this model, and publishes
 | `score_event.py` | `ScoreResult` → `TaskScoreProposed` (`contracts/`). |
 | `kafka_sink.py` | `TaskScoreProposed` → shared/proto's `TaskScoreProposedEvent`, published keyed by `task_id`. |
 | `score_publisher.py` | The handlers, and when to publish. |
-| `score_publisher_runner.py` | The process: one consumer thread per topic. |
+| `score_publisher_runner.py` | Starts it from the API: one consumer thread per topic, plus the rescore worker. |
 
 The payload, as agreed with Chain on #133: `event_id`, `tenant_id`, `task_id`,
 `mind_score` (the **`base_score`**, never the blocked-adjusted `score`: blocking
@@ -454,26 +653,99 @@ When a score is published:
   redelivery (a malformed id, a result without `base_score`, a score outside
   0..1, a model bug for one task). Propagating it would kill the process on the
   same message forever, so it is logged with the task id and skipped. Only a
-  failure to send to Kafka propagates, so that message is retried. Anything the
+  failure to send to Kafka propagates: it ends that run of the consumer with
+  the message uncommitted, and the thread runs again after a short wait and
+  reads it again (see "Running inside the API"). A re-score whose send fails is
+  queued back the same way. Anything the
   model raises counts as permanent, so a model must not raise on a transient
   failure (#474 already requires falling back to the baseline score).
-- **When propagation changes a score without an Inbox event** (#474: a parent
-  changed, so its children's scores did), the propagation code calls
-  `ScorePublisher.rescore(child_id)` for each affected child. That only queues
-  the id, so it is safe from anywhere, including from inside the model's own
-  `score()`. A worker thread scores each queued child again with the publisher's
-  own model (so that model must be the propagation model) on its newest state,
+- **When propagation changes a score without an Inbox event** (#474:
+  `ScorePublisher._cascade` detects the just-sent `mind_score` moved by at
+  least `_CASCADE_CHANGE_TOLERANCE`), it asks Chain for that task's direct
+  children and calls `ScorePublisher.rescore(child_id)` for each. That only
+  queues the id, so it is safe from anywhere, including from inside the
+  model's own `score()`. A worker thread scores each queued child again
+  with the publisher's own model — `score_publisher_runner.py` wires
+  `HierarchicalRankingModel` in as that model, replacing the baseline here
+  only, in production; R1's harness still scores the unmodified baseline
+  for comparison — on its newest state,
   under the same lock as the event handlers. A request for a task already
   queued is dropped, and a re-score whose score is unchanged is not sent, so a
-  cycle in the hierarchy cannot flood Chain; propagation should still ask only
-  when a parent's score actually changed. `rescore` returns nothing. The state is
-  in memory, so a child no Inbox event has reached since start-up is logged and
-  skipped until its next event.
-- **The lock is held while the model scores**, so a model that calls the network
-  (propagation reads Chain's traversal API) holds up the other topic meanwhile.
+  cycle in the hierarchy cannot flood Chain; propagation only asks a child's
+  children when that child's own score actually changed. `rescore` returns
+  nothing. The state is in memory, so a child no Inbox event has reached
+  since start-up is logged and skipped until its next event. The other side
+  of this integration, `ScorePublisher.cached_task(task_id)`, is how
+  `ChainAncestorSource` re-scores an ancestor's own state — see *Hierarchical
+  propagation* above.
+- **The lock is held while the model scores** (#474's `ChainHierarchyClient.get_ancestors`),
+  so a slow Chain holds up the other topic meanwhile, bounded by
+  `MIND_CHAIN__TIMEOUT_SECONDS` -- `_cascade`'s own call does not add to this,
+  since round-9 moved it outside the lock. See *Known limitations* above.
 
 What was last published lives in memory, so a restart re-publishes each task
 once on its next event. A score is not re-sent just because time passes.
+
+## Running inside the API (#920)
+
+The publisher runs in background threads of MIND's API, the way Chain's and
+Inbox's Kafka consumers run inside their own services, so it deploys with the
+API and needs no entry of its own in Relay's chart.
+
+- **Started from the API's lifespan** (`api/main.py`) by `start_score_publisher()`,
+  **only when Kafka is configured** (the chart's config file sets
+  `kafka.bootstrap_servers` and `kafka.schema_registry_url`). Locally and in
+  tests, with no kafka section, the API starts without it and
+  `app.state.score_publisher` is `None`. Only one of the two keys set is a
+  broken config (#481): start-up stops with a `ConfigFileError` naming the
+  missing key, before any thread starts.
+- **Stopped on shutdown**: the consumers end within a second and leave their
+  group cleanly, instead of Kafka waiting for a session timeout.
+- **A failed thread runs again on its own, and never takes the API down.** The
+  threads run through `messaging/background.py`'s `BackgroundThreads`: when a
+  run raises (a Kafka send failure), it is logged and run again after a wait
+  that doubles each time, 1 s up to 60 s, as the `task.created` listener does.
+  Each run of a consumer builds a new one, so the uncommitted message is read
+  again: the recovery a pod restart would give, without one. There is no
+  `os._exit`, and the retries do not give up.
+- **`app.state.score_publisher.healthy`** is false only if a thread has died,
+  which the retries should never let happen. A Kafka outage, including Kafka
+  being down when the API starts, stays healthy and is retried inside the
+  thread. That makes it safe for liveness (#481's `/health/live`): a broker
+  that is down never restarts the API, nor loops a pod that starts without it.
+  Recovery does not depend on it. It is `None` when Kafka isn't configured.
+- **A thread that keeps failing is visible, not silent.** A bad message at the
+  head of a topic, or a wrong setting, fails on every run, so it never
+  recovers and Chain gets no scores from that topic, while `healthy` stays
+  true. `app.state.score_publisher.retrying` names the threads that failed
+  and have not recovered since. A thread recovers by handling a message or
+  finishing a re-score, or by running 10 minutes with nothing to do and no
+  new failure; not by merely running a while, since a send to a broker that
+  is down blocks for up to 5 minutes before it fails. Each failure is logged
+  as a WARNING; once the wait between runs reaches 60 s, every retry is
+  logged at ERROR: `background: thread <name> keeps failing (<n> times in a
+  row); running it again every 60.0s`. So a short outage isn't an alert, and
+  a stuck thread is.
+- **One consumer group per topic:** `mind-score-publisher-task-created` and
+  `mind-score-publisher-task-updated`. In one shared group, every retry of
+  one topic's consumer (it leaves the group and joins again) would rebalance
+  the other topic's consumer too. New groups start from the beginning of
+  their topic (`auto.offset.reset: earliest`).
+- **The publisher's lock is held during the Kafka send.** It keeps each task's
+  events in order, and a score recorded only once it was sent. So while a
+  send hangs, the other two threads wait on it and don't show in `retrying`.
+  A hung send fails only after about 5 minutes (librdkafka's
+  `message.timeout.ms`); from then on that thread is in `retrying`. Its
+  ERROR starts at the 7th failure in a row, when the wait reaches 60 s:
+  about 36 minutes after the send first hung (7 x 5 min + 63 s of waits).
+- **MIND must run as one replica (`replicaCount: 1`) with one uvicorn worker.**
+  The publisher keeps its state in memory: a second copy would split the
+  topics between two states, and the stale-event and loop checks would break.
+  Raise it with Mind before scaling the API.
+
+`BackgroundThreads` is generic: any Kafka consumer of MIND can run inside the
+API the same way, with a target of the form
+`lambda stop: consumer.run(Message, handle, stop=stop)`.
 
 ## Running it
 
@@ -482,9 +754,18 @@ pytest tests/test_scoring.py -v                  # the acceptance tests
 pytest tests/test_scoring_missing_fields.py -v   # no tier, no estimate, no description
 pytest tests/test_score_publish.py tests/test_score_event.py \
        tests/test_inbox_task.py tests/test_kafka_sink.py -v   # publishing to Chain
+pytest tests/test_hierarchical_propagation.py -v              # #474: propagation, the Chain
+                                                                 # adapter's fallback, the cascade
 ```
 
-That is all this package runs. Evaluating the model against the persona set goes
-through the harness and belongs to R1; it needs `"segmented"` registered in the
-`models` dict in [`../evaluation/run.py`](../evaluation/run.py), which is R1's
-file.
+Evaluating a model against the persona set goes through the harness:
+
+```
+python -m mind.evaluation.run --personas eval/personas --model hierarchical
+```
+
+`"hierarchical"` is registered in `run.py`'s `models` dict, built from the
+real `eval/hierarchy/nodes.json` the harness already loads and validates.
+`"segmented"` (the baseline alone, for R1's own comparison) is not — that
+registration is R1's file, [`../evaluation/run.py`](../evaluation/run.py),
+and hers to add.

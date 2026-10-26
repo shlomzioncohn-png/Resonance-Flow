@@ -2,10 +2,11 @@ package com.rnd.chain.events;
 
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.dto.TaskTier;
 import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.inbox.event.TaskUpdatedEvent;
+import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.annotation.RetryableTopic;
 import org.springframework.kafka.retrytopic.DltStrategy;
@@ -20,45 +21,36 @@ import static com.rnd.chain.events.EventFields.parseUuid;
 import static com.rnd.chain.events.EventFields.toLocalDateTime;
 
 /**
- * Consumes task.updated (Inbox, Protobuf) to feed {@link TaskEligibilityService#onTaskStatusChangedIfNewer}.
+ * Consumes task.updated (Inbox, Protobuf) and applies the incoming task status through
+ * {@link TaskEligibilityService#onTaskStatusChangedIfNewer}.
  *
- * Idempotency - state-based, last-write-wins (confirmed by the team lead): task.updated carries
- * no event id in its body, so there is no claim table to dedupe against here (contrast with
- * DependencyProposedEventHandler, which does have one). Instead, the incoming event's updated_at
- * is compared against the task's own stored {@link Task#getUpdatedAt()} - applied only if strictly
- * newer, so an out-of-order or duplicate redelivery of an older/equal snapshot is a safe no-op.
- * Nothing in the current codebase ever set Task.updatedAt before this handler existed (verified:
- * every TaskEligibilityService mutator preserves it unchanged via copyOf), so repurposing it as
- * "the updated_at last received from Inbox" doesn't collide with any other writer.
+ * If Chain has not seen the task before, the event creates a local Task using the event's
+ * status, updatedAt and tenantId, with zero dependency and constraint counters.
  *
- * Atomicity (PR #467 review): the staleness check, the status write, and the {@code updatedAt}
- * stamp all happen inside {@link TaskEligibilityService#onTaskStatusChangedIfNewer}'s single
- * graph-lock critical section - not three separate calls from here - so a
- * redelivered/out-of-order event racing a newer one for the same task can't interleave between
- * them. See that method's Javadoc for how this is meant to carry over once persistence is a real
- * transactional store.
+ * Inbox's DONE status is not applied here: completion (and releasing dependents) belongs to
+ * task.completed alone. A DONE event never changes an existing task's status or updatedAt (only
+ * the tenant check still runs); for an unknown task it creates a PENDING task, see
+ * {@link TaskEligibilityService#onTaskUpdatedAsDone}. Reopening, CANCELLED and REJECTED are
+ * still handled here as before.
  *
- * OPEN DISCREPANCY (see the implementation plan, section 7): task-created-event.proto's header
- * comment states Inbox's standing convention is that every event carries an event_id as a Kafka
- * header (not a body field) "same as today" - which would suggest task.updated has one too,
- * contradicting the team lead's explicit "task.updated has no event id" answer. This handler
- * follows the team lead's answer (state-based, no claim) since it's the more specific, most
- * recent instruction for this exact topic - but that discrepancy is unresolved, not silently
- * decided, and is called out explicitly to the team in a separate message. If it turns out
- * task.updated does carry a header event id, this handler should switch to
+ * Idempotency is state-based, last-write-wins: task.updated carries no event id in its body,
+ * so the incoming event's updated_at is compared against the task's stored
+ * {@link Task#getUpdatedAt()}. For an existing task, only a strictly newer event is applied;
+ * duplicate or out-of-order events with an older or equal updated_at are ignored.
+ *
+ * Atomicity: task creation, the staleness check and the status update are executed inside
+ * {@link TaskEligibilityService#onTaskStatusChangedIfNewer}'s graph-lock critical section,
+ * preventing concurrent task.updated events for the same task from interleaving incorrectly.
+ *
+ * task.updated carries no event id, hence state-based idempotency; if it gains one, use
  * {@link ChainEventProcessingTemplate#processClaimed} instead.
  */
+@RequiredArgsConstructor
 @Component
 public class TaskUpdatedEventHandler {
 
     private final TaskEligibilityService taskEligibilityService;
     private final ChainEventProcessingTemplate template;
-
-    public TaskUpdatedEventHandler(TaskEligibilityService taskEligibilityService,
-                                    ChainEventProcessingTemplate template) {
-        this.taskEligibilityService = taskEligibilityService;
-        this.template = template;
-    }
 
     @RetryableTopic(
             attempts = "3",
@@ -74,32 +66,43 @@ public class TaskUpdatedEventHandler {
     @Transactional
     public void onMessage(TaskUpdatedEvent event) {
         UUID taskId = parseUuid(event.getTaskId(), "task_id");
-        TaskStatus newStatus = InboxTaskStatusMapper.map(event.getStatus());
         LocalDateTime eventUpdatedAt = toLocalDateTime(event.getUpdatedAt());
         UUID tenantId = parseUuid(event.getTenantId(), "tenant_id");
 
+        // DONE is applied only by task.completed; CANCELLED/REJECTED still release from here.
+        if (event.getStatus() == com.rnd.inbox.event.TaskStatus.TASK_STATUS_DONE) {
+            template.processUnclaimed(taskId.toString(), "task.updated",
+                    () -> apply(taskId, () -> taskEligibilityService.onTaskUpdatedAsDone(
+                            taskId, eventUpdatedAt, tenantId)));
+            return;
+        }
+
+        TaskStatus newStatus = InboxTaskStatusMapper.map(event.getStatus());
+        TaskTier tier = InboxTaskTierMapper.map(event);
         template.processUnclaimed(taskId.toString(), "task.updated",
-                () -> apply(taskId, newStatus, eventUpdatedAt, tenantId));
+                () -> apply(taskId, () -> taskEligibilityService.onTaskStatusChangedIfNewer(
+                        taskId, newStatus, eventUpdatedAt, tenantId, tier)));
     }
 
-    private void apply(UUID taskId, TaskStatus newStatus, LocalDateTime eventUpdatedAt, UUID tenantId) {
-        try {
-            taskEligibilityService.onTaskStatusChangedIfNewer(taskId, newStatus, eventUpdatedAt, tenantId);
-        } catch (TaskNotFoundException e) {
-            throw new ReferencedTaskNotFoundException(
-                    "task.updated referenced a task Chain hasn't seen yet: " + taskId, e);
-        } catch (TenantReassignmentException e) {
-            // Confirmed with Inbox: tenant_id never legitimately changes after creation, so this
-            // is always a bug upstream - retrying the same event will never resolve it.
-            throw new NonRetryableEventException(
-                    "task.updated for task " + taskId + " claims a different tenant than stored", e);
-        } catch (RuntimeException e) {
-            // Same reasoning as TaskCreatedEventHandler#persist: an unexpected failure here (e.g.
-            // a bug in the repository) is still retried as a transient failure, not sent straight
-            // to .errors without a retry attempt.
-            throw new ChainTransientProcessingException(
-                    "Failed to apply task.updated for task " + taskId, e);
-        }
+    private void apply(UUID taskId, Runnable action) {
+
+    try {
+        action.run();
+
+    } catch (TenantReassignmentException e) {
+        // Confirmed with Inbox: tenant_id never legitimately changes after creation, so this
+        // is always a bug upstream - retrying the same event will never resolve it.
+        throw new NonRetryableEventException(
+                "task.updated for task " + taskId
+                        + " claims a different tenant than stored",
+                e);
+
+    } catch (RuntimeException e) {
+        // Unexpected failures are still retried as transient failures.
+        throw new ChainTransientProcessingException(
+                "Failed to apply task.updated for task " + taskId,
+                e);
     }
+}
 
 }

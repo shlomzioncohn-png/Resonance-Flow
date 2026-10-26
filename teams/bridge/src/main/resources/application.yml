@@ -24,10 +24,7 @@ spring:
       continue-on-error: true
   kafka:
     # Team shared / remote environment (do not use unless agreed):
-    #   bootstrap-servers: 3.216.80.66:9092
-    #   topic: bridge.github.tasks
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    topic: ${KAFKA_TOPIC:bridge.test}
     # Read directly by RawObjectEventKafkaConfig (raw/config/) for its dedicated Protobuf
     # producer - this block's producer.* below stays JSON and keeps serving GitHub/CRM/JIRA/
     # Media via the shared kafkaTemplate bean, per teams/relay/docs/kafka-producer-consumer-guide.md.
@@ -62,6 +59,8 @@ github:
   target:
     owner: ${GITHUB_TARGET_OWNER:KamaTechOrg}
     repo: ${GITHUB_TARGET_REPO:Resonance-Flow}
+  # Page size for the issues/pulls list endpoints (GitHub max: 100)
+  page-size: ${GITHUB_PAGE_SIZE:100}
   sync:
     # Set to true to enable the automatic nightly GitHub to Kafka sync
     cron:
@@ -74,6 +73,8 @@ jira:
     token: ${JIRA_TOKEN:}
   target:
     project: ${JIRA_TARGET_PROJECT:}
+  # Page size for /rest/api/2/search (startAt/maxResults pagination)
+  page-size: ${JIRA_PAGE_SIZE:100}
   sync:
     # Set to true to enable the automatic nightly Jira to Kafka sync
     cron:
@@ -81,6 +82,10 @@ jira:
       expression: ${JIRA_SYNC_CRON_EXPRESSION:0 0 2 * * ?}
 
 bridge:
+  # The one tenant every RawObjectEvent lane sends (Email/Slack/WhatsApp/Calendar/Drive and the
+  # media lane). Must be a UUID of a tenant that exists in Inbox - Mind passes it through to Inbox's
+  # tasks.tenant_id. Inbox's only tenant today is System (...0001); a fixed demo UUID is still TBD.
+  tenant-id: ${BRIDGE_TENANT_ID:00000000-0000-0000-0000-000000000001}
   # Backs the control-plane lane (GroupStateStore/CursorStore/CalendarEventStateStore), not
   # the rest of Bridge - no default on any of these three, same convention as HUBSPOT_TOKEN: a
   # missing value must fail startup loudly, not silently fall back to a placeholder.
@@ -92,14 +97,14 @@ bridge:
   # KafkaPayloadPublisher (see esti/inbox-kafka-ingestion-contract) - one
   # topic for every source, never a per-lane one.
   structured-tasks-topic: ${BRIDGE_STRUCTURED_TASKS_TOPIC:bridge.structured.tasks}
-  kafka:
-    # Confluent Schema Registry for bridgeTaskEventKafkaTemplate's KafkaProtobufSerializer (see
-    # BridgeTaskKafkaConfig). The localhost default is for local/dev only - any real environment
-    # must override SCHEMA_REGISTRY_URL to the shared registry Relay owns.
-    schema-registry:
-      url: ${SCHEMA_REGISTRY_URL:http://localhost:8081}
   manual-sync:
     enabled: false
+  # Deployment-wide tenant for lanes whose sources carry no tenant (GitHub, Jira).
+  # Inbox's tasks.tenant_id is NOT NULL; same env var as crm.organization-id per
+  # Daniel's guidance - one CRM_ORGANIZATION_ID value serves every lane. Blank means
+  # "not configured": mappers fall back to null (the documented contract gap for
+  # local runs through LoggingPayloadPublisher).
+  organization-id: ${CRM_ORGANIZATION_ID:}
   crm:
     dataset: classpath:crm/synthetic-deals.json
     # Inbox's tasks.tenant_id is NOT NULL, but HubSpot (and this
@@ -134,6 +139,7 @@ bridge:
       allowed-keywords: [deploy, deadline, meeting, pr, review, task, urgent, project]
     chat:
       session-gap-minutes: 45
+      correction-delay-seconds: 60
     # Per-source fixture/real switch - see plan.md. Each source can go "real" independently;
     # "real" beans throw UnsupportedOperationException until their connector is implemented.
     # Shared by every real Google reader (Calendar/Gmail/Drive) - see intake.google.
@@ -144,6 +150,10 @@ bridge:
     google:
       client-secrets-path: ${BRIDGE_GOOGLE_CLIENT_SECRETS_PATH:}
       tokens-directory: ${BRIDGE_GOOGLE_TOKENS_DIR:}
+    # tenant-id for every lane below (Email/Drive/Calendar/Slack/WhatsApp) comes from the single
+    # bridge.tenant-id setting via BridgeTenantId (com.rnd.bridge.intake.config), injected
+    # directly into each Real*SourceReader - there is deliberately no per-lane tenant-id key
+    # here anymore, so there is exactly one place to change the tenant.
     email:
       mode: fixture
       sync:
@@ -172,7 +182,6 @@ bridge:
       # Only read when mode: real. Bot User OAuth Token (xoxb-...) from a Slack app installed
       # with channels:history/groups:history/files:read scopes - see plan.md.
       bot-token: ${BRIDGE_SLACK_BOT_TOKEN:}
-      tenant-id: kamatech
       # Channel IDs (Cxxxxxxxx) the bot has been invited to - no config here means "read every
       # channel", Slack has no such mode without a much broader scope.
       channels: ${BRIDGE_SLACK_CHANNELS:}
@@ -187,6 +196,58 @@ bridge:
       # Local time zone the exporting phone was set to - WhatsApp export timestamps carry no
       # offset, so this must match the tenant, not be assumed to be UTC.
       zone-id: ${BRIDGE_WHATSAPP_ZONE_ID:Asia/Jerusalem}
+  # Shared AI infrastructure (com.rnd.bridge.ai, see its README.md) - every model call in Bridge
+  # goes through here. Providers hold each key once; models is the one list everyone picks
+  # from; usages optionally override the default per use. Startup fails on anything that points
+  # nowhere.
+  ai:
+    # true: Bridge refuses to start if any model below isn't marked free: true, so nothing can
+    # ever be billed. The real guarantee is a provider key with no billing attached.
+    free-only: true
+    default-model: gemini-flash
+    providers:
+      gemini:
+        base-url: ${BRIDGE_AI_GEMINI_BASE_URL:${BRIDGE_MEDIA_CLASSIFIER_BASE_URL:https://generativelanguage.googleapis.com/v1beta/openai}}
+        # Falls back to the old media-classifier variable, so an existing .env keeps working.
+        api-key: ${BRIDGE_AI_GEMINI_API_KEY:${BRIDGE_MEDIA_CLASSIFIER_API_KEY:}}
+        # With thinking off (reasoning-effort below) a call takes seconds; 30s still leaves room
+        # for image requests and a loaded free tier, while bounding a hung call (x3 attempts).
+        timeout: 30s
+    models:
+      gemini-flash:
+        provider: gemini
+        name: ${BRIDGE_AI_GEMINI_MODEL:${BRIDGE_MEDIA_CLASSIFIER_MODEL:gemini-3.6-flash}}
+        images: true
+        # Free tier only (a Google AI Studio key in a project with no billing).
+        free: true
+        # Thinking off: a short classification gains nothing from it, and with it on one call
+        # measured 145s locally (Mind measured 101s on vs ~1.4s off). Each call then costs one
+        # free-tier request in seconds, not minutes.
+        reasoning-effort: none
+        # Reply cap (max_tokens). The JSON a classification needs is ~100 tokens; a reply cut
+        # off here fails loudly ("cut off at max_tokens"), it is never parsed half-done.
+        max-output-tokens: 1024
+    defaults:
+      redact-pii: true
+      # Per usage per UTC day. Gemini's free tier allows 20 requests/day per model per project
+      # (measured 2026-10-20 - Google changes it, check https://ai.dev/rate-limit), shared by
+      # every usage on that model, so the usages' limits below must add up to at most that.
+      # Without this, one busy usage would spend the day's quota for all the others.
+      daily-call-limit: 10
+    usages:
+      media-meeting:
+        model: gemini-flash
+        daily-call-limit: 10
+      media-document:
+        model: gemini-flash
+        daily-call-limit: 10
+        # Documents are sent as images - regex redaction has nothing to act on.
+        redact-pii: false
+    monitoring:
+      # MODEL_CALL_SLOW / MODEL_CALL_EXPENSIVE thresholds (Mind uses 10s; an image request to
+      # the free tier can take longer, so 15s).
+      llm-max-duration: 15s
+      llm-max-cost-usd: 0.02
   media:
     # Meeting/doc/audio hand-off (Esther) - local folders to read test files from, one per
     # source, not committed; set your own in .env. Shares minio.* and
@@ -194,7 +255,7 @@ bridge:
     zoom-recordings-dir: ${BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR:./temp/zoom}
     bbb-recordings-dir: ${BRIDGE_MEDIA_BBB_RECORDINGS_DIR:./temp/bbb}
     scanned-docs-dir: ${BRIDGE_MEDIA_SCANNED_DOCS_DIR:./temp/docs}
-    tenant-id: ${BRIDGE_MEDIA_TENANT_ID:demo-tenant}
+    tenant-id: ${bridge.tenant-id}
     # Files at or below this size never land - a conservative proxy for "empty/corrupt
     # recording", not real audio-duration filtering (that needs a codec-aware library this
     # lane doesn't depend on). Tune based on what garbage actually shows up in practice.
@@ -223,17 +284,18 @@ bridge:
         # was checked. Formats: whatever a PagedDocumentReader supports (images + PDF).
         max-pages-to-scan: 5
         pages-to-send: 2
-      model:
-        # Any OpenAI-compatible chat-completions endpoint - switching provider (DeepSeek,
-        # Groq, ...) is a change to these three settings only. Scanned docs need a model that
-        # accepts images.
-        base-url: ${BRIDGE_MEDIA_CLASSIFIER_BASE_URL:https://generativelanguage.googleapis.com/v1beta/openai}
-        name: ${BRIDGE_MEDIA_CLASSIFIER_MODEL:gemini-3.8-flash}
-        api-key: ${BRIDGE_MEDIA_CLASSIFIER_API_KEY:}
-        # Bump on every prompt change in ModelMediaClassifier, so results stay comparable.
-        prompt-version: v2
-        # Thinking models take ~20s per call - keep well above that.
-        timeout: 60s
+        # Hostile-file guards, checked before any parsing/rendering: a larger file is never
+        # opened; a page bigger than this (width x height once rendered, read from its header)
+        # is never rendered - a decompression bomb would otherwise exhaust the heap. 25 MP is
+        # far above any real scan (A4 at 300 DPI is ~8.7 MP).
+        max-file-size-bytes: 26214400
+        max-page-pixels: 25000000
+      # Bump on every prompt change in ModelMediaClassifier, so results stay comparable.
+      # v3: the text sent to the model is PII-redacted (bridge.ai), so the input changed.
+      # v4: content-is-data rule against prompt injection; transcript fenced in <transcript>.
+      prompt-version: v4
+      # Which model, which key, fallback and limits: bridge.ai.usages.media-meeting /
+      # media-document below (the shared AI infrastructure), not here.
     zoom:
       # Not consumed by MediaIntakeOrchestrator yet - see ZoomCloudRecordingClient's javadoc
       # for why (no meetingId source). "real" bean is a throw-stub like bridge.intake.*.mode's -

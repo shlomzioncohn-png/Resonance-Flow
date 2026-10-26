@@ -149,7 +149,7 @@
                     <protoSourceRoot>${proto.root}</protoSourceRoot>
                     <!-- Only this one is actually used by relay's own Java code (com.rnd.relay.event
                          package) - the rest (task-created/-updated/-completed/-creation-requested-event,
-                         github-task, raw-object-event) belong to com.rnd.inbox.event and exist here purely
+                         raw-object-event) belong to com.rnd.inbox.event and exist here purely
                          for ci/check-all-schemas.sh to register/validate against the schema registry as
                          raw .proto text; several of them redeclare the same enum names in that shared
                          package (documented in task-updated-event.proto as "copied verbatim"), which is

@@ -6,7 +6,9 @@ import com.rnd.bridge.intake.model.LandedAttachment;
 import com.rnd.bridge.intake.model.MessageSnapshot;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.raw.model.ChangeType;
+import com.rnd.bridge.raw.model.RawSourceType;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -78,7 +80,7 @@ public class ChatSourceRecordMapper {
                 0,
                 attachmentCount,
                 sessionMessageIds,
-                0));
+                0).withSourceRef(slackSourceRef(first.sourceType(), first.chatId(), first.id())));
 
         int attachmentIndex = 0;
         for (ChatMessage message : sessionMessages) {
@@ -104,6 +106,7 @@ public class ChatSourceRecordMapper {
                         ownerMessageId,
                         0,
                         ChangeType.UPSERT,
+                        null,
                         null,
                         null));
             }
@@ -131,6 +134,15 @@ public class ChatSourceRecordMapper {
      */
     public List<SourceRecord> toSourceRecords(GroupState mergedGroup, List<ChatMessage> newMessagesThisBatch) {
         List<MessageSnapshot> allMessages = mergedGroup.messages();
+        if (allMessages.isEmpty()) {
+            // A deletion emptied this group entirely (see ChatGroupStateReconciler.removeMessage)
+            // - there is no message left to derive a transcript/naturalId/participants from, so
+            // this is the one case that isn't "the existing logic, unchanged": build a single
+            // DELETE_REVIEW record instead, same contract Calendar/Drive already use for their
+            // own whole-item-deleted case (RealCalendarSourceReader.toCancelledSourceRecord /
+            // RealDriveSourceReader.toTrashedSourceRecord).
+            return List.of(toDeleteReviewRecord(mergedGroup));
+        }
         MessageSnapshot first = allMessages.get(0);
         List<String> participants = allMessages.stream()
                 .map(MessageSnapshot::sender)
@@ -167,7 +179,8 @@ public class ChatSourceRecordMapper {
                 attachmentCount,
                 sessionMessageIds,
                 mergedGroup.revision(),
-                mergedGroup.groupId()));
+                mergedGroup.groupId())
+                .withSourceRef(slackSourceRef(mergedGroup.sourceType(), mergedGroup.chatId(), first.messageId())));
 
         int attachmentIndex = 0;
         List<String> incomingMessageIds = newMessagesThisBatch.stream()
@@ -226,5 +239,52 @@ public class ChatSourceRecordMapper {
             }
         }
         return records;
+    }
+
+    /** Builds the single DELETE_REVIEW record for a group a deletion emptied entirely - see
+     * toSourceRecords(GroupState, List)'s empty branch. No message is left to derive
+     * occurredAt/naturalId from, so occurredAt falls back to "now" (there is no legitimate
+     * "unknown" value - same reasoning as RealCalendarSourceReader.toCancelledSourceRecord) and
+     * naturalId is derived from the group's own stable identity instead of a message timestamp. */
+    private SourceRecord toDeleteReviewRecord(GroupState mergedGroup) {
+        String naturalId = mergedGroup.chatId() + "|" + mergedGroup.correlationId();
+        return new SourceRecord(
+                mergedGroup.sourceType(),
+                mergedGroup.tenantId(),
+                naturalId,
+                mergedGroup.correlationId(),
+                Instant.now(),
+                null,
+                List.of(),
+                null,
+                null,
+                EMPTY_CONTENT,
+                null,
+                null,
+                null,
+                0,
+                0,
+                List.of(),
+                mergedGroup.revision(),
+                ChangeType.DELETE_REVIEW,
+                mergedGroup.groupId(),
+                null,
+                null);
+    }
+
+    /** Slack's sourceRef is channelId:ts (see RawObjectEvent.sourceRef's javadoc) - null for
+     * every other chat source (WhatsApp, fixtures), which have no such stable per-session id.
+     * Always keyed to the CURRENT first message (allMessages.get(0) at call time), never pinned
+     * to whichever message happened to be first when the group was created - Mind confirmed
+     * (see docs/raw-object-event-source-ref-schema-response.md) that sourceRef is allowed to
+     * change between revisions: identity is correlationId, sourceRef is only a user-facing link,
+     * and Mind always reads it off the latest revision. So when a root/earlier message is
+     * deleted, this deliberately re-points at whichever message is now first, rather than
+     * either freezing the old (now-gone) ts or trying to keep it stable - a link to a message
+     * that still exists is strictly better than a dead one. Deliberately null on an emptied
+     * group's DELETE_REVIEW (toDeleteReviewRecord) for the same reason - there is no surviving
+     * message left to point at. */
+    private static String slackSourceRef(RawSourceType sourceType, String chatId, String ts) {
+        return sourceType == RawSourceType.SLACK ? chatId + ":" + ts : null;
     }
 }
