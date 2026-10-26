@@ -12,6 +12,7 @@ from .config import GeneratorConfig
 from .diseases import DISEASE_TYPES
 from .model import World
 from .peers import UNKNOWN_TIER, PeerIndex
+from .severity import SeverityScorer
 from .simulation import History
 
 
@@ -60,6 +61,7 @@ def _observed(cfg: GeneratorConfig, world: World, history: History, peers: PeerI
         if r.action == "ADDED" and r.depends_on_task_id not in edges_by_task[r.task_id]:
             edges_by_task[r.task_id].append(r.depends_on_task_id)
 
+    scorer = SeverityScorer(cfg, world, history, peers)
     out = {}
     for d in world.diseases:
         members = set(d.task_ids)
@@ -80,6 +82,7 @@ def _observed(cfg: GeneratorConfig, world: World, history: History, peers: PeerI
         }
         if d.type == "slow_chain":  # ...and the chain with healthy chains of the same length, shape and tier
             out[d.id]["peer_chains"] = peers.chain_peers(d.task_ids)
+        out[d.id].update(scorer.score(d, out[d.id]))  # how bad it actually is (see docs/severity.md)
     return out
 
 
@@ -146,7 +149,8 @@ def write_dataset(out_dir: Path, cfg: GeneratorConfig, world: World, history: Hi
     rows = []
     for d in world.diseases:
         o = observed[d.id]
-        common = {"disease_id": d.id, "type": d.type, "severity": d.severity, "tier": d.tier,
+        common = {"disease_id": d.id, "type": d.type, "severity": d.severity,
+                  "severity_score": o["severity_score"], "severity_level": o["severity_level"], "tier": d.tier,
                   "in_stage_a": str(d.in_stage_a).lower(),
                   "window_start": o["window_start"], "window_end": o["window_end"],
                   "ongoing_at_end": str(o["ongoing_at_end"]).lower()}
@@ -154,6 +158,6 @@ def write_dataset(out_dir: Path, cfg: GeneratorConfig, world: World, history: Hi
                   "role": "root" if t == d.root_task_id else "member"} for t in d.task_ids]
         rows += [{**common, "element_type": "edge", **e} for e in o["edges"]]
     _write_csv(out_dir / "ground_truth.csv",
-               ["disease_id", "type", "severity", "tier", "in_stage_a", "element_type", "task_id", "depends_on_task_id", "role",
+               ["disease_id", "type", "severity", "severity_score", "severity_level", "tier", "in_stage_a", "element_type", "task_id", "depends_on_task_id", "role",
                 "window_start", "window_end", "ongoing_at_end"], rows)
     return manifest

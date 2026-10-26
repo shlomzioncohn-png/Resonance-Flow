@@ -38,14 +38,16 @@ type does not change any other task's ids or behaviour (each disease and each ta
 
 ## What it produces (per set)
 
-Rows shaped exactly like Chain's two history tables (migrations `V2`, `V7`, `V9`), as CSV
-(empty cell = NULL, ready for `COPY ... CSV HEADER`):
+Rows shaped like Chain's two history tables (migrations `V2`, `V7`, `V9`), as CSV (empty cell = NULL, ready for
+`COPY ... CSV HEADER`). `task_state_history.csv` has two more columns than the real table: Inbox's `deadline`
+and `effort_estimate_minutes`, repeated on every row of a task. They are **assumed** to exist on the history
+table; there is no migration, and nothing here touches Chain's real tables:
 
 | File | Meaning |
 |---|---|
 | `task_state_history.csv` | task events: `STATUS_CHANGED`, and `BLOCKED` / `UNBLOCKED` when a task's blocking count crosses zero |
 | `dependency_history.csv` | edge events: `ADDED` / `REMOVED` (`task_id` depends on `depends_on_task_id`), plus `REJECTED` noise |
-| `ground_truth.csv` | **answer key**: per planted disease, one row per involved task and per involved edge, with `type`, `severity`, `tier`, `in_stage_a`, `window_start`, `window_end`, `ongoing_at_end` |
+| `ground_truth.csv` | **answer key**: per planted disease, one row per involved task and per involved edge, with `type`, `severity` (how strongly it was planted), `severity_score` and `severity_level` (how bad it actually is, see `docs/severity.md`), `tier`, `in_stage_a`, `window_start`, `window_end`, `ongoing_at_end` |
 | `ground_truth.json` | same key with parameters and what the disease actually looked like (`observed`), including how its root compares with its peers (`peer_group`, and `peer_chains` for a slow chain) |
 | `healthy_controls.csv` | **answer key**: the healthy control chains (same lengths, tiers and shape as the slow chain) with their end-to-end days |
 | `tasks.csv` | analysis input: per task `task_id`, `created_at`, `project_id` |
@@ -65,7 +67,7 @@ open dependency appears, `UNBLOCKED` exactly when the last one is done or remove
 and the counter rules; the generator refuses to write data that fails it.
 
 Code layout (`src/flow_health/generator/`): `config.py` (all knobs), `model.py` (tiers, task/edge specs),
-`planner.py` (healthy world), `controls.py` (healthy control chains), `peers.py` (peer groups), `diseases/` (one module per disease), `simulation.py`, `validate.py`,
+`planner.py` (healthy world), `attributes.py` (deadline and estimate), `controls.py` (healthy control chains), `peers.py` (peer groups), `severity.py` (severity score), `diseases/` (one module per disease), `simulation.py`, `validate.py`,
 `export.py`, `__main__.py`.
 
 **Healthy world**
@@ -113,6 +115,13 @@ Create `diseases/<name>.py` that defines `DISEASE = Disease(name, plant, nominal
 `plant(planter, severity)` builds tasks and edges through the planter (`task`, `depend`, `advance`, ...)
 and returns the root task and a params dict. It is discovered automatically; nothing else changes.
 `tests/test_generator.py` has a toy example.
+
+## Severity
+
+Each planted disease gets `severity_score` (0 to 100) and `severity_level` in the ground truth, from four parts: how
+unusual it is among its peers, how far it overran its estimate, how tight the deadlines it threatens are, and how
+much work it holds up. How each part is computed for each type is in [`docs/severity.md`](docs/severity.md).
+The older `severity` field (`subtle` / `moderate` / `severe`) only records how strongly the pattern was planted.
 
 ## Known simplifications
 
