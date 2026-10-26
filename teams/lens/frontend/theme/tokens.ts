@@ -39,6 +39,7 @@ export const colorTokens = {
   gray: { 50: '#f8fafc', 100: '#f1f5f9', 500: '#94a3b8', 600: '#64748b', 700: '#475569' },
   violet: { 50: '#f5f3ff', 500: '#8b5cf6' },
   cyan: { 600: '#0891b2' },
+  sky: { 700: '#0369a1' },
   pink: { 500: '#ec4899' },
 } as const;
 
@@ -63,14 +64,18 @@ export const chartTokens = {
   done: colorTokens.green[600],
 } as const;
 
+/**
+ * `main` is used both as text on white and under white text, so it's the 700
+ * step: the 600 steps (and gray 500) are below the 4.5:1 contrast minimum.
+ */
 export const statusTokens = {
   healthy: {
-    main: colorTokens.green[600],
+    main: colorTokens.green[700],
     bg: colorTokens.green[50],
     text: colorTokens.green[700],
   },
   warning: {
-    main: colorTokens.amber[600],
+    main: colorTokens.amber[700],
     bg: colorTokens.amber[50],
     text: colorTokens.amber[700],
   },
@@ -80,7 +85,7 @@ export const statusTokens = {
     text: colorTokens.red[700],
   },
   neutral: {
-    main: colorTokens.gray[500],
+    main: colorTokens.gray[600],
     bg: colorTokens.gray[100],
     text: colorTokens.gray[700],
   },

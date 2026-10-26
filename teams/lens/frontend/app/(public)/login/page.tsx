@@ -54,11 +54,12 @@ export default function LoginPage() {
             <Logo variant="light" />
           </Box>
           <TextField
-            label="Email"
-            type="email"
+            // Plain text, not type="email": the accounts sign in with a username
+            // (manager1) as well as an email, and the browser would block a username.
+            label="Email or username"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            autoComplete="email"
+            autoComplete="username"
             required
             fullWidth
           />
