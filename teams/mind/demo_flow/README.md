@@ -83,7 +83,10 @@ A run takes 6 to 8 minutes. The stack is left up afterwards (Redpanda Console
 <http://localhost:8090>, MinIO <http://localhost:9091>, `minioadmin`/`minioadmin`);
 `python -m demo_flow.run --down-only` takes it down. Each run keeps its logs and result in
 `runs/<run-id>/` (gitignored): `mind-landed.log`, `mind-api.log`, `result.txt`, next to
-the feed's manifest `runs/<run-id>.json`.
+the feed's manifest `runs/<run-id>.json`. Since #482 also `calls/`, every model call each
+Mind process made (one JSONL file per process, `MIND_MONITORING__CALLS_DIR`), and
+`report.md`, their latency and cost by stage and by item
+(`python -m mind.observability.report runs/<run-id>/calls` writes it again).
 
 A Mind process that stops on an error is started again, up to 3 times, as the cluster's
 `restart: on-failure` would: since #919 an LLM outage stops the landed runner on purpose, so

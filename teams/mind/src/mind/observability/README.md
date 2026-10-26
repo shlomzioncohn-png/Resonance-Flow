@@ -74,6 +74,13 @@ price per token. Every field and log key carries its unit (`cpu_seconds`,
 - `context.py` (#482) -- `call_context(item=, task=, stage=)` attributes every
   call recorded inside the block; record_call() reads it, so no call site
   passes it. See "Item, task and stage" below.
+- `report.py` (#482) -- `python -m mind.observability.report [CALLS_DIR]
+  [--out FILE]`: a run's breakdown by stage and by item, from every
+  `*.jsonl` in CALLS_DIR (default `$MIND_MONITORING__CALLS_DIR`). Known and
+  unknown costs apart, dollars and CPU seconds never added, Chain requests
+  never added to the scores they are inside, degraded scores reported apart
+  -- and a stage with no record listed as not measured, never as zero. The
+  #359 demo writes it to `runs/<run-id>/report.md` at the end of every run.
 
 ## Status of #479 (cost and latency monitoring)
 
