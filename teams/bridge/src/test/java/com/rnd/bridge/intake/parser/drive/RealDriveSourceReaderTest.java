@@ -117,6 +117,26 @@ class RealDriveSourceReaderTest {
     }
 
     @Test
+    void recordCarriesTheConfiguredTenantIdNotAHardcodedOne() throws IOException {
+        DriveImportProperties uuidTenant = new DriveImportProperties(
+                "00000000-0000-0000-0000-000000000001", null);
+        Drive.Files.List request = mockListRequest();
+        when(files.list()).thenReturn(request);
+        when(request.execute()).thenReturn(new FileList().setFiles(List.of(file("f1", "application/pdf"))));
+        stubStartPageToken("start-1");
+
+        Drive.Files.Get getRequest = mock(Drive.Files.Get.class);
+        when(files.get("f1")).thenReturn(getRequest);
+        when(getRequest.executeMediaAsInputStream())
+                .thenReturn(new ByteArrayInputStream("bytes".getBytes(StandardCharsets.UTF_8)));
+
+        DriveReadResult result = reader(uuidTenant).read(ReadCursor.full());
+
+        assertThat(result.records()).hasSize(1);
+        assertThat(result.records().get(0).tenantId()).isEqualTo("00000000-0000-0000-0000-000000000001");
+    }
+
+    @Test
     void nativeGoogleFileIsExportedAsTextPlainRatherThanFetchedViaGet() throws IOException {
         Drive.Files.List request = mockListRequest();
         when(files.list()).thenReturn(request);

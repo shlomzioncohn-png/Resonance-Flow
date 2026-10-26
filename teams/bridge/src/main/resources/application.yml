@@ -167,6 +167,7 @@ bridge:
           expression: ${BRIDGE_INTAKE_EMAIL_SYNC_CRON_EXPRESSION:0 */15 * * * ?}
     drive:
       mode: fixture
+      tenant-id: ${bridge.tenant-id}
       sync:
         cron:
           enabled: ${BRIDGE_INTAKE_DRIVE_SYNC_CRON_ENABLED:false}
