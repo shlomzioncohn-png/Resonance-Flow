@@ -229,10 +229,16 @@ components:
       # KafkaPayloadPublisher bean) activate - without it everything falls
       # back to LoggingPayloadPublisher and nothing reaches Inbox.
       SPRING_PROFILES_ACTIVE: "kafka"
-      # Deployment must --set a real Inbox tenant UUID (blank fails CrmLaneConfig's
-      # kafka-profile startup check by design). Feeds both bridge.crm.organization-id
-      # and bridge.organization-id (GitHub/Jira) via application.yml.
-      CRM_ORGANIZATION_ID: ""
+      # Inbox tenant UUID stamped on every structured task Bridge publishes. Feeds both
+      # bridge.crm.organization-id and bridge.organization-id (GitHub/Jira) via
+      # application.yml. Must not be blank: with the kafka profile active,
+      # CrmLaneConfig fails startup on a blank value by design, which crashed the
+      # CD smoke test and blocked every Bridge deploy since #996.
+      # Default: Inbox's built-in "System" tenant (V15__add_system_admin.sql), the
+      # same value as bridge.tenant-id's default for the unstructured lanes, so
+      # Bridge stamps one tenant everywhere. Override it in
+      # environments/shared.yaml once the shared cluster has its own tenant.
+      CRM_ORGANIZATION_ID: "00000000-0000-0000-0000-000000000001"
     objectStorage:
       bucket: "bridge-raw"
     config:
