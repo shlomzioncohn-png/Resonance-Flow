@@ -19,41 +19,8 @@ import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 
 /**
- * Talks to the HubSpot CRM v3 API: the pipeline lookup, and cursor-following
- * deal pagination with {@code propertiesWithHistory=dealstage}.
- * <p>
- * Three classes of failure are retried, up to {@code maxRetries} attempts,
- * each backing off before the next attempt:
- * <ul>
- *   <li>{@code 429} (quota exceeded) - backs off using the response's
- *       {@code Retry-After} header (seconds) when present, exponential
- *       backoff otherwise.</li>
- *   <li>{@code 502}/{@code 503}/{@code 504} (transient server errors) -
- *       always exponential backoff, HubSpot does not send a useful
- *       {@code Retry-After} for these.</li>
- *   <li>Transport-level failures (connect/read timeouts, DNS/IO errors) -
- *       always exponential backoff. Surfaced by {@code RestClient} two
- *       different ways for the same underlying problem: a failure before
- *       any response exists (refused connection, DNS, a connect timeout) is
- *       a {@link ResourceAccessException}; a read timeout that hits
- *       mid-body, after a 2xx status already came back, is a plain {@link
- *       RestClientException} from message-converter extraction instead.
- *       Both are recognised by walking the cause chain for an {@link
- *       IOException} rather than by exception type.</li>
- * </ul>
- * Any other non-2xx response (e.g. {@code 400}/{@code 401}/{@code 404}) is
- * fatal and fails immediately, not retried. Exhausting the retry budget on
- * any of the three retryable classes above, or hitting a fatal response,
- * fails with a {@link HubSpotClientException} - never containing the bearer
- * token.
- * <p>
- * {@link #production} configures explicit connect/read timeouts (see
- * {@code bridge.crm.hubspot.connect-timeout-millis} /
- * {@code read-timeout-millis}) so a server that accepts a connection and
- * then never responds - no status code, nothing for the retry logic above
- * to react to on its own - fails the request instead of blocking the
- * calling thread indefinitely, and is then retried like any other
- * transport failure.
+ * Talks to the HubSpot CRM v3 API: pipeline lookup and cursor-following deal pagination.
+ * Retries 429/502-504/transport failures up to {@code maxRetries} with backoff; any other non-2xx is fatal, not retried.
  */
 final class HubSpotClient {
 
@@ -129,14 +96,6 @@ final class HubSpotClient {
         return response.results() == null ? List.of() : response.results();
     }
 
-    /**
-     * Reads one deal by id - {@code GET /crm/v3/objects/deals/{dealId}}, same {@code properties}
-     * and {@code propertiesWithHistory=dealstage} as {@link #fetchAllDeals()}'s list call, both
-     * documented as supported query parameters on this endpoint (HubSpot CRM API, "Deals" object
-     * reference, the single-object GET operation). {@link Optional#empty()} for a 404 - the only
-     * status this client treats as "doesn't exist" rather than a failure; every other retry/error
-     * rule from {@link #execute} still applies (429/502-504 retried, anything else fatal).
-     */
     Optional<HubSpotDealRecord> fetchDeal(String dealId) {
         return executeOptional(DEALS_ENDPOINT + "/" + dealId, uriBuilder -> uriBuilder
                         .queryParam("properties", DEALS_PROPERTIES)
@@ -144,7 +103,6 @@ final class HubSpotClient {
                 HubSpotDealRecord.class);
     }
 
-    /** Follows {@code paging.next.after} until HubSpot stops returning one. */
     List<HubSpotDealRecord> fetchAllDeals() {
         List<HubSpotDealRecord> all = new ArrayList<>();
         String after = null;
@@ -185,13 +143,6 @@ final class HubSpotClient {
         return withRetry(path, () -> attemptOptional(path, customizer, responseType));
     }
 
-    /**
-     * The retry/backoff loop shared by every HubSpot call - {@code action} is one attempt (one
-     * HTTP round trip, already classified by {@link #attempt}/{@link #attemptOptional} into a
-     * plain result or one of the three retryable failures below). Pulled out so {@link
-     * #fetchDeal(String)} gets the exact same 429/502-504/transport-failure retry behavior as
-     * {@link #fetchPipelines()} and {@link #fetchAllDeals()} without a second copy of this loop.
-     */
     private <T> T withRetry(String path, Supplier<T> action) {
         int attempt = 0;
         while (true) {
@@ -256,17 +207,7 @@ final class HubSpotClient {
                         return response.bodyTo(responseType);
                     });
         } catch (RestClientException restClientFailure) {
-            // Two different shapes reach here under the same root cause. A
-            // connect timeout / DNS failure / connection reset before any
-            // response exists surfaces directly as ResourceAccessException.
-            // A read timeout that hits mid-body - the connection succeeded,
-            // headers came back 2xx, then the body stalled - surfaces
-            // instead as a plain RestClientException from message-converter
-            // extraction (see DefaultRestClient.readWithMessageConverters),
-            // with the IOException one or two levels down its cause chain
-            // rather than as the exception type itself. Checking the cause
-            // chain for IOException catches both without also catching a
-            // fatal one, like a converter failing on a malformed body.
+            // Connect/DNS failures and mid-body read timeouts both surface as RestClientException - IOException cause chain catches both.
             if (isTransportFailure(restClientFailure)) {
                 throw new TransportFailure(restClientFailure);
             }
@@ -274,13 +215,6 @@ final class HubSpotClient {
         }
     }
 
-    /**
-     * Same request/response handling as {@link #attempt}, except a 404 is reported as {@link
-     * Optional#empty()} instead of a fatal {@link HubSpotClientException} - the one status this
-     * client treats as "the resource doesn't exist" rather than a failure. Only used by {@link
-     * #fetchDeal(String)}; {@link #fetchPipelines()} and {@link #fetchAllDeals()} keep going
-     * through {@link #attempt}, where a 404 is still fatal like any other unexpected status.
-     */
     private <T> Optional<T> attemptOptional(String path, UnaryOperator<UriBuilder> customizer, Class<T> responseType) {
         try {
             return restClient.get()
@@ -313,14 +247,7 @@ final class HubSpotClient {
         }
     }
 
-    /**
-     * HubSpot's error responses carry a {@code message}/{@code category}
-     * body (e.g. {@code EXPIRED_AUTHENTICATION}) that says exactly what went
-     * wrong - far more useful than the bare status code alone. Best-effort
-     * only: reading the body can itself fail (empty body, non-JSON-text
-     * content), and a failure here must never mask the real fatal-status
-     * exception this is attached to.
-     */
+    // Best-effort only - a failure here must not mask the real fatal-status exception.
     private static String errorBodySuffix(RestClient.RequestHeadersSpec.ConvertibleClientHttpResponse response) {
         try {
             String body = response.bodyTo(String.class);
@@ -384,11 +311,7 @@ final class HubSpotClient {
         }
     }
 
-    /**
-     * Wraps an IOException-caused {@link RestClientException} (which
-     * {@link ResourceAccessException} is a subtype of) so it retries like
-     * the other transient failures above.
-     */
+    /** Wraps an IOException-caused {@link RestClientException} so it retries like the other transient failures. */
     private static final class TransportFailure extends RuntimeException {
         TransportFailure(RestClientException cause) {
             super(cause);

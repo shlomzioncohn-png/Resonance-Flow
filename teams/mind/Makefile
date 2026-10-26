@@ -1,4 +1,4 @@
-.PHONY: install dev test lint fmt run run-index-consumer run-score-publisher eval eval-ci schema migrate docker-build docker-up proto
+.PHONY: install dev test lint fmt run run-local run-index-consumer run-landed-consumer eval eval-ci schema migrate migrate-local docker-build docker-up proto
 
 install:
 	pip install -e .
@@ -32,11 +32,27 @@ fmt:
 run: proto
 	uvicorn mind.api.main:app --reload --port 8000
 
+# #481: MIND reads its connection settings only from the files
+# $CONFIG_FILE_PATH / $SECRETS_FILE_PATH name, so `run` and `migrate` refuse to
+# start without them. These run them against the committed examples
+# (placeholders only), with `docker compose up -d vector-store` as the database.
+# demo-check-media needs them too: ASR reads asr.whisper_model from config.yaml.
+# Target-specific, so they reach the `run`/`migrate` recipes too; a value given
+# on the command line wins, e.g. `make run-local SECRETS_FILE_PATH=secrets.local.yaml`.
+run-local migrate-local demo-check-media: export CONFIG_FILE_PATH = config.example.yml
+run-local migrate-local demo-check-media: export SECRETS_FILE_PATH = secrets.example.yml
+
+run-local: run
+
+migrate-local: migrate
+
 run-index-consumer: proto
 	python -m mind.embeddings.index_consumer_runner
 
-run-score-publisher: proto
-	python -m mind.scoring.score_publisher_runner
+# #919: the whole creation pipeline, task.created listener included -- needs
+# Kafka, MinIO, the vector store and an LLM provider (src/mind/ingestion/README.md).
+run-landed-consumer: proto
+	python -m mind.ingestion.landed_consumer_runner
 
 eval:
 	python -m mind.evaluation.run --personas eval/personas

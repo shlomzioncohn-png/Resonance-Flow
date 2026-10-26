@@ -1,8 +1,10 @@
 package com.rnd.bridge.github.controller;
 
+import com.rnd.bridge.core.PayloadPublisher;
+import com.rnd.bridge.core.error.PublishException;
+import com.rnd.bridge.core.error.ValidationException;
 import com.rnd.bridge.task.model.Task;
 import com.rnd.bridge.github.service.GitHubClient;
-import com.rnd.bridge.github.service.GitHubKafkaProducer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,11 +31,11 @@ public class GitHubBridgeController {
     private String defaultRepo;
 
     private final GitHubClient gitHubClient;
-    private final GitHubKafkaProducer gitHubKafkaProducer;
+    private final PayloadPublisher<Task> taskPublisher;
 
-    public GitHubBridgeController(GitHubClient gitHubClient, GitHubKafkaProducer gitHubKafkaProducer) {
+    public GitHubBridgeController(GitHubClient gitHubClient, PayloadPublisher<Task> taskPublisher) {
         this.gitHubClient = gitHubClient;
-        this.gitHubKafkaProducer = gitHubKafkaProducer;
+        this.taskPublisher = taskPublisher;
     }
 
     @PostMapping("/sync")
@@ -48,14 +50,27 @@ public class GitHubBridgeController {
 
         return gitHubClient.fetchAllTasks(targetOwner, targetRepo)
                 .collectList()
-                .doOnNext(this::publishTasks)
-                .map(fetched -> ResponseEntity.ok(Map.<String, Object>of("owner", targetOwner, "repo", targetRepo, "published", fetched.size())))
+                .map(fetched -> ResponseEntity.ok(Map.<String, Object>of("owner", targetOwner, "repo", targetRepo,
+                        "fetched", fetched.size(), "published", publishTasks(fetched))))
                 .doOnError(error -> log.error("Failed to sync GitHub tasks for {}/{}", targetOwner, targetRepo, error))
                 .onErrorResume(error -> Mono.just(ResponseEntity.internalServerError()
                         .body(Map.<String, Object>of("error", error.getMessage(), "owner", targetOwner, "repo", targetRepo))));
     }
 
-    private void publishTasks(List<Task> tasks) {
-        gitHubKafkaProducer.publishAll(tasks);
+    /**
+     * publish() blocks and fails the record - so each task gets its own attempt:
+     * one invalid/unpublishable record must not kill the rest of the batch.
+     */
+    private int publishTasks(List<Task> tasks) {
+        int published = 0;
+        for (Task task : tasks) {
+            try {
+                taskPublisher.publish(task);
+                published++;
+            } catch (PublishException | ValidationException e) {
+                log.error("Failed to publish GitHub task {}", task.sourceRef(), e);
+            }
+        }
+        return published;
     }
 }

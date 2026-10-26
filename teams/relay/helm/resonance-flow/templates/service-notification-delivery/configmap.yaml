@@ -34,6 +34,8 @@ metadata:
 data:
   config.yaml: |
     spring:
+      config:
+        import: "optional:configtree:/etc/resonance-flow/secrets/kafka-sasl/"
       kafka:
         # kafka is a top-level dependency (shared by every component), schema-registry is
         # declared on this component specifically - same split components.inbox.dependencies
@@ -43,6 +45,6 @@ data:
           security.protocol: SASL_PLAINTEXT
           sasl.mechanism: PLAIN
           sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" (dict "root" $) | quote }}
-          schema.registry.url: {{ printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" .dependencies "name" "schema-registry")) | quote }}
+          schema.registry.url: {{ include "resonance-flow.schemaRegistryUrl" (dict "root" $ "deps" .dependencies) | quote }}
 {{- end }}
 {{- end }}

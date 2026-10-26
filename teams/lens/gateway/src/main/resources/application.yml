@@ -39,7 +39,7 @@ app:
 # Override BFF_SERVICE_URL to point at a different BFF without recompiling
 bff:
   service:
-    url: ${BFF_SERVICE_URL:http://localhost:8082}
+    url: ${BFF_SERVICE_URL:http://localhost:8085}
   connect-timeout-ms: ${BFF_CONNECT_TIMEOUT_MS:2000}
   read-timeout-ms: ${BFF_READ_TIMEOUT_MS:10000}
   # BFF endpoint paths — change here if BFF renames a route, no code changes needed
@@ -49,6 +49,12 @@ bff:
     employee-task: ${BFF_ENDPOINT_EMPLOYEE_TASK:/workspace/employee-task}
     manager-users: ${BFF_ENDPOINT_MANAGER_USERS:/manager/users}
     task-selection: ${BFF_ENDPOINT_TASK_SELECTION:/workspace/tasks/selection}
+
+# JWT configuration for RS256 token signing/validation
+lens:
+  jwt:
+    private-key-location: ${JWT_PRIVATE_KEY_LOCATION:./jwt-private.pem}
+    public-key-location: ${JWT_PUBLIC_KEY_LOCATION:./jwt-public.pem}
 
 server:
   port: ${SERVER_PORT:8080}

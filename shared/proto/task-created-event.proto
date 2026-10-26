@@ -15,8 +15,8 @@ import "google/protobuf/struct.proto";
 // Registered under FULL compatibility: never renumber, retype or remove a field or enum value -
 // only add. That's also why id/title/description keep their original names and nullability.
 //
-// Not fields here: correlation_id (a Kafka header, like event_id), and suggested_owner_* (set
-// later by MIND, so they only appear on task.updated).
+// Not a field here: correlation_id (a Kafka header, like event_id).
+// suggested_owner_* carry MIND's proposal from task.creation.requested; they never set owner_id.
 
 message TaskCreatedEvent {
   string id = 1;                                   // UUID as string.
@@ -40,6 +40,8 @@ message TaskCreatedEvent {
   google.protobuf.Timestamp created_at = 19;
   optional google.protobuf.Struct metadata = 20;   // Free-form JSONB.
   optional string owner_id = 21;                   // UUID as string.
+  optional string suggested_owner_user_id = 22;    // UUID as string. A proposal, not the owner.
+  optional float suggested_owner_confidence = 23;  // 0..1.
 }
 
 enum SourceType {
@@ -57,6 +59,8 @@ enum SourceType {
   SOURCE_TYPE_MANUAL = 11;
   SOURCE_TYPE_DRIVE = 12;
   SOURCE_TYPE_JIRA_ISSUE = 13;
+  SOURCE_TYPE_ZOOM = 14;
+  SOURCE_TYPE_BIGBLUEBUTTON = 15;
 }
 
 enum TaskTier {

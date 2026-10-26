@@ -8,11 +8,15 @@ catch.
 """
 
 import json
+import logging
 import re
+from dataclasses import dataclass
 
 from pydantic import ValidationError
 
-from mind.extraction.models import ExtractedFields
+from mind.extraction.models import MAX_TASKS_PER_TEXT, ExtractedFields, ExtractedTasks
+
+logger = logging.getLogger("mind.extraction")
 
 
 class MalformedOutput(Exception):
@@ -44,12 +48,53 @@ def _first_json_object(text: str) -> str:
     return text[start : end + 1]
 
 
+def _read_payload(text: str) -> object:
+    """The answer's JSON, with the formatting slips forgiven, or `MalformedOutput`."""
+
+    if not text or not text.strip():
+        raise MalformedOutput("the answer was empty")
+
+    body = _strip_code_fence(text)
+
+    # The list without the object around it is the right answer written
+    # wrong, like a code fence: wrapped here rather than repaired, which would
+    # cost a call and charge every task in it. Narrowing it to { ... } instead
+    # would cut out `{task}, {task}` and call valid JSON invalid. When it does
+    # not read as a list, it was prose that happens to open with a bracket.
+    if body.startswith("["):
+        try:
+            tasks = json.loads(body)
+        except json.JSONDecodeError:
+            pass
+        else:
+            logger.info("extraction: the answer was a bare list; reading it as the tasks")
+            return {"tasks": tasks}
+
+    try:
+        return json.loads(_first_json_object(body))
+    except json.JSONDecodeError as exc:
+        raise MalformedOutput(f"the answer is not valid JSON ({exc.msg})") from exc
+
+
 def describe_validation_error(error: ValidationError) -> str:
     """Condense a pydantic error into something a model can act on."""
 
     parts = []
     for detail in error.errors():
         location = ".".join(str(item) for item in detail["loc"]) or "(root)"
+        # Read with .get(): a KeyError here is neither a ValidationError nor
+        # a MalformedOutput, so it would end the run rather than the item.
+        actual = detail.get("ctx", {}).get("actual_length")
+        if detail["type"] == "too_long" and detail["loc"] == ("tasks",) and actual is not None:
+            # Pydantic's "at most 15 items" names the limit and not what to
+            # remove, and the repair prompt otherwise says to return every
+            # task again: told only that, a model resends the same list.
+            parts.append(
+                f"tasks: there are {actual}, and at most {MAX_TASKS_PER_TEXT} are allowed; "
+                f"keep only the real tasks, work someone is asked to do, offers to do, or "
+                f"agrees to do, and leave out the rest"
+            )
+            continue
         parts.append(f"{location}: {detail['msg']}")
     return "; ".join(parts)
 
@@ -57,32 +102,72 @@ def describe_validation_error(error: ValidationError) -> str:
 def parse_response(
     text: str,
     schema: type[ExtractedFields] = ExtractedFields,
-) -> ExtractedFields:
-    """Read one answer into `schema`, or raise `MalformedOutput`.
+) -> list[ExtractedFields]:
+    """Read one answer into a list of `schema`, or raise `MalformedOutput`.
 
-    `schema` is which shape was asked for: the basic fields alone, or with
-    the classification and effort estimate. It defaults to the basic one so
-    that every existing caller keeps the behaviour it had.
+    The answer is `{"tasks": [...]}` (#690), and `schema` is the shape of each
+    task: the basic fields alone, or with the classification and effort
+    estimate. The list may be empty; one task that fails `schema` fails the
+    whole answer, and the message names it by its place (`tasks.1.title`).
 
     Every rejection path raises the same exception type: for the extractor a
     failed parse and a failed validation are the same normal event, and both
     lead to the same repair round.
     """
 
-    if not text or not text.strip():
-        raise MalformedOutput("the answer was empty")
-
-    candidate = _first_json_object(_strip_code_fence(text))
+    payload = _read_payload(text)
 
     try:
-        payload = json.loads(candidate)
-    except json.JSONDecodeError as exc:
-        raise MalformedOutput(f"the answer is not valid JSON ({exc.msg})") from exc
-
-    # No isinstance check on `payload`: it was narrowed to the outermost
-    # { ... } span above, so anything json.loads accepts here is an object.
-
-    try:
-        return schema.model_validate(payload)
+        # mypy reads `ExtractedTasks[schema]` as a type annotation, where a
+        # variable is not allowed. Here it is a runtime call: pydantic builds
+        # the list model for whichever shape `schema` holds.
+        envelope = ExtractedTasks[schema]  # type: ignore[valid-type]
+        return envelope.model_validate(payload).tasks
     except ValidationError as exc:
         raise MalformedOutput(describe_validation_error(exc)) from exc
+
+
+@dataclass(frozen=True)
+class RejectedAnswer:
+    """What can still be read from an answer that failed validation."""
+
+    # False when there was no `tasks` list to read: broken JSON, no object,
+    # or `tasks` not a list. Then the two fields below say nothing.
+    readable: bool
+    # How many entries its `tasks` list held, valid or not.
+    task_count: int
+    # The entries that pass the task schema each on its own.
+    valid: list[ExtractedFields]
+
+
+def read_rejected_answer(
+    text: str,
+    schema: type[ExtractedFields] = ExtractedFields,
+) -> RejectedAnswer:
+    """How many tasks a rejected answer held, and which pass `schema` on their own.
+
+    Used for scoring and never as output, so it does not break the rule at the
+    top of this module: nothing found here reaches Inbox. The extractor only
+    asks whether a task in the final answer was already valid in an earlier
+    round, so that a repair round is charged to the task that needed it.
+
+    Never raises. It runs on an answer that has already failed, so any shape
+    can arrive here, and an exception would end the run instead of the item.
+    """
+
+    try:
+        payload = _read_payload(text)
+    except MalformedOutput:
+        return RejectedAnswer(readable=False, task_count=0, valid=[])
+
+    tasks = payload.get("tasks") if isinstance(payload, dict) else None
+    if not isinstance(tasks, list):
+        return RejectedAnswer(readable=False, task_count=0, valid=[])
+
+    found = []
+    for task in tasks:
+        try:
+            found.append(schema.model_validate(task))
+        except ValidationError:
+            continue
+    return RejectedAnswer(readable=True, task_count=len(tasks), valid=found)

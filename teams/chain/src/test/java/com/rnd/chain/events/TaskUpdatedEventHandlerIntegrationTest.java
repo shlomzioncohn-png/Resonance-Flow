@@ -1,5 +1,7 @@
 package com.rnd.chain.events;
 
+import java.util.List;
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.testsupport.PgCleanup;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
@@ -58,6 +60,25 @@ import static org.junit.jupiter.api.Assertions.*;
 })
 class TaskUpdatedEventHandlerIntegrationTest {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.rnd.chain.repository.TaskReadinessRepository taskReadinessRepository;
+
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
+
     private static final String TOPIC = "task.updated";
     private static final String ERROR_TOPIC = TOPIC + ".errors";
     private static final LocalDateTime BASE_TIME = LocalDateTime.of(2026, 1, 1, 12, 0, 0);
@@ -104,8 +125,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
 
     private static Task buildTask(UUID id, TaskStatus status, LocalDateTime updatedAt) {
         return Task.builder()
-                .id(id).tenantId(TENANT_ID).status(status).isReady(true)
-                .blockingCount(0).openConstraintCount(0)
+                .id(id).tenantId(TENANT_ID).status(status)
                 .createdAt(BASE_TIME).updatedAt(updatedAt)
                 .build();
     }
@@ -146,13 +166,12 @@ class TaskUpdatedEventHandlerIntegrationTest {
     }
 
     @Test
-    void transitioningToDone_releasesDependents() throws InterruptedException {
+    void transitioningToDone_doesNotReleaseDependents() throws InterruptedException {
         UUID blocker = UUID.randomUUID();
         UUID dependent = UUID.randomUUID();
         taskRepository.save(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME));
         taskRepository.save(Task.builder()
                 .id(dependent).tenantId(TENANT_ID).status(TaskStatus.PENDING)
-                .isReady(false).blockingCount(1).openConstraintCount(0)
                 .createdAt(BASE_TIME).updatedAt(BASE_TIME).build());
         taskDependencyRepository.save(new TaskDependency(dependent, blocker));
 
@@ -163,10 +182,13 @@ class TaskUpdatedEventHandlerIntegrationTest {
                 .setUpdatedAt(timestamp(BASE_TIME.plusMinutes(5)))
                 .build());
 
-        await().atMost(Duration.ofSeconds(20)).alias("the dependent to be released").until(() ->
-                taskRepository.findById(dependent).map(Task::isReady).orElse(false));
-
-        assertEquals(0, taskRepository.findById(dependent).orElseThrow().getBlockingCount());
+        // Completion is applied only by task.completed, so a DONE update must leave everything as it was.
+        await().during(Duration.ofSeconds(3)).atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            assertEquals(TaskStatus.ACTIVE, taskRepository.findById(blocker).orElseThrow().getStatus());
+            Task dependentAfter = taskRepository.findById(dependent).orElseThrow();
+            assertEquals(1, blockingCount(dependentAfter));
+            assertFalse(isReady(dependentAfter));
+        });
     }
 
     @Test
@@ -177,7 +199,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
         producer.send(TOPIC, taskId.toString(), TaskUpdatedEvent.newBuilder()
                 .setTaskId(taskId.toString())
                 .setTenantId(TENANT_ID.toString())
-                .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_DONE)
+                .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_NEW)
                 .setUpdatedAt(timestamp(BASE_TIME.minusMinutes(1))) // older than stored
                 .build());
 

@@ -75,6 +75,9 @@ class TaskCreationRequestEventValidationTest {
         dto.setEffortEstimateMinutes(45);
         dto.setDeadline("2026-09-02T12:00:00Z");
         dto.setStatus("NEW");
+        dto.setEffortEstimateConfidence(0.6);
+        dto.setSuggestedOwnerUserId(UUID.randomUUID().toString());
+        dto.setSuggestedOwnerConfidence(0.8);
 
         assertThatCode(() -> validator.validate(dto)).doesNotThrowAnyException();
     }
@@ -135,6 +138,60 @@ class TaskCreationRequestEventValidationTest {
         dto.setConfidence(confidence);
 
         assertRejects(dto, "confidence");
+    }
+
+    @ParameterizedTest
+    @ValueSource(doubles = {0.0, 1.0})
+    void acceptsSuggestionConfidencesAtTheBoundaries(double confidence) {
+        TaskCreationRequestEventDto dto = validEvent();
+        dto.setEffortEstimateConfidence(confidence);
+        dto.setSuggestedOwnerUserId(UUID.randomUUID().toString());
+        dto.setSuggestedOwnerConfidence(confidence);
+
+        assertThatCode(() -> validator.validate(dto)).doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
+    @ValueSource(doubles = {-0.1, 1.1})
+    void rejectsAnEffortEstimateConfidenceOutsideZeroToOne(double confidence) {
+        TaskCreationRequestEventDto dto = validEvent();
+        dto.setEffortEstimateConfidence(confidence);
+
+        assertRejects(dto, "effortEstimateConfidence");
+    }
+
+    @ParameterizedTest
+    @ValueSource(doubles = {-0.1, 1.1})
+    void rejectsASuggestedOwnerConfidenceOutsideZeroToOne(double confidence) {
+        TaskCreationRequestEventDto dto = validEvent();
+        dto.setSuggestedOwnerUserId(UUID.randomUUID().toString());
+        dto.setSuggestedOwnerConfidence(confidence);
+
+        assertRejects(dto, "suggestedOwnerConfidence");
+    }
+
+    @Test
+    void rejectsASuggestedOwnerUserIdThatIsNotAUuid() {
+        TaskCreationRequestEventDto dto = validEvent();
+        dto.setSuggestedOwnerUserId("not-a-uuid");
+
+        assertRejects(dto, "suggestedOwnerUserId");
+    }
+
+    @Test
+    void acceptsASuggestedOwnerWithoutAConfidence() {
+        TaskCreationRequestEventDto dto = validEvent();
+        dto.setSuggestedOwnerUserId(UUID.randomUUID().toString());
+
+        assertThatCode(() -> validator.validate(dto)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsASuggestedOwnerConfidenceWithoutASuggestedOwner() {
+        TaskCreationRequestEventDto dto = validEvent();
+        dto.setSuggestedOwnerConfidence(0.8);
+
+        assertRejects(dto, "suggestedOwnerConfidence");
     }
 
     @Test

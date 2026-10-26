@@ -38,6 +38,9 @@ public class TaskCreationRequestProtoMapper {
         dto.setHasDependencies(proto.hasHasDependencies() ? proto.getHasDependencies() : null);
         dto.setCreatedByUserId(proto.hasCreatedByUserId() ? proto.getCreatedByUserId() : null);
         dto.setAssignees(fromAssignees(proto.getAssigneesList()));
+        dto.setEffortEstimateConfidence(proto.hasEffortEstimateConfidence() ? proto.getEffortEstimateConfidence() : null);
+        dto.setSuggestedOwnerUserId(proto.hasSuggestedOwnerUserId() ? proto.getSuggestedOwnerUserId() : null);
+        dto.setSuggestedOwnerConfidence(proto.hasSuggestedOwnerConfidence() ? proto.getSuggestedOwnerConfidence() : null);
         return dto;
     }
 

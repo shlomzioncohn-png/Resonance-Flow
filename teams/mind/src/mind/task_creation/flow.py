@@ -2,16 +2,22 @@
 so all three use one pending store. How to compose it: README.md, "Running it".
 """
 
+from __future__ import annotations
+
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from mind.contracts.task_creation_requested import TaskCreationRequested
-from mind.embeddings.base import VectorStore
+from mind.embeddings.base import VectorIndex
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.task_creation.overdue import DEFAULT_MAX_WAIT, report_overdue
 from mind.task_creation.pending import PendingStore
 from mind.task_creation.reply import Headers, MatchedReply, OnMatched, handle_task_created_reply
-from mind.task_creation.send import Publisher, send_creation_request
+from mind.task_creation.send import send_creation_request
+
+if TYPE_CHECKING:
+    from mind.messaging.producer import Publisher
 
 
 class TaskCreationFlow:
@@ -21,13 +27,13 @@ class TaskCreationFlow:
         self,
         *,
         producer: Publisher,
-        index: VectorStore,
+        index: VectorIndex,
         pending: PendingStore,
         max_wait: timedelta = DEFAULT_MAX_WAIT,
         on_matched: OnMatched | None = None,
     ) -> None:
-        """`on_matched` is told of each request Inbox turned into a task (#355's
-        hook) — at least once, maybe twice."""
+        """`on_matched` is told of each request Inbox turned into a task
+        (#355's hook) — at least once, maybe twice."""
 
         self._producer = producer
         self._index = index
@@ -42,6 +48,7 @@ class TaskCreationFlow:
         bridge_correlation_id: UUID,
         revision: int,
         task_index: int = 0,
+        dependency_mentions: tuple[str, ...] = (),
     ) -> UUID:
         """What the pipeline calls for each task it extracted."""
 
@@ -52,6 +59,7 @@ class TaskCreationFlow:
             bridge_correlation_id=bridge_correlation_id,
             revision=revision,
             task_index=task_index,
+            dependency_mentions=dependency_mentions,
         )
 
     async def on_task_created(self, event: TaskCreatedEvent, headers: Headers) -> MatchedReply | None:

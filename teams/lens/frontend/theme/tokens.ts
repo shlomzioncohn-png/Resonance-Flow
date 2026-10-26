@@ -37,6 +37,16 @@ export const colorTokens = {
   amber: { 50: '#fffbeb', 100: '#fef3c7', 500: '#f59e0b', 600: '#d97706', 700: '#b45309' },
   red: { 50: '#fef2f2', 100: '#fee2e2', 500: '#ef4444', 600: '#dc2626', 700: '#b91c1c' },
   gray: { 50: '#f8fafc', 100: '#f1f5f9', 500: '#94a3b8', 600: '#64748b', 700: '#475569' },
+  violet: { 50: '#f5f3ff', 500: '#8b5cf6' },
+  pink: { 500: '#ec4899' },
+} as const;
+
+/** The look of AI-generated content (Personal Work Insights), so it reads apart from regular data. */
+export const aiTokens = {
+  gradient: `linear-gradient(135deg, ${colorTokens.brand[600]} 0%, ${colorTokens.violet[500]} 55%, ${colorTokens.pink[500]} 100%)`,
+  surface: colorTokens.violet[50],
+  accent: colorTokens.violet[500],
+  glow: '0 10px 24px -8px rgba(79, 70, 229, 0.7)',
 } as const;
 
 /** Semantic status meaning used across the product (see the status legend in the manager dashboard design). */

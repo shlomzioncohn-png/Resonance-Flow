@@ -14,6 +14,6 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 @ConfigurationProperties(prefix = "bridge.intake.whatsapp")
 public record WhatsAppImportProperties(
         String importDir,
-        @DefaultValue("kamatech") String tenantId,
+        String tenantId,
         @DefaultValue("Asia/Jerusalem") String zoneId) {
 }

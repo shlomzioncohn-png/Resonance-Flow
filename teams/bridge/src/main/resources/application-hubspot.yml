@@ -1,6 +1,10 @@
 bridge:
   crm:
     hubspot:
+      # Active alongside "salesforce" now (additive CRM profiles, team lead decision 2026-10-19) -
+      # this file's tunables only ever apply to the hubspot source; salesforce's own live entirely
+      # in application-salesforce.yml. sourceRef "crm:hubspot:<id>" keeps HubSpot deals distinct
+      # from Salesforce's "crm:salesforce:<id>" even if the same raw id exists in both.
       base-url: https://api.hubspot.com
       # Backed by the HUBSPOT_TOKEN environment variable - never given a
       # default here, so a missing token fails startup loudly instead of

@@ -13,6 +13,9 @@ dependencies = [
     "uvicorn",
     # embeddings (src/mind/embeddings)
     "psycopg[binary,pool]>=3.1",
+    # psycopg[pool] extra has no version floor of its own -- pin separately.
+    # >=3.2 for AsyncConnectionPool's check= param (pgvector_store.py).
+    "psycopg-pool>=3.2",
     "sentence-transformers>=3.0",
     # migrations (migrations/) -- runs at deploy time, inside the image,
     # not just in dev, so this belongs here and not in [dev].
@@ -22,6 +25,9 @@ dependencies = [
     "confluent-kafka[protobuf,schemaregistry]>=2.5,<2.11",
     "protobuf>=5",
     "pyyaml",
+    # Bridge's object storage (src/mind/ingestion) -- the official MinIO SDK,
+    # the Python sibling of the io.minio client Bridge writes with.
+    "minio>=7.2,<8",
     # LLM provider calls (mind.extraction.providers); also what
     # fastapi.testclient.TestClient runs on in the tests.
     "httpx",

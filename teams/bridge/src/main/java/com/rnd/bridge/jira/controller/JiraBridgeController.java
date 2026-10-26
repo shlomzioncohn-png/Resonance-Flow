@@ -1,7 +1,9 @@
 package com.rnd.bridge.jira.controller;
 
+import com.rnd.bridge.core.PayloadPublisher;
+import com.rnd.bridge.core.error.PublishException;
+import com.rnd.bridge.core.error.ValidationException;
 import com.rnd.bridge.jira.service.JiraClient;
-import com.rnd.bridge.jira.service.JiraKafkaProducer;
 import com.rnd.bridge.task.model.Task;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,11 +28,11 @@ public class JiraBridgeController {
     private String defaultProject;
 
     private final JiraClient jiraClient;
-    private final JiraKafkaProducer jiraKafkaProducer;
+    private final PayloadPublisher<Task> taskPublisher;
 
-    public JiraBridgeController(JiraClient jiraClient, JiraKafkaProducer jiraKafkaProducer) {
+    public JiraBridgeController(JiraClient jiraClient, PayloadPublisher<Task> taskPublisher) {
         this.jiraClient = jiraClient;
-        this.jiraKafkaProducer = jiraKafkaProducer;
+        this.taskPublisher = taskPublisher;
     }
 
     @PostMapping("/sync")
@@ -43,14 +45,27 @@ public class JiraBridgeController {
 
         return jiraClient.fetchIssues(targetProject)
                 .collectList()
-                .doOnNext(this::publishTasks)
-                .map(fetched -> ResponseEntity.ok(Map.<String, Object>of("project", targetProject, "published", fetched.size())))
+                .map(fetched -> ResponseEntity.ok(Map.<String, Object>of("project", targetProject,
+                        "fetched", fetched.size(), "published", publishTasks(fetched))))
                 .doOnError(error -> log.error("Failed to sync Jira tasks for project {}", targetProject, error))
                 .onErrorResume(error -> Mono.just(ResponseEntity.internalServerError()
                         .body(Map.<String, Object>of("error", error.getMessage(), "project", targetProject))));
     }
 
-    private void publishTasks(List<Task> tasks) {
-        jiraKafkaProducer.publishAll(tasks);
+    /**
+     * publish() blocks and fails the record - so each task gets its own attempt:
+     * one invalid/unpublishable record must not kill the rest of the batch.
+     */
+    private int publishTasks(List<Task> tasks) {
+        int published = 0;
+        for (Task task : tasks) {
+            try {
+                taskPublisher.publish(task);
+                published++;
+            } catch (PublishException | ValidationException e) {
+                log.error("Failed to publish Jira task {}", task.sourceRef(), e);
+            }
+        }
+        return published;
     }
 }

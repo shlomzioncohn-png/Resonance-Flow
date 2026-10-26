@@ -14,6 +14,8 @@ public final class TaskFixtures {
      * one explicitly. */
     public static final UUID DEFAULT_TENANT_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
     public static final UUID OTHER_TENANT_ID = UUID.fromString("22222222-2222-2222-2222-222222222222");
+    public static final UUID DEFAULT_TASK_ID = UUID.fromString("33333333-3333-3333-3333-333333333333");
+    public static final UUID OTHER_TASK_ID = UUID.fromString("44444444-4444-4444-4444-444444444444");
 
     private TaskFixtures() {
     }
@@ -23,9 +25,6 @@ public final class TaskFixtures {
                 .id(id)
                 .tenantId(DEFAULT_TENANT_ID)
                 .status(TaskStatus.ACTIVE)
-                .isReady(true)
-                .blockingCount(0)
-                .openConstraintCount(0)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
