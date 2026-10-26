@@ -2,6 +2,7 @@ package com.rnd.bridge.storage;
 
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -32,16 +33,35 @@ public class ObjectKeyBuilder {
     private static final DateTimeFormatter DATE_FORMAT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneOffset.UTC);
 
-    public String build(SourceRecord record, Instant ingestedAt) {
+    public String build(SourceRecord record, Instant ingestedAt, Role role) {
         String date = DATE_FORMAT.format(ingestedAt);
         String id = UUID.randomUUID().toString();
         String filename = record.attachmentFilename() != null
                 ? "%s-%s".formatted(id, record.attachmentFilename())
-                : id + "." + primaryExtension(record.sourceType());
+                : id + "." + primaryExtension(record, role);
         return "%s/%s/%s/%s".formatted(record.sourceType().name(), record.tenantId(), date, filename);
     }
 
-    private String primaryExtension(RawSourceType sourceType) {
+    /** EMAIL's extension is keyed off the record's own mimeType, not just role, because EMAIL has
+     * two distinct non-attachment record shapes now, told apart only by what RealEmailSourceReader
+     * explicitly sets: the readable-text BODY ("text/plain; charset=UTF-8") and the raw-Gmail-JSON
+     * SOURCE_METADATA sibling ("application/json", see SourceRecord.objectRole's javadoc).
+     * FixtureEmailSourceReader's body record never sets mimeType (stays null) - deliberately falls
+     * through to "json", its original/unchanged extension, so it is NOT touched by this change.
+     * Role alone can't make this distinction: both the Real BODY and the Fixture BODY resolve to
+     * Role.BODY via SourceRecordRefMapper.roleFor's default inference.
+     * DRIVE/CALENDAR/SLACK/WHATSAPP are deliberately NOT routed through this mimeType check - a
+     * Drive file's own mimeType can legitimately BE "text/plain" or "application/json" (it's the
+     * real file's content type, not a synthetic marker), and must still get DRIVE's fixed "json"
+     * key extension regardless. */
+    private String primaryExtension(SourceRecord record, Role role) {
+        // Attachments never reach this method - build() branches on attachmentFilename() first -
+        // so role here is always BODY or SOURCE_METADATA.
+        RawSourceType sourceType = record.sourceType();
+        if (sourceType == RawSourceType.EMAIL) {
+            String mimeType = record.mimeType();
+            return mimeType != null && mimeType.startsWith("text/plain") ? "txt" : "json";
+        }
         return switch (sourceType) {
             case EMAIL, DRIVE, CALENDAR -> "json";
             case SLACK, WHATSAPP -> "txt";
