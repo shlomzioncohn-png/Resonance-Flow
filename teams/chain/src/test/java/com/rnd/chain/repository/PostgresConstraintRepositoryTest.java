@@ -90,7 +90,7 @@ class PostgresConstraintRepositoryTest {
     }
 
     @Test
-    void save_nullReason_roundTripsAsNull() {
+    void save_nullReason_roundTripsAsEmptyMap() {
         LocalDateTime now = LocalDateTime.now();
         Constraint constraint = new Constraint(UUID.randomUUID().toString(), seededTask(),
             Constraint.ConstraintType.APPROVAL_NEEDED, Constraint.ConstraintStatus.PENDING, null,
@@ -98,10 +98,12 @@ class PostgresConstraintRepositoryTest {
 
         constraintRepository.save(constraint);
 
+        // Constraint.getReason() never returns null by design (it returns an empty map), so "no reason"
+        // is persisted as an empty JSON object and read back as an empty map.
         assertThat(constraintRepository.findById(constraint.getConstraintId()))
             .get()
             .extracting(Constraint::getReason)
-            .isNull();
+            .isEqualTo(Map.of());
     }
 
     @Test
