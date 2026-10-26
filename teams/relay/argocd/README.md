@@ -104,8 +104,18 @@ team's sync.
 
 - **Grafana.** On, with the Prometheus and Alertmanager datasources the chart
   provisions. Its dashboard sidecar loads any ConfigMap labelled
-  `grafana_dashboard: "1"` from any namespace - that's how the `resonance-flow`
-  chart ships its alert dashboard.
+  `grafana_dashboard: "1"` from any namespace into the folder its
+  `grafana_folder` annotation names (the chart's own dashboards go to
+  `kubernetes`), and refuses edits saved in the UI - that's how the
+  `resonance-flow` chart ships its dashboards (its README, "Dashboards").
+- **Grafana's Ingress.** Through Traefik, on its own host (no sub-path, so
+  probes, metrics and port-forward keep working at `/`). Like the
+  `resonance-flow` Ingress, its host and TLS live in
+  [`environments/shared.yaml`](../helm/resonance-flow/environments/shared.yaml),
+  under `grafana:`: the chart source loads that file through a third,
+  ref-only source (`ref: values`), with `valuesObject` winning over it. Off
+  until `grafana.ingress.host` is set - enabling it without one fails the
+  render. Turning it on also sets Grafana's `root_url` to `https://<host>/`.
 - **Grafana's admin login.** From the `grafana-admin` Secret (`admin-user`,
   `admin-password`), which the app's second source,
   `teams/relay/monitoring/grafana-admin-secret-hook.yaml`, creates in a
@@ -117,7 +127,14 @@ team's sync.
   Grafana chart's own random password would change on every refresh. To
   rotate it, delete the Secret and sync.
 
-Nothing here has an Ingress. Reach Prometheus, Alertmanager and Grafana with:
+To try Grafana and the dashboards without a shared cluster,
+`../monitoring-env/up.sh` installs kube-prometheus-stack (same values) and the
+`resonance-flow` chart on a local kind cluster, without Traefik - Grafana at
+`http://localhost:3000` through a port-forward. See its
+[README](../monitoring-env/README.md).
+
+Prometheus and Alertmanager have no Ingress, and Grafana's is off until its
+host is set. Reach them with:
 
 ```bash
 kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-prometheus 9090:9090
