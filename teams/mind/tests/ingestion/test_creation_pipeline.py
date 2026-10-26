@@ -10,11 +10,12 @@ three tests.
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 import pytest
-from tests.extraction.fakes import ScriptedProvider, answer_of
+from tests.extraction.fakes import DEADLINE_SETTINGS, ScriptedProvider, answer_of
 from tests.ingestion.test_landed_consumer import BODY, ITEM, KEY, TENANT, _message, _read
 from tests.test_index_consumer import FakeVectorIndex
 
@@ -120,6 +121,7 @@ class Parts:
             extract=lambda item: extractor.extract(item.text, item.source_type, item.item_key),
             find_duplicate=self.index,
             sender=self.flow,
+            deadline_settings=DEADLINE_SETTINGS,
         )
 
 
@@ -132,7 +134,9 @@ def _classification(sensitivity: str) -> dict[str, Any]:
     }
 
 
-def _event(revision: int = 0, sensitivity: str | None = None) -> RawObjectEvent:
+def _event(
+    revision: int = 0, sensitivity: str | None = None, source_timestamp: str | None = None
+) -> RawObjectEvent:
     classification = _classification(sensitivity) if sensitivity else None
     return RawObjectEvent.model_validate(
         {
@@ -142,6 +146,7 @@ def _event(revision: int = 0, sensitivity: str | None = None) -> RawObjectEvent:
             "tenant_id": TENANT,
             "correlation_id": str(ITEM),
             "ingested_at": "2026-10-18T09:00:00Z",
+            "source_timestamp": source_timestamp,
             "scope_decision": "INCLUDED",
             "revision": revision,
             "change_type": "UPSERT",
@@ -189,6 +194,34 @@ def test_a_landed_event_becomes_one_creation_request() -> None:
     # Searched in the item's own tenant only (#841).
     assert parts.index.asked == [(UUID(TENANT), TITLE, "Asked for in Slack, due tomorrow.")]
     assert store.processed_revision(ITEM) == 3
+
+
+DUE_TOMORROW = answer_of(
+    {**TASK, "deadline": {"phrase": "by tomorrow", "kind": "OFFSET", "amount": 1, "unit": "DAYS"}}
+)
+
+
+@pytest.mark.parametrize(
+    ("source_timestamp", "expected"),
+    [
+        # No source time: counted from when it landed, Sunday the 18th -> Monday
+        # the 19th, 17:00 in Israel.
+        (None, datetime(2026, 10, 19, 14, 0, tzinfo=UTC)),
+        # The source's own time wins: written Thursday the 15th -> Friday the 16th.
+        ("2026-10-15T09:00:00Z", datetime(2026, 10, 16, 14, 0, tzinfo=UTC)),
+    ],
+)
+async def test_the_deadline_is_counted_from_when_the_text_was_written(
+    source_timestamp: str | None, expected: datetime
+) -> None:
+    """#960: "by tomorrow" in the Slack message reaches Inbox as a moment."""
+
+    parts = Parts(DUE_TOMORROW)
+
+    await parts.pipeline.handle(_event(source_timestamp=source_timestamp), [_item()])
+
+    ((_, request, _),) = parts.producer.sent
+    assert request.deadline.ToDatetime(tzinfo=UTC) == expected
 
 
 async def _duplicate_log_line(caplog: pytest.LogCaptureFixture, event: RawObjectEvent) -> str:
@@ -269,6 +302,41 @@ async def test_each_task_of_a_text_gets_its_own_request() -> None:
     assert [request.title for _, request, _ in parts.producer.sent] == [TITLE, SECOND_TITLE]
     # Every task is checked for a duplicate on its own.
     assert [title for _, title, _ in parts.index.asked] == [TITLE, SECOND_TITLE]
+
+
+async def _matched_for_each_sent(parts: Parts, sent: list[UUID]) -> list[MatchedReply]:
+    """Inbox's task.created for every request sent, through the real flow."""
+
+    for number, correlation_id in enumerate(sent):
+        reply = TaskCreatedEvent(id=f"{TASK_ID[:-1]}{number}", tenant_id=TENANT, title=TITLE)
+        await parts.flow.on_task_created(reply, [("correlation_id", str(correlation_id).encode())])
+    return parts.matched
+
+
+async def test_a_tasks_dependency_mentions_reach_the_matched_reply() -> None:
+    # #359: extraction found them, but the pipeline did not hand them on, so
+    # #834's adapter (on_matched) always read an empty list and published nothing.
+    depends_on_the_second = {
+        **TASK,
+        "has_dependencies": True,
+        "dependency_mentions": [SECOND_TITLE],  # grounded by its sibling's title
+    }
+    parts = Parts(answer_of(depends_on_the_second, {**TASK, "title": SECOND_TITLE}))
+
+    sent = await parts.pipeline.handle(_event(), [_item()])
+    first, second = await _matched_for_each_sent(parts, sent)
+
+    assert first.request.dependency_mentions == (SECOND_TITLE,)
+    assert second.request.dependency_mentions == ()
+
+
+async def test_a_task_without_dependency_mentions_hands_on_none() -> None:
+    parts = Parts(ANSWER)
+
+    sent = await parts.pipeline.handle(_event(), [_item()])
+    (matched,) = await _matched_for_each_sent(parts, sent)
+
+    assert matched.request.dependency_mentions == ()
 
 
 async def test_each_item_owns_its_own_range_of_task_numbers() -> None:

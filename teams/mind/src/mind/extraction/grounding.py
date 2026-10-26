@@ -1,27 +1,19 @@
 """Checking what the model claims against the content it read.
 
-`source_ref` is a pointer back to the original item — a message id, a ticket
-key, a URL. Bridge now sends one on `RawObjectEvent` (#31), but extraction
-does not receive the event yet, so here the only place it can come from is
-inside the content itself. That makes the rule here a
-definition rather than a restriction: a pointer that does not appear in the
-content was not found there, it was invented.
-
-Why it is worth a module of its own rather than a line in the scorer: the
-field is what a user later clicks to see "the original", so what goes into
-it is a boundary decision, not a scoring detail. The scorer is told what
-happened afterwards, and only reads.
+`source_ref` is a pointer the model says it read in the content — a message
+id, a ticket key, a URL. It is **not** what reaches Inbox: the `source_ref`
+sent there comes from Bridge's event (#31, #353), never from the model, as
+`assembly.source_ref_for_inbox` says. What the model wrote is still checked,
+because inventing a pointer says something about the answer: a pointer that
+does not appear in the content was not found there, it was invented, and
+`ground_source_ref` drops it and tells the scorer (`invented_source_ref`), which
+lowers the task's `confidence`.
 
 **What this does not do.** It closes fabrication — a model inventing a
-pointer that was never in the content. It does not close injection. The
-content is written by whoever sent it, so a sender can put a link in their
-own message and tell the model to use it; the value then genuinely is in the
-content and passes every check here. The only real answer to that is for
-`source_ref` to arrive from Bridge as event metadata instead of being read
-out of the body. #31 settled that: `RawObjectEvent.source_ref`. Once the
-consumer passes it through, it should replace this content-derived value.
-Until then, treat this field as content-derived: it says what the content
-claimed, not what is true.
+pointer that was never in the content. It does not close injection: a sender
+can put a link in their own message and tell the model to use it, and the value
+then genuinely is in the content. That no longer reaches Inbox, since Bridge's
+own `source_ref` is the one sent.
 
 This belongs between parsing and scoring because that is the one point where
 both the raw text and the extracted fields are in hand: the schema never sees
@@ -33,6 +25,9 @@ is a paraphrase of other work, not an identifier. That function is also where
 a grounded mention turns `has_dependencies` true, because only here is the
 content in hand to tell a real mention from an invented one.
 
+**The deadline's phrase (#960)** is checked by `ground_deadline`, the same
+way as a mention and then by its numbers too.
+
 `confidence.title_grounding` does the same kind of overlap check for the
 title, but for scoring rather than for dropping. Folding the two together is
 a follow-up, not a change to make while fixing this.
@@ -41,9 +36,10 @@ a follow-up, not a change to make while fixing this.
 import logging
 import re
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from mind.extraction.confidence import content_words
-from mind.extraction.models import ExtractedFields
+from mind.extraction.models import ClassificationFields, ExtractedFields
 
 logger = logging.getLogger("mind.extraction")
 
@@ -119,11 +115,47 @@ def ground_source_ref(
 # calibrated; the persona set has no labelled mentions to tune on.
 MIN_WORDS_TO_MISS_ONE = 3
 
+# Whole numbers, so "72" is not found inside "720".
+_NUMBER = re.compile(r"[0-9]+")
+
+
+def _numbers(text: str) -> set[int]:
+    # As values, so the 9 of "by 9:00" is the 09 of a text that writes 09:00.
+    return {int(digits) for digits in _NUMBER.findall(text)}
+
+
+@dataclass(frozen=True)
+class Said:
+    """The content's words and numbers, read once per item.
+
+    Every task of an item is checked against the same text, twice (mentions,
+    deadline): a meeting of fifteen tasks used to read its 100k characters
+    thirty times. The extractor reads it once and hands this to each task's
+    checks; it lives as long as that one item's extraction, no longer.
+    """
+
+    words: frozenset[str]
+    numbers: frozenset[int]
+
+
+def said_in(raw_text: str) -> Said:
+    return Said(frozenset(content_words(raw_text)), frozenset(_numbers(raw_text)))
+
+
+def _words_said(words: list[str], said: frozenset[str]) -> bool:
+    """The rule for a paraphrase: every content word said, except that one may
+    be missing from MIN_WORDS_TO_MISS_ONE words up. Shared by mentions and the
+    deadline's phrase, so tightening it changes both."""
+
+    missing = sum(1 for word in words if word not in said)
+    return missing <= (1 if len(words) >= MIN_WORDS_TO_MISS_ONE else 0)
+
 
 def ground_dependency_mentions(
     fields: ExtractedFields,
     raw_text: str,
     sibling_titles: Iterable[str] = (),
+    said: Said | None = None,
 ) -> ExtractedFields:
     """Keep the mentions the content names, then let only those flip the flag.
 
@@ -151,14 +183,12 @@ def ground_dependency_mentions(
     show other work without naming it.
     """
 
-    said = set(content_words(raw_text))
+    words_said = (said or said_in(raw_text)).words
     siblings = {title.strip().lower() for title in sibling_titles}
     kept = []
     for mention in fields.dependency_mentions:
         words = content_words(mention)
-        missing = sum(1 for word in words if word not in said)
-        allowed = 1 if len(words) >= MIN_WORDS_TO_MISS_ONE else 0
-        if mention.strip().lower() in siblings or (words and missing <= allowed):
+        if mention.strip().lower() in siblings or (words and _words_said(words, words_said)):
             kept.append(mention)
         else:
             logger.warning(
@@ -180,3 +210,39 @@ def ground_dependency_mentions(
     return fields.model_copy(
         update={"dependency_mentions": kept, "has_dependencies": has_dependencies}
     )
+
+
+def ground_deadline(
+    fields: ExtractedFields, raw_text: str, said: Said | None = None
+) -> ExtractedFields:
+    """Keep the deadline only if the content says its phrase.
+
+    The words follow the rule for a mention (MIN_WORDS_TO_MISS_ONE). The
+    numbers are checked on their own and none may be missing: the word check
+    drops anything shorter than three characters, which is most of a deadline
+    ("72", "20", "14:00"), and the number is the answer. A phrase with no word
+    and no number ("by then") points at nothing and is dropped too.
+
+    It catches an invented deadline, not a misattributed one: the "March" of
+    another event the content mentions is really there and passes.
+
+    The log names no phrase: it is the content's own words.
+    """
+
+    if not isinstance(fields, ClassificationFields) or fields.deadline is None:
+        return fields
+
+    phrase = fields.deadline.phrase
+    words = content_words(phrase)
+    numbers = _numbers(phrase)
+    said = said or said_in(raw_text)
+
+    if (words or numbers) and _words_said(words, said.words) and numbers <= said.numbers:
+        return fields
+    logger.warning(
+        "extraction: deadline phrase (%d words, %d numbers) does not appear in the content; "
+        "recording the deadline as null",
+        len(words),
+        len(numbers),
+    )
+    return fields.model_copy(update={"deadline": None})

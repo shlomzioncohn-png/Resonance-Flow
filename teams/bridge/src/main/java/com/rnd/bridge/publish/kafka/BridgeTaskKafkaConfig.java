@@ -79,8 +79,8 @@ import java.util.Map;
  * {@link #bridgeTaskEventKafkaTemplate} now sends {@link StructuredTaskEvent} via Confluent's
  * {@link KafkaProtobufSerializer}, matching Inbox's {@code KafkaProtobufDeserializer} on the
  * consumer side - the two sides no longer disagree on wire format. {@code
- * schema.registry.url} is read from {@code bridge.kafka.schema-registry.url} (no hardcoded
- * default beyond the local-dev fallback in {@code application.yml}).
+ * schema.registry.url} is read from {@code spring.kafka.properties.schema.registry.url}, the one
+ * Schema Registry setting every Bridge Protobuf producer shares (RawObjectEventKafkaConfig too).
  * {@code auto.register.schemas} is explicitly {@code false}: registering the schema is Relay's
  * job (adding the {@code bridge.structured.tasks-value} row to {@code schema-subjects.tsv}, see
  * issue #567), not something this producer should do as a side effect of its first publish -
@@ -106,7 +106,7 @@ class BridgeTaskKafkaConfig {
     ProducerFactory<String, StructuredTaskEvent> bridgeTaskEventProducerFactory(
             KafkaProperties kafkaProperties,
             SslBundles sslBundles,
-            @Value("${bridge.kafka.schema-registry.url}") String schemaRegistryUrl) {
+            @Value("${spring.kafka.properties.schema.registry.url}") String schemaRegistryUrl) {
         // Starts from Boot's producer props so spring.kafka.properties.* (SASL/security) apply,
         // same as ChainProtobufKafkaConfig - overrides below must stay after it.
         Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties(sslBundles));
