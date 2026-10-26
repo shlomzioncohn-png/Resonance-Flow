@@ -3,6 +3,7 @@ package com.rnd.bridge.intake.model;
 import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import java.time.Instant;
 import java.util.List;
 
@@ -94,6 +95,11 @@ import java.util.List;
  * precomputedRef.objectKey()): SourceRecordRefMapper.toRef returns precomputedRef verbatim instead
  * of recomputing a ref from rawContent, and UnstructuredIntakeLane.afterMap skips landing it
  * entirely. Null for every ordinary record, which is landed/ref'd fresh as always.
+ * objectRole is an explicit override of SourceRecordRefMapper.roleFor's usual
+ * attachmentIndex/sourceType-based inference - null for every ordinary record (the inferred
+ * role is used, as always). Today only RealEmailSourceReader sets this, to Role.SOURCE_METADATA,
+ * for the sibling record carrying the raw Gmail JSON alongside the readable-text body record -
+ * both are attachmentIndex() == 0, so roleFor's own logic has no other way to tell them apart.
  */
 public record SourceRecord(
         RawSourceType sourceType,
@@ -116,7 +122,8 @@ public record SourceRecord(
         ChangeType changeType,
         String groupId,
         RawObjectRef precomputedRef,
-        String sourceRef) {
+        String sourceRef,
+        Role objectRole) {
 
     /** A copy of this record carrying {@code sourceRef} - the source system's own identifier for
      * the logical item (see RawObjectEvent.sourceRef's javadoc for the wire-facing contract).
@@ -127,7 +134,16 @@ public record SourceRecord(
         return new SourceRecord(sourceType, tenantId, naturalId, correlationId, occurredAt, sender,
                 participants, subject, body, rawContent, mimeType, attachmentFilename, attachmentFileId,
                 attachmentIndex, attachmentCount, sourceMessageIds, revision, changeType, groupId,
-                precomputedRef, sourceRef);
+                precomputedRef, sourceRef, objectRole);
+    }
+
+    /** A copy of this record carrying an explicit {@code objectRole} override - see that field's
+     * javadoc above for why this exists and who sets it today. */
+    public SourceRecord withRole(Role objectRole) {
+        return new SourceRecord(sourceType, tenantId, naturalId, correlationId, occurredAt, sender,
+                participants, subject, body, rawContent, mimeType, attachmentFilename, attachmentFileId,
+                attachmentIndex, attachmentCount, sourceMessageIds, revision, changeType, groupId,
+                precomputedRef, sourceRef, objectRole);
     }
 
     /** Convenience constructor for every case except a Slack attachment record (which needs
@@ -153,7 +169,7 @@ public record SourceRecord(
             int revision) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
                 rawContent, mimeType, attachmentFilename, null, attachmentIndex, attachmentCount, sourceMessageIds,
-                revision, ChangeType.UPSERT, null, null, null);
+                revision, ChangeType.UPSERT, null, null, null, null);
     }
 
     /** Convenience constructor for Calendar's cancellation path - same attachmentFileId/groupId
@@ -179,7 +195,7 @@ public record SourceRecord(
             ChangeType changeType) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
                 rawContent, mimeType, attachmentFilename, null, attachmentIndex, attachmentCount, sourceMessageIds,
-                revision, changeType, null, null, null);
+                revision, changeType, null, null, null, null);
     }
 
     /** Convenience constructor for a chat transcript record built from a persisted GroupState -
@@ -205,7 +221,7 @@ public record SourceRecord(
             String groupId) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
                 rawContent, mimeType, attachmentFilename, null, attachmentIndex, attachmentCount, sourceMessageIds,
-                revision, ChangeType.UPSERT, groupId, null, null);
+                revision, ChangeType.UPSERT, groupId, null, null, null);
     }
 
     /** Convenience constructor for a Slack attachment record built from a persisted GroupState -
@@ -233,7 +249,7 @@ public record SourceRecord(
             String groupId) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
                 rawContent, mimeType, attachmentFilename, attachmentFileId, attachmentIndex, attachmentCount,
-                sourceMessageIds, revision, ChangeType.UPSERT, groupId, null, null);
+                sourceMessageIds, revision, ChangeType.UPSERT, groupId, null, null, null);
     }
 
     /** Convenience constructor for a carried-forward, already-landed attachment record (see
@@ -259,6 +275,6 @@ public record SourceRecord(
             RawObjectRef precomputedRef) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
                 rawContent, null, null, attachmentFileId, attachmentIndex, attachmentCount, sourceMessageIds,
-                revision, ChangeType.UPSERT, groupId, precomputedRef, null);
+                revision, ChangeType.UPSERT, groupId, precomputedRef, null, null);
     }
 }
