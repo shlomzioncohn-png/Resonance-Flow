@@ -18,6 +18,7 @@ import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.google.GoogleCredentialsProvider;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigInteger;
@@ -31,6 +32,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.jsoup.Jsoup;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -217,7 +219,10 @@ public class RealEmailSourceReader implements EmailSourceReader {
         List<SourceRecord> records = new ArrayList<>();
         MessagePart payload = message.getPayload();
         String from = extractEmailAddress(header(payload, "From"));
+        String to = header(payload, "To");
+        String cc = header(payload, "Cc");
         String subject = header(payload, "Subject");
+        String date = header(payload, "Date");
         String messageId = header(payload, "Message-ID");
         Instant occurredAt = Instant.ofEpochMilli(message.getInternalDate());
         String naturalId = "EMAIL|" + message.getId();
@@ -229,16 +234,22 @@ public class RealEmailSourceReader implements EmailSourceReader {
                 (tenantId.value() + "|" + naturalId).getBytes(StandardCharsets.UTF_8)).toString();
         List<String> participants = participants(payload, from);
 
-        StringBuilder plainTextBody = new StringBuilder();
         List<MessagePart> attachmentParts = new ArrayList<>();
-        collectBodyAndAttachments(payload, plainTextBody, attachmentParts);
+        String text = collectBodyAndAttachments(payload, attachmentParts, naturalId);
         int attachmentCount = attachmentParts.size();
+        String readableBody = buildReadableBody(from, to, cc, subject, date, text);
 
         records.add(new SourceRecord(
                 RawSourceType.EMAIL, tenantId.value(), naturalId, correlationId, occurredAt, from,
-                participants, subject, plainTextBody.isEmpty() ? null : plainTextBody.toString(),
-                message.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, attachmentCount, List.of(), 0)
+                participants, subject, readableBody, readableBody.getBytes(StandardCharsets.UTF_8),
+                "text/plain; charset=UTF-8", null, 0, attachmentCount, List.of(), 0)
                 .withSourceRef(messageId));
+
+        records.add(new SourceRecord(
+                RawSourceType.EMAIL, tenantId.value(), naturalId + "|metadata", correlationId, occurredAt, from,
+                participants, subject, null, message.toString().getBytes(StandardCharsets.UTF_8),
+                "application/json", null, 0, attachmentCount, List.of(), 0)
+                .withRole(Role.SOURCE_METADATA));
 
         int index = 0;
         for (MessagePart attachment : attachmentParts) {
@@ -276,21 +287,73 @@ public class RealEmailSourceReader implements EmailSourceReader {
 
     /**
      * Gmail bodies are a MIME part tree, not a flat field (unlike the fixture's assumption) -
-     * walks it depth-first, keeping the first text/plain part found as the body and every part
-     * with a filename as an attachment reference.
+     * walks it depth-first, concatenating every text/plain part found (in document order) and
+     * collecting every part with a filename as an attachment reference. Falls back to the first
+     * text/html part (stripped to plain text via jsoup) only when no text/plain part was found at
+     * all. A leaf part that is neither an attachment, text/plain, nor (as a fallback) text/html is
+     * logged, never silently dropped.
      */
-    private void collectBodyAndAttachments(MessagePart part, StringBuilder body, List<MessagePart> attachments) {
+    private String collectBodyAndAttachments(MessagePart part, List<MessagePart> attachments, String naturalId) {
+        List<String> textPlainParts = new ArrayList<>();
+        List<MessagePart> htmlParts = new ArrayList<>();
+        collectParts(part, attachments, textPlainParts, htmlParts, naturalId);
+        if (!textPlainParts.isEmpty()) {
+            return String.join("\n\n", textPlainParts);
+        }
+        if (!htmlParts.isEmpty()) {
+            MessagePart html = htmlParts.get(0);
+            if (html.getBody().getData() != null) {
+                String htmlText = new String(
+                        Base64.getUrlDecoder().decode(html.getBody().getData()), StandardCharsets.UTF_8);
+                return Jsoup.parse(htmlText).text();
+            }
+        }
+        return "";
+    }
+
+    private void collectParts(MessagePart part, List<MessagePart> attachments, List<String> textPlainParts,
+                               List<MessagePart> htmlParts, String naturalId) {
         if (part.getParts() != null) {
             for (MessagePart child : part.getParts()) {
-                collectBodyAndAttachments(child, body, attachments);
+                collectParts(child, attachments, textPlainParts, htmlParts, naturalId);
             }
             return;
         }
         if (part.getFilename() != null && !part.getFilename().isBlank()) {
             attachments.add(part);
-        } else if ("text/plain".equals(part.getMimeType()) && body.isEmpty() && part.getBody().getData() != null) {
-            body.append(new String(Base64.getUrlDecoder().decode(part.getBody().getData()), StandardCharsets.UTF_8));
+        } else if ("text/plain".equals(part.getMimeType())) {
+            if (part.getBody().getData() != null) {
+                textPlainParts.add(
+                        new String(Base64.getUrlDecoder().decode(part.getBody().getData()), StandardCharsets.UTF_8));
+            }
+        } else if ("text/html".equals(part.getMimeType())) {
+            htmlParts.add(part);
+        } else {
+            log.warn("Email naturalId={} has an unhandled leaf MIME part mimeType={} - skipped, not landed",
+                    naturalId, part.getMimeType());
         }
+    }
+
+    /** From/To/Cc/Subject/Date header block, blank line, then the extracted text - Mind's
+     * requested readable-text shape for the BODY object. Cc is omitted entirely when the message
+     * has none; every other header line is always present even if the header itself was absent
+     * (an empty value, not a missing line - keeps the shape predictable for Mind's parsing). */
+    private static String buildReadableBody(String from, String to, String cc, String subject, String date,
+                                              String text) {
+        StringBuilder header = new StringBuilder();
+        header.append("From: ").append(nullToEmpty(from)).append('\n');
+        header.append("To: ").append(nullToEmpty(to)).append('\n');
+        if (cc != null && !cc.isBlank()) {
+            header.append("Cc: ").append(cc).append('\n');
+        }
+        header.append("Subject: ").append(nullToEmpty(subject)).append('\n');
+        header.append("Date: ").append(nullToEmpty(date)).append('\n');
+        header.append('\n').append(text);
+        return header.toString();
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     private byte[] attachmentBytes(Gmail gmail, String messageId, MessagePart part) {
