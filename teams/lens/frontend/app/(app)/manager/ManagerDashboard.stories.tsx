@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import { getRouter } from '@storybook/nextjs-vite/navigation.mock';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
-import { expect, waitFor, within } from 'storybook/test';
+import { expect, screen, waitFor, within } from 'storybook/test';
 import { sampleGraph } from '@/mocks/dependencyGraphData';
 import {
   bottlenecksGraphEmptyHandler,
@@ -15,6 +15,9 @@ import ManagerDashboardPage from './page';
 // The KPIs and the charts are real in the app (BFF counts Inbox's tasks), so they're answered here, per story.
 
 const KPIS_URL = `${process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080'}/api/manager/dashboard/kpis`;
+
+/** The query string of the last KPI request, recorded by FiltersFromUrl. */
+let kpiRequestQuery: string | null = null;
 
 const meta = {
   title: 'Pages/Manager/Dashboard',
@@ -74,6 +77,47 @@ export const Default: Story = {
       expect(getRouter().push).toHaveBeenCalledWith(
         `/manager/bottlenecks?taskId=${sampleGraph.nodes[0].id}`,
       ),
+    );
+  },
+};
+
+export const ChangePeriodFilter: Story = {
+  play: async ({ canvas, userEvent }) => {
+    // A chip change goes through applyFilters, which writes the filters to the URL.
+    await userEvent.click(canvas.getByRole('button', { name: /Period: Last 30 days/ }));
+    // The menu opens in a portal on document.body, outside the canvas.
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Last 7 days' }));
+    await waitFor(() =>
+      expect(getRouter().replace).toHaveBeenCalledWith(expect.stringContaining('?period=7d'), {
+        scroll: false,
+      }),
+    );
+  },
+};
+
+/** The filters in the URL reach the KPI request, so a filter change refetches the tiles. */
+export const FiltersFromUrl: Story = {
+  parameters: {
+    nextjs: { navigation: { query: { period: '7d', project: 'p-1' } } },
+  },
+  beforeEach: ({ msw }) => {
+    kpiRequestQuery = null;
+    msw.use(
+      http.get(KPIS_URL, ({ request }) => {
+        kpiRequestQuery = new URL(request.url).search;
+        return HttpResponse.json({ inProgress: 3, blocked: 1, delayed: 0, avgBlockedDays: null });
+      }),
+    );
+  },
+  play: async ({ canvas }) => {
+    await expect(
+      await canvas.findByRole('button', { name: /Period: Last 7 days/ }),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(kpiRequestQuery).toBe('?period=7d&project=p-1'));
+    // The full graph opens on the same project.
+    await expect(canvas.getByRole('link', { name: 'View all' })).toHaveAttribute(
+      'href',
+      '/manager/bottlenecks?projectId=p-1',
     );
   },
 };

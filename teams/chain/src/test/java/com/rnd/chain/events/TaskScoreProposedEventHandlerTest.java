@@ -3,7 +3,7 @@ package com.rnd.chain.events;
 import com.rnd.chain.dto.TaskTier;
 import com.google.protobuf.Timestamp;
 import com.rnd.chain.exception.TenantReassignmentException;
-import com.rnd.chain.service.TaskCounterUpdater;
+import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.mind.event.TaskScoreProposedEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,15 +26,15 @@ class TaskScoreProposedEventHandlerTest {
     private final UUID taskId = UUID.randomUUID();
     private final UUID tenantId = UUID.randomUUID();
 
-    private TaskCounterUpdater taskCounterUpdater;
+    private PriorityScoreService priorityScoreService;
     private TaskScoreProposedEventHandler handler;
 
     @BeforeEach
     void setUp() {
-        taskCounterUpdater = mock(TaskCounterUpdater.class);
+        priorityScoreService = mock(PriorityScoreService.class);
         ProcessedEventStore store = mock(ProcessedEventStore.class);
         when(store.tryClaim(any())).thenReturn(true);
-        handler = new TaskScoreProposedEventHandler(taskCounterUpdater, new ChainEventProcessingTemplate(store));
+        handler = new TaskScoreProposedEventHandler(priorityScoreService, new ChainEventProcessingTemplate(store));
     }
 
     private TaskScoreProposedEvent.Builder event(float mindScore, float confidence) {
@@ -53,7 +53,7 @@ class TaskScoreProposedEventHandlerTest {
                 .setScoredAt(Timestamp.newBuilder().setSeconds(1_700_000_000L))
                 .build());
 
-        verify(taskCounterUpdater).onScoreProposed(taskId, tenantId, TaskTier.STRATEGIC, 0.8, 0.55,
+        verify(priorityScoreService).onScoreProposed(taskId, tenantId, TaskTier.STRATEGIC, 0.8, 0.55,
                 LocalDateTime.ofEpochSecond(1_700_000_000L, 0, ZoneOffset.UTC));
     }
 
@@ -61,13 +61,13 @@ class TaskScoreProposedEventHandlerTest {
     void eventWithoutScoredAt_passesNullScoredAt() {
         handler.onMessage(event(0.8f, 0.5f).build());
 
-        verify(taskCounterUpdater).onScoreProposed(taskId, tenantId, null, 0.8, 0.5, null);
+        verify(priorityScoreService).onScoreProposed(taskId, tenantId, null, 0.8, 0.5, null);
     }
 
     @Test
     void tenantDifferentFromStored_throwsNonRetryable() {
         doThrow(new TenantReassignmentException("tenant mismatch"))
-                .when(taskCounterUpdater).onScoreProposed(any(), any(), any(), any(), any(), any());
+                .when(priorityScoreService).onScoreProposed(any(), any(), any(), any(), any(), any());
 
         assertThrows(NonRetryableEventException.class, () -> handler.onMessage(event(0.8f, 0.5f).build()));
     }
@@ -76,6 +76,6 @@ class TaskScoreProposedEventHandlerTest {
     void mindScoreOutsideRange_throwsNonRetryableAndDoesNotCallService() {
         assertThrows(NonRetryableEventException.class, () -> handler.onMessage(event(1.5f, 0.5f).build()));
 
-        verify(taskCounterUpdater, never()).onScoreProposed(any(), any(), any(), any(), any(), any());
+        verify(priorityScoreService, never()).onScoreProposed(any(), any(), any(), any(), any(), any());
     }
 }

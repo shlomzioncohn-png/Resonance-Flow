@@ -23,7 +23,9 @@ models/*
 .env.local
 # Local stand-ins for the config.yaml/secrets.yaml the Helm chart mounts
 # in the cluster. They hold real provider keys -- never commit them.
+# Both extensions: the committed examples are *.example.yml (#481 review).
 *.local.yaml
+*.local.yml
 
 # OS / editor
 .DS_Store
@@ -70,3 +72,4 @@ skills-lock.json
 
 # #359 demo feed: one manifest per run (correlation ids, object keys)
 demo_flow/runs/
+demo_flow/stack/secrets.yaml

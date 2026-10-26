@@ -29,7 +29,7 @@
  */
 import { delay, http, HttpResponse } from 'msw';
 import type { GatewayErrorBody } from '@/services/api';
-import type { LoginRequest, LoginResponse } from '@/services/authApi';
+import type { AuthRole, LoginRequest, LoginResponse } from '@/services/authApi';
 import type { DependencyGraph } from '@/services/bottlenecksApi';
 import type { ProjectTaskCounts } from '@/services/managerApi';
 import type {
@@ -98,17 +98,17 @@ export function resetMockUsers() {
 }
 resetMockUsers();
 
-// Two fake accounts for mock mode and the Login stories - one per screen a sign-in leads to.
-const MOCK_ACCOUNTS: (LoginRequest & LoginResponse['user'])[] = [
+// Same users and passwords as the Keycloak realm (teams/lens/keycloak/realm-lens.json).
+const MOCK_ACCOUNTS: (LoginRequest & { password: string; id: string; displayName: string; role: AuthRole })[] = [
   {
-    login: 'manager1@lens.test',
+    login: 'manager1',
     password: 'manager1',
     id: 'a3c5e0b2-4f1d-4c8e-9b7a-1d2e3f4a5b01',
     displayName: 'Maya Manager',
-    role: 'TEAM_LEAD',
+    role: 'TENANT_ADMIN',
   },
   {
-    login: 'employee1@lens.test',
+    login: 'employee1',
     password: 'employee1',
     id: 'a3c5e0b2-4f1d-4c8e-9b7a-1d2e3f4a5b02',
     displayName: 'Eli Employee',
@@ -278,7 +278,11 @@ export const handlers = [
       // The real Gateway also sets the token as an HttpOnly cookie; the mock has no token at all.
       return HttpResponse.json<LoginResponse>({
         expiresIn: 3600,
-        user: { id: account.id, displayName: account.displayName, role: account.role },
+        user: {
+          id: account.id,
+          displayName: account.displayName,
+          role: account.role,
+        },
       });
     },
   ),

@@ -1,5 +1,6 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.exception.InvalidDependencyException;
@@ -41,6 +42,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest
 class TaskEligibilityServicePostgresConcurrencyTest {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.rnd.chain.repository.TaskReadinessRepository taskReadinessRepository;
+
+    private TaskReadinessSnapshot readiness(Task task) {
+        return taskReadinessRepository.findByIds(List.of(task.getId())).get(task.getId());
+    }
+
+    private int blockingCount(Task task) {
+        return readiness(task).blockingCount();
+    }
+
+    private int openConstraintCount(Task task) {
+        return readiness(task).openConstraintCount();
+    }
+
+    private boolean isReady(Task task) {
+        return readiness(task).isReady();
+    }
+
     private static final int THREAD_COUNT = 16;
 
     @Autowired
@@ -77,9 +97,6 @@ class TaskEligibilityServicePostgresConcurrencyTest {
                 .id(id)
                 .tenantId(TENANT_ID)
                 .status(TaskStatus.ACTIVE)
-                .isReady(false)
-                .blockingCount(0)
-                .openConstraintCount(0)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
@@ -131,8 +148,8 @@ class TaskEligibilityServicePostgresConcurrencyTest {
         runConcurrently(jobs);
 
         Task hub = taskRepository.findById(hubId).orElseThrow();
-        assertEquals(THREAD_COUNT, hub.getBlockingCount(), "every concurrent addDependency must be counted exactly once");
-        assertFalse(hub.isReady());
+        assertEquals(THREAD_COUNT, blockingCount(hub), "every concurrent addDependency must be counted exactly once");
+        assertFalse(isReady(hub));
     }
 
     @Test
@@ -148,7 +165,7 @@ class TaskEligibilityServicePostgresConcurrencyTest {
         for (UUID blockerId : blockerIds) {
             edgeService.addDependency(hubId, blockerId);
         }
-        assertEquals(THREAD_COUNT, taskRepository.findById(hubId).orElseThrow().getBlockingCount());
+        assertEquals(THREAD_COUNT, blockingCount(taskRepository.findById(hubId).orElseThrow()));
 
         List<Runnable> jobs = blockerIds.stream()
                 .<Runnable>map(blockerId -> () -> service.onTaskStatusChanged(blockerId, TaskStatus.DONE))
@@ -157,8 +174,8 @@ class TaskEligibilityServicePostgresConcurrencyTest {
         runConcurrently(jobs);
 
         Task hub = taskRepository.findById(hubId).orElseThrow();
-        assertEquals(0, hub.getBlockingCount(), "every concurrent completion must be counted exactly once");
-        assertTrue(hub.isReady());
+        assertEquals(0, blockingCount(hub), "every concurrent completion must be counted exactly once");
+        assertTrue(isReady(hub));
     }
 
     @Test
@@ -182,9 +199,9 @@ class TaskEligibilityServicePostgresConcurrencyTest {
             Task blocker = taskRepository.findById(blockerId).orElseThrow();
 
             if (blocker.getStatus() == TaskStatus.DONE) {
-                assertEquals(0, dependent.getBlockingCount(),
+                assertEquals(0, blockingCount(dependent),
                         "trial " + i + ": blocker finished DONE but dependent is still counting it as blocking");
-                assertTrue(dependent.isReady(), "trial " + i + ": dependent should be ready once its only blocker is DONE");
+                assertTrue(isReady(dependent), "trial " + i + ": dependent should be ready once its only blocker is DONE");
             }
         }
     }

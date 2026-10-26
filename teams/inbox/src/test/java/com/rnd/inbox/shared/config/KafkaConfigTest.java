@@ -1,11 +1,13 @@
 package com.rnd.inbox.shared.config;
 import com.rnd.inbox.shared.messaging.kafka.ErrorTopicPublisher;
 import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializerConfig;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.errors.SerializationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.kafka.KafkaException;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.listener.ListenerExecutionFailedException;
@@ -14,7 +16,9 @@ import org.springframework.kafka.support.serializer.DeserializationException;
 
 import java.net.ConnectException;
 import java.util.List;
+import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -50,6 +54,17 @@ class KafkaConfigTest {
         container = mock(MessageListenerContainer.class);
         when(container.isRunning()).thenReturn(true);
         record = new ConsumerRecord<>(TOPIC, 0, 2L, "key", null);
+    }
+
+    @Test
+    void protobufKafkaProducerFactory_always_usesLatestRegisteredSchemaWithoutAutoRegistering() {
+        Map<String, Object> props = new KafkaConfig()
+                .protobufKafkaProducerFactory(new KafkaProperties(), "mock://not-dialed")
+                .getConfigurationProperties();
+
+        assertThat(props)
+                .containsEntry(KafkaProtobufSerializerConfig.AUTO_REGISTER_SCHEMAS, false)
+                .containsEntry(KafkaProtobufSerializerConfig.USE_LATEST_VERSION, true);
     }
 
     @Test

@@ -2,7 +2,7 @@ package com.rnd.chain.events;
 
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TenantReassignmentException;
-import com.rnd.chain.service.TaskCounterUpdater;
+import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.mind.event.TaskScoreProposedEvent;
 import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -30,7 +30,7 @@ import static com.rnd.chain.events.EventFields.toLocalDateTime;
 @Component
 public class TaskScoreProposedEventHandler {
 
-    private final TaskCounterUpdater taskCounterUpdater;
+    private final PriorityScoreService priorityScoreService;
     private final ChainEventProcessingTemplate template;
 
     @RetryableTopic(
@@ -64,7 +64,7 @@ public class TaskScoreProposedEventHandler {
 
         try {
             LocalDateTime scoredAt = event.hasScoredAt() ? toLocalDateTime(event.getScoredAt()) : null;
-            taskCounterUpdater.onScoreProposed(taskId, tenantId, InboxTaskTierMapper.map(event.getTier()), mindScore, confidence, scoredAt);
+            priorityScoreService.onScoreProposed(taskId, tenantId, InboxTaskTierMapper.map(event.getTier()), mindScore, confidence, scoredAt);
         } catch (InvalidRequestException ex) {
             throw new NonRetryableEventException(
                     "Mind proposed an invalid score for task " + taskId, ex);

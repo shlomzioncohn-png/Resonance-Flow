@@ -78,9 +78,13 @@ a schema fact other teams will build on. Record the answer in the spec, then imp
 
 ## 3. Commands
 
-The database is **shared infrastructure**: one `resonance_flow` instance for the whole project,
-with the schema owned by Inbox's own Flyway migrations (`src/main/resources/db/migration`). The
-Postgres instance itself lives in the **root** compose file, not in Inbox's — a per-team Postgres
+The Postgres instance is **shared infrastructure**: Inbox has its own `inbox` database there,
+owned by the `inbox` user (like Chain's `chain`), with the schema owned by Inbox's own Flyway
+migrations (`src/main/resources/db/migration`). The root compose creates it via
+`shared/database/init/create-inbox-database.sh` on a fresh volume only - an older volume has just
+`resonance_flow`, so run `docker compose down -v` there once. CI's tests still run as `postgres`
+on `resonance_flow`, passing every `DB_*` explicitly - never hard-code the database name in a test.
+The Postgres instance itself lives in the **root** compose file, not in Inbox's — a per-team Postgres
 would mean a per-team copy of a schema that is supposed to be canonical. Don't add one here.
 
 There are two compose files, and neither alone gives you both Postgres and Kafka:

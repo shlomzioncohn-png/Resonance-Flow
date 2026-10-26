@@ -1,4 +1,4 @@
-.PHONY: install dev test lint fmt run run-index-consumer run-score-publisher run-landed-consumer eval eval-ci schema migrate docker-build docker-up proto
+.PHONY: install dev test lint fmt run run-local run-index-consumer run-landed-consumer eval eval-ci schema migrate migrate-local docker-build docker-up proto demo-artifacts demo-check-media demo-feed demo-feed-slack-first demo-flow demo-flow-slack-first
 
 install:
 	pip install -e .
@@ -32,12 +32,25 @@ fmt:
 run: proto
 	uvicorn mind.api.main:app --reload --port 8000
 
+# #481: MIND reads its connection settings only from the files
+# $CONFIG_FILE_PATH / $SECRETS_FILE_PATH name, so `run` and `migrate` refuse to
+# start without them. These run them against the committed examples
+# (placeholders only), with `docker compose up -d vector-store` as the database.
+# demo-check-media needs them too: ASR reads asr.whisper_model from config.yaml.
+# Target-specific, so they reach the `run`/`migrate` recipes too; a value given
+# on the command line wins, e.g. `make run-local SECRETS_FILE_PATH=secrets.local.yaml`.
+run-local migrate-local demo-check-media: export CONFIG_FILE_PATH = config.example.yml
+run-local migrate-local demo-check-media: export SECRETS_FILE_PATH = secrets.example.yml
+
+run-local: run
+
+migrate-local: migrate
+
 run-index-consumer: proto
 	python -m mind.embeddings.index_consumer_runner
 
-run-score-publisher: proto
-	python -m mind.scoring.score_publisher_runner
-
+# #919: the whole creation pipeline, task.created listener included -- needs
+# Kafka, MinIO, the vector store and an LLM provider (src/mind/ingestion/README.md).
 run-landed-consumer: proto
 	python -m mind.ingestion.landed_consumer_runner
 
@@ -96,6 +109,15 @@ demo-feed: proto
 
 demo-feed-slack-first: proto
 	python -m demo_flow.feed --order slack-first $(ARGS)
+
+# The whole flow, one command: stack, Mind, feed, result (demo_flow/run.py).
+# Needs Docker and demo_flow/stack/secrets.yaml. On Windows, without make:
+# python -m demo_flow.run [--order slack-first]
+demo-flow: proto
+	python -m demo_flow.run --order natural $(ARGS)
+
+demo-flow-slack-first: proto
+	python -m demo_flow.run --order slack-first $(ARGS)
 
 docker-build:
 	docker compose build

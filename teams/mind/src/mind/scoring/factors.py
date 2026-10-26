@@ -27,6 +27,11 @@ class Factor(StrEnum):
     QUICK_WIN = "quick_win"
     """How quickly the task can be cleared. Never decisive on its own."""
 
+    HIERARCHY = "hierarchy"
+    """The net effect of averaging in the task's ancestors (#474) -- 0 for a
+    root or an orphan, and can be negative (an unimportant ancestor can pull
+    a task below its own baseline, unlike an additive-only boost)."""
+
 
 #: Every name this package is allowed to put in `contributions`.
 FACTOR_NAMES: frozenset[str] = frozenset(factor.value for factor in Factor)

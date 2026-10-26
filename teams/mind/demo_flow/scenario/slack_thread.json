@@ -1,6 +1,5 @@
 [
   {
-    "tenantId": "demo-tenant",
     "channel": "#northwind-deal",
     "type": "message",
     "user": "Lior",
@@ -8,7 +7,6 @@
     "ts": "1791193200.000100"
   },
   {
-    "tenantId": "demo-tenant",
     "channel": "#northwind-deal",
     "type": "message",
     "user": "Dana",
@@ -16,7 +14,6 @@
     "ts": "1791193260.000200"
   },
   {
-    "tenantId": "demo-tenant",
     "channel": "#northwind-deal",
     "type": "message",
     "user": "Lior",

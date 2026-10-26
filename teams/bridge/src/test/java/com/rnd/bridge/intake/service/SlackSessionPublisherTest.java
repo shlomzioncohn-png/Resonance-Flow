@@ -61,7 +61,7 @@ class SlackSessionPublisherTest {
     @Test
     void publishesTranscriptOnlyWhenNoAttachmentsWereLandedDuringTheSession() {
         ChatMessage message = new ChatMessage(
-                RawSourceType.SLACK, "kamatech", "chat-a", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi",
+                RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", "chat-a", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi",
                 List.of(), "m1", null);
         ChatGroupStateReconciler.RealtimeReconcileResult result = reconciler.reconcileNonThreadedMessage(message);
         GroupState state = result.groupState();
@@ -74,7 +74,7 @@ class SlackSessionPublisherTest {
         assertThat(captor.getValue().objects().get(0).role()).isEqualTo(Role.TRANSCRIPT);
         assertThat(captor.getValue().correlationId()).isEqualTo(state.correlationId());
 
-        GroupState afterPublish = groupStateStore.load(RawSourceType.SLACK, "kamatech", state.groupId()).orElseThrow();
+        GroupState afterPublish = groupStateStore.load(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", state.groupId()).orElseThrow();
         assertThat(afterPublish.published()).isTrue();
     }
 
@@ -83,7 +83,7 @@ class SlackSessionPublisherTest {
         ChatMessage.Attachment attachment =
                 new ChatMessage.Attachment("F1", "note.txt", "text/plain", "fake-bytes".getBytes());
         ChatMessage message = new ChatMessage(
-                RawSourceType.SLACK, "kamatech", "chat-a", "ruth", Instant.parse("2026-08-18T09:00:00Z"),
+                RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", "chat-a", "ruth", Instant.parse("2026-08-18T09:00:00Z"),
                 "listen to this", List.of(attachment), "m1", null);
         ChatGroupStateReconciler.RealtimeReconcileResult result = reconciler.reconcileNonThreadedMessage(message);
         assertThat(result.newAttachmentRecords()).hasSize(1);
@@ -93,9 +93,9 @@ class SlackSessionPublisherTest {
         RawObjectRef attachmentRef = refMapper.toRef(
                 result.newAttachmentRecords().get(0), Instant.parse("2026-08-18T09:00:00Z"));
         groupStateStore.recordLandedAttachment(
-                RawSourceType.SLACK, "kamatech", result.groupState().groupId(), "m1", "F1", attachmentRef);
+                RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", result.groupState().groupId(), "m1", "F1", attachmentRef);
         GroupState stateWithLandedAttachment =
-                groupStateStore.load(RawSourceType.SLACK, "kamatech", result.groupState().groupId()).orElseThrow();
+                groupStateStore.load(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", result.groupState().groupId()).orElseThrow();
 
         sessionPublisher.publishSession(stateWithLandedAttachment, Instant.parse("2026-08-18T09:45:00Z"));
 
@@ -105,7 +105,7 @@ class SlackSessionPublisherTest {
         assertThat(captor.getValue().objects().get(0).role()).isEqualTo(Role.TRANSCRIPT);
         assertThat(captor.getValue().objects().get(1).role()).isEqualTo(Role.ATTACHMENT);
 
-        GroupState afterPublish = groupStateStore.load(RawSourceType.SLACK, "kamatech", stateWithLandedAttachment.groupId())
+        GroupState afterPublish = groupStateStore.load(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", stateWithLandedAttachment.groupId())
                 .orElseThrow();
         assertThat(afterPublish.published()).isTrue();
     }
@@ -113,7 +113,7 @@ class SlackSessionPublisherTest {
     @Test
     void neverConfirmsPublishedWhenKafkaPublishFails() {
         ChatMessage message = new ChatMessage(
-                RawSourceType.SLACK, "kamatech", "chat-a", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi",
+                RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", "chat-a", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi",
                 List.of(), "m1", null);
         ChatGroupStateReconciler.RealtimeReconcileResult result = reconciler.reconcileNonThreadedMessage(message);
         doAnswer(invocation -> {
@@ -124,7 +124,7 @@ class SlackSessionPublisherTest {
                         () -> sessionPublisher.publishSession(result.groupState(), Instant.parse("2026-08-18T09:45:00Z")))
                 .isInstanceOf(RuntimeException.class);
 
-        GroupState state = groupStateStore.load(RawSourceType.SLACK, "kamatech", result.groupState().groupId())
+        GroupState state = groupStateStore.load(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", result.groupState().groupId())
                 .orElseThrow();
         assertThat(state.published()).isFalse();
     }

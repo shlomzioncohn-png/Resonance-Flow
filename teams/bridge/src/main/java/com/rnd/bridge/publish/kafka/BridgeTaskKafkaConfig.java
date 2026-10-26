@@ -79,8 +79,8 @@ import java.util.Map;
  * {@link #bridgeTaskEventKafkaTemplate} now sends {@link StructuredTaskEvent} via Confluent's
  * {@link KafkaProtobufSerializer}, matching Inbox's {@code KafkaProtobufDeserializer} on the
  * consumer side - the two sides no longer disagree on wire format. {@code
- * schema.registry.url} is read from {@code bridge.kafka.schema-registry.url} (no hardcoded
- * default beyond the local-dev fallback in {@code application.yml}).
+ * schema.registry.url} is read from {@code spring.kafka.properties.schema.registry.url}, the one
+ * Schema Registry setting every Bridge Protobuf producer shares (RawObjectEventKafkaConfig too).
  * {@code auto.register.schemas} is explicitly {@code false}: registering the schema is Relay's
  * job (adding the {@code bridge.structured.tasks-value} row to {@code schema-subjects.tsv}, see
  * issue #567), not something this producer should do as a side effect of its first publish -
@@ -104,10 +104,12 @@ class BridgeTaskKafkaConfig {
 
     @Bean
     ProducerFactory<String, StructuredTaskEvent> bridgeTaskEventProducerFactory(
-            @Value("${spring.kafka.bootstrap-servers}") String bootstrapServers,
-            @Value("${bridge.kafka.schema-registry.url}") String schemaRegistryUrl) {
-        Map<String, Object> props = new HashMap<>();
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+            KafkaProperties kafkaProperties,
+            SslBundles sslBundles,
+            @Value("${spring.kafka.properties.schema.registry.url}") String schemaRegistryUrl) {
+        // Starts from Boot's producer props so spring.kafka.properties.* (SASL/security) apply,
+        // same as ChainProtobufKafkaConfig - overrides below must stay after it.
+        Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties(sslBundles));
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaProtobufSerializer.class);
         props.put(ProducerConfig.ACKS_CONFIG, "all");

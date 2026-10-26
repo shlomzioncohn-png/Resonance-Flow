@@ -39,7 +39,8 @@ from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 
 from pydantic import BaseModel, Field, computed_field
 
-from mind.config import ASRSettings
+from mind.config import ASRSettings, get_asr_settings
+from mind.config_file import ConfigFileError
 from mind.multimodal.failures import FailureCategory
 from mind.multimodal.result import MediaTextResult
 from mind.observability.compute import CpuClock
@@ -406,10 +407,23 @@ def _model_path(settings: ASRSettings) -> Path:
     return target
 
 
+def _settings() -> ASRSettings:
+    """The process's ASR settings (read once, see config.get_asr_settings).
+
+    A missing or broken config.yaml is the host's environment, not a bug in
+    this module: it comes back as ASR_UNAVAILABLE (retryable), never
+    INTERNAL_ERROR (#481 review).
+    """
+    try:
+        return get_asr_settings()
+    except ConfigFileError as exc:
+        raise _ASRUnavailable(f"ASR settings unavailable: {exc}") from exc
+
+
 def _model_name(settings: ASRSettings | None = None) -> str:
     """The name record_call() files a call under -- known without loading the model,
     since a call can end (silence, a bad file) before the model is ever needed."""
-    size = (settings or ASRSettings()).whisper_model
+    size = (settings or _settings()).whisper_model
     return f"whisper-{size}-{COMPUTE_TYPE}-local"
 
 
@@ -422,7 +436,7 @@ def _load_model() -> tuple[str, Any]:
     global _model
     with _model_lock:
         if _model is None:
-            settings = ASRSettings()
+            settings = _settings()
             path = _verified(_model_path(settings), settings.whisper_model)
             try:
                 from faster_whisper import WhisperModel
@@ -734,7 +748,13 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
 
     segments: list[TranscriptSegment] = []
     timed_out = False
-    model_name, model = _model_name(), None
+    try:
+        model_name = _model_name()
+    except _ASRUnavailable as exc:
+        # The settings, not the model: the same host problem as missing weights.
+        logger.warning("ASR_UNAVAILABLE: %s", exc)
+        return _failure(ASRFailureReason.ASR_UNAVAILABLE, str(exc))
+    model: Any = None
     start = time.perf_counter()  # TRANSCRIBE_TIMEOUT_S counts from here
     # ERROR until the loop completes, so anything that leaves it early is
     # recorded as a failure. A timeout is not: it returns what was decoded, and

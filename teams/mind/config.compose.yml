@@ -1,0 +1,22 @@
+# MIND's config.yaml for `docker compose up` (#481) -- mounted by
+# docker-compose.yml at /etc/resonance-flow/config/config.yaml, the path
+# Relay's Helm chart uses in the cluster, and named by CONFIG_FILE_PATH.
+#
+# Same keys as the chart renders (teams/relay/helm/resonance-flow/README.md,
+# "MIND (`components.mind`)"). Only the keys MIND reads today are here.
+# No credentials: the password comes from .env's POSTGRES_PASSWORD, via
+# docker-compose.yml's mind-secrets config.
+
+vector_store:
+  # The Compose service name -- inside a container, localhost is the
+  # container itself, not the database next to it.
+  url: vector-store:5432
+  # Must match POSTGRES_USER / POSTGRES_DB in .env.
+  user: mind
+  db: mind
+
+service:
+  log_level: INFO
+
+# No kafka section: no local broker is wired into this Compose file yet, so
+# the `--profile kafka` services can't reach one either way.

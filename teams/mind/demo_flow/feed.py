@@ -50,6 +50,7 @@ from pydantic import ValidationError
 
 from demo_flow import common
 from mind.contracts import RawObjectEvent as RawObjectEventContract
+from mind.ingestion.event_objects import InvalidEvent, tenant_uuid
 from mind.messaging import raw_object_event_pb2 as pb
 
 logger = logging.getLogger("demo_flow.feed")
@@ -129,6 +130,19 @@ def _shift_instant(value: str, shift: timedelta) -> str:
     return _instant(datetime.fromisoformat(value) + shift)
 
 
+#: The demo's content is synthetic and names no real person, so it is
+#: classified as Bridge's rules would classify it: not sensitive. Mind reads
+#: this only to decide whether a log line may quote a task's title
+#: (creation_pipeline._loggable_title), and the demo's checker needs that
+#: title to tell which task a duplicate line is about (verify.py).
+DEMO_CLASSIFICATION = pb.Classification(
+    decided_by=pb.DECIDED_BY_RULE,
+    sensitivity=pb.SensitivityLabel(value=pb.SENSITIVITY_NONE, confidence=1.0),
+    reason="synthetic demo content (#359)",
+    classifier=pb.ClassifierInfo(model="rules", prompt_version="demo-359"),
+)
+
+
 def _event(
     source_type: pb.SourceType,
     tenant_id: str,
@@ -167,6 +181,7 @@ def _event(
         event.source_timestamp.FromDatetime(source_timestamp)
     if source_ref is not None:
         event.source_ref = source_ref
+    event.classification.CopyFrom(DEMO_CLASSIFICATION)
     return event
 
 
@@ -222,8 +237,7 @@ def build_meeting(
     return FeedItem("meeting", objects, event)
 
 
-def build_slack(messages: list[dict[str, Any]], shift: timedelta) -> FeedItem:
-    tenant_id = messages[0]["tenantId"]
+def build_slack(messages: list[dict[str, Any]], tenant_id: str, shift: timedelta) -> FeedItem:
     ingested_at = common.SLACK_INGESTED_AT + shift
     # ChatSourceRecordMapper: one "sender: text" line per message, senders in
     # order of first appearance as participants, the first message's time.
@@ -256,15 +270,15 @@ def _attachment_modality(mime_type: str | None) -> pb.Modality:
 
 
 def build_email(
-    record: dict[str, Any], attachments: dict[str, bytes], shift: timedelta
+    record: dict[str, Any], attachments: dict[str, bytes], tenant_id: str, shift: timedelta
 ) -> FeedItem:
-    tenant_id = record["tenantId"]
     ingested_at = common.EMAIL_INGESTED_AT + shift
     sent_at = datetime.fromisoformat(record["date"]) + shift
 
     # The fixture record Bridge parses, with the run's date and each
-    # attachment's bytes inline as base64 (gmail-sample.json's shape).
-    landed_record = copy.deepcopy(record)
+    # attachment's bytes inline as base64 (gmail-sample.json's shape). The
+    # tenant goes first, where Bridge's fixture records have it.
+    landed_record = {"tenantId": tenant_id, **copy.deepcopy(record)}
     landed_record["date"] = _instant(sent_at)
     for attachment in landed_record.get("attachments", []):
         content = attachments[attachment["filename"]]
@@ -309,18 +323,19 @@ def build_items(
     slack_messages: list[dict[str, Any]],
     email_record: dict[str, Any],
     attachments: dict[str, bytes],
+    tenant_id: uuid.UUID,
 ) -> list[FeedItem]:
     shift = common.week_shift(anchor)
-    tenant_id = email_record["tenantId"]
+    tenant = str(tenant_id)
     builders: dict[str, Callable[[], FeedItem]] = {
-        "meeting": lambda: build_meeting(meeting_audio, meeting_metadata, tenant_id, shift),
-        "slack": lambda: build_slack(slack_messages, shift),
-        "email": lambda: build_email(email_record, attachments, shift),
+        "meeting": lambda: build_meeting(meeting_audio, meeting_metadata, tenant, shift),
+        "slack": lambda: build_slack(slack_messages, tenant, shift),
+        "email": lambda: build_email(email_record, attachments, tenant, shift),
     }
     return [builders[name]() for name in ORDERS[order]]
 
 
-def load_items(order: str, anchor: date) -> list[FeedItem]:
+def load_items(order: str, anchor: date, tenant_id: uuid.UUID) -> list[FeedItem]:
     """build_items from the files under scenario/ and artifacts/."""
     missing = [p for p in (common.MEETING_AUDIO, common.FORM_IMAGE) if not p.exists()]
     if missing:
@@ -339,6 +354,7 @@ def load_items(order: str, anchor: date) -> list[FeedItem]:
         slack_messages=common.read_json(common.SLACK_THREAD),
         email_record=email_record,
         attachments=attachments,
+        tenant_id=tenant_id,
     )
 
 
@@ -370,6 +386,11 @@ def mind_view(event: pb.RawObjectEvent) -> dict[str, Any]:
     for ref in data["objects"]:
         for field, prefix in _REF_ENUM_PREFIXES.items():
             ref[field] = ref[field].removeprefix(prefix)
+    classification = data.get("classification")
+    if classification:
+        classification["decided_by"] = classification["decided_by"].removeprefix("DECIDED_BY_")
+        sensitivity = classification["sensitivity"]
+        sensitivity["value"] = sensitivity["value"].removeprefix("SENSITIVITY_")
     return data
 
 
@@ -389,12 +410,18 @@ def contract_problems(item: FeedItem) -> list[str]:
             raise AssertionError(f"{item.name}: {ref.object_key} does not match its content")
 
     try:
-        RawObjectEventContract.model_validate(mind_view(item.event))
+        contract = RawObjectEventContract.model_validate(mind_view(item.event))
     except ValidationError as error:
         return [
             f"{'.'.join(str(part) for part in detail['loc'])}: {detail['msg']}"
             for detail in error.errors(include_url=False)
         ]
+    # The model takes any string as the tenant; the consumer then skips the
+    # event when it is not a UUID.
+    try:
+        tenant_uuid(contract)
+    except InvalidEvent as error:
+        return [str(error)]
     return []
 
 
@@ -527,7 +554,19 @@ def main(argv: list[str] | None = None) -> int:
         default="this-week",
         help="the Monday the scenario happens on, YYYY-MM-DD (default: this week's Monday)",
     )
+    parser.add_argument(
+        "--tenant-id",
+        type=uuid.UUID,
+        default=os.environ.get("DEMO_TENANT_ID", str(common.DEFAULT_TENANT_ID)),
+        help="the tenant every event is sent for; must already exist in Inbox "
+        "(default: DEMO_TENANT_ID, or Inbox's built-in System tenant)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="build and validate only")
+    parser.add_argument(
+        "--run-id",
+        help="name of the run and of its manifest, runs/<run-id>.json "
+        "(default: the UTC time and the order; demo_flow.run passes its own)",
+    )
     parser.add_argument(
         "--minio-endpoint", default=os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
     )
@@ -547,15 +586,16 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     anchor = _parse_anchor(args.anchor)
     gap_s = args.gap if args.gap is not None else DEFAULT_GAP_S[args.order]
-    run_id = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{args.order}"
+    run_id = args.run_id or f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{args.order}"
 
-    items = load_items(args.order, anchor)
+    items = load_items(args.order, anchor, args.tenant_id)
     logger.info(
-        "run %s: order=%s gap=%.0fs scenario Monday=%s, %d items",
+        "run %s: order=%s gap=%.0fs scenario Monday=%s tenant=%s, %d items",
         run_id,
         args.order,
         gap_s,
         anchor,
+        args.tenant_id,
         len(items),
     )
     for item in items:
@@ -595,6 +635,7 @@ def main(argv: list[str] | None = None) -> int:
                 "order": args.order,
                 "gap_s": gap_s,
                 "scenario_monday": str(anchor),
+                "tenant_id": str(args.tenant_id),
                 "topic": args.topic,
                 "items": sent,
             },
