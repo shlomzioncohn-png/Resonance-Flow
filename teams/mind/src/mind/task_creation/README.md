@@ -258,8 +258,8 @@ Mind suggests an owner; it never assigns one (#132). What reaches Inbox is
   Dana, please sign" sent to Dana), and her address is surer than her first
   name; when the name was someone else ("Yossi will sign it" sent to Dana)
   this picks the wrong one, so it is logged, to count. Without one recipient
-  (a chat, several) the name is looked up instead. An email whose one
-  recipient is its sender has no owner. An address is found only once #131
+  (a chat, several) the name is looked up instead, and so it is when the one
+  recipient is the sender (an email to oneself). An address is found only once #131
   matches addresses exactly, as agreed with its author; #131's draft matches
   words, and an address matches nobody there.
 - **The sender is never the owner.** The prompt says so, but a sender who signs

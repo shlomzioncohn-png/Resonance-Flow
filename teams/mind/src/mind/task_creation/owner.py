@@ -96,23 +96,23 @@ def what_to_look_up(
     over a name: mostly both are one person ("Hi Dana, please sign" sent to
     Dana), and her address is surer than her first name. Without one
     recipient (a chat, several) the name is looked up instead, so a stray
-    flag costs nothing. An email's one recipient who is its sender is no
-    owner, nor is a name that is the sender's own. Logged when an answer is
-    dropped, never with the name or the address.
+    flag costs nothing, and the same when the one recipient is the sender
+    (an email to oneself). A name that is the sender's own is never looked up.
+    Logged when an answer is dropped, never with the name or the address.
     """
 
-    if owner_is_recipient and len(recipients) == 1:
-        (address,) = recipients
-        if sender and parseaddr(sender)[1].lower() == address.lower():
-            logger.info("owner: the email's one recipient is its sender; no owner sent")
-            return None
-        if owner_mention is not None:
-            logger.info("owner: both the recipient and a name; keeping the recipient")
-        return address
     if owner_is_recipient:
+        sender_address = parseaddr(sender)[1].lower() if sender else ""
+        to_self = len(recipients) == 1 and recipients[0].lower() == sender_address
+        if len(recipients) == 1 and not to_self:
+            if owner_mention is not None:
+                logger.info("owner: both the recipient and a name; keeping the recipient")
+            return recipients[0]
         logger.info(
-            "owner: the task is the recipient's, and the item has %d recipients; %s",
-            len(recipients),
+            "owner: the task is the recipient's, but %s; %s",
+            "the one recipient is the sender"
+            if to_self
+            else f"the item has {len(recipients)} recipients",
             "looking up the name" if owner_mention else "no owner sent",
         )
     if owner_mention is None:

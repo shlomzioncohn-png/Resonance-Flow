@@ -266,3 +266,14 @@ def test_an_email_to_oneself_has_no_owner(sender: str, caplog: pytest.LogCapture
         assert _look_up(recipient=True, sender=sender) is None
 
     assert "sender" in caplog.text
+
+
+def test_an_email_to_oneself_still_looks_up_someone_else_it_names() -> None:
+    """ "Reminder: ask Yossi Levi to sign", mailed to oneself: the recipient is
+    the sender, so the name is looked up, as when there is no recipient."""
+
+    assert _look_up("Yossi Levi", recipient=True, sender=DANA) == "Yossi Levi"
+
+
+def test_an_email_to_oneself_never_looks_up_the_sender_by_name() -> None:
+    assert _look_up("Dana Cohen", recipient=True, sender=f"Dana Cohen <{DANA}>") is None

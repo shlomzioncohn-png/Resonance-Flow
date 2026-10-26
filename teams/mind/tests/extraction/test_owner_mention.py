@@ -146,7 +146,10 @@ def test_a_mention_with_no_letters_says_so(written: str, caplog: pytest.LogCaptu
     assert "single letters" not in caplog.text
 
 
-@pytest.mark.parametrize("written", ["someone", "Someone", "everyone", "you", "me", "we", "Nobody"])
+@pytest.mark.parametrize(
+    "written",
+    ["someone", "Someone", "everyone", "you", "me", "we", "Nobody", "she", "Him", "the team"],
+)
 def test_a_word_for_nobody_in_particular_is_not_a_name(
     written: str, caplog: pytest.LogCaptureFixture
 ) -> None:

@@ -54,7 +54,9 @@ MAX_OWNER_MENTION_LENGTH = 100
 _NOT_A_PERSON = frozenset(
     {
         "someone", "somebody", "anyone", "anybody", "everyone", "everybody",
-        "nobody", "no one", "all", "you", "me", "we", "us", "they", "them",
+        "nobody", "no one", "someone else", "everyone else", "all", "you",
+        "me", "we", "us", "they", "them", "he", "she", "him", "her",
+        "the team", "my team", "our team", "your team", "the group",
     }
 )  # fmt: skip
 
