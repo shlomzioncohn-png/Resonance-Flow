@@ -164,6 +164,8 @@ Ancestors has no `/transitive` variant - the ancestor chain already is the trans
 | GET | `/tasks/{taskId}/dependencies/transitive` | All (transitive) dependencies |
 | GET | `/tasks/{taskId}/dependencies/history` | Dependency change history |
 | GET | `/tasks/{taskId}/state-history` | Status / blocking history, filterable by time range |
+| GET | `/tasks/state-history` | Tenant-wide state history, `from`/`to` required (max 90 days), cursor-paged oldest first |
+| GET | `/tasks/blocked-since` | Currently blocked tasks of the tenant with `blockedSince`, optional `taskIds` |
 | GET | `/tasks/{taskId}/constraints/history` | Constraint history, filterable by time range |
 | GET | `/tasks/{taskId}/dependents` | Direct dependents |
 | GET | `/tasks/{taskId}/dependents/transitive` | All (transitive) dependents |
