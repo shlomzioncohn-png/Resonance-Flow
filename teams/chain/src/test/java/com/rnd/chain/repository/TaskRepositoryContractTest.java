@@ -91,6 +91,7 @@ abstract class TaskRepositoryContractTest {
         UUID childId = UUID.randomUUID();
         UUID otherId = UUID.randomUUID();
         TaskRepository repository = createRepository(List.of(
+                newTaskBuilder(parentId).build(),
                 newTaskBuilder(childId).parentTaskId(parentId).build(),
                 newTaskBuilder(otherId).build()));
 
@@ -104,6 +105,7 @@ abstract class TaskRepositoryContractTest {
         UUID parentId = UUID.randomUUID();
         UUID childId = UUID.randomUUID();
         TaskRepository repository = createRepository(List.of(
+                newTaskBuilder(parentId).build(),
                 newTaskBuilder(childId).parentTaskId(parentId).deletedAt(LocalDateTime.now()).build()));
 
         assertThat(repository.findByParentTaskId(parentId)).isEmpty();

@@ -34,6 +34,7 @@ from collections.abc import Awaitable, Callable
 from typing import Protocol
 from uuid import UUID
 
+from mind.config import DeadlineSettings
 from mind.contracts import RawObjectEvent
 from mind.contracts.raw_object_event_enums import Sensitivity
 from mind.contracts.task_creation_requested import TaskCreationRequested
@@ -105,10 +106,18 @@ class Sender(Protocol):
 
 
 class CreationPipeline:
-    def __init__(self, *, extract: Extract, find_duplicate: FindDuplicate, sender: Sender) -> None:
+    def __init__(
+        self,
+        *,
+        extract: Extract,
+        find_duplicate: FindDuplicate,
+        sender: Sender,
+        deadline_settings: DeadlineSettings,
+    ) -> None:
         self._extract = extract
         self._find_duplicate = find_duplicate
         self._sender = sender
+        self._deadline_settings = deadline_settings
 
     async def handle(self, event: RawObjectEvent, items: list[ExtractionItem]) -> list[UUID]:
         """Send one creation request per new task the items hold; return their correlation_ids."""
@@ -132,6 +141,10 @@ class CreationPipeline:
                 tenant_id,
                 bridge_source_ref=event.source_ref,
                 bridge_correlation_id=event.correlation_id,
+                # When the text was written, for "by tomorrow" (#960): the
+                # source's own time when Bridge has it, else when it landed.
+                written_at=event.source_timestamp or event.ingested_at,
+                deadline_settings=self._deadline_settings,
             )
             # One request per extracted task, in the same order. The task's
             # dependency mentions are not in the contract: they travel beside
