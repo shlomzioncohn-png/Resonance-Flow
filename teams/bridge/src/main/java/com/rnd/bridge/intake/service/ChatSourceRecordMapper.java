@@ -108,6 +108,7 @@ public class ChatSourceRecordMapper {
                         ChangeType.UPSERT,
                         null,
                         null,
+                        null,
                         null));
             }
         }
@@ -268,6 +269,7 @@ public class ChatSourceRecordMapper {
                 mergedGroup.revision(),
                 ChangeType.DELETE_REVIEW,
                 mergedGroup.groupId(),
+                null,
                 null,
                 null);
     }
