@@ -201,9 +201,10 @@ alerts should still reach its team (e.g. `lens-frontend`) - see "Alerting".
   on a fresh cluster the failed apply would block every team's sync.
 - **Kafka consumer-group lag.** The `kafka-exporter` subchart
   (prometheus-kafka-exporter), also on only in `environments/shared.yaml`. It logs
-  in with the `kafka.sasl.client` credentials through
-  `templates/kafka-exporter-sasl-secret.yaml` - never set its `sasl.scram`
-  username/password directly. Same as above: its own ServiceMonitor stays off,
+  in as the `kafka.sasl.client` user, reading the password from the
+  `resonance-flow-kafka-sasl-credentials` Secret (`client-passwords`), like the
+  services do - never set its `sasl.scram` username/password directly. Same as
+  above: its own ServiceMonitor stays off,
   `infra-servicemonitors.yaml` scrapes it.
 
 ## Alerting
