@@ -24,8 +24,10 @@ system, which already trusts that certificate. It needs `pip install truststore`
 
 import argparse
 import sys
+from datetime import UTC, datetime
 from uuid import uuid4
 
+from mind.config import DeadlineSettings
 from mind.contracts.base_enums import SourceType
 from mind.extraction.assembly import to_task_creation_requested
 from mind.extraction.extractor import BasicExtractor, ExtractionSuccess
@@ -97,10 +99,16 @@ def main() -> int:
             print(f"  -{penalty.effective:<8} {penalty.reason}")
 
     # The proposals Inbox would receive, one per task. tenant_id is invented
-    # here: outside a smoke test it comes from the intake event, never from
-    # this stage.
+    # here and the sample is "written" now: outside a smoke test both come from
+    # the intake event (written_at is its source_timestamp, else ingested_at),
+    # never from this stage. "Before Friday's close" resolves against it (#960).
     proposals = to_task_creation_requested(
-        outcome, tenant_id=uuid4(), bridge_source_ref=None, bridge_correlation_id=uuid4()
+        outcome,
+        tenant_id=uuid4(),
+        bridge_source_ref=None,
+        bridge_correlation_id=uuid4(),
+        written_at=datetime.now(UTC),
+        deadline_settings=DeadlineSettings(),
     )
     for proposal in proposals:
         print("\nTaskCreationRequested:")

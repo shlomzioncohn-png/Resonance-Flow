@@ -1,6 +1,6 @@
 [
   {
-    "tenantId": "kamatech",
+    "tenantId": "00000000-0000-0000-0000-000000000001",
     "id": "evt_sprint_review_0819",
     "summary": "Sprint review meeting",
     "organizer": { "email": "hadas@kamatech.org" },
@@ -17,7 +17,7 @@
     ]
   },
   {
-    "tenantId": "kamatech",
+    "tenantId": "00000000-0000-0000-0000-000000000001",
     "id": "evt_grandma_birthday_0820",
     "summary": "יום הולדת סבתא",
     "organizer": { "email": "mom@gmail.com" },

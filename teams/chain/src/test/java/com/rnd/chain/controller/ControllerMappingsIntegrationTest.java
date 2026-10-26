@@ -3,6 +3,8 @@ package com.rnd.chain.controller;
 import com.rnd.chain.service.DependencyGraphService;
 import com.rnd.chain.service.TaskDependencyService;
 import com.rnd.chain.service.TaskTraversalService;
+import com.rnd.chain.tenant.TaskOwnershipService;
+import com.rnd.chain.tenant.TenantContext;
 
 import org.junit.jupiter.api.Test;
 
@@ -45,6 +47,12 @@ class ControllerMappingsIntegrationTest {
 
     @MockBean
     private DependencyGraphService dependencyGraphService;
+
+    @MockBean
+    private TenantContext tenantContext;
+
+    @MockBean
+    private TaskOwnershipService taskOwnershipService;
 
     @Test
     void previouslyDuplicatedReadPaths_areMappedUnambiguously() throws Exception {

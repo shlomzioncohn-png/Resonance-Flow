@@ -72,11 +72,19 @@ public class SlackSessionScheduler {
      * onDeadline's own revalidation), only as an optimization to avoid an unnecessary wakeup.
      */
     public void scheduleOrReschedule(GroupState state) {
-        if (state.messages().isEmpty()) {
+        GroupKey key = GroupKey.of(state);
+        Instant deadline = computeDeadline(state);
+        if (deadline == null) {
+            // Empty and not maybePublished - a group a deletion emptied before it was ever
+            // actually at risk of being stale at Mind (see computeDeadline). Nothing to publish,
+            // so any previously-registered timer for this group is cancelled rather than left to
+            // fire pointlessly.
+            ScheduledFuture<?> previous = registry.remove(key);
+            if (previous != null) {
+                previous.cancel(false);
+            }
             return;
         }
-        GroupKey key = GroupKey.of(state);
-        Instant deadline = latestActivity(state).plus(sessionGap());
 
         AtomicReference<ScheduledFuture<?>> selfRef = new AtomicReference<>();
         ScheduledFuture<?> future = taskScheduler.schedule(() -> onDeadline(key, selfRef.get()), deadline);
@@ -86,6 +94,36 @@ public class SlackSessionScheduler {
         if (previous != null) {
             previous.cancel(false);
         }
+    }
+
+    /**
+     * The single deadline rule shared by scheduleOrReschedule and (conceptually) onDeadline's own
+     * staleness recheck - see maybePublished's javadoc for why "current state, read once" is
+     * always correct here, and this class's own javadoc update for why onDeadline must skip its
+     * staleness recheck entirely once maybePublished is true (otherwise a correctionDelay-based
+     * deadline, always in the future at the moment it's computed, would look "early" forever and
+     * never actually fire).
+     * Returns null only for the empty + not-maybePublished case - there is nothing to schedule,
+     * and no legitimate deadline to compute (latestActivity would throw on an empty list); the
+     * caller cancels any outstanding timer instead of installing a new one.
+     */
+    private Instant computeDeadline(GroupState state) {
+        boolean maybePublished = maybePublished(state);
+        if (state.messages().isEmpty()) {
+            return maybePublished ? clock.instant().plus(correctionDelay()) : null;
+        }
+        if (maybePublished) {
+            return clock.instant().plus(correctionDelay());
+        }
+        return latestActivity(state).plus(sessionGap());
+    }
+
+    /** published || revision > 0 || claimedRevision != null - see docs/plans/
+     * slack-message-deleted.md §4 for the exhaustive trace proving this gives the same result on
+     * the state entering a merge as on the state the merge produces, so reading it once, on
+     * whatever GroupState is currently at hand, is always correct. */
+    private boolean maybePublished(GroupState state) {
+        return state.published() || state.revision() > 0 || state.claimedRevision() != null;
     }
 
     /**
@@ -105,23 +143,32 @@ public class SlackSessionScheduler {
             return;
         }
         GroupState state = maybeState.get();
-        if (state.published() || state.superseded() || state.messages().isEmpty()) {
+        boolean maybePublished = maybePublished(state);
+        if (state.published() || (state.messages().isEmpty() && !maybePublished)) {
             registry.remove(key, myFuture);
             return;
         }
 
-        Instant actualDeadline = latestActivity(state).plus(sessionGap());
-        if (clock.instant().isBefore(actualDeadline)) {
-            // Stale/early wakeup (e.g. a message arrived after this timer was originally
-            // scheduled, pushing the real deadline out). Only reschedule if we're still the
-            // registry's current entry - if a later scheduleOrReschedule has already replaced us,
-            // that replacement is the correct, up-to-date timer; touching it here would risk
-            // undoing it.
-            if (registry.get(key) == myFuture) {
-                scheduleOrReschedule(state);
+        if (!maybePublished) {
+            // Ordinary still-open staleness recheck, unchanged from before this feature - only
+            // ever reached for a non-empty, not-yet-possibly-published group.
+            Instant actualDeadline = latestActivity(state).plus(sessionGap());
+            if (clock.instant().isBefore(actualDeadline)) {
+                // Stale/early wakeup (e.g. a message arrived after this timer was originally
+                // scheduled, pushing the real deadline out). Only reschedule if we're still the
+                // registry's current entry - if a later scheduleOrReschedule has already replaced
+                // us, that replacement is the correct, up-to-date timer; touching it here would
+                // risk undoing it.
+                if (registry.get(key) == myFuture) {
+                    scheduleOrReschedule(state);
+                }
+                return;
             }
-            return;
         }
+        // maybePublished==true skips the staleness recheck entirely and proceeds straight to
+        // claim+publish - see computeDeadline's javadoc for why re-running it here would defeat
+        // correctionDelay, and this class's own javadoc for why that race is safe once
+        // maybePublished is true.
 
         boolean claimed = groupStateStore.claimForPublication(
                 key.sourceType(), key.tenantId(), key.groupId(), state.revision());
@@ -166,6 +213,10 @@ public class SlackSessionScheduler {
 
     private Duration sessionGap() {
         return Duration.ofMinutes(properties.sessionGapMinutes());
+    }
+
+    private Duration correctionDelay() {
+        return Duration.ofSeconds(properties.correctionDelaySeconds());
     }
 
     /** Groups alone aren't globally unique - the same groupId string could theoretically repeat

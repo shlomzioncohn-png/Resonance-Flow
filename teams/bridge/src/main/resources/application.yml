@@ -82,6 +82,10 @@ jira:
       expression: ${JIRA_SYNC_CRON_EXPRESSION:0 0 2 * * ?}
 
 bridge:
+  # The one tenant every RawObjectEvent lane sends (Email/Slack/WhatsApp/Calendar/Drive and the
+  # media lane). Must be a UUID of a tenant that exists in Inbox - Mind passes it through to Inbox's
+  # tasks.tenant_id. Inbox's only tenant today is System (...0001); a fixed demo UUID is still TBD.
+  tenant-id: ${BRIDGE_TENANT_ID:00000000-0000-0000-0000-000000000001}
   # Backs the control-plane lane (GroupStateStore/CursorStore/CalendarEventStateStore), not
   # the rest of Bridge - no default on any of these three, same convention as HUBSPOT_TOKEN: a
   # missing value must fail startup loudly, not silently fall back to a placeholder.
@@ -93,12 +97,6 @@ bridge:
   # KafkaPayloadPublisher (see esti/inbox-kafka-ingestion-contract) - one
   # topic for every source, never a per-lane one.
   structured-tasks-topic: ${BRIDGE_STRUCTURED_TASKS_TOPIC:bridge.structured.tasks}
-  kafka:
-    # Confluent Schema Registry for bridgeTaskEventKafkaTemplate's KafkaProtobufSerializer (see
-    # BridgeTaskKafkaConfig). The localhost default is for local/dev only - any real environment
-    # must override SCHEMA_REGISTRY_URL to the shared registry Relay owns.
-    schema-registry:
-      url: ${SCHEMA_REGISTRY_URL:http://localhost:8081}
   manual-sync:
     enabled: false
   # Deployment-wide tenant for lanes whose sources carry no tenant (GitHub, Jira).
@@ -141,6 +139,7 @@ bridge:
       allowed-keywords: [deploy, deadline, meeting, pr, review, task, urgent, project]
     chat:
       session-gap-minutes: 45
+      correction-delay-seconds: 60
     # Per-source fixture/real switch - see plan.md. Each source can go "real" independently;
     # "real" beans throw UnsupportedOperationException until their connector is implemented.
     # Shared by every real Google reader (Calendar/Gmail/Drive) - see intake.google.
@@ -151,6 +150,10 @@ bridge:
     google:
       client-secrets-path: ${BRIDGE_GOOGLE_CLIENT_SECRETS_PATH:}
       tokens-directory: ${BRIDGE_GOOGLE_TOKENS_DIR:}
+    # tenant-id for every lane below (Email/Drive/Calendar/Slack/WhatsApp) comes from the single
+    # bridge.tenant-id setting via BridgeTenantId (com.rnd.bridge.intake.config), injected
+    # directly into each Real*SourceReader - there is deliberately no per-lane tenant-id key
+    # here anymore, so there is exactly one place to change the tenant.
     email:
       mode: fixture
       sync:
@@ -179,7 +182,6 @@ bridge:
       # Only read when mode: real. Bot User OAuth Token (xoxb-...) from a Slack app installed
       # with channels:history/groups:history/files:read scopes - see plan.md.
       bot-token: ${BRIDGE_SLACK_BOT_TOKEN:}
-      tenant-id: kamatech
       # Channel IDs (Cxxxxxxxx) the bot has been invited to - no config here means "read every
       # channel", Slack has no such mode without a much broader scope.
       channels: ${BRIDGE_SLACK_CHANNELS:}
@@ -253,7 +255,7 @@ bridge:
     zoom-recordings-dir: ${BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR:./temp/zoom}
     bbb-recordings-dir: ${BRIDGE_MEDIA_BBB_RECORDINGS_DIR:./temp/bbb}
     scanned-docs-dir: ${BRIDGE_MEDIA_SCANNED_DOCS_DIR:./temp/docs}
-    tenant-id: ${BRIDGE_MEDIA_TENANT_ID:demo-tenant}
+    tenant-id: ${bridge.tenant-id}
     # Files at or below this size never land - a conservative proxy for "empty/corrupt
     # recording", not real audio-duration filtering (that needs a codec-aware library this
     # lane doesn't depend on). Tune based on what garbage actually shows up in practice.

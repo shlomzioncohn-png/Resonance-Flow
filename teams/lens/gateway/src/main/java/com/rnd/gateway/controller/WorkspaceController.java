@@ -1,5 +1,6 @@
 package com.rnd.gateway.controller;
 
+import com.rnd.gateway.dto.TaskActivityDTO;
 import com.rnd.gateway.dto.TaskDTO;
 import com.rnd.gateway.dto.TaskListResponseDTO;
 import com.rnd.gateway.dto.TaskRecommendationDTO;
@@ -462,6 +463,59 @@ public class WorkspaceController {
 
         } catch (Exception e) {
             logger.error("Unexpected error fetching task details for taskId: {}", taskId, e);
+            throw new ServiceUnavailableException("bff", "Unexpected error communicating with BFF");
+        }
+    }
+
+    /**
+     * Task activity - the history behind the task page's Activity tab.
+     *
+     * Request: GET /api/workspace/tasks/{taskId}/activity
+     *
+     * Response: { items: [...newest first], statusHistoryUnavailable, dependencyHistoryUnavailable }
+     * BFF reads it from Chain with the user's own tenant; nothing about the
+     * tenant comes from the Frontend.
+     */
+    @Operation(summary = "Get task activity",
+            description = "Status, blocking and dependency changes from Chain, newest first. Read-only.")
+    @GetMapping("/tasks/{taskId}/activity")
+    public ResponseEntity<TaskActivityDTO> getTaskActivity(@PathVariable String taskId) {
+
+        String userId = getMockUserId("workspace.activity"); // TODO: extract from JWT
+
+        logger.info("Task activity request - userId: {}, taskId: {}", userId, taskId);
+
+        try {
+            String bffUrl = UriComponentsBuilder.fromHttpUrl(bffServiceUrl)
+                    .path(bffTasksPath + "/{taskId}/activity")
+                    .buildAndExpand(taskId)
+                    .toUriString();
+
+            ResponseEntity<TaskActivityDTO> bffResponse = restTemplate.exchange(
+                    bffUrl, HttpMethod.GET, new HttpEntity<>(buildHeaders(userId)), TaskActivityDTO.class);
+
+            TaskActivityDTO activity = bffResponse.getBody();
+            if (activity == null) {
+                throw new ServiceUnavailableException("bff", "BFF returned empty response");
+            }
+            return ResponseEntity.ok(activity);
+
+        } catch (ServiceUnavailableException | GatewayTimeoutException | ResponseStatusException e) {
+            throw e;
+        } catch (ResourceAccessException e) {
+            if (e.getCause() instanceof SocketTimeoutException) {
+                logger.error("BFF read timeout for activity of taskId: {}", taskId, e);
+                throw new GatewayTimeoutException("bff", bffReadTimeoutMs, "BFF did not respond in time");
+            }
+            logger.error("BFF unreachable for activity of taskId: {}", taskId, e);
+            throw new ServiceUnavailableException("bff", "BFF is currently unavailable");
+
+        } catch (HttpStatusCodeException e) {
+            logger.warn("BFF returned {} for activity of taskId: {}", e.getStatusCode(), taskId);
+            throw new ResponseStatusException(e.getStatusCode(), bffErrorReason(e));
+
+        } catch (Exception e) {
+            logger.error("Unexpected error fetching activity for taskId: {}", taskId, e);
             throw new ServiceUnavailableException("bff", "Unexpected error communicating with BFF");
         }
     }

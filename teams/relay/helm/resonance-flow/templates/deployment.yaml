@@ -11,7 +11,11 @@ metadata:
     app.kubernetes.io/component: {{ $componentName }}
 
 spec:
+  {{- /* Same condition as pipe-hpa.yaml: the HPA owns replicas there, so setting them
+         here conflicts on every server-side-apply upgrade (Helm 4's default). */}}
+  {{- if not (and (eq $componentName "notification-delivery") (dig "autoscaling" "enabled" false $component)) }}
   replicas: {{ $component.replicaCount }}
+  {{- end }}
 
   {{- with $component.updateStrategy }}
   strategy:

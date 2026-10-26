@@ -82,7 +82,7 @@ llm:
     base_url: https://api.deepseek.com
     model: deepseek-chat
     timeout_seconds: 60
-    max_output_tokens: 2048
+    max_output_tokens: 2400
 # secrets.yaml -> components.mind.secret
 llm:
   deepseek:
@@ -715,7 +715,7 @@ a timeout after its retries — loses all of them together, where per-task calls
 would have lost one. Chosen because one call is cheaper and the model sees the
 whole context (a recap names what was asked earlier). What guards it: the
 output cap sized for a full list (`TOKENS_PER_TASK`, `DEFAULT_MAX_OUTPUT_TOKENS`
-2048), descriptions held to about 300 characters by the prompt and dropped past
+2400), descriptions held to about 300 characters by the prompt and dropped past
 `MAX_DESCRIPTION_LENGTH` (600), and at most 10 mentions of a title's length. An
 empty meeting with an `ExtractionFailure` is this, not a parsing bug.
 
@@ -856,6 +856,169 @@ and may not be in the index yet when its mention is resolved.
   numbers are in the PR. A repeatable AMI eval belongs to R1's extraction
   eval (#178), which can now read `ExtractionSuccess.tasks`.
 - **Urgency has no reference date.** `source_timestamp` is not in the prompt,
-  so "by Friday" cannot be placed in time.
+  so the model cannot tell how near "by Friday" is when it judges urgency.
+  The deadline itself is placed in time, by code (#960, below).
 - **With classification switched off the model sees no examples at all**,
   including the multi-task and dependency ones. The switch defaults to on.
+
+## Deadline (#960)
+
+`TaskCreationRequested.deadline` was on the contract and on Inbox's proto from
+the start, and extraction never filled it: every task went out with none, so
+ranking's strongest feature, `deadline_proximity`, read every task as undated.
+It is now asked for in the same call and under the same `classify` switch as
+the estimate.
+
+| piece | where |
+|---|---|
+| what the model reports | `StatedDeadline` on `ClassificationFields` (`models.py`) |
+| the instructions | `classification.md`: the key, its rules, the examples |
+| the phrase checked against the content | `grounding.ground_deadline` |
+| turning it into a moment | `deadline.py`, called by `assembly.resolve_deadline` |
+| the locale it is read in | `config.DeadlineSettings` (`MIND_DEADLINE__*`) |
+| when the text was written | `ingestion/creation_pipeline.py`: `source_timestamp`, else `ingested_at` |
+
+### The model reports, the code counts
+
+The model does no date arithmetic. It writes down what the content says, in one
+of four shapes, and our code works out the moment against when the text was
+written. Counting from Monday to "Friday", or from October 22 to "October 20",
+is where models slip; here it is plain code a test can pin. Only the resolved
+moment reaches Inbox, in UTC: ranking compares `deadline` with its own "now"
+on every run, so an offset like "in 3 days" would be right for one moment only.
+
+| `kind` | keys | the content says |
+|---|---|---|
+| `DATE` | `month`, `day`, `year` only when written | "by November 3" |
+| `OFFSET` | `amount`, `unit`: `MINUTES` `HOURS` `DAYS` `WEEKS` `WORKING_DAYS` | "within 72 hours", "tomorrow" (1 `DAYS`) |
+| `WEEKDAY` | `weekday`, `next_week` | "by Friday", "next Tuesday" |
+| `PERIOD_END` | `period`: `DAY` `WEEK` `NEXT_WEEK` `MONTH` | "today", "end of the month", "by 12:30" (`DAY` + time) |
+
+Every shape carries `phrase`, the content's own words for it, and any shape that
+lands on a day may carry `time_of_day` ("14:00") when the content names a time.
+The model writes the units the content uses: "two weeks" is 2 `WEEKS`, never 14
+`DAYS`, so it never multiplies either.
+
+### The rules it is resolved by
+
+Each was a decision taken on the issue; the reasoning is there. The one that
+runs through most of them: when a reading is uncertain, prefer the earlier
+moment. A deadline read too early lifts the task where a person sees it; one
+read too late, or dropped, buries it, which is the failure ranking exists to
+prevent.
+
+| the content | resolved to |
+|---|---|
+| a date with no year | passed if at most 60 days back (`MAX_DAYS_PASSED`), otherwise ahead |
+| a day with no time | 17:00 local (`end_of_day`); on the day of writing after 17:00, 23:59 |
+| minutes, hours | exactly that long after, in real elapsed time (across a clock change too) |
+| days, weeks | that many calendar days on, at the end of the working day |
+| working days | only when the content says working or business days |
+| a weekday | the nearest one, today included; `next_week` adds a week |
+| the end of the week | its last working day; once that has passed (a Friday in Israel), next week's |
+| next week | the end of the coming week |
+| the end of the month | its last working day; once that has passed, the month's last day |
+| a named time | replaces 17:00; midnight is 23:59; on a minutes or hours offset it adds nothing |
+| a named time already gone today | the next occurrence for a weekday or a week's end, the month's last day for a month's end; a time today or an explicit date stays missed |
+| "ideally by Friday" | Friday: polite wording is how real deadlines are written |
+| "no rush", "whenever", "no deadline" | `null` |
+
+The locale is one setting for all of Mind, `DeadlineSettings`: the IANA zone
+(`Asia/Jerusalem`), the end of the working day (17:00) and the working week
+(Sunday to Thursday), Israel's because the only tenant and the demo are. Event
+times are UTC and say nothing about the writer, and Inbox's `Tenant.timezone`
+does not reach Mind yet. A zone that does not exist, or a working week with no
+working day, no day off or a gap in it, fails when the settings are loaded,
+not on the first deadline. `tzdata` is a declared dependency: Windows and slim
+images have no zone database of their own.
+
+### An unusable deadline becomes null, never a repair round
+
+The same line as the classification fields and the estimate: the deadline is
+optional, so an answer that cannot be used is dropped and logged, and never
+costs a repair round or the rest of the task. That covers a kind that is not
+one of the four, a kind missing what it needs (the commonest: a `DATE` with no
+month or day), a date no calendar has (February 30), a year outside 2000-2200
+and an offset landing more than twenty years ahead (`MAX_DEADLINE_DAYS_AHEAD`).
+The two bounds are not about plausibility: without them a year of 10**10 or
+"within 100000000 days" raised `OverflowError` out of assembly, and the item's
+message came back for ever.
+
+A `time_of_day` that cannot be read ("5pm", a number, a time with a zone) costs
+only the time: the day the model read is still right, so it keeps the end of
+the working day. A number is refused on purpose, since pydantic reads 17 as
+seventeen seconds past midnight.
+
+The logs name locations and error types, never the content's words.
+
+### A phrase the content never said
+
+`ground_deadline` keeps a deadline only if its `phrase` is in the content: its
+words under the same rule as a dependency mention (`MIN_WORDS_TO_MISS_ONE`),
+and every number in it, matched whole and by value ("72" is not in "720";
+"9:00" is "09:00"). The numbers are checked apart because the word check drops
+anything shorter than three characters, which is most of a deadline, and the
+number is the answer. A phrase with nothing to check ("by then") is dropped.
+
+It catches an invented deadline, not a misattributed one: the "March" of an
+offsite the content mentions is really there and passes. Against that stand
+the prompt's rules and examples.
+
+### The traps
+
+The prompt names them, and its examples carry them:
+
+- **a duration**: "it takes about two hours" says how long, not by when;
+- **time already passed**: "down for 40 minutes", "waiting since Monday";
+- **another event's date**: "the board meeting is on the 12th" is not this
+  task's deadline unless the content says the work is due by it;
+- **an explicit "no rush"**: null, unlike a softly worded date.
+
+`system.md` used to say "never output priority, owner or deadline"; it now says
+priority or owner. With the switch off the key is still never listed, so it is
+still never asked for.
+
+### What was measured, and what was not
+
+Live, `gemini-3.6-flash`:
+
+- **The #359 demo**, its three items as Bridge lands them (ASR and OCR faked,
+  everything else real): 4 of 4 deadlines on the right day: the cost sheet on
+  Wednesday, the quote on Thursday (meeting and Slack), the form on Friday.
+- **The 62 DEV persona tasks**, title and description as an email, the
+  scenario's `current_datetime` as the time of writing, read as Israel local
+  time with a Monday-to-Friday week, since the set is written as such a
+  workplace. One run each, so no noise floor:
+
+| | first run | after the time fix |
+|---|---|---|
+| found, of the 37 with a gold deadline | 29 | 34 |
+| on the right date | 28 | 33 |
+| at the exact time | 14 | 24 |
+| a deadline where the gold has none, of 25 | 0 | 0 |
+
+The first run's misses were nearly all one gap: a time with no day ("by 12:30")
+had no shape to go in, so the model sent a `DATE` without a date. Now it is
+`PERIOD_END DAY` with a time, and every shape that lands on a day may carry one.
+
+What the exact-time row cannot show: the nine remaining differences are all
+texts that name no time ("due today", "by the end of the week"), where the
+authors picked one (23:00, 20:00, 09:00) and the rule above says 17:00. Of the
+three misses, one is defensible (a statement that "was meant to go out with
+yesterday's launch"), one is the measurement (the model split the text in two
+and the deadline went to the second task, while only the first is compared),
+and one did not repeat when re-run.
+
+The deadline costs output: 136 tokens a task on average and 215 at most, over
+the old `TOKENS_PER_TASK` of 120. It is now 160, and `DEFAULT_MAX_OUTPUT_TOKENS`
+2400, so a full list still fits.
+
+### Known gaps, left for follow-ups
+
+- **One zone for every tenant.** The tenant's own time zone is in Inbox
+  (`Tenant.timezone`) and needs a contract change to reach Mind.
+- **A soft deadline is not marked.** "Ideally by Friday" counts the same as
+  "the agreement lapses Friday". Down-weighting it is a ranking decision, and
+  needs a soft/hard field on the wire.
+- **The persona measurement is by hand and compares the first task only.** A
+  repeatable one belongs to R1's extraction eval (#178).

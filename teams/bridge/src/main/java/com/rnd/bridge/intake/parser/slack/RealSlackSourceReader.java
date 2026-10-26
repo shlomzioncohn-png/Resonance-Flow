@@ -1,5 +1,6 @@
 package com.rnd.bridge.intake.parser.slack;
 
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.SlackApiProperties;
 import com.rnd.bridge.intake.model.ChatMessage;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -40,6 +41,7 @@ import org.springframework.stereotype.Component;
 public class RealSlackSourceReader implements SlackSourceReader {
 
     private final SlackApiProperties properties;
+    private final BridgeTenantId tenantId;
     private final MethodsClient methods;
     private final HttpClient httpClient = HttpClient.newHttpClient();
     // conversations.history only ever returns the sender as a user id (Uxxxxxxxx) - ids are
@@ -48,7 +50,8 @@ public class RealSlackSourceReader implements SlackSourceReader {
     // the live Events API path too - see its javadoc.
     private final SlackUserNameResolver userNameResolver;
 
-    public RealSlackSourceReader(SlackApiProperties properties, SlackUserNameResolver userNameResolver) {
+    public RealSlackSourceReader(
+            SlackApiProperties properties, BridgeTenantId tenantId, SlackUserNameResolver userNameResolver) {
         if (properties.botToken() == null || properties.botToken().isBlank()) {
             throw new IllegalStateException(
                     "bridge.intake.slack.bot-token must be set when bridge.intake.slack.mode=real");
@@ -58,6 +61,7 @@ public class RealSlackSourceReader implements SlackSourceReader {
                     "bridge.intake.slack.channels must list at least one channel id when bridge.intake.slack.mode=real");
         }
         this.properties = properties;
+        this.tenantId = tenantId;
         this.methods = Slack.getInstance().methods(properties.botToken());
         this.userNameResolver = userNameResolver;
     }
@@ -171,7 +175,7 @@ public class RealSlackSourceReader implements SlackSourceReader {
         long epochMillis = Math.round(Double.parseDouble(message.getTs()) * 1000);
         return new ChatMessage(
                 RawSourceType.SLACK,
-                properties.tenantId(),
+                tenantId.value(),
                 channelId,
                 userNameResolver.resolveUserName(message.getUser()),
                 Instant.ofEpochMilli(epochMillis),

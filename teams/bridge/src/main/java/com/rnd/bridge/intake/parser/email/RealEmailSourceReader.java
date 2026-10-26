@@ -14,12 +14,13 @@ import com.google.api.services.gmail.model.MessagePart;
 import com.google.api.services.gmail.model.MessagePartBody;
 import com.google.api.services.gmail.model.MessagePartHeader;
 import com.rnd.bridge.core.ReadCursor;
-import com.rnd.bridge.intake.config.GmailImportProperties;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.google.GoogleCredentialsProvider;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.raw.model.RawSourceType;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -30,6 +31,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -59,33 +62,39 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(prefix = "bridge.intake.email", name = "mode", havingValue = "real")
 public class RealEmailSourceReader implements EmailSourceReader {
 
+    private static final Logger log = LoggerFactory.getLogger(RealEmailSourceReader.class);
     private static final Pattern ANGLE_BRACKET_EMAIL = Pattern.compile("<([^>]+)>");
 
     private final GoogleCredentialsProvider credentialsProvider;
-    private final GmailImportProperties properties;
+    private final BridgeTenantId tenantId;
     private Gmail client;
 
     @Autowired
-    public RealEmailSourceReader(GoogleCredentialsProvider credentialsProvider, GmailImportProperties properties) {
+    public RealEmailSourceReader(GoogleCredentialsProvider credentialsProvider, BridgeTenantId tenantId) {
         this.credentialsProvider = credentialsProvider;
-        this.properties = properties;
+        this.tenantId = tenantId;
     }
 
     /** Test-only seam: lets tests inject a mocked Gmail client instead of the real one client()
      * would otherwise lazily build from live Google credentials. */
-    RealEmailSourceReader(GoogleCredentialsProvider credentialsProvider, GmailImportProperties properties, Gmail client) {
-        this(credentialsProvider, properties);
+    RealEmailSourceReader(GoogleCredentialsProvider credentialsProvider, BridgeTenantId tenantId, Gmail client) {
+        this(credentialsProvider, tenantId);
         this.client = client;
     }
 
     @Override
     public EmailReadResult read(ReadCursor cursor) {
-        String historyId = cursor == null ? null : cursor.historyId();
+        String historyId = cursor == null ? null : cursor.token();
+        log.info("Email read starting: storedToken={}", historyId != null ? "present" : "absent");
         if (historyId == null) {
-            return readFull();
+            EmailReadResult result = readFull();
+            logResult("full", result);
+            return result;
         }
         try {
-            return readIncremental(historyId);
+            EmailReadResult result = readIncremental(historyId);
+            logResult("incremental", result);
+            return result;
         } catch (GoogleJsonResponseException e) {
             if (e.getStatusCode() == 404) {
                 // Expired/unknown historyId - the only way back is a full sync from scratch,
@@ -94,7 +103,11 @@ public class RealEmailSourceReader implements EmailSourceReader {
                 System.getLogger(RealEmailSourceReader.class.getName()).log(
                         System.Logger.Level.WARNING,
                         "Gmail historyId " + historyId + " expired or unknown (404) - falling back to full resync");
-                return readFull();
+                log.info("Email incremental read got 404 on stored historyId - falling back to full resync; "
+                        + "googleErrorDetails={}", e.getDetails() != null ? e.getDetails() : e.getMessage());
+                EmailReadResult result = readFull();
+                logResult("full (post-404 fallback)", result);
+                return result;
             }
             throw new UncheckedIOException("Failed to list Gmail history from " + historyId, e);
         } catch (IOException e) {
@@ -102,25 +115,51 @@ public class RealEmailSourceReader implements EmailSourceReader {
         }
     }
 
+    private void logResult(String path, EmailReadResult result) {
+        log.info("Email read via {} path complete: records={}, nextToken={}",
+                path, result.records().size(), result.nextHistoryId() != null ? "present" : "null");
+    }
+
     private EmailReadResult readFull() {
         Gmail gmail = client();
+        // The historyId to resume from must be a high-water mark as of (at least) the start of
+        // this scan, not whichever message happens to be processed last - messages.list has no
+        // documented, stable ordering guarantee, and in practice returns newest-first, so "last
+        // processed" is the OLDEST message's historyId: constant across runs (nothing older ever
+        // arrives) and already expired/unknown by the time the next incremental read tries it,
+        // forcing an endless full resync. users.getProfile("me").historyId is Gmail's own current
+        // mailbox-level historyId, captured before any per-message fetch, so it's always >= every
+        // message's own historyId.
+        BigInteger profileHistoryId = fetchProfileHistoryId(gmail);
         List<SourceRecord> records = new ArrayList<>();
         String pageToken = null;
-        String latestHistoryId = null;
+        BigInteger maxMessageHistoryId = null;
         do {
             ListMessagesResponse page = listPage(gmail, pageToken);
             if (page.getMessages() != null) {
                 for (Message summary : page.getMessages()) {
                     Message full = getFull(gmail, summary.getId());
                     records.addAll(toSourceRecords(gmail, full));
-                    if (full.getHistoryId() != null) {
-                        latestHistoryId = full.getHistoryId().toString();
+                    if (full.getHistoryId() != null
+                            && (maxMessageHistoryId == null || full.getHistoryId().compareTo(maxMessageHistoryId) > 0)) {
+                        maxMessageHistoryId = full.getHistoryId();
                     }
                 }
             }
             pageToken = page.getNextPageToken();
         } while (pageToken != null);
-        return new EmailReadResult(records, latestHistoryId);
+        BigInteger nextHistoryId = profileHistoryId != null ? profileHistoryId : maxMessageHistoryId;
+        return new EmailReadResult(records, nextHistoryId == null ? null : nextHistoryId.toString());
+    }
+
+    private BigInteger fetchProfileHistoryId(Gmail gmail) {
+        try {
+            return gmail.users().getProfile("me").execute().getHistoryId();
+        } catch (IOException e) {
+            log.warn("Failed to fetch Gmail profile historyId - falling back to the max historyId "
+                    + "across this sync's fetched messages", e);
+            return null;
+        }
     }
 
     private EmailReadResult readIncremental(String startHistoryId) throws IOException {
@@ -179,9 +218,15 @@ public class RealEmailSourceReader implements EmailSourceReader {
         MessagePart payload = message.getPayload();
         String from = extractEmailAddress(header(payload, "From"));
         String subject = header(payload, "Subject");
+        String messageId = header(payload, "Message-ID");
         Instant occurredAt = Instant.ofEpochMilli(message.getInternalDate());
         String naturalId = "EMAIL|" + message.getId();
-        String correlationId = UUID.randomUUID().toString();
+        // Deterministic (type-3 name-based), not randomUUID() - a resend of the same Gmail
+        // message (retry of a partially-failed batch, or a resync) must mint the same
+        // correlationId every time, or Mind's dedupKey() (correlationId + ":" + revision, see
+        // RawObjectEvent) sees it as a brand-new logical item and duplicates it.
+        String correlationId = UUID.nameUUIDFromBytes(
+                (tenantId.value() + "|" + naturalId).getBytes(StandardCharsets.UTF_8)).toString();
         List<String> participants = participants(payload, from);
 
         StringBuilder plainTextBody = new StringBuilder();
@@ -190,15 +235,16 @@ public class RealEmailSourceReader implements EmailSourceReader {
         int attachmentCount = attachmentParts.size();
 
         records.add(new SourceRecord(
-                RawSourceType.EMAIL, properties.tenantId(), naturalId, correlationId, occurredAt, from,
+                RawSourceType.EMAIL, tenantId.value(), naturalId, correlationId, occurredAt, from,
                 participants, subject, plainTextBody.isEmpty() ? null : plainTextBody.toString(),
-                message.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, attachmentCount, List.of(), 0));
+                message.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, attachmentCount, List.of(), 0)
+                .withSourceRef(messageId));
 
         int index = 0;
         for (MessagePart attachment : attachmentParts) {
             index++;
             records.add(new SourceRecord(
-                    RawSourceType.EMAIL, properties.tenantId(), naturalId + "|attachment-" + index, correlationId,
+                    RawSourceType.EMAIL, tenantId.value(), naturalId + "|attachment-" + index, correlationId,
                     occurredAt, from, participants, null, null, attachmentBytes(gmail, message.getId(), attachment),
                     attachment.getMimeType(), attachment.getFilename(), index, attachmentCount, List.of(), 0));
         }
