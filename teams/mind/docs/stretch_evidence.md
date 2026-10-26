@@ -16,14 +16,14 @@
 | | Baseline | Stretch |
 |---|---|---|
 | Model | `SegmentedRankingModel` (#354) | `HierarchicalRankingModel` (#474, PR #974) |
-| Model commit | `b16bfecc` | `861b4ced` |
-| Record | [`baseline_score_2026-10-25.json`](../eval/baselines/baseline_score_2026-10-25.json) | [`stretch_score_2026-10-25.json`](../eval/baselines/stretch_score_2026-10-25.json) |
+| Model commit | `b16bfecc` | `87bba9c9` (this branch, with #974 merged in) |
+| Record | [`baseline_score_2026-10-25.json`](../eval/baselines/baseline_score_2026-10-25.json) | [`stretch_score_2026-10-26.json`](../eval/baselines/stretch_score_2026-10-26.json) |
 
 - **Same persona set for both:** `eval/personas` + `eval/hierarchy` at commit
   `f07b5e71`, 42 scenarios. The stretch run loaded the baseline from its record
   (`--compare-to`), which refuses a record whose persona-set checksum differs, so
   the baseline was not re-scored.
-- **The diff:** [`stretch_comparison_2026-10-25.json`](../eval/baselines/stretch_comparison_2026-10-25.json),
+- **The diff:** [`stretch_comparison_2026-10-26.json`](../eval/baselines/stretch_comparison_2026-10-26.json),
   produced by #464's `diff_reports`.
 - **What the stretch does:** for a task with ancestors, `score = 0.5 * own + 0.5 *
   mean(ancestor importance)`, where `own` is the baseline's own score for that
@@ -162,7 +162,8 @@ and is reported to her as a finding.
 
 ## Reproduce
 
-Once the baseline branch and PR #974 are both on `main`, from `teams/mind`:
+This is the command that produced the stretch record, from a clean working tree
+at `87bba9c9`. From `teams/mind`:
 
 ```bash
 python -m mind.evaluation.run --model hierarchical \
