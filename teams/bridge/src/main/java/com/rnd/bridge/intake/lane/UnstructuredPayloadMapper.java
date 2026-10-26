@@ -7,6 +7,7 @@ import com.rnd.bridge.intake.service.SourceRecordRefMapper;
 import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawObjectRef;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import com.rnd.bridge.scoping.AllowlistScopingFilter;
 import java.time.Instant;
@@ -68,7 +69,13 @@ final class UnstructuredPayloadMapper implements PayloadMapper<List<SourceRecord
         }
     }
 
+    /** The body/transcript record, never the EMAIL SOURCE_METADATA sibling (see
+     * SourceRecord.objectRole's javadoc) - both are attachmentIndex() == 0, so that check alone
+     * is no longer enough to exclude it. */
     static SourceRecord primaryOf(List<SourceRecord> group) {
-        return group.stream().filter(record -> record.attachmentIndex() == 0).findFirst().orElse(group.get(0));
+        return group.stream()
+                .filter(record -> record.attachmentIndex() == 0 && record.objectRole() != Role.SOURCE_METADATA)
+                .findFirst()
+                .orElse(group.get(0));
     }
 }
