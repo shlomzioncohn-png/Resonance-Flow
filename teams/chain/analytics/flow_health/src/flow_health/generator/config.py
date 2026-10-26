@@ -22,6 +22,7 @@ class GeneratorConfig:
     abandoned_rate: float = 0.04  # healthy tasks started and never finished; nothing depends on them
     late_dependency_rate: float = 0.08  # extra edges added after creation, per task
     removal_rate: float = 0.04  # share of edges later removed
+    replan_rate: float = 0.20  # tried on this share of tasks: a dependency is pulled out and put back (2-3 blocks if its blocker stays open)
     rejected_rate: float = 0.01  # REJECTED dependency_history rows per task: noise a consumer must ignore
     missing_tier_rate: float = 0.05  # share of tasks whose tier the analysis does not get to see
     control_chains_per_group: int = 6  # healthy chains per (length, tier, team pace): peers of the slow chain

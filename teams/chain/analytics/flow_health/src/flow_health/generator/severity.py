@@ -17,7 +17,7 @@ from .simulation import History
 
 WEIGHTS = {"abnormality": 0.35, "overrun": 0.30, "deadline": 0.25, "scale": 0.10}
 HIGH_FROM, MEDIUM_FROM = 66.0, 33.0  # score thresholds of the level
-HEALTHY_MAX_BLOCKS = 2  # a healthy task is blocked at most this often
+HEALTHY_MAX_BLOCKS = 3  # a healthy task is blocked at most this often (re-planned dependencies)
 FLAPPING_FULL = 10  # blocks at which the recurring-blocker abnormality is 1
 OVERRUN_FULL = 100.0  # actual/expected ratio at which the overrun is 1
 DEADLINE_WINDOW_DAYS = 30.0  # a deadline further away than this adds no pressure

@@ -54,7 +54,7 @@ deadline (30% of them, as in Inbox) add nothing.
 | Type | abnormality | overrun | deadline | scale |
 |---|---|---|---|---|
 | `chronic_blocking` | percentile of the blocker's open time among healthy blockers of the same tier, similar subtree and team pace | the blocker's active time against its estimate | tightest deadline among the blocker and the tasks it blocks | tasks it blocks, out of 12 |
-| `recurring_blocker` | how many times the dependent was blocked: 2 or fewer is normal (0), 10 or more is 1 | the blocker's active time against its estimate | tightest deadline among the blocker and the tasks that keep being blocked | tasks affected, out of 12 |
+| `recurring_blocker` | how many times the dependent was blocked: 3 or fewer is normal (0), 10 or more is 1 | the blocker's active time against its estimate | tightest deadline among the blocker and the tasks that keep being blocked | tasks affected, out of 12 |
 | `slow_chain` | percentile of the chain's end-to-end time among healthy control chains of the same length, tier and team pace | all links' active time against their estimates | tightest deadline among the links | links, out of 12 |
 
 `growing_bottleneck` and `stuck_subgraph` (outside stage A) use the chronic-blocker definition.
@@ -71,3 +71,15 @@ table has neither column today, and Chain does not store a deadline at all. Noth
   is slow by nature (`slow_legit`) is estimated as slow, so it does not.
 - Deadlines fall some time after creation: about a fifth close to the expected completion (so some are missed),
   the rest within a week, a month or up to three months.
+
+## When a case is not yet visible
+
+Severity says how bad a case is, not whether the data already shows it. A pattern that starts close to the end of
+the history may not have had time to look abnormal. `visible_in_data` in the ground truth says whether it has:
+a chronic blocker once it has been open longer than 90% of its healthy peers, a slow chain once it has taken longer
+than 90% of its healthy peer chains, a recurring blocker once a task has been blocked a third time. `visible_from`
+is that moment, and `not_visible_because` is `too_recent` (still going on) or `stayed_within_normal` (it ended
+without ever leaving the normal range). Score detectors only on cases that are visible.
+
+Healthy tasks are blocked at most three times (some are, when a dependency is re-planned), so a recurring blocker
+planted at its faintest (3 blocks) cannot be told apart from them by counting alone.
