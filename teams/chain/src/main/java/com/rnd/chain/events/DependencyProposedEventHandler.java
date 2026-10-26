@@ -1,15 +1,16 @@
 package com.rnd.chain.events;
 
 import com.rnd.chain.dto.DependencyChangeSource;
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.InvalidRequestException;
-import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.service.DependencyEdgeService;
 import com.rnd.chain.service.SchedulingUpdateService;
 import com.rnd.chain.service.TaskDependencyService;
 import com.rnd.mind.event.DependencyProposedEvent;
+import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.annotation.RetryableTopic;
 import org.springframework.kafka.retrytopic.DltStrategy;
@@ -29,6 +30,7 @@ import static com.rnd.chain.events.EventFields.parseUuid;
  * is created as a PENDING placeholder in the event's tenant, so the edge is recorded right away.
  * Cycles, invalid dependencies and cross-tenant edges go straight to .errors without retry.
  */
+@RequiredArgsConstructor
 @Component
 public class DependencyProposedEventHandler {
 
@@ -38,22 +40,6 @@ public class DependencyProposedEventHandler {
     private final SchedulingPublishListener schedulingPublishListener;
     private final TaskReadinessRepository taskReadinessRepository;
     private final ChainEventProcessingTemplate template;
-
-    public DependencyProposedEventHandler(
-            TaskDependencyService taskDependencyService,
-            DependencyEdgeService dependencyEdgeService,
-            SchedulingUpdateService schedulingUpdateService,
-            SchedulingPublishListener schedulingPublishListener,
-            TaskReadinessRepository taskReadinessRepository,
-            ChainEventProcessingTemplate template) {
-
-        this.taskDependencyService = taskDependencyService;
-        this.dependencyEdgeService = dependencyEdgeService;
-        this.schedulingUpdateService = schedulingUpdateService;
-        this.schedulingPublishListener = schedulingPublishListener;
-        this.taskReadinessRepository = taskReadinessRepository;
-        this.template = template;
-    }
 
     @RetryableTopic(
             attempts = "3",
