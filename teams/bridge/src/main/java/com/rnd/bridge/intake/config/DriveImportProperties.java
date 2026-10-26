@@ -6,5 +6,5 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * Config for RealDriveSourceReader.
  */
 @ConfigurationProperties(prefix = "bridge.intake.drive")
-public record DriveImportProperties(String tenantId, String rootFolderId) {
+public record DriveImportProperties(String rootFolderId) {
 }

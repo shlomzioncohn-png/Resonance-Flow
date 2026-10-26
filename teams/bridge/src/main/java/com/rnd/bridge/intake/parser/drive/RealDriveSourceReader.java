@@ -11,6 +11,7 @@ import com.google.api.services.drive.model.ChangeList;
 import com.google.api.services.drive.model.File;
 import com.google.api.services.drive.model.FileList;
 import com.rnd.bridge.core.ReadCursor;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.DriveImportProperties;
 import com.rnd.bridge.intake.google.GoogleCredentialsProvider;
 import com.rnd.bridge.intake.model.DriveFileState;
@@ -68,15 +69,17 @@ public class RealDriveSourceReader implements DriveSourceReader {
 
     private final GoogleCredentialsProvider credentialsProvider;
     private final DriveImportProperties properties;
+    private final BridgeTenantId tenantId;
     private final DriveFileStateReconciler fileStateReconciler;
     private Drive client;
 
     @Autowired
     public RealDriveSourceReader(
             GoogleCredentialsProvider credentialsProvider, DriveImportProperties properties,
-            DriveFileStateReconciler fileStateReconciler) {
+            BridgeTenantId tenantId, DriveFileStateReconciler fileStateReconciler) {
         this.credentialsProvider = credentialsProvider;
         this.properties = properties;
+        this.tenantId = tenantId;
         this.fileStateReconciler = fileStateReconciler;
     }
 
@@ -84,8 +87,8 @@ public class RealDriveSourceReader implements DriveSourceReader {
      * would otherwise lazily build from live Google credentials. */
     RealDriveSourceReader(
             GoogleCredentialsProvider credentialsProvider, DriveImportProperties properties,
-            DriveFileStateReconciler fileStateReconciler, Drive client) {
-        this(credentialsProvider, properties, fileStateReconciler);
+            BridgeTenantId tenantId, DriveFileStateReconciler fileStateReconciler, Drive client) {
+        this(credentialsProvider, properties, tenantId, fileStateReconciler);
         this.client = client;
     }
 
@@ -191,9 +194,9 @@ public class RealDriveSourceReader implements DriveSourceReader {
                 : file.getOwners().get(0).getEmailAddress();
         Instant occurredAt = Instant.ofEpochMilli(file.getModifiedTime().getValue());
         DriveFileState state = fileStateReconciler.resolve(
-                properties.tenantId(), file.getId(), file.getMimeType(), file.getHeadRevisionId(), file.getVersion());
+                tenantId.value(), file.getId(), file.getMimeType(), file.getHeadRevisionId(), file.getVersion());
         return new SourceRecord(
-                RawSourceType.DRIVE, properties.tenantId(), file.getId(), state.correlationId(),
+                RawSourceType.DRIVE, tenantId.value(), file.getId(), state.correlationId(),
                 occurredAt, owner, owner == null ? List.of() : List.of(owner), file.getName(),
                 file.getDescription(), content, file.getMimeType(), null, 0, 0, List.of(), state.revision())
                 .withSourceRef(file.getId());
@@ -209,12 +212,12 @@ public class RealDriveSourceReader implements DriveSourceReader {
      */
     private SourceRecord toTrashedSourceRecord(File file) {
         DriveFileState state = fileStateReconciler.resolve(
-                properties.tenantId(), file.getId(), file.getMimeType(), file.getHeadRevisionId(), file.getVersion());
+                tenantId.value(), file.getId(), file.getMimeType(), file.getHeadRevisionId(), file.getVersion());
         Instant occurredAt = file.getModifiedTime() != null
                 ? Instant.ofEpochMilli(file.getModifiedTime().getValue())
                 : Instant.now();
         return new SourceRecord(
-                RawSourceType.DRIVE, properties.tenantId(), file.getId(), state.correlationId(),
+                RawSourceType.DRIVE, tenantId.value(), file.getId(), state.correlationId(),
                 occurredAt, null, List.of(), null, null,
                 file.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), state.revision(),
                 ChangeType.DELETE_REVIEW).withSourceRef(file.getId());

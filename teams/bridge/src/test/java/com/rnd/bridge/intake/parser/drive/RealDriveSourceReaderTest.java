@@ -23,6 +23,7 @@ import com.google.api.services.drive.model.FileList;
 import com.google.api.services.drive.model.StartPageToken;
 import com.google.api.services.drive.model.User;
 import com.rnd.bridge.core.ReadCursor;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.DriveImportProperties;
 import com.rnd.bridge.intake.model.DriveFileState;
 import com.rnd.bridge.intake.model.SourceRecord;
@@ -50,7 +51,8 @@ import org.slf4j.LoggerFactory;
  */
 class RealDriveSourceReaderTest {
 
-    private static final DriveImportProperties PROPERTIES = new DriveImportProperties("kamatech", null);
+    private static final DriveImportProperties PROPERTIES = new DriveImportProperties(null);
+    private static final BridgeTenantId TENANT_ID = new BridgeTenantId("kamatech");
 
     private final Drive drive = mock(Drive.class);
     private final Drive.Files files = mock(Drive.Files.class);
@@ -58,17 +60,21 @@ class RealDriveSourceReaderTest {
     private final DriveFileStateReconciler fileStateReconciler = mock(DriveFileStateReconciler.class);
 
     private RealDriveSourceReader reader() {
-        return reader(PROPERTIES);
+        return reader(PROPERTIES, TENANT_ID);
     }
 
     private RealDriveSourceReader reader(DriveImportProperties properties) {
+        return reader(properties, TENANT_ID);
+    }
+
+    private RealDriveSourceReader reader(DriveImportProperties properties, BridgeTenantId tenantId) {
         when(drive.files()).thenReturn(files);
         when(drive.changes()).thenReturn(changes);
         when(fileStateReconciler.resolve(anyString(), anyString(), any(), any(), any()))
                 .thenAnswer(inv -> new DriveFileState(
                         inv.getArgument(1), inv.getArgument(0), "corr-" + inv.getArgument(1), inv.getArgument(3),
                         inv.getArgument(4), 0, false));
-        return new RealDriveSourceReader(null, properties, fileStateReconciler, drive);
+        return new RealDriveSourceReader(null, properties, tenantId, fileStateReconciler, drive);
     }
 
     private Drive.Files.List mockListRequest() {
@@ -118,8 +124,7 @@ class RealDriveSourceReaderTest {
 
     @Test
     void recordCarriesTheConfiguredTenantIdNotAHardcodedOne() throws IOException {
-        DriveImportProperties uuidTenant = new DriveImportProperties(
-                "00000000-0000-0000-0000-000000000001", null);
+        BridgeTenantId uuidTenant = new BridgeTenantId("00000000-0000-0000-0000-000000000001");
         Drive.Files.List request = mockListRequest();
         when(files.list()).thenReturn(request);
         when(request.execute()).thenReturn(new FileList().setFiles(List.of(file("f1", "application/pdf"))));
@@ -130,7 +135,7 @@ class RealDriveSourceReaderTest {
         when(getRequest.executeMediaAsInputStream())
                 .thenReturn(new ByteArrayInputStream("bytes".getBytes(StandardCharsets.UTF_8)));
 
-        DriveReadResult result = reader(uuidTenant).read(ReadCursor.full());
+        DriveReadResult result = reader(PROPERTIES, uuidTenant).read(ReadCursor.full());
 
         assertThat(result.records()).hasSize(1);
         assertThat(result.records().get(0).tenantId()).isEqualTo("00000000-0000-0000-0000-000000000001");
@@ -181,7 +186,7 @@ class RealDriveSourceReaderTest {
 
     @Test
     void rootFolderIdScopesTheListQueryWhenConfigured() throws IOException {
-        DriveImportProperties scoped = new DriveImportProperties("kamatech", "folder-123");
+        DriveImportProperties scoped = new DriveImportProperties("folder-123");
         Drive.Files.List request = mockListRequest();
         when(files.list()).thenReturn(request);
         when(request.execute()).thenReturn(new FileList().setFiles(List.of()));
@@ -355,7 +360,7 @@ class RealDriveSourceReaderTest {
                 com.rnd.bridge.storage.ControlPlaneStateStores.inMemory(backingStore),
                 new com.fasterxml.jackson.databind.ObjectMapper());
         var realReconciler = new DriveFileStateReconciler(store);
-        return new RealDriveSourceReader(null, PROPERTIES, realReconciler, drive);
+        return new RealDriveSourceReader(null, PROPERTIES, TENANT_ID, realReconciler, drive);
     }
 
     private File nativeDocFile(String id, long version) {

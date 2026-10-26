@@ -12,6 +12,7 @@ import com.google.api.services.calendar.model.EventAttendee;
 import com.google.api.services.calendar.model.EventDateTime;
 import com.google.api.services.calendar.model.Events;
 import com.rnd.bridge.core.ReadCursor;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.CalendarImportProperties;
 import com.rnd.bridge.intake.google.GoogleCredentialsProvider;
 import com.rnd.bridge.intake.model.CalendarEventState;
@@ -74,15 +75,17 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
 
     private final GoogleCredentialsProvider credentialsProvider;
     private final CalendarImportProperties properties;
+    private final BridgeTenantId tenantId;
     private final CalendarEventStateReconciler eventStateReconciler;
     private Calendar client;
 
     @Autowired
     public RealCalendarSourceReader(
             GoogleCredentialsProvider credentialsProvider, CalendarImportProperties properties,
-            CalendarEventStateReconciler eventStateReconciler) {
+            BridgeTenantId tenantId, CalendarEventStateReconciler eventStateReconciler) {
         this.credentialsProvider = credentialsProvider;
         this.properties = properties;
+        this.tenantId = tenantId;
         this.eventStateReconciler = eventStateReconciler;
     }
 
@@ -90,8 +93,8 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
      * client() would otherwise lazily build from live Google credentials. */
     RealCalendarSourceReader(
             GoogleCredentialsProvider credentialsProvider, CalendarImportProperties properties,
-            CalendarEventStateReconciler eventStateReconciler, Calendar client) {
-        this(credentialsProvider, properties, eventStateReconciler);
+            BridgeTenantId tenantId, CalendarEventStateReconciler eventStateReconciler, Calendar client) {
+        this(credentialsProvider, properties, tenantId, eventStateReconciler);
         this.client = client;
     }
 
@@ -199,11 +202,11 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
         // every read - see CalendarEventStateReconciler for the first-seen/retry/updated
         // decision, keyed on event.getId() (stable) and event.getEtag() (Google's per-version
         // change marker).
-        CalendarEventState state = eventStateReconciler.resolve(properties.tenantId(), event.getId(), event.getEtag());
+        CalendarEventState state = eventStateReconciler.resolve(tenantId.value(), event.getId(), event.getEtag());
         // Calendar attachments are deferred until RealDriveSourceReader exists (see class
         // javadoc) - events land without them for now, so attachmentCount is always 0 here.
         return new SourceRecord(
-                RawSourceType.CALENDAR, properties.tenantId(), event.getId(), state.correlationId(),
+                RawSourceType.CALENDAR, tenantId.value(), event.getId(), state.correlationId(),
                 occurredAt, organizer, participants(event, organizer), event.getSummary(), event.getDescription(),
                 event.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), state.revision())
                 .withSourceRef(event.getId());
@@ -227,12 +230,12 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
      * a normal edit (see class javadoc) - only changeType marks this as a cancellation.
      */
     private SourceRecord toCancelledSourceRecord(Event event) {
-        CalendarEventState state = eventStateReconciler.resolve(properties.tenantId(), event.getId(), event.getEtag());
+        CalendarEventState state = eventStateReconciler.resolve(tenantId.value(), event.getId(), event.getEtag());
         Instant occurredAt = event.getUpdated() != null
                 ? Instant.ofEpochMilli(event.getUpdated().getValue())
                 : Instant.now();
         return new SourceRecord(
-                RawSourceType.CALENDAR, properties.tenantId(), event.getId(), state.correlationId(),
+                RawSourceType.CALENDAR, tenantId.value(), event.getId(), state.correlationId(),
                 occurredAt, null, List.of(), null, null,
                 event.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), state.revision(),
                 ChangeType.DELETE_REVIEW).withSourceRef(event.getId());

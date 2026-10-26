@@ -3,6 +3,7 @@ package com.rnd.bridge.intake.controller;
 import com.rnd.bridge.core.IntakeResult;
 import com.rnd.bridge.core.KeyedLock;
 import com.rnd.bridge.core.ReadCursor;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.lane.CursorStore;
 import com.rnd.bridge.intake.lane.UnstructuredIntakeLane;
 import com.rnd.bridge.intake.model.SourceRecord;
@@ -23,7 +24,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -49,8 +49,8 @@ public class UnstructuredIntakeController {
     public UnstructuredIntakeController(
             List<UnstructuredIntakeLane> lanes, CursorStore cursorStore, CalendarSourceReader calendarSourceReader,
             EmailSourceReader emailSourceReader, DriveSourceReader driveSourceReader, KeyedLock tokenCursorLock,
-            @Value("${bridge.tenant-id}") String tenantId) {
-        this.tenantId = tenantId;
+            BridgeTenantId tenantId) {
+        this.tenantId = tenantId.value();
         this.lanesBySource = lanes.stream()
                 .collect(Collectors.toMap(UnstructuredIntakeLane::sourceType, Function.identity()));
         this.cursorStore = cursorStore;

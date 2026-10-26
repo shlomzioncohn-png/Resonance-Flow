@@ -3,7 +3,6 @@ package com.rnd.bridge;
 import com.rnd.bridge.intake.config.CalendarImportProperties;
 import com.rnd.bridge.intake.config.ChatSessionProperties;
 import com.rnd.bridge.intake.config.DriveImportProperties;
-import com.rnd.bridge.intake.config.GmailImportProperties;
 import com.rnd.bridge.intake.config.GoogleOAuthProperties;
 import com.rnd.bridge.intake.config.ScopingProperties;
 import com.rnd.bridge.intake.config.SlackApiProperties;
@@ -27,7 +26,6 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
     GoogleOAuthProperties.class,
     CalendarImportProperties.class,
     DriveImportProperties.class,
-    GmailImportProperties.class,
     MediaClassificationProperties.class,
     AiProperties.class
 })

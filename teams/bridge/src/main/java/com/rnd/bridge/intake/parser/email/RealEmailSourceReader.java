@@ -14,7 +14,7 @@ import com.google.api.services.gmail.model.MessagePart;
 import com.google.api.services.gmail.model.MessagePartBody;
 import com.google.api.services.gmail.model.MessagePartHeader;
 import com.rnd.bridge.core.ReadCursor;
-import com.rnd.bridge.intake.config.GmailImportProperties;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.google.GoogleCredentialsProvider;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -66,19 +66,19 @@ public class RealEmailSourceReader implements EmailSourceReader {
     private static final Pattern ANGLE_BRACKET_EMAIL = Pattern.compile("<([^>]+)>");
 
     private final GoogleCredentialsProvider credentialsProvider;
-    private final GmailImportProperties properties;
+    private final BridgeTenantId tenantId;
     private Gmail client;
 
     @Autowired
-    public RealEmailSourceReader(GoogleCredentialsProvider credentialsProvider, GmailImportProperties properties) {
+    public RealEmailSourceReader(GoogleCredentialsProvider credentialsProvider, BridgeTenantId tenantId) {
         this.credentialsProvider = credentialsProvider;
-        this.properties = properties;
+        this.tenantId = tenantId;
     }
 
     /** Test-only seam: lets tests inject a mocked Gmail client instead of the real one client()
      * would otherwise lazily build from live Google credentials. */
-    RealEmailSourceReader(GoogleCredentialsProvider credentialsProvider, GmailImportProperties properties, Gmail client) {
-        this(credentialsProvider, properties);
+    RealEmailSourceReader(GoogleCredentialsProvider credentialsProvider, BridgeTenantId tenantId, Gmail client) {
+        this(credentialsProvider, tenantId);
         this.client = client;
     }
 
@@ -226,7 +226,7 @@ public class RealEmailSourceReader implements EmailSourceReader {
         // correlationId every time, or Mind's dedupKey() (correlationId + ":" + revision, see
         // RawObjectEvent) sees it as a brand-new logical item and duplicates it.
         String correlationId = UUID.nameUUIDFromBytes(
-                (properties.tenantId() + "|" + naturalId).getBytes(StandardCharsets.UTF_8)).toString();
+                (tenantId.value() + "|" + naturalId).getBytes(StandardCharsets.UTF_8)).toString();
         List<String> participants = participants(payload, from);
 
         StringBuilder plainTextBody = new StringBuilder();
@@ -235,7 +235,7 @@ public class RealEmailSourceReader implements EmailSourceReader {
         int attachmentCount = attachmentParts.size();
 
         records.add(new SourceRecord(
-                RawSourceType.EMAIL, properties.tenantId(), naturalId, correlationId, occurredAt, from,
+                RawSourceType.EMAIL, tenantId.value(), naturalId, correlationId, occurredAt, from,
                 participants, subject, plainTextBody.isEmpty() ? null : plainTextBody.toString(),
                 message.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, attachmentCount, List.of(), 0)
                 .withSourceRef(messageId));
@@ -244,7 +244,7 @@ public class RealEmailSourceReader implements EmailSourceReader {
         for (MessagePart attachment : attachmentParts) {
             index++;
             records.add(new SourceRecord(
-                    RawSourceType.EMAIL, properties.tenantId(), naturalId + "|attachment-" + index, correlationId,
+                    RawSourceType.EMAIL, tenantId.value(), naturalId + "|attachment-" + index, correlationId,
                     occurredAt, from, participants, null, null, attachmentBytes(gmail, message.getId(), attachment),
                     attachment.getMimeType(), attachment.getFilename(), index, attachmentCount, List.of(), 0));
         }

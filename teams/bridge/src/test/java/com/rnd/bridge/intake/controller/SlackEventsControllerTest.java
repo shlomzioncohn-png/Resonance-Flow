@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.bridge.core.IntakeResult;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.SlackApiProperties;
 import com.rnd.bridge.intake.lane.GroupStateStore;
 import com.rnd.bridge.intake.lane.UnstructuredIntakeLane;
@@ -78,7 +79,8 @@ class SlackEventsControllerTest {
     // (it never goes through this controller's routing/scheduling).
     private final SlackUserNameResolver realParserUserNameResolver = mockPassThroughResolver();
     private final SlackEventMessageParser realEventMessageParser = new SlackEventMessageParser(
-            new SlackApiProperties("xoxb-fake", "kamatech", List.of("chat-a"), "shh"), realParserUserNameResolver);
+            new SlackApiProperties("xoxb-fake", List.of("chat-a"), "shh"),
+            new BridgeTenantId("kamatech"), realParserUserNameResolver);
 
     private static SlackUserNameResolver mockPassThroughResolver() {
         SlackUserNameResolver resolver = mock(SlackUserNameResolver.class);

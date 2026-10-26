@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.SlackApiProperties;
 import com.rnd.bridge.intake.model.ChatMessage;
 import com.rnd.bridge.intake.parser.slack.SlackUserNameResolver;
@@ -33,7 +34,8 @@ class SlackEventMessageParserTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final SlackUserNameResolver userNameResolver = mock(SlackUserNameResolver.class);
     private final SlackEventMessageParser parser = new SlackEventMessageParser(
-            new SlackApiProperties("xoxb-fake", "kamatech", List.of("C123"), "shh"), userNameResolver);
+            new SlackApiProperties("xoxb-fake", List.of("C123"), "shh"),
+            new BridgeTenantId("kamatech"), userNameResolver);
 
     SlackEventMessageParserTest() {
         when(userNameResolver.resolveUserName(any())).thenAnswer(invocation -> {

@@ -20,7 +20,7 @@ import com.google.api.services.gmail.model.MessagePart;
 import com.google.api.services.gmail.model.MessagePartHeader;
 import com.google.api.services.gmail.model.Profile;
 import com.rnd.bridge.core.ReadCursor;
-import com.rnd.bridge.intake.config.GmailImportProperties;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.util.List;
@@ -38,7 +38,7 @@ import org.mockito.Mockito;
  */
 class RealEmailSourceReaderTest {
 
-    private static final GmailImportProperties PROPERTIES = new GmailImportProperties("kamatech");
+    private static final BridgeTenantId TENANT_ID = new BridgeTenantId("kamatech");
 
     private final Gmail gmail = mock(Gmail.class);
     private final Gmail.Users users = mock(Gmail.Users.class);
@@ -57,7 +57,7 @@ class RealEmailSourceReaderTest {
         when(users.messages()).thenReturn(messages);
         when(users.history()).thenReturn(history);
         when(users.getProfile("me")).thenReturn(getProfileRequest);
-        return new RealEmailSourceReader(null, PROPERTIES, gmail);
+        return new RealEmailSourceReader(null, TENANT_ID, gmail);
     }
 
     private Message message(String id, String historyId) {

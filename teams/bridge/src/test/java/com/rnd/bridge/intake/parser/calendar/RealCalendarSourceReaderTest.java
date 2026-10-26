@@ -21,6 +21,7 @@ import com.google.api.services.calendar.model.Event;
 import com.google.api.services.calendar.model.EventDateTime;
 import com.google.api.services.calendar.model.Events;
 import com.rnd.bridge.core.ReadCursor;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.CalendarImportProperties;
 import com.rnd.bridge.intake.lane.CalendarEventStateStore;
 import com.rnd.bridge.intake.model.SourceRecord;
@@ -59,7 +60,8 @@ import org.slf4j.LoggerFactory;
  */
 class RealCalendarSourceReaderTest {
 
-    private static final CalendarImportProperties PROPERTIES = new CalendarImportProperties("primary", "kamatech");
+    private static final CalendarImportProperties PROPERTIES = new CalendarImportProperties("primary");
+    private static final BridgeTenantId TENANT_ID = new BridgeTenantId("kamatech");
 
     private final Calendar calendar = mock(Calendar.class);
     private final Calendar.Events events = mock(Calendar.Events.class);
@@ -69,7 +71,7 @@ class RealCalendarSourceReaderTest {
         CalendarEventStateReconciler eventStateReconciler = new CalendarEventStateReconciler(
                 new CalendarEventStateStore(
                         new InMemoryObjectStorageClient(), ControlPlaneStateStores.inMemory(), new ObjectMapper()));
-        return new RealCalendarSourceReader(null, PROPERTIES, eventStateReconciler, calendar);
+        return new RealCalendarSourceReader(null, PROPERTIES, TENANT_ID, eventStateReconciler, calendar);
     }
 
     private Calendar.Events.List mockRequest() {

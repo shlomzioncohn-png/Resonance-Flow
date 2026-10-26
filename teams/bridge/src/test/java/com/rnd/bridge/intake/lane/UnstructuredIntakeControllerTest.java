@@ -20,6 +20,7 @@ import com.rnd.bridge.core.PayloadValidator;
 import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.core.SourceReader;
 import com.rnd.bridge.core.error.LaneException;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.controller.UnstructuredIntakeController;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.parser.calendar.CalendarReadResult;
@@ -134,7 +135,7 @@ class UnstructuredIntakeControllerTest {
     private UnstructuredIntakeController controllerFor(RawSourceType sourceType) {
         return new UnstructuredIntakeController(
                 List.of(laneFor(sourceType)), cursorStore, calendarSourceReader, emailSourceReader,
-                driveSourceReader, calendarCursorLock, "00000000-0000-0000-0000-000000000001");
+                driveSourceReader, calendarCursorLock, new BridgeTenantId("00000000-0000-0000-0000-000000000001"));
     }
 
     @Test

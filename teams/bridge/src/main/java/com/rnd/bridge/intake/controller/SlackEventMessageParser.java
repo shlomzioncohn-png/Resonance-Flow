@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.SlackApiProperties;
 import com.rnd.bridge.intake.model.ChatMessage;
 import com.rnd.bridge.intake.model.SlackMessageDeletion;
@@ -68,11 +69,14 @@ class SlackEventMessageParser {
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     private final SlackApiProperties properties;
+    private final BridgeTenantId tenantId;
     private final SlackUserNameResolver userNameResolver;
     private final HttpClient httpClient = HttpClient.newHttpClient();
 
-    SlackEventMessageParser(SlackApiProperties properties, SlackUserNameResolver userNameResolver) {
+    SlackEventMessageParser(
+            SlackApiProperties properties, BridgeTenantId tenantId, SlackUserNameResolver userNameResolver) {
         this.properties = properties;
+        this.tenantId = tenantId;
         this.userNameResolver = userNameResolver;
     }
 
@@ -151,14 +155,14 @@ class SlackEventMessageParser {
                         "Slack message_deleted deleted_ts={} disagrees with previous_message.ts={} - using deleted_ts",
                         deletedTs, previousMessage.get("ts").asText());
             }
-            return Optional.of(new SlackMessageDeletion(RawSourceType.SLACK, properties.tenantId(), channel, deletedTs));
+            return Optional.of(new SlackMessageDeletion(RawSourceType.SLACK, tenantId.value(), channel, deletedTs));
         }
         if ("message_changed".equals(subtype) && event.hasNonNull("message")) {
             JsonNode nested = event.get("message");
             if (nested.hasNonNull("subtype") && "tombstone".equals(nested.get("subtype").asText())
                     && nested.hasNonNull("ts")) {
                 return Optional.of(
-                        new SlackMessageDeletion(RawSourceType.SLACK, properties.tenantId(), channel, nested.get("ts").asText()));
+                        new SlackMessageDeletion(RawSourceType.SLACK, tenantId.value(), channel, nested.get("ts").asText()));
             }
         }
         return Optional.empty();
@@ -198,7 +202,7 @@ class SlackEventMessageParser {
         long epochMillis = Math.round(Double.parseDouble(message.getTs()) * 1000);
         return Optional.of(new ChatMessage(
                 RawSourceType.SLACK,
-                properties.tenantId(),
+                tenantId.value(),
                 message.getChannel(),
                 userNameResolver.resolveUserName(message.getUser()),
                 Instant.ofEpochMilli(epochMillis),

@@ -3,6 +3,7 @@ package com.rnd.bridge.intake.parser.whatsapp;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.WhatsAppImportProperties;
 import com.rnd.bridge.intake.model.ChatMessage;
 import java.io.IOException;
@@ -35,7 +36,7 @@ class RealWhatsAppSourceReaderTest {
         Files.write(importDir.resolve("cake-photo.jpg"), new byte[] {1, 2, 3});
 
         RealWhatsAppSourceReader reader = new RealWhatsAppSourceReader(
-                new WhatsAppImportProperties(importDir.toString(), "kamatech", "Asia/Jerusalem"));
+                new WhatsAppImportProperties(importDir.toString(), "Asia/Jerusalem"), new BridgeTenantId("kamatech"));
         List<ChatMessage> messages = reader.read();
 
         assertThat(messages).hasSize(3);
@@ -58,7 +59,7 @@ class RealWhatsAppSourceReaderTest {
     @Test
     void failsFastWhenImportDirIsNotConfigured() {
         RealWhatsAppSourceReader reader = new RealWhatsAppSourceReader(
-                new WhatsAppImportProperties(null, "kamatech", "Asia/Jerusalem"));
+                new WhatsAppImportProperties(null, "Asia/Jerusalem"), new BridgeTenantId("kamatech"));
 
         assertThatThrownBy(reader::read)
                 .isInstanceOf(IllegalStateException.class)
@@ -68,7 +69,7 @@ class RealWhatsAppSourceReaderTest {
     @Test
     void failsFastWhenImportDirDoesNotExist() {
         RealWhatsAppSourceReader reader = new RealWhatsAppSourceReader(new WhatsAppImportProperties(
-                importDir.resolve("missing").toString(), "kamatech", "Asia/Jerusalem"));
+                importDir.resolve("missing").toString(), "Asia/Jerusalem"), new BridgeTenantId("kamatech"));
 
         assertThatThrownBy(reader::read)
                 .isInstanceOf(IllegalStateException.class)

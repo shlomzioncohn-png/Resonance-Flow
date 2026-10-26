@@ -156,9 +156,12 @@ bridge:
     google:
       client-secrets-path: ${BRIDGE_GOOGLE_CLIENT_SECRETS_PATH:}
       tokens-directory: ${BRIDGE_GOOGLE_TOKENS_DIR:}
+    # tenant-id for every lane below (Email/Drive/Calendar/Slack/WhatsApp) comes from the single
+    # bridge.tenant-id setting via BridgeTenantId (com.rnd.bridge.intake.config), injected
+    # directly into each Real*SourceReader - there is deliberately no per-lane tenant-id key
+    # here anymore, so there is exactly one place to change the tenant.
     email:
       mode: fixture
-      tenant-id: ${bridge.tenant-id}
       sync:
         # Set to true to enable scheduled email sync via IntakeSyncJobs/SyncJobScheduler - off
         # by default, same convention as bridge.crm.sync.cron/github.sync.cron.
@@ -167,14 +170,12 @@ bridge:
           expression: ${BRIDGE_INTAKE_EMAIL_SYNC_CRON_EXPRESSION:0 */15 * * * ?}
     drive:
       mode: fixture
-      tenant-id: ${bridge.tenant-id}
       sync:
         cron:
           enabled: ${BRIDGE_INTAKE_DRIVE_SYNC_CRON_ENABLED:false}
           expression: ${BRIDGE_INTAKE_DRIVE_SYNC_CRON_EXPRESSION:0 */15 * * * ?}
     calendar:
       mode: fixture
-      tenant-id: ${bridge.tenant-id}
       sync:
         cron:
           enabled: ${BRIDGE_INTAKE_CALENDAR_SYNC_CRON_ENABLED:false}
@@ -187,7 +188,6 @@ bridge:
       # Only read when mode: real. Bot User OAuth Token (xoxb-...) from a Slack app installed
       # with channels:history/groups:history/files:read scopes - see plan.md.
       bot-token: ${BRIDGE_SLACK_BOT_TOKEN:}
-      tenant-id: ${bridge.tenant-id}
       # Channel IDs (Cxxxxxxxx) the bot has been invited to - no config here means "read every
       # channel", Slack has no such mode without a much broader scope.
       channels: ${BRIDGE_SLACK_CHANNELS:}
@@ -196,7 +196,6 @@ bridge:
       signing-secret: ${BRIDGE_SLACK_SIGNING_SECRET:}
     whatsapp:
       mode: fixture
-      tenant-id: ${bridge.tenant-id}
       # Only read when mode: real. See plan.md - there's no export API, so this directory is
       # filled manually from WhatsApp's own "Export Chat" feature.
       import-dir: ${BRIDGE_WHATSAPP_IMPORT_DIR:}
