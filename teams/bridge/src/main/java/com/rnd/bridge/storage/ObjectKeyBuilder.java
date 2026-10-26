@@ -50,10 +50,12 @@ public class ObjectKeyBuilder {
      * through to "json", its original/unchanged extension, so it is NOT touched by this change.
      * Role alone can't make this distinction: both the Real BODY and the Fixture BODY resolve to
      * Role.BODY via SourceRecordRefMapper.roleFor's default inference.
-     * DRIVE/CALENDAR/SLACK/WHATSAPP are deliberately NOT routed through this mimeType check - a
-     * Drive file's own mimeType can legitimately BE "text/plain" or "application/json" (it's the
-     * real file's content type, not a synthetic marker), and must still get DRIVE's fixed "json"
-     * key extension regardless. */
+     * DRIVE now also derives its extension from mimeType (see driveExtension) - RealDriveSourceReader
+     * sets mimeType to describe what was actually landed (export text, or the real file's own type),
+     * never a synthetic marker, so this is safe. FixtureDriveSourceReader never sets mimeType (stays
+     * null, intentionally not touched by this change - see driveExtension's default case), so its
+     * JSON fixture content keeps the "json" extension it always had.
+     * CALENDAR/SLACK/WHATSAPP are deliberately NOT routed through a mimeType check. */
     private String primaryExtension(SourceRecord record, Role role) {
         // Attachments never reach this method - build() branches on attachmentFilename() first -
         // so role here is always BODY or SOURCE_METADATA.
@@ -62,11 +64,37 @@ public class ObjectKeyBuilder {
             String mimeType = record.mimeType();
             return mimeType != null && mimeType.startsWith("text/plain") ? "txt" : "json";
         }
+        if (sourceType == RawSourceType.DRIVE) {
+            return driveExtension(record.mimeType());
+        }
         return switch (sourceType) {
             case EMAIL, DRIVE, CALENDAR -> "json";
             case SLACK, WHATSAPP -> "txt";
             case ZOOM, BIGBLUEBUTTON, SCANNED_DOC -> throw new IllegalArgumentException(
                     sourceType + " is produced by the meeting/doc/audio lane, not this one");
+        };
+    }
+
+    /** Explicit mimeType -> extension table for DRIVE, so the landed key matches what was
+     * actually fetched (export text, a real PDF, a real image, ...) instead of always "json".
+     * Deliberately an explicit map, not a "subtype after the slash" derivation - that would turn
+     * e.g. "application/vnd.google-apps.document" (never actually landed as record content, but
+     * defensive here) or "image/svg+xml" into a bogus extension. Anything not listed here - null,
+     * an unrecognized/vendor mimeType, or FixtureDriveSourceReader's always-null mimeType - keeps
+     * today's "json" default rather than guessing. */
+    private static String driveExtension(String mimeType) {
+        if (mimeType == null) {
+            return "json";
+        }
+        return switch (mimeType) {
+            case "text/plain" -> "txt";
+            case "application/pdf" -> "pdf";
+            case "application/json" -> "json";
+            case "image/jpeg" -> "jpg";
+            case "image/png" -> "png";
+            case "image/gif" -> "gif";
+            case "image/webp" -> "webp";
+            default -> "json";
         };
     }
 }

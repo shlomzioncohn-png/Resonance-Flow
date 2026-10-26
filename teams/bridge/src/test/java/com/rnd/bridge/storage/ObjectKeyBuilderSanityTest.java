@@ -29,7 +29,7 @@ class ObjectKeyBuilderSanityTest {
 
         assertThat(SCHEMA_PATTERN.matcher(key).matches()).isTrue();
         assertThat(key).startsWith("DRIVE/kamatech/2026-08-25/");
-        assertThat(key).endsWith(".json");
+        assertThat(key).endsWith(".jpg");
     }
 
     @Test
@@ -93,12 +93,43 @@ class ObjectKeyBuilderSanityTest {
     }
 
     @Test
-    void driveStaysJsonRegardlessOfRole() {
+    void driveExtensionDependsOnMimeTypeNotRole() {
         SourceRecord record = new SourceRecord(
                 RawSourceType.DRIVE, "kamatech", "9f8e7d6c5b", "corr-4",
                 Instant.parse("2026-08-16T20:00:00Z"), "malki@kamatech.org", List.of("malki@kamatech.org"),
-                "IMG_2043.jpg", null, "{}".getBytes(StandardCharsets.UTF_8), "image/jpeg", null, 0, 0, List.of(), 0);
+                "scan.pdf", null, "fake-pdf".getBytes(StandardCharsets.UTF_8), "application/pdf", null, 0, 0,
+                List.of(), 0);
 
-        assertThat(builder.build(record, INGESTED_AT, Role.SOURCE_METADATA)).endsWith(".json");
+        assertThat(builder.build(record, INGESTED_AT, Role.BODY)).endsWith(".pdf");
+        assertThat(builder.build(record, INGESTED_AT, Role.SOURCE_METADATA)).endsWith(".pdf");
+    }
+
+    @Test
+    void driveNativeGoogleFileExportedAsTextPlainGetsTxtExtension() {
+        SourceRecord record = new SourceRecord(
+                RawSourceType.DRIVE, "kamatech", "doc1", "corr-6",
+                Instant.parse("2026-08-16T20:00:00Z"), "malki@kamatech.org", List.of("malki@kamatech.org"),
+                "notes.doc", null, "exported text".getBytes(StandardCharsets.UTF_8), "text/plain", null, 0, 0,
+                List.of(), 0);
+
+        assertThat(builder.build(record, INGESTED_AT, Role.BODY)).endsWith(".txt");
+    }
+
+    @Test
+    void driveUnrecognizedOrNullMimeTypeDefaultsToJson() {
+        SourceRecord unrecognized = new SourceRecord(
+                RawSourceType.DRIVE, "kamatech", "f1", "corr-7",
+                Instant.parse("2026-08-16T20:00:00Z"), "malki@kamatech.org", List.of("malki@kamatech.org"),
+                "weird.bin", null, "bytes".getBytes(StandardCharsets.UTF_8), "application/octet-stream", null, 0, 0,
+                List.of(), 0);
+        // FixtureDriveSourceReader never sets mimeType on its records (stays null) - must keep
+        // its original ".json" extension, since its content is genuinely the fixture JSON text.
+        SourceRecord fixture = new SourceRecord(
+                RawSourceType.DRIVE, "kamatech", "f2", "corr-8",
+                Instant.parse("2026-08-16T20:00:00Z"), "malki@kamatech.org", List.of("malki@kamatech.org"),
+                "fixture.json", null, "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), 0);
+
+        assertThat(builder.build(unrecognized, INGESTED_AT, Role.BODY)).endsWith(".json");
+        assertThat(builder.build(fixture, INGESTED_AT, Role.BODY)).endsWith(".json");
     }
 }
