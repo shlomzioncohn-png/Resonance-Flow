@@ -104,18 +104,14 @@ def test_a_recipient_flag_that_is_not_a_yes_or_no_never_raises(
     assert "owner_is_recipient" in caplog.text
 
 
-def test_the_recipient_and_a_name_together_keep_the_recipient(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """ "Hi Dana, please sign" sent to Dana gives both answers for one person,
-    and her address is surer than her first name. Logged, to count it."""
+def test_the_recipient_and_a_name_together_are_both_kept() -> None:
+    """Which one wins needs the item's recipients, which parsing does not see:
+    a chat has none, and its name must not be lost to a stray flag. Settled in
+    task_creation/owner.what_to_look_up."""
 
-    with caplog.at_level(logging.WARNING, logger="mind.extraction"):
-        task = _task("Dana", recipient=True)
+    task = _task("Dana", recipient=True)
 
-    assert (task.owner_mention, task.owner_is_recipient) == (None, True)
-    assert "both" in caplog.text
-    assert "Dana" not in caplog.text
+    assert (task.owner_mention, task.owner_is_recipient) == ("Dana", True)
 
 
 def test_a_name_other_than_the_recipient_is_kept() -> None:
@@ -148,3 +144,16 @@ def test_a_mention_with_no_letters_says_so(written: str, caplog: pytest.LogCaptu
 
     assert "no letters" in caplog.text
     assert "single letters" not in caplog.text
+
+
+@pytest.mark.parametrize("written", ["someone", "Someone", "everyone", "you", "me", "we", "Nobody"])
+def test_a_word_for_nobody_in_particular_is_not_a_name(
+    written: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """ "Can someone check the deal?": "someone" is in the content, so grounding
+    would keep it, and the directory would be asked for it."""
+
+    with caplog.at_level(logging.WARNING, logger="mind.extraction"):
+        assert _task(written).owner_mention is None
+
+    assert "not a person" in caplog.text

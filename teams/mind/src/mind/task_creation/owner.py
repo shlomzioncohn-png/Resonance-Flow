@@ -8,6 +8,7 @@ import logging
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from email.utils import parseaddr
 from typing import Protocol
 from uuid import UUID
 
@@ -66,22 +67,19 @@ def _sender_words(sender: str) -> set[str]:
 
 
 def is_the_sender(owner_mention: str, sender: str | None) -> bool:
-    """Whether the mention and the sender are spelled from the same words,
-    one taking in all of the other's.
+    """Whether every word of the mention is a word of the sender.
 
     The issue rules the sender out, and the prompt asks for it, but a sender
-    who signs "Thanks, Avi" has written the name, so grounding keeps it. Both
-    ways: "Avi" for avi.katz@, and "Lisa Grant" for a sender the record knows
-    only as "Lisa". A heuristic: an address that does not spell the name
-    ("ak@" for Avraham) is missed, and a mention that shares only part of the
-    sender ("Avi Levi" for avi.katz@) is someone else.
+    who signs "Thanks, Avi" has written the name, so grounding keeps it. One
+    way only: "Dana Levi" is someone else for dana@, though "Lisa Grant" is
+    then missed for a sender the record knows only as "Lisa". A heuristic: an
+    address that does not spell the name ("ak@" for Avraham) is missed too.
     """
 
     if not sender:
         return False
     mention = set(_WORD.findall(owner_mention.lower()))
-    words = _sender_words(sender)
-    return bool(mention) and bool(words) and (mention <= words or words <= mention)
+    return bool(mention) and mention <= _sender_words(sender)
 
 
 def what_to_look_up(
@@ -93,22 +91,30 @@ def what_to_look_up(
 ) -> str | None:
     """What to ask the directory for: an address, a name, or None for nothing.
 
-    The recipient comes first, as when `ExtractedFields` is parsed: given both
-    answers, the name is not looked at (the model drops it there already).
     The recipient is looked up by the address in the email record, and only
-    when there is one: which of several was asked is a guess. A name is
-    looked up unless it is the sender's own. Logged when an answer is
+    when there is one: which of several was asked is a guess. Then it wins
+    over a name: mostly both are one person ("Hi Dana, please sign" sent to
+    Dana), and her address is surer than her first name. Without one
+    recipient (a chat, several) the name is looked up instead, so a stray
+    flag costs nothing. An email's one recipient who is its sender is no
+    owner, nor is a name that is the sender's own. Logged when an answer is
     dropped, never with the name or the address.
     """
 
+    if owner_is_recipient and len(recipients) == 1:
+        (address,) = recipients
+        if sender and parseaddr(sender)[1].lower() == address.lower():
+            logger.info("owner: the email's one recipient is its sender; no owner sent")
+            return None
+        if owner_mention is not None:
+            logger.info("owner: both the recipient and a name; keeping the recipient")
+        return address
     if owner_is_recipient:
-        if len(recipients) == 1:
-            return recipients[0]
         logger.info(
-            "owner: the task is the recipient's, and the item has %d recipients; no owner sent",
+            "owner: the task is the recipient's, and the item has %d recipients; %s",
             len(recipients),
+            "looking up the name" if owner_mention else "no owner sent",
         )
-        return None
     if owner_mention is None:
         return None
     if is_the_sender(owner_mention, sender):

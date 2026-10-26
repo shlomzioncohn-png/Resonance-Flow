@@ -1040,12 +1040,13 @@ happens next, from the lookup in Inbox's directory to the confidence, is in
 - **Optional, never a repair round** (`models.py`). An unusable value is no
   owner and is logged without the name: not a string, several different names
   (Inbox takes one suggested owner), an address, a placeholder, longer than
-  `MAX_OWNER_MENTION_LENGTH`. The same name twice is one owner. A recipient
-  flag that is not a yes or a no is false.
-- **Both answers keep the recipient.** Mostly they are one person twice, and
-  her address is surer than her first name. When the name was someone else
-  ("Yossi will sign it" sent to Dana) this picks the wrong one; it is logged
-  for live runs to count. "Dana, please ask Yossi" asks Dana, so it is hers.
+  `MAX_OWNER_MENTION_LENGTH`, single letters (a speaker's label), a word for
+  nobody in particular ("someone", "everyone", "you"). The same name twice is
+  one owner. A recipient flag that is not a yes or a no is false.
+- **Both answers are kept here.** Which one wins needs the item's recipients,
+  which this stage does not see: a chat has none, and a stray flag must not
+  cost it a grounded name. `task_creation/owner.what_to_look_up` settles it
+  (see "The owner" there). "Dana, please ask Yossi" asks Dana, so it is hers.
 - **Grounded more strictly than a mention** (`grounding.ground_owner_mention`).
   A name is not a paraphrase: no word may be missing, and the words must stand
   side by side, in either order ("Cohen, Dana" writes "Dana Cohen"; "Dana Levi

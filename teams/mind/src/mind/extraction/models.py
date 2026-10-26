@@ -49,6 +49,15 @@ MAX_MENTIONS_PER_TASK = 10
 # the model is echoing the content, and a lookup would match nobody anyway.
 MAX_OWNER_MENTION_LENGTH = 100
 
+# Words the content uses for nobody in particular. Said in the content, so
+# grounding would keep them, and the directory would be asked for "someone".
+_NOT_A_PERSON = frozenset(
+    {
+        "someone", "somebody", "anyone", "anybody", "everyone", "everybody",
+        "nobody", "no one", "all", "you", "me", "we", "us", "they", "them",
+    }
+)  # fmt: skip
+
 # A word of a name: letters and digits, so "Dana C." is "Dana" and "C".
 _NAME_WORD = re.compile(r"[^\W_]+")
 
@@ -599,7 +608,9 @@ class ExtractedFields(BaseModel):
     # Whether the task is the email's recipient's: "you are asked to sign".
     # The model only says so; the address is taken from the email record by
     # code, and only when there is one recipient, since a model copying one
-    # off the To line could as well copy the From line's.
+    # off the To line could as well copy the From line's. Given with a name,
+    # both are kept: which one wins needs the item's recipients, so it is
+    # settled in task_creation/owner.what_to_look_up.
     owner_is_recipient: bool = False
 
     @field_validator("owner_mention", mode="before")
@@ -634,6 +645,12 @@ class ExtractedFields(BaseModel):
             return None
         name = value.strip()
         if name.lower() in _NULL_PLACEHOLDERS:
+            return None
+        if name.lower() in _NOT_A_PERSON:
+            logger.warning(
+                "extraction: owner_mention came back as a word that is not a person; "
+                "recording no owner"
+            )
             return None
         if "@" in name:
             logger.warning(
@@ -679,23 +696,6 @@ class ExtractedFields(BaseModel):
                 type(value).__name__,
             )
             return False
-
-    @model_validator(mode="after")
-    def one_owner_answer_at_most(self) -> Self:
-        """The recipient and a name are two answers to one question; the
-        recipient is kept (#132). Mostly it is one person twice ("Hi Dana,
-        please sign" sent to Dana), and her address is surer than her name.
-        When the name was someone else ("Yossi will sign it" sent to Dana),
-        this picks the wrong one, so it is logged, never named, for live runs
-        to count. "Dana, please ask Yossi" is not that case: it asks Dana."""
-
-        if self.owner_is_recipient and self.owner_mention is not None:
-            logger.warning(
-                "extraction: the owner came back as both the recipient and a name; "
-                "keeping the recipient"
-            )
-            self.owner_mention = None
-        return self
 
     @field_validator("description", "source_ref", mode="after")
     @classmethod

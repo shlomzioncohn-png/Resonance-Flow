@@ -253,17 +253,23 @@ Mind suggests an owner; it never assigns one (#132). What reaches Inbox is
   email asks the person it is sent to. That person's address is taken from
   the email record, and only when there is one recipient: a model copying it
   off the To line could as well copy the From line's. `owner.what_to_look_up`
-  turns the two into the one string the directory is asked for, or none. An
-  address is found only once #131 matches addresses exactly, as agreed with
-  its author; #131's draft matches words, and an address matches nobody there.
+  turns the two into the one string the directory is asked for, or none. With
+  one recipient the address wins over a name: mostly both are one person ("Hi
+  Dana, please sign" sent to Dana), and her address is surer than her first
+  name; when the name was someone else ("Yossi will sign it" sent to Dana)
+  this picks the wrong one, so it is logged, to count. Without one recipient
+  (a chat, several) the name is looked up instead. An email whose one
+  recipient is its sender has no owner. An address is found only once #131
+  matches addresses exactly, as agreed with its author; #131's draft matches
+  words, and an address matches nobody there.
 - **The sender is never the owner.** The prompt says so, but a sender who signs
   "Thanks, Avi" has written the name, so grounding keeps it, and a live run
-  returned it. `owner.is_the_sender` drops a name spelled from the same
-  words as the sender, either one taking in all of the other's: the display
-  name and the address before its "@", never the domain ("Avi" for
-  `avi.katz@…`, "Lisa Grant" for a sender known as "Lisa"). A heuristic:
-  `ak@` for Avraham is missed, and a name that shares only part of the sender
-  ("Avi Levi" for `avi.katz@…`) is kept as someone else.
+  returned it. `owner.is_the_sender` drops a name whose every word is the
+  sender's: the display name and the address before its "@", never the
+  domain ("Avi" for `avi.katz@…`). One way only, so another person with the
+  sender's first name ("Dana Levi" for `dana@…`) is kept. A heuristic: `ak@`
+  for Avraham is missed, and so is "Lisa Grant" for a sender the record knows
+  only as "Lisa"; a name with a word of its own ("Avi Levi") is someone else.
 
 ### Choosing one user (`owner.choose_owner`)
 

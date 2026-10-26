@@ -215,11 +215,24 @@ def test_neither_answer_is_nothing_to_look_up() -> None:
     assert _look_up() is None
 
 
-def test_the_recipient_comes_before_a_name() -> None:
-    """The rule `ExtractedFields` applies when parsing (#132): both answers
-    keep the recipient. Repeated here, so the order cannot drift apart."""
+def test_with_one_recipient_the_recipient_comes_before_a_name(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """ "Hi Dana, please sign" sent to Dana: both answers, one person, and her
+    address is surer than her first name. Logged without either, to count it."""
 
-    assert _look_up("Yossi Levi", recipient=True) == DANA
+    with caplog.at_level(logging.INFO, logger="mind.task_creation"):
+        assert _look_up("Dana", recipient=True) == DANA
+
+    assert "both" in caplog.text
+    assert "Dana" not in caplog.text and "dana" not in caplog.text
+
+
+@pytest.mark.parametrize("recipients", [(), (DANA, "moshe.katz@acme-demo.test")])
+def test_without_one_recipient_the_name_is_looked_up(recipients: tuple[str, ...]) -> None:
+    """A chat's stray recipient flag must not cost it Malki."""
+
+    assert _look_up("Malki", recipient=True, recipients=recipients, sender=None) == "Malki"
 
 
 def test_the_recipient_log_does_not_call_a_chat_an_email(
@@ -232,8 +245,24 @@ def test_the_recipient_log_does_not_call_a_chat_an_email(
     assert "0 recipients" in caplog.text
 
 
-def test_a_fuller_name_of_a_sender_known_by_first_name_is_the_sender() -> None:
-    """The record says only "Lisa", the signature says "Lisa Grant"."""
+def test_someone_sharing_the_senders_first_name_is_not_the_sender() -> None:
+    """dana@ writes "Please ask Dana Levi to sign": another Dana, kept."""
 
-    assert is_the_sender("Lisa Grant", "Lisa")
-    assert is_the_sender("Avi Katz Cohen", SENDER)
+    assert not is_the_sender("Dana Levi", "dana@acme-demo.test")
+
+
+def test_a_fuller_name_than_the_record_knows_is_a_known_miss() -> None:
+    """One way only: the record's "Lisa" does not spell "Lisa Grant", and
+    blocking it would block every other Lisa too."""
+
+    assert not is_the_sender("Lisa Grant", "Lisa")
+
+
+@pytest.mark.parametrize("sender", [DANA, "Dana Cohen <Dana.Cohen@acme-demo.test>"])
+def test_an_email_to_oneself_has_no_owner(sender: str, caplog: pytest.LogCaptureFixture) -> None:
+    """The one recipient is the sender: the issue rules the sender out."""
+
+    with caplog.at_level(logging.INFO, logger="mind.task_creation"):
+        assert _look_up(recipient=True, sender=sender) is None
+
+    assert "sender" in caplog.text
