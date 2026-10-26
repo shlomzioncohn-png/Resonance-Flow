@@ -292,7 +292,9 @@ bridge:
       # Bump on every prompt change in ModelMediaClassifier, so results stay comparable.
       # v3: the text sent to the model is PII-redacted (bridge.ai), so the input changed.
       # v4: content-is-data rule against prompt injection; transcript fenced in <transcript>.
-      prompt-version: v4
+      # v5: Hebrew/English transcripts, concrete TEST cues, opening-minutes caution, a high bar
+      # for TEST/SOCIAL confidence (they are excluded), category kept separate from quality.
+      prompt-version: v5
       # Which model, which key, fallback and limits: bridge.ai.usages.media-meeting /
       # media-document below (the shared AI infrastructure), not here.
     zoom:

@@ -113,14 +113,25 @@ public class ModelMediaClassifier {
 
     private static final String MEETING_PROMPT = SHARED_RULES + """
 
-            The item is a recorded meeting, given as its topic and a transcript excerpt between
-            <transcript> and </transcript>.
+            The item is a recorded meeting, given as its topic, duration, headcount and a transcript
+            excerpt between <transcript> and </transcript>. The transcript may be in Hebrew, English
+            or both; judge it in whatever language it is in.
             categories:
               PLANNING: planning or prioritizing work. STANDUP: short status round.
               CUSTOMER_CALL: with a customer, prospect or partner. INTERVIEW: a hiring interview.
               ONE_ON_ONE: a manager/report or peer 1:1. SOCIAL: non-work chat.
-              TEST: a mic/connection check or recording with no real content.
+              TEST: a mic/connection check or a recording with no real content - e.g. only
+                "can you hear me", "testing", "one, two", "שומעים אותי", "אחת שתיים", silence
+                or background noise, with no discussion of work.
               OTHER: anything else.
+            The first minutes of a real meeting often hold greetings, small talk and mic checks:
+            classify by the excerpt as a whole, not by how it opens.
+            TEST and SOCIAL items are dropped from the pipeline, so a real work meeting wrongly
+            labeled either one is lost. Give TEST or SOCIAL a category_confidence of 0.8 or more
+            only when the excerpt clearly holds no work discussion at all; if any part may be
+            work, lower it.
+            Category and quality are separate: background noise with no speech is TEST with
+            quality POOR; a real meeting with noisy audio keeps its real category, with quality POOR.
             """;
 
     private static final String DOCUMENT_PROMPT = SHARED_RULES + """
