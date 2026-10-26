@@ -15,12 +15,12 @@ The keys read here, one subtree per provider:
         base_url: https://api.deepseek.com
         model: deepseek-chat
         timeout_seconds: 60
-        max_output_tokens: 2400
+        max_output_tokens: 2700
       gemini:
         base_url: https://generativelanguage.googleapis.com
         model: gemini-3.6-flash
         timeout_seconds: 60
-        max_output_tokens: 2400
+        max_output_tokens: 2700
         thinking_budget: 0
     # secrets.yaml
     llm:
@@ -46,8 +46,10 @@ DEFAULT_TIMEOUT_SECONDS = 60.0
 # deadline. Measured on AMI IS1008b (2026-10-22): 11 tasks in 971 tokens, about
 # 88 each, before the deadline. With it (#960, 62 DEV persona tasks, gemini-
 # 3.6-flash): 136 a task on average, 215 at most, for the longer descriptions
-# of single-task texts. tests/extraction ties the cap below to it.
-TOKENS_PER_TASK = 160
+# of single-task texts. With the owner's two keys (#132, 2026-10-26, AMI
+# IS1008b and IB4003 and the design meeting, twice each): 101 to 169 a task.
+# tests/extraction ties the cap below to it.
+TOKENS_PER_TASK = 180
 
 # An extraction answer is a list of up to MAX_TASKS_PER_TEXT tasks (#690), at
 # TOKENS_PER_TASK each. At the cap the answer is cut mid-object and refused, so
@@ -55,7 +57,7 @@ TOKENS_PER_TASK = 160
 # runaway generation, and only the tokens actually written are billed. A model
 # that ignores thinkingBudget 0 (gemini-3.8-flash) spends part of this cap on
 # thinking, so raise it when switching to one.
-DEFAULT_MAX_OUTPUT_TOKENS = 2400
+DEFAULT_MAX_OUTPUT_TOKENS = 2700
 
 GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
 GEMINI_DEFAULT_API_VERSION = "v1beta"

@@ -15,6 +15,8 @@ Bridge already computes the plain text, and landing it is asked of Bridge.
 
 import json
 import logging
+from dataclasses import dataclass
+from email.utils import getaddresses
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +34,53 @@ def _texts(value: object) -> list[str]:
     return [" ".join(v.split()) for v in values if isinstance(v, str) and v.strip()]
 
 
+@dataclass(frozen=True)
+class EmailBody:
+    """An email's text, and who it is from and to, read from the record once.
+
+    The sender and recipients are for the owner (#132): the one recipient
+    asked may be it, the sender never is. They come from the record, never
+    from the text, where the From and To lines are only for the model.
+    """
+
+    text: str
+    sender: str | None = None
+    recipients: tuple[str, ...] = ()
+
+
+def _sender(value: object) -> str | None:
+    """One sender, or None. An address record keeps its name beside the
+    address ("Lisa Grant <lisa@…>"), and a name with no address is kept
+    alone: a sender's name is often not spelled by the address, and it is
+    what tells their signature ("Thanks, Lisa") apart."""
+
+    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], dict):
+        value = value[0]
+    if isinstance(value, dict):
+        emails = _texts(value)
+        email = emails[0] if emails else None
+        name = value.get("name")
+        name = " ".join(name.split()) if isinstance(name, str) else ""
+        if email and name:
+            return f"{name} <{email}>"
+        return email or name or None
+    senders = _texts(value)
+    return senders[0] if len(senders) == 1 else None
+
+
+def _addresses(value: object) -> tuple[str, ...]:
+    """Each recipient's bare address. A header writes people as
+    "Dana Cohen <dana@…>", several to a string, and #131 matches the address
+    alone, exactly; what holds no address names nobody to look up."""
+
+    return tuple(address for _, address in getaddresses(_texts(value)) if "@" in address)
+
+
 def email_body_text(text: str, object_key: str) -> str:
+    return read_email_body(text, object_key).text
+
+
+def read_email_body(text: str, object_key: str) -> EmailBody:
     try:
         record = json.loads(text.lstrip("\ufeff"))
     except (ValueError, RecursionError):  # nested too deep is unreadable too
@@ -49,8 +97,9 @@ def email_body_text(text: str, object_key: str) -> str:
             )
         else:
             logger.warning("email_body: %s is not an email record, sent as it is", object_key)
-        return text
+        return EmailBody(text)
 
+    sender, recipients = _sender(record.get("from")), _addresses(record.get("to"))
     lines = [
         f"{label}: {', '.join(values)}"
         for label, field in _HEADERS
@@ -62,5 +111,5 @@ def email_body_text(text: str, object_key: str) -> str:
         if names:
             lines.append(f"Attachments: {', '.join(names)}")
     if not lines:
-        return record["body"]
-    return "\n".join(lines) + "\n\n" + record["body"]
+        return EmailBody(record["body"], sender, recipients)
+    return EmailBody("\n".join(lines) + "\n\n" + record["body"], sender, recipients)

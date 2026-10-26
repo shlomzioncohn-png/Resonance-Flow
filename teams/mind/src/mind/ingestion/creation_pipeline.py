@@ -2,11 +2,14 @@
 (#690: none, one or several), check the tenant's index for each, and ask Inbox
 to create the new ones.
 
-    ExtractionItem ─► extract ─► to_task_creation_requested ─► find_duplicate ─► flow.send
+    ExtractionItem ─► extract ─► to_task_creation_requested ─► find_duplicate ─► owner ─► flow.send
                         │              (one per task)          (tenant's index)
                   failure: see                                     │
                   below                                   match: logged at INFO,
                                                           not sent
+
+The owner (#132) is looked up only for a task that is sent, and only when the
+pipeline has a directory: see task_creation/README.md, "The owner".
 
 Failures, the same two kinds as `landed_consumer.py`:
 
@@ -41,7 +44,9 @@ from mind.contracts.task_creation_requested import TaskCreationRequested
 from mind.embeddings.base import SearchResult
 from mind.extraction.assembly import to_task_creation_requested
 from mind.extraction.extractor import ExtractionFailure, ExtractionItem, ExtractionOutcome
+from mind.extraction.models import ExtractedFields
 from mind.ingestion.event_objects import tenant_uuid
+from mind.task_creation.owner import OwnerDirectory, choose_owner, what_to_look_up
 
 logger = logging.getLogger(__name__)
 
@@ -113,11 +118,45 @@ class CreationPipeline:
         find_duplicate: FindDuplicate,
         sender: Sender,
         deadline_settings: DeadlineSettings,
+        directory: OwnerDirectory | None = None,
     ) -> None:
         self._extract = extract
         self._find_duplicate = find_duplicate
         self._sender = sender
         self._deadline_settings = deadline_settings
+        # Inbox's users, for the suggested owner (#132). None sends no owner.
+        self._directory = directory
+
+    def _with_owner(
+        self,
+        request: TaskCreationRequested,
+        fields: ExtractedFields,
+        item: ExtractionItem,
+        tenant_id: UUID,
+    ) -> TaskCreationRequested:
+        """The request with Mind's suggested owner, or as it was when there is none."""
+
+        if self._directory is None:
+            return request
+        look_up = what_to_look_up(
+            fields.owner_mention,
+            fields.owner_is_recipient,
+            sender=item.sender,
+            recipients=item.recipients,
+        )
+        if look_up is None:
+            return request
+        # A blocking call, like the extraction above: #131 answers from its
+        # cache, and asks Inbox only when that has expired.
+        owner = choose_owner(self._directory.find_candidates(tenant_id, look_up))
+        if owner is None:
+            return request
+        return request.model_copy(
+            update={
+                "suggested_owner_user_id": owner.user_id,
+                "suggested_owner_confidence": owner.confidence,
+            }
+        )
 
     async def handle(self, event: RawObjectEvent, items: list[ExtractionItem]) -> list[UUID]:
         """Send one creation request per new task the items hold; return their correlation_ids."""
@@ -170,6 +209,7 @@ class CreationPipeline:
                     )
                     continue
 
+                request = self._with_owner(request, task.fields, item, tenant_id)
                 sent.append(
                     await self._sender.send(
                         request,
