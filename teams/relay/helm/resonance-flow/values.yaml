@@ -532,7 +532,9 @@ components:
     enabled: true
     replicaCount: 1
     image:
-      # In-memory Apicurio registry - not durable, fine for dev/CI only.
+      # In-memory Apicurio registry - not durable, fine for dev/CI only. Any restart (e.g. a
+      # liveness kill under load) drops every schema: rerun schema-sync-hook, then restart the
+      # producers - Confluent clients cache the latest version they looked up.
       repository: "apicurio/apicurio-registry-mem"
       pullPolicy: IfNotPresent
       tag: "2.5.11.Final"
@@ -682,6 +684,9 @@ kafka:
   controller:
     replicaCount: 1
     controllerOnly: false
+    # Bitnami's default heap is 75% of the limit (576Mi of 768Mi), leaving too little for
+    # Kafka's off-heap memory - it got OOMKilled under load. Kafka leans on the page cache.
+    heapOpts: -XX:InitialRAMPercentage=50 -XX:MaxRAMPercentage=50
     resources:
       # 192Mi was OOMKilling the JVM before it finished KRaft storage formatting on
       # startup (verified locally - combined broker+controller needs more headroom).
@@ -713,7 +718,9 @@ minio:
       cpu: 100m
       memory: 128Mi
     limits:
-      cpu: 150m
+      # Bitnami's setup script gives each `mc` call a fixed 5s timeout; at 150m they took
+      # 4-7s, so it misread MinIO as stopped and crashed on "port already in use".
+      cpu: 300m
       memory: 192Mi
 postgresql:
   enabled: true
