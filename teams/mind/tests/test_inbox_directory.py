@@ -612,13 +612,64 @@ def test_a_failure_on_the_teams_list_throws_away_the_users_too(caplog):
 
 
 def test_a_good_answer_logs_nothing(caplog):
-    def handler(request):
-        return httpx.Response(200, json=_page([]))
+    tenant = uuid4()
+    someone_else = _user(tenant, display_name="Yossi Katz")
 
-    result, records = _find_and_log(handler, caplog)
+    def handler(request):
+        rows = [someone_else] if request.url.path == "/api/v1/users" else []
+        return httpx.Response(200, json=_page(rows))
+
+    result, records = _find_and_log(handler, caplog, tenant)
+
+    assert result == []  # nobody called Dana, which is not a problem
+    assert records == []
+
+
+def test_a_tenant_for_which_inbox_gives_nothing_at_all_is_logged_once(caplog):
+    # With Inbox's tenantId filter a wrong tenant id is an empty answer, not rows the
+    # filter here drops, so nothing else would say so.
+    tenant, clock, requests = uuid4(), _Clock(), []
+    directory = _cached_directory(clock, requests, cache_ttl_seconds=60)
+
+    with caplog.at_level(logging.WARNING, logger="mind.integrations"):
+        directory.find_candidates(tenant, "Dana")
+        clock.now += 61  # the lists are asked for again
+        directory.find_candidates(tenant, "Dana")
+
+    assert len(requests) == 4
+    assert len(caplog.records) == 1
+    assert "no users and no teams" in caplog.records[0].getMessage()
+
+
+def test_the_nothing_at_all_warning_comes_back_after_people_do(caplog):
+    tenant, clock, requests = uuid4(), _Clock(), []
+    state = {}
+    directory = _cached_directory(clock, requests, state, cache_ttl_seconds=60)
+
+    with caplog.at_level(logging.WARNING, logger="mind.integrations"):
+        directory.find_candidates(tenant, "Dana")
+        state["users"] = [_user(tenant)]
+        clock.now += 61
+        directory.find_candidates(tenant, "Dana")
+        state["users"] = []
+        clock.now += 61
+        directory.find_candidates(tenant, "Dana")
+
+    assert len(caplog.records) == 2
+
+
+def test_rows_that_come_back_but_are_all_inactive_get_one_explanation_not_two(caplog):
+    tenant = uuid4()
+
+    def handler(request):
+        rows = [_user(tenant, status="SUSPENDED")] if request.url.path == "/api/v1/users" else []
+        return httpx.Response(200, json=_page(rows))
+
+    result, records = _find_and_log(handler, caplog, tenant)
 
     assert result == []
-    assert records == []
+    assert len(records) == 1
+    assert "none are active" in records[0].getMessage()
 
 
 # --- Remembering Inbox's lists (step 4) ---------------------------------------------
@@ -834,6 +885,87 @@ def test_a_close_one_word_username_does_not_beat_the_real_name():
     found = _inbox([fuss]).find_candidates(tenant, "Michal")
 
     assert _found(found) == [(AssigneeType.USER, fuss["id"], 0.7)]
+
+
+def test_a_mention_that_is_an_address_finds_the_user_with_that_email_ignoring_case():
+    tenant = uuid4()
+    cohen = _user(tenant, email="Dana.Cohen@Acme.com")
+    levi = _user(tenant, display_name="Dana Levi", email="dana.levi@acme.com")
+
+    found = _inbox([cohen, levi]).find_candidates(tenant, " dana.cohen@acme.COM ")
+
+    assert _found(found) == [(AssigneeType.USER, cohen["id"], 1.0)]
+
+
+def test_an_address_with_no_match_does_not_fall_back_to_the_name_in_it():
+    tenant = uuid4()
+    cohen = _user(tenant, display_name="Dana Cohen", email="dana.cohen@acme.com")
+
+    found = _inbox([cohen]).find_candidates(tenant, "dana.cohen@gmail.com")
+
+    assert found == []
+
+
+def test_two_users_whose_emails_differ_only_in_case_are_both_returned_as_a_tie():
+    tenant = uuid4()
+    first = _user(tenant, email="dana.cohen@acme.com")
+    second = _user(tenant, email="Dana.Cohen@acme.com")
+
+    found = _inbox([first, second]).find_candidates(tenant, "dana.cohen@acme.com")
+
+    assert [c.score for c in found] == [1.0, 1.0]
+    assert [str(c.id) for c in found] == sorted([first["id"], second["id"]])
+
+
+def test_a_user_with_no_email_and_a_team_never_match_an_address():
+    tenant = uuid4()
+    no_email = _user(tenant, display_name="dana.cohen@acme.com")  # not an email field
+    team = _team(tenant, name="dana.cohen@acme.com")
+
+    found = _inbox([no_email], [team]).find_candidates(tenant, "dana.cohen@acme.com")
+
+    assert found == []
+
+
+def test_a_second_lookup_of_an_address_makes_no_http_request():
+    tenant, clock, requests = uuid4(), _Clock(), []
+    cohen = _user(tenant, email="dana.cohen@acme.com")
+    directory = _cached_directory(clock, requests, {"users": [cohen]}, cache_ttl_seconds=300)
+
+    first = directory.find_candidates(tenant, "dana.cohen@acme.com")
+    second = directory.find_candidates(tenant, "Dana.Cohen@ACME.com")
+
+    assert _found(first) == _found(second) == [(AssigneeType.USER, cohen["id"], 1.0)]
+    assert len(requests) == 2  # one read of users and one of teams, for both lookups
+
+
+def test_an_address_lookup_gives_nothing_and_does_not_raise_when_inbox_is_down(caplog):
+    def handler(request):
+        return httpx.Response(503, text="down")
+
+    with caplog.at_level(logging.WARNING, logger="mind.integrations"):
+        found = _directory(handler).find_candidates(uuid4(), "dana.cohen@acme.com")
+
+    assert found == []
+    assert len(caplog.records) == 1
+    assert "answered 503" in caplog.records[0].getMessage()
+
+
+def test_the_tenant_is_sent_to_inbox_as_a_filter_and_rows_are_still_filtered_here():
+    tenant, other = uuid4(), uuid4()
+    requests = []
+    wanted = _user(tenant, display_name="Dana Cohen")
+    stranger = _user(other, display_name="Dana Cohen")  # an Inbox that ignores the filter
+
+    def handler(request):
+        requests.append(request)
+        rows = [wanted, stranger] if request.url.path == "/api/v1/users" else []
+        return httpx.Response(200, json=_page(rows))
+
+    found = _directory(handler).find_candidates(tenant, "Dana Cohen")
+
+    assert [r.url.params["tenantId"] for r in requests] == [str(tenant), str(tenant)]
+    assert _found(found) == [(AssigneeType.USER, wanted["id"], 1.0)]
 
 
 def test_a_user_is_found_by_username():

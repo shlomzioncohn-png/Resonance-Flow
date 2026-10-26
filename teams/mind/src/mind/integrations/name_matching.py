@@ -1,7 +1,9 @@
 """How well a name found in text matches a name in Inbox (#131).
 
 Pure functions: strings in, a score from 0 to 1 out. No network, no state, so
-the table of cases agreed for #131 can be a plain parametrized test.
+the table of cases agreed for #131 can be a plain parametrized test. Also here,
+for the same reason, `is_email_address`: it decides whether a mention is matched
+by its words or, as an address, against the users' emails (inbox_directory.py).
 
 The rules are ours, written down here, not learned. They compare word with
 word, never the two strings as a whole: a string comparison is swayed by how
@@ -55,6 +57,21 @@ PARTIAL_SCORE = 0.7
 INITIAL_SIMILARITY = 0.9
 
 _WORD_BOUNDARY = re.compile(r"[\s._-]+")
+
+
+_EMAIL = re.compile(r"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+")
+
+
+def is_email_address(text: str | None) -> bool:
+    """Whether a mention is an email address and nothing else.
+
+    "Dana Cohen <dana@acme.com>" is not: whoever extracts the mention hands over
+    the address alone (agreed with #132). Deliberately plain, not a validator.
+    """
+
+    if not text:
+        return False
+    return _EMAIL.fullmatch(text.strip()) is not None
 
 
 def words(text: str | None) -> tuple[str, ...]:

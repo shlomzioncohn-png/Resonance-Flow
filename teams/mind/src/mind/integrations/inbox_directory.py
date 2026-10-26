@@ -33,7 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from mind.config import InboxDirectorySettings
 from mind.contracts import AssigneeType
-from mind.integrations.name_matching import best_score, words
+from mind.integrations.name_matching import best_score, is_email_address, words
 
 logger = logging.getLogger("mind.integrations")
 
@@ -71,6 +71,8 @@ class _InboxUser(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     username: str | None = None
+    # Read only to match a mention that is an address; never logged.
+    email: str | None = None
     status: str
     tenant: _TenantRef
 
@@ -234,16 +236,24 @@ class InboxDirectory:
 
         Only active ones, only from that tenant. Empty when nothing matches, or
         when Inbox cannot be asked -- never an exception.
+
+        A `name` that is an email address is a different lookup: it is compared
+        with the users' emails, exactly and ignoring case, and never falls back to
+        the name in it. Only users can match (see `_candidates_by_email`).
         """
 
-        mention_words = words(name)
-        if not mention_words:
+        address = is_email_address(name)
+        mention_words = () if address else words(name)
+        if not address and not mention_words:
             return []
 
         loaded = self._load(tenant_id)
         if loaded is None:
             return []
         users, teams = loaded
+
+        if address:
+            return self._candidates_by_email(name, users)
 
         scored = [
             *((AssigneeType.USER, u.id, best_score(mention_words, _user_names(u))) for u in users),
@@ -256,6 +266,28 @@ class InboxDirectory:
         ]
         # Best first; the id breaks a tie so the order is the same on every run.
         candidates.sort(key=lambda c: (-c.score, str(c.id)))
+        return candidates
+
+    @staticmethod
+    def _candidates_by_email(
+        address: str, users: tuple[_InboxUser, ...]
+    ) -> list[DirectoryCandidate]:
+        """The users whose email is `address`, ignoring case: each one an exact match.
+
+        An address is evidence of one person, so there is no fallback to the name
+        in it: dana.cohen@gmail.com is not the Dana Cohen of the tenant. Teams have
+        no address. Inbox's unique index on email is case sensitive, so two users
+        can differ only in case; both are returned, a tie, so that #132 sends no
+        owner rather than the wrong one.
+        """
+
+        wanted = address.strip().casefold()
+        matches = [u for u in users if u.email and u.email.strip().casefold() == wanted]
+        candidates = [
+            DirectoryCandidate(assignee_type=AssigneeType.USER, id=u.id, score=1.0)
+            for u in matches
+        ]
+        candidates.sort(key=lambda c: str(c.id))
         return candidates
 
     def _load(self, tenant_id: UUID) -> _Lists | None:
@@ -320,6 +352,7 @@ class InboxDirectory:
                 ", ".join(fields[:5]),
             )
         else:
+            self._note_if_nothing_came_back(tenant_id, users, teams)
             # Only an answer is kept. A failure is not, or Mind would go on
             # without owners for a whole TTL after Inbox came back.
             if ttl > 0:
@@ -327,12 +360,41 @@ class InboxDirectory:
             return users, teams
         return None
 
+    def _note_if_nothing_came_back(
+        self,
+        tenant_id: UUID,
+        users: tuple[_InboxUser, ...],
+        teams: tuple[_InboxTeam, ...],
+    ) -> None:
+        """Log, once, a tenant for which Inbox gave no users and no teams at all.
+
+        With Inbox's own `tenantId` filter, a wrong tenant id or a tenant the actor
+        cannot see comes back as empty pages, not as rows that the filter here
+        drops, so `_keep_active` has nothing to complain about. Without this line
+        that would pass as "nobody has that name" on every lookup.
+        """
+
+        key = (tenant_id, "everything")
+        # `_keep_active` already said why when rows came back and none survived.
+        explained = (tenant_id, "users") in self._warned_empty or (
+            tenant_id,
+            "teams",
+        ) in self._warned_empty
+        if users or teams:
+            self._warned_empty.discard(key)
+        elif key not in self._warned_empty and not explained:
+            self._warned_empty.add(key)
+            logger.warning(
+                "Inbox returned no users and no teams for this tenant: check that the "
+                "tenant id is right and that the actor can see it"
+            )
+
     def _active_users(
         self, tenant_id: UUID, deadline: float | None = None
     ) -> tuple[_InboxUser, ...]:
         """Every active user of `tenant_id` that the actor can see."""
 
-        users = self._fetch_all(_USERS_PATH, _Page[_InboxUser], deadline)
+        users = self._fetch_all(_USERS_PATH, _Page[_InboxUser], deadline, tenant_id)
         return _keep_active(users, tenant_id, "users", self._warned_empty)
 
     def _active_teams(
@@ -340,11 +402,15 @@ class InboxDirectory:
     ) -> tuple[_InboxTeam, ...]:
         """Every active team of `tenant_id` that the actor can see."""
 
-        teams = self._fetch_all(_TEAMS_PATH, _Page[_InboxTeam], deadline)
+        teams = self._fetch_all(_TEAMS_PATH, _Page[_InboxTeam], deadline, tenant_id)
         return _keep_active(teams, tenant_id, "teams", self._warned_empty)
 
     def _fetch_all[Item: (_InboxUser, _InboxTeam)](
-        self, path: str, page_type: type[_Page[Item]], deadline: float | None = None
+        self,
+        path: str,
+        page_type: type[_Page[Item]],
+        deadline: float | None = None,
+        tenant_id: UUID | None = None,
     ) -> list[Item]:
         """Read every page of one Inbox list.
 
@@ -368,7 +434,7 @@ class InboxDirectory:
         page = 0
         while page < _MAX_PAGES:
             self._check_deadline(path, deadline)
-            raw = self._read_body(url, actor_id, page, path, deadline)
+            raw = self._read_body(url, actor_id, page, path, deadline, tenant_id)
             body = page_type.model_validate(json.loads(raw))
             items.extend(body.content)
             page += 1
@@ -377,7 +443,13 @@ class InboxDirectory:
         raise _GaveUp(f"Inbox has more than {_MAX_PAGES} pages of {path}")
 
     def _read_body(
-        self, url: str, actor_id: UUID, page: int, path: str, deadline: float | None
+        self,
+        url: str,
+        actor_id: UUID,
+        page: int,
+        path: str,
+        deadline: float | None,
+        tenant_id: UUID | None,
     ) -> bytes:
         """One page of one list, as bytes, read piece by piece.
 
@@ -387,10 +459,16 @@ class InboxDirectory:
         between the pieces a single page could take as long as it liked.
         """
 
+        params: dict[str, str | int] = {"page": page, "size": _PAGE_SIZE, "sort": "id,asc"}
+        if tenant_id is not None:
+            # Inbox's own filter. Spelled tenantId, a request parameter: the snake_case
+            # of its answers does not reach it. An Inbox without the filter ignores
+            # it, which is why the rows are still filtered by tenant here.
+            params["tenantId"] = str(tenant_id)
         with self._client.stream(
             "GET",
             url,
-            params={"page": page, "size": _PAGE_SIZE, "sort": "id,asc"},
+            params=params,
             headers={_ACTOR_HEADER: str(actor_id)},
         ) as response:
             response.raise_for_status()

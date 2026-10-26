@@ -18,6 +18,7 @@ from mind.config import InboxDirectorySettings
 from mind.integrations.name_matching import (
     PARTIAL_SCORE,
     WORD_MATCH_MIN,
+    is_email_address,
     score_names,
     words,
 )
@@ -143,6 +144,26 @@ def test_a_person_with_no_names_or_a_mention_with_no_words_never_matches():
 )
 def test_words_of_a_name(text, expected):
     assert words(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("dana.cohen@acme.com", True),
+        ("  Dana.Cohen@Acme.com ", True),
+        ("dana+invoices@acme.co.il", True),
+        ("Dana Cohen", False),
+        ("Dana Cohen <dana.cohen@acme.com>", False),  # the extraction hands over the address alone
+        ("dana@", False),
+        ("@acme.com", False),
+        ("dana@acme", False),
+        ("dana@@acme.com", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_what_counts_as_an_email_address(text, expected):
+    assert is_email_address(text) is expected
 
 
 def test_the_floor_in_config_is_below_anything_the_rule_lets_through():

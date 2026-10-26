@@ -23,24 +23,28 @@ teams (`TEAM`) of that tenant, active ones only. An empty list means no match
 
 | Call | Used for |
 |---|---|
-| `GET /api/v1/users?page=&size=&sort=id,asc` | every user the actor can see |
-| `GET /api/v1/teams?page=&size=&sort=id,asc` | every team the actor can see |
+| `GET /api/v1/users?page=&size=&sort=id,asc&tenantId=` | the users of the tenant that the actor can see |
+| `GET /api/v1/teams?page=&size=&sort=id,asc&tenantId=` | the teams of the tenant that the actor can see |
 
 Pages of 200, all of them (`total_pages`), in a fixed order so a row added
 between two calls cannot make a page skip or repeat people. Every call sends
-`X-Actor-Id`.
+`X-Actor-Id`. `tenantId` is Inbox's own filter (on `inbox-team`, not yet on
+`main`); an Inbox without it ignores the parameter and returns every tenant.
 
 ### What it reads
 
 Inbox answers in snake_case. From a user: `id`, `display_name`, `first_name`,
-`last_name`, `username`, `status`, `tenant.id`. From a team: `id`, `name`,
+`last_name`, `username`, `email` (personal data; used only to match a mention that
+is an address, and never logged), `status`, `tenant.id`. From a team: `id`, `name`,
 `status`, `tenant.id`. Other fields are ignored.
 
 Kept: rows whose `tenant.id` is the tenant asked for **and** whose `status` is
-`ACTIVE`. Inbox has no filter for either, so it is done here. If Inbox returns
-rows and none survive, a warning with counts and statuses is logged (never
-names): that is what a wrong status spelling, or an actor that cannot see the
-tenant, looks like.
+`ACTIVE`. Inbox has no filter for `status`, and the one for the tenant may be
+missing, so both are done here. If Inbox returns rows and none survive, a warning
+with counts and statuses is logged (never names): that is what a wrong status
+spelling, or an actor that cannot see the tenant, looks like. If it returns no
+users and no teams at all, that is logged too, once per tenant: with Inbox's own
+filter, a wrong tenant id is an empty answer, not rows to drop.
 
 > **To verify against a real Inbox:** that `status` arrives as `"ACTIVE"`, and
 > the field names above. They were read from Inbox's code, not from a response.
@@ -114,6 +118,25 @@ Known limits:
   It rests on a handful of pairs, not on a measured set; revisit it with real
   names. The tests that pin the cases are in `tests/test_name_matching.py`.
 
+### A mention that is an email address
+
+The owner of a task sometimes comes from the recipient of an email, and then the
+mention is an address (`dana.cohen@acme.com`), with no name in the text. Such a
+mention is not matched by words. It is compared with the `email` of each user,
+exactly and ignoring case, and each user with that address scores **1.0**.
+
+- **No fallback to the name.** If no user has the address, the result is empty:
+  `dana.cohen@gmail.com` is not the Dana Cohen of the tenant.
+- **Teams have no address**, so none is returned.
+- **A tie is possible**: Inbox's unique index on `email` is case sensitive, so two
+  users can differ only in case. Both come back with 1.0, and #132 sends no owner.
+- A different address of the same person (an alias, `dana+tag@`, another domain)
+  finds nobody. That is a known limit, and safer than a guess.
+- The mention must be the address alone. `Dana Cohen <dana@acme.com>` is split by
+  whoever extracts the mention (agreed with #132), not here.
+- The addresses are read from the lists that are already cached, so they are held
+  in memory with the names. They are never logged.
+
 ### The actor
 
 What Inbox returns depends on the role of the user in `X-Actor-Id`:
@@ -145,8 +168,11 @@ exists on `/users` only.
 
 Because it is a `SYSTEM_ADMIN`, Inbox returns the users and teams of **every**
 tenant, and the client keeps those of the tenant asked for. The seed has about
-1,400 users, which is about 7 pages. An optional `tenant_id` filter on both
-endpoints has been asked of the Inbox team; until then there is none.
+1,400 users, which is about 7 pages. Inbox has added an optional `tenantId` filter
+on both endpoints (on `inbox-team`, not yet on `main`). The client sends it with
+every request; an Inbox without it ignores the parameter, and the rows are still
+filtered by tenant here either way. The parameter is spelled `tenantId`: the
+snake_case of Inbox's answers does not apply to request parameters.
 
 Mind only reads (`GET`). Inbox trusts `X-Actor-Id` as sent (its "Known gap" in
 `teams/inbox/CLAUDE.md`) and there is no decision about a token yet, so this id
@@ -181,7 +207,8 @@ is used on the next lookup.
 
 The two lists of a tenant are kept for `CACHE_TTL_SECONDS` (default 300, `0` =
 off), per tenant. A person added, disabled or moved in Inbox is seen up to that
-long late. There is no lock: extraction runs one item at a time, and two threads
+long late. The same goes for an email address: one that moves from one user to
+another keeps matching the old user, with score 1.0, until the lists are read again. There is no lock: extraction runs one item at a time, and two threads
 asking for the same tenant at once would only fetch it twice.
 
 ### Config
