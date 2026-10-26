@@ -10,7 +10,7 @@ from .export import write_dataset
 from .seal import sealed_version, verify
 from .version import GENERATOR_VERSION
 
-DEFAULT_EVAL_SEED = 4242
+DEFAULT_EVAL_SEED = 591009  # the first eval seed (4242) was inspected while the generator was tuned, so it is retired
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -84,7 +84,7 @@ def test_a_chronic_blocker_becomes_visible_when_it_passes_the_p90_of_its_peers(f
 
 
 def test_a_pattern_that_starts_just_before_the_end_is_not_yet_visible():
-    data = generate(replace(FULL, seed=4242))  # the eval seed has ongoing patterns that started late
+    data = generate(replace(FULL, seed=4242))  # a seed whose ongoing patterns started late (the retired first eval seed)
     from flow_health.generator.export import _observed
     from flow_health.generator.peers import PeerIndex
 

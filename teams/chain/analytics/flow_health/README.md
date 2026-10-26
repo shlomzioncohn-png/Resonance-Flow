@@ -28,12 +28,13 @@ The generator itself uses only the standard library; the analysis code (loader, 
 
 | | `data/dev` | `data/eval` |
 |---|---|---|
-| seed | 42 | 4242 (`--eval-seed`) |
+| seed | 42 | 591009 (`--eval-seed`) |
 | use | build and tune the model | measure precision / recall, once, at the end |
 | disease types | all except the held-out `stuck_subgraph` | every type, including the held-out one |
 
 Different seeds mean different healthy tasks, teams and graph, so the model never sees the evaluation
-data in advance. On top of that the eval set contains a disease type the dev set never had. Excluding a
+data in advance. (The first eval seed, 4242, was looked at while the generator was being tuned, so it was retired and
+replaced; seed 4242 is now just another dev-style seed.) On top of that the eval set contains a disease type the dev set never had. Excluding a
 type does not change any other task's ids or behaviour (each disease and each task has its own seeded RNG).
 
 **The eval set is sealed.** Every file the generator writes is fingerprinted in `SEAL.json` (SHA-256 of each file).
