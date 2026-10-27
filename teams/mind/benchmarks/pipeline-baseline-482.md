@@ -1,195 +1,227 @@
 # Full-flow latency and cost baseline (#482) -- PRELIMINARY
 
-> **Preliminary baseline: one run per arrival order, two runs in all. Not complete, not
+> **Preliminary baseline: one run per arrival order with every stage measured. Not
 > representative.** Two runs of the #359 demo -- natural order and slack-first, three items
-> each -- on one Windows laptop, with no Chain. Embedding and vector queries are **not
-> measured** (not zero), and **every score is degraded** (Chain was unreachable), so the scoring
-> numbers are not the full scoring path's. The two runs' ASR timings differ by 1.7x on the
-> same recording (below), which is what one run per order cannot settle. Still pending before
-> this can serve as week 8's baseline: R3's embedding/vector-query instrumentation, and several
-> runs per order.
+> each -- on one Windows laptop, with no Chain. Every stage of the flow is now recorded,
+> embedding and vector queries included (R3's change, approved). But **every score is
+> degraded** (Chain was unreachable), so the scoring numbers are not the full scoring path's,
+> and **identical ASR work varies up to ~4x between runs on this laptop** (below), so one run
+> per order is a snapshot, not a distribution. Before this can serve as week 8's baseline: several
+> runs per order, ideally on a machine whose clock is pinned, and full scoring with a live Chain.
 
 ## The runs
 
-| | Run 1 | Run 2 |
-|---|---|---|
-| Run id | `20261026T110028Z-natural` | `20261026T115606Z-slack-first` |
-| Command | `python -m demo_flow.run --order natural` | `python -m demo_flow.run --order slack-first` |
-| Items fed (UTC, 2026-10-26) | meeting 11:02:43, Slack 11:04:13, email 11:05:43 (gap 90 s) | Slack 11:58:44, meeting 11:58:49, email 11:58:54 (gap 5 s) |
-| Mind code | `7d902f66` | `7d902f66` (branch at `6c4df5d7`, which changed only this baseline) |
-| Demo result | 1/6 -- as documented for this order (finding 1: Inbox keeps one task per `source_ref`, so the meeting's T1 is never created) | 4/6 -- as documented for this order: the meeting's T1 found as a duplicate of Slack's (similarity 0.784) and not sent; 3 requested, 3 created |
+The current baseline is the 2026-10-27 pair. The 2026-10-26 pair is kept as history (no
+embedding or vector-query records then); two runs in between are not a baseline (see "Runs not
+used").
 
-Both runs, the same: branch `michal-brecher/serving-under-flow-482` (on `main` `29aaca0f`),
-the demo runner and report as committed in `72d7b26d`; Windows 11 Pro, Intel Core i7-13620H
-(10 cores, 16 threads), 15.7 GB RAM, Python 3.12.4, Docker 29.8.2, Mind as two local
-processes and the stack in Docker; ASR `whisper-base.en-int8-local`, OCR
-`tesseract-psm11-ocr`, LLM `gemini-3.6-flash` (paid key); **Chain not running** --
-`MIND_CHAIN__BASE_URL` unset, so the default `http://resonance-flow-chain:80`, which does not
-resolve on this machine. The monitoring did not change either result.
+| | natural | slack-first |
+|---|---|---|
+| Run id | `20261027T094205Z-natural` | `20261027T094907Z-slack-first` |
+| Items fed (UTC, 2026-10-27) | meeting 09:43:53, Slack 09:45:23, email 09:46:53 (gap 90 s) | Slack 10:00:59, meeting 10:01:04, email 10:01:09 (gap 5 s) |
+| Mind code | `3e8505db` | `3e8505db` |
+| Demo result | 1/6 -- as documented for this order (finding 1: Inbox keeps one task per `source_ref`, so the meeting's T1 is never created) | 4/6 -- as documented: the meeting's T1 found as a duplicate of Slack's and not sent; 3 requested, 3 created |
+
+Both: branch `michal-brecher/serving-under-flow-482` (on `main` `1a8b59db`), the commits that
+record embedding and vector queries (`53456e33`), import sentence-transformers lazily
+(`d2d134a2`) and warm the model at the landed runner's start-up (`3e8505db`); Windows 11 Pro,
+Intel Core i7-13620H (10 cores, 16 threads), 15.7 GB RAM, Python 3.12.4, Docker 29.8.2, Mind as
+two local processes and the stack in Docker; ASR `whisper-base.en-int8-local`, OCR
+`tesseract-psm11-ocr`, LLM `gemini-3.6-flash` (paid key), embedding `bge-small-en-v1.5-local`;
+**Chain not running** -- `MIND_CHAIN__BASE_URL` unset, so the default
+`http://resonance-flow-chain:80`, which does not resolve here. Nothing else ran on the machine
+during the two runs. The monitoring did not change either result.
 
 Raw data, kept as recorded, under `pipeline-baseline-482/<run-id>/` (sha256 of the files as
 committed, LF line endings; a checkout that converts to CRLF hashes differently):
 
 | Run | File | Lines | sha256 |
 |---|---|---|---|
-| natural | `calls/model-calls-mind-landed-2360.jsonl` | 5 | `832728c1...a93632` |
-| natural | `calls/model-calls-mind-api-22828.jsonl` | 9 | `a105af02...8d440d5` |
-| slack-first | `calls/model-calls-mind-landed-27696.jsonl` | 5 | `07fd41cc...1a8eb5` |
-| slack-first | `calls/model-calls-mind-api-13160.jsonl` | 9 | `0f592ea3...35feb23` |
+| 2026-10-27 natural | `calls/model-calls-mind-landed-22672.jsonl` | 16 | `60ecf0d1...0b0b18` |
+| 2026-10-27 natural | `calls/model-calls-mind-api-31768.jsonl` | 9 | `1c0eb931...7ad9ce` |
+| 2026-10-27 slack-first | `calls/model-calls-mind-landed-29660.jsonl` | 16 | `75271928...a5b6a4` |
+| 2026-10-27 slack-first | `calls/model-calls-mind-api-31428.jsonl` | 9 | `03d6c49d...33d338` |
+| 2026-10-26 natural | `calls/model-calls-mind-landed-2360.jsonl` | 5 | `832728c1...a93632` |
+| 2026-10-26 natural | `calls/model-calls-mind-api-22828.jsonl` | 9 | `a105af02...8d440d5` |
+| 2026-10-26 slack-first | `calls/model-calls-mind-landed-27696.jsonl` | 5 | `07fd41cc...1a8eb5` |
+| 2026-10-26 slack-first | `calls/model-calls-mind-api-13160.jsonl` | 9 | `0f592ea3...35feb23` |
 
-Beside each: `report.md` (`python -m mind.observability.report <run>/calls`, regenerated from
-the copied files and identical to the one the run wrote) and `demo-result.txt` (the demo's
-own PASS/FAIL output). Every line of all four files is `mind.model_call/1`, and every one
-carries an item and a stage.
+Beside each: `report.md`, as the run wrote it (`python -m mind.observability.report
+<run>/calls` writes it again), and `demo-result.txt`, the demo's own PASS/FAIL output. Every
+line of every file is `mind.model_call/1` and carries an item and a stage.
 
 ## The items
 
-The same three inputs in both runs. Bridge sends no `source_ref` in the demo, so the `item_ref`
+The same three inputs in every run. Bridge sends no `source_ref` in the demo, so the `item_ref`
 comes from the per-run correlation id and differs between runs.
 
-| Item | `item_ref` natural / slack-first | Input | Tasks scored natural / slack-first |
+| Item | `item_ref` 10-27 natural / slack-first | Input | Tasks scored |
 |---|---|---|---|
-| Meeting (Zoom) | `df0c4e4aa56cd405` / `306e54c513b960cb` | 67.5 s of audio; 778 chars of text for extraction | 1 (T1 dropped by Inbox) / 1 (T1 merged into Slack's) |
-| Slack thread | `61957176ab79969a` / `44cc318fcaf55724` | 213 chars of text for extraction | 1 / 1 |
-| Email + scanned form | `ab89e32bc4e544f1` / `6de12fe6d27d7bc8` | body + one scanned document (OCR); 1,050 chars of text for extraction | 1 / 1 |
+| Meeting (Zoom) | `160ef010ac437a17` / `beffd4bd62c20847` | 67.5 s of audio; 778 chars of text for extraction | 1 / 1 (natural: T1 dropped by Inbox; slack-first: T1 merged into Slack's) |
+| Slack thread | `e78aadc5058ccb5c` / `fafd7ee3c8ab45d2` | 213 chars of text for extraction | 1 / 1 |
+| Email + scanned form | `d0916ccd2b9981c2` / `82e8a42cd6b82af8` | body + one scanned document (OCR); 1,050 chars of text for extraction | 1 / 1 |
 
-## Per stage
+## Per stage (2026-10-27)
 
-Wall time of each recorded call, from the JSONL. Three-call lists are in the order meeting /
-Slack / email.
+Wall time of each recorded call, from the JSONL. Lists are in the order meeting / Slack /
+email; the meeting's duplicate check is two calls (its two candidate tasks).
 
 | Stage | Call | Run | Wall, each (ms) | Wall total | Compute cost | Dollar cost |
 |---|---|---|---|---|---|---|
-| to_text | ASR `whisper-base.en-int8-local` | natural | 16,945.8 | 16.9 s | **34.28 CPU s** (RTF 0.244) | n/a |
-| | | slack-first | 29,272.0 | 29.3 s | **43.80 CPU s** (RTF 0.427) -- see "ASR, 1.7x apart" | n/a |
-| to_text | OCR `tesseract-psm11-ocr` | natural | 903.1 | 0.9 s | **unmeasured** (Windows reports no child-process CPU) | n/a |
-| | | slack-first | 1,340.5 | 1.3 s | **unmeasured** | n/a |
-| extraction | LLM `gemini-3.6-flash` | natural | 2,423.8 / 1,986.3 / 2,266.9 | 6.7 s | n/a | **$0.0132825**, all 3 priced; 15,030 tokens in / 536 out |
-| | | slack-first | 2,172.7 / 1,942.0 / 1,935.2 | 6.0 s | n/a | **$0.01331625**, all 3 priced; 15,030 in / 545 out |
-| duplicate_check | embedding + vector query | both | -- | -- | **not measured** | -- |
-| task_created | embedding (indexing) + dependency resolution | both | -- | -- | **not measured** | -- |
-| score | scoring `hierarchical-ranking` -- **degraded** | natural | 1,405.8 / 1,274.1 / 1,367.6 | 4.0 s | 0.02 CPU s (thread CPU, 15.6 ms steps on Windows) | n/a |
-| | | slack-first | 1,277.1 / 1,626.1 / 1,165.4 | 4.1 s | 0.02 CPU s | n/a |
-| score | Chain `/ancestors`, inside each score -- **failed** | natural | 1,398.4 / 1,271.8 / 1,365.4 | (inside scoring) | n/a | n/a |
-| | | slack-first | 1,275.3 / 1,580.5 / 1,163.9 | (inside scoring) | n/a | n/a |
-| score | Chain `/children`, after each score (rescore cascade) -- **failed** | natural | 1,151.2 / 1,150.2 / 1,141.7 | 3.4 s | n/a | n/a |
-| | | slack-first | 1,144.1 / 1,271.5 / 1,150.0 | 3.6 s | n/a | n/a |
+| to_text | ASR `whisper-base.en-int8-local` | natural | 6,928.4 | 6.9 s | **25.94 CPU s** (RTF 0.101) | n/a |
+| | | slack-first | 8,918.3 | 8.9 s | **33.39 CPU s** (RTF 0.130) | n/a |
+| to_text | OCR `tesseract-psm11-ocr` | natural | 801.3 (email) | 0.8 s | **unmeasured** (Windows reports no child-process CPU) | n/a |
+| | | slack-first | 1,234.6 (email) | 1.2 s | **unmeasured** | n/a |
+| extraction | LLM `gemini-3.6-flash` | natural | 3,057.6 / 1,954.9 / 2,048.3 | 7.1 s | n/a | **$0.0135**, all 3 priced; 15,030 tokens in / 594 out |
+| | | slack-first | 2,248.9 / 1,999.9 / 2,184.6 | 6.4 s | n/a | **$0.01351125**, all 3 priced; 15,030 in / 597 out |
+| duplicate_check | embedding `bge-small-en-v1.5-local` | natural | 132.3 + 14.5 / 25.2 / 54.5 | 0.2 s | 1.38 CPU s | n/a |
+| | | slack-first | 35.7 + 28.3 / 102.8 / 30.6 | 0.2 s | 1.42 CPU s | n/a |
+| duplicate_check | vector query `pgvector-search` | natural | 27.5 + 11.5 / 51.1 / 49.8 | 0.1 s | n/a | n/a |
+| | | slack-first | 25.4 + 55.0 / 20.6 / 52.8 | 0.2 s | n/a | n/a |
+| task_created | embedding (indexing the created task) | natural | 23.2 / 56.4 / 44.6 | 0.1 s | 0.73 CPU s | n/a |
+| | | slack-first | 44.3 / 28.3 / 44.1 | 0.1 s | 0.81 CPU s | n/a |
+| score | scoring `hierarchical-ranking` -- **degraded** | natural | 1,280.3 / 1,303.1 / 1,281.6 | 3.9 s | 0.02 CPU s (thread CPU, 15.6 ms steps on Windows) | n/a |
+| | | slack-first | 1,301.5 / 1,297.4 / 1,151.7 | 3.8 s | 0.00 CPU s (below one step) | n/a |
+| score | Chain `/ancestors`, inside each score -- **failed** | natural | 1,277.4 / 1,301.5 / 1,279.5 | (inside scoring) | n/a | n/a |
+| | | slack-first | 1,299.8 / 1,294.5 / 1,149.9 | (inside scoring) | n/a | n/a |
+| score | Chain `/children`, after each score (rescore cascade) -- **failed** | natural | 1,142.2 / 1,139.4 / 1,146.3 | 3.4 s | n/a | n/a |
+| | | slack-first | 1,144.0 / 1,144.9 / 1,144.8 | 3.4 s | n/a | n/a |
 
-All recorded calls, each counted once: **32.0 s** (natural), **44.3 s** (slack-first) -- the
-difference is almost all the meeting's ASR.
+All recorded calls, each counted once: **22.6 s** of wall time, 28.06 + 1 unmeasured CPU s
+(natural); **24.2 s**, 35.62 + 1 unmeasured CPU s (slack-first).
 
-## Per item
+## Per item (2026-10-27)
 
-| Item | Run | Span (first call start -> last call end) | Sum of calls | to_text | extraction | score (incl. `/children`) | CPU s | LLM $ |
-|---|---|---|---|---|---|---|---|---|
-| Meeting | natural | 25.5 s | 21.9 s | 16.9 s | 2.4 s | 2.6 s | 34.30 | $0.0047 |
-| | slack-first | 34.9 s | 33.9 s | 29.3 s | 2.2 s | 2.4 s | 43.80 | $0.0047 |
-| Slack | natural | 5.4 s | 4.4 s | -- | 2.0 s | 2.4 s | 0.00 | $0.0041 |
-| | slack-first | 10.7 s | 4.8 s | -- | 1.9 s | 2.9 s | 0.02 | $0.0041 |
-| Email | natural | 10.6 s | 5.7 s | 0.9 s | 2.3 s | 2.5 s | 0.00 + 1 unmeasured | $0.0045 |
-| | slack-first | 7.8 s | 5.6 s | 1.3 s | 1.9 s | 2.3 s | 0.00 + 1 unmeasured | $0.0045 |
+| Item | Run | Span (first call start -> last call end) | Sum of calls | to_text | extraction | duplicate_check | task_created | score (incl. `/children`) | CPU s | LLM $ |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Meeting | natural | 18.3 s | 12.6 s | 6.9 s | 3.1 s | 0.2 s | 0.0 s | 2.4 s | 27.12 | $0.0050 |
+| | slack-first | 16.6 s | 13.8 s | 8.9 s | 2.2 s | 0.1 s | 0.0 s | 2.4 s | 34.30 | $0.0047 |
+| Slack | natural | 8.4 s | 4.5 s | -- | 2.0 s | 0.1 s | 0.1 s | 2.4 s | 0.53 | $0.0041 |
+| | slack-first | 6.6 s | 4.6 s | -- | 2.0 s | 0.1 s | 0.0 s | 2.4 s | 0.88 | $0.0043 |
+| Email | natural | 8.4 s | 5.4 s | 0.8 s | 2.0 s | 0.1 s | 0.0 s | 2.4 s | 0.41 + 1 unmeasured | $0.0044 |
+| | slack-first | 10.1 s | 5.8 s | 1.2 s | 2.2 s | 0.1 s | 0.0 s | 2.3 s | 0.45 + 1 unmeasured | $0.0045 |
 
 The span includes what records nothing: Kafka, MinIO, Inbox creating the task, the wait for
-`task.created`, and -- in slack-first, where the items arrive 5 s apart -- waiting behind the
-item before it. The sum includes no embedding or vector query, so it is a lower bound.
+`task.created`, and -- in slack-first, where items arrive 5 s apart -- waiting behind the item
+before it.
 
 ## Cost, known and unknown
 
 Two units, never added together.
 
-- **Dollars, measured:** LLM calls only. **$0.0132825 (natural) and $0.01331625
-  (slack-first), ~$0.0044 per item**, every call priced (none unpriced), at `pricing.py`'s
-  price for `gemini-3.6-flash` -- which doubles on 2027-01-01. Steady across the two runs:
-  the same 15,030 input tokens, 536 vs 545 output.
-- **CPU seconds, measured:** ASR 34.28 / 43.80 s; scoring 0.02 / 0.02 s. The slack-first ASR
-  figure is probably an overcount (next section).
-- **CPU seconds, not measured:** OCR (1 call per run, Windows); embedding and vector queries
-  (not instrumented yet).
+- **Dollars, measured:** LLM calls only. **$0.0135 per run, ~$0.0041-0.0050 per item**, every
+  call priced, at `pricing.py`'s price for `gemini-3.6-flash` -- which doubles on 2027-01-01.
+  Steady across all four runs: the same 15,030 input tokens; 536-597 output.
+- **CPU seconds, measured:** ASR 25.9 / 33.4 s; embedding 2.1 / 2.2 s (7 calls per run, 0.13-0.89
+  s each); scoring 0.02 / 0.00 s.
+- **CPU seconds, not measured:** OCR (1 call per run, Windows).
 - **Not measured at all, in any unit:** the infrastructure -- Kafka, MinIO, Postgres/pgvector,
   Inbox -- and the machine itself. No dollar figure here covers them.
 
 ## What dominates
 
-- **The meeting's ASR**, in both runs: 16.9 s of the item's 21.9 s of calls (77%) in natural,
-  29.3 s of 33.9 s (86%) in slack-first, and nearly all of each run's measured CPU. Taking the
-  natural run, where nothing else was running beside it: 0.244 x real time and ~0.51 CPU s
-  per second of audio. Extrapolated linearly -- one 67.5 s sample, not a measurement -- the
-  longest recording ASR decodes (`MAX_DURATION_S` = 600 s) would take ~2.4 min of wall time
-  and ~5 CPU min. That is the stage to watch for week 8's 1,000-item target (#483) if the mix
-  has much audio -- and, from slack-first, it slows when other work shares its process.
-- **LLM extraction: ~1.9-2.4 s and ~$0.004-0.005 per item**, steady across both runs and all
-  three items.
-- **In both runs, Chain's failure costs more than scoring itself** -- see below. That is the
-  demo environment's, not the full path's.
+- **The meeting's ASR**: 6.9 of the item's 12.6 s of calls (55%) in natural, 8.9 of 13.8 s
+  (65%) in slack-first, and 92-94% of each run's measured CPU. 0.38-0.49 CPU s per second of
+  audio here; across all runs, 0.28-0.65 (`serving-reliability-482.md` measured the longest job).
+  The stage to watch for week 8's 1,000-item target (#483) if the mix has much audio.
+- **LLM extraction: ~2-3 s and ~$0.0041-0.0050 per item**, the only dollar cost.
+- **Chain's failure: ~2.4 s per task** -- `/ancestors` inside the score, `/children` after it.
+  In the demo environment more than any other stage but ASR; not the full path's cost.
+- **Embedding and vector queries are small**: 0.1-0.3 s of wall and up to ~1.2 CPU s per item
+  (the meeting, two candidates and one created task), the first embedding of a process (132 ms)
+  included.
 
-## ASR, 1.7x apart on the same recording
+## ASR: the same recording, 6.9 to 29.3 s
 
-The same 67.5 s recording took **16.9 s / 34.3 CPU s** in natural and **29.3 s / 43.8 CPU s**
-in slack-first (RTF 0.244 vs 0.427). Measured, and in the files:
+| Run | Wall | CPU s | RTF |
+|---|---|---|---|
+| 2026-10-26 natural | 16.9 s | 34.3 | 0.244 |
+| 2026-10-26 slack-first | 29.3 s | 43.8 | 0.427 |
+| 2026-10-27 natural | 6.9 s | 25.9 | 0.101 |
+| 2026-10-27 slack-first | 8.9 s | 33.4 | 0.130 |
 
-- In slack-first the meeting's ASR ran from 11:58:49.8 to 11:59:19.0. Slack's task was
-  scored in the API from 11:58:52.1, so Slack's `task.created` had arrived inside that window
-  -- and the landed runner's listener thread, in the same process as Whisper, indexes the task
-  and resolves its dependencies on that event, both with embedding calls.
-- In natural nothing else was in flight: the meeting came first, and its own `task.created`
-  came after its ASR.
+**Correction.** The previous version of this baseline gave a likely cause for the 2026-10-26
+slack-first ASR being 1.7x slower: Slack's task being indexed, with embedding calls, in the
+same process during it. **Now that embedding is measured, that explanation does not hold:**
+indexing a task takes 23-56 ms and 0.16-0.41 CPU s, nowhere near the 12.3 s and 9.5 CPU s gap,
+and in the 2026-10-27 slack-first run the indexing had finished before the ASR began. The
+measured fact remains -- identical ASR work varies ~4x in wall time and ~1.7x in CPU across these
+runs, and 2.6x in the long-job measurement -- and the most likely cause is the laptop itself
+(power and thermal state, other work), which was not controlled. Read single-run ASR numbers
+with that in mind.
 
-The likely cause, **not proven**: that indexing ran beside Whisper in one process. It would
-slow Whisper's wall time (shared cores), and `CpuClock` is process-wide, so the listener's
-CPU is charged to the ASR call too -- the known limitation in
-`src/mind/observability/README.md` ("overlapping calls in one process are each charged for
-both"). How much of the 12.3 s and 9.5 CPU s it explains cannot be read off this run:
-embedding is not instrumented, and other load on the laptop was not recorded. Read the
-slack-first ASR figures as an upper bound, the natural ones as the uncontended case, and
-treat the gap itself as a week-8 question (#483: items do arrive close together).
-
-## Scoring: all six degraded
+## Scoring: all degraded
 
 All three scores in each run are **degraded**: Chain could not be asked, so each is the
-baseline's own score, with no ancestors in it (`hierarchy` contribution 0.0), and its latency
-is the fallback path's. **These are not measurements of full scoring** and must not be used as
-its baseline.
+baseline's own score, with no ancestors in it (`hierarchy` contribution 0.0), and its latency is
+the fallback path's. **These are not measurements of full scoring** and must not be used as its
+baseline. Of each 1.15-1.30 s score, all but 1.6-2.9 ms was the failed `/ancestors` request: the
+scoring model itself is a few milliseconds; the full path's cost is whatever a live Chain adds.
 
-What the timings do show: of each 1.17-1.63 s score, all but a few milliseconds was the
-failed `/ancestors` request -- 7.4, 2.3, 2.2 ms in natural; 1.8, 45.6, 1.5 ms in slack-first
-(the 45.6 ms is the API's first score of its run). The scoring model itself is a few
-milliseconds; the full path's cost is whatever a live Chain adds, which these runs cannot say.
+## Findings
 
-## Open issue for R3: the 0.2 s Chain timeout does not bound a DNS failure
+### For R3: the 0.2 s Chain timeout does not bound a DNS failure (open, unchanged)
 
-**Recorded here, not changed** -- scoring logic and timeouts are R3's (#474), and outside this
-baseline.
+`ChainHierarchyClient` sets `DEFAULT_TIMEOUT_SECONDS = 0.2` "to fail fast on a struggling one".
+In all four runs every request failed with `ConnectError: [Errno 11001] getaddrinfo failed`
+after **1.14-1.58 s** -- 24 of 24, 6-8x the timeout: the name lookup happens before the
+connection, and httpx's timeout does not cover it. Each task paid ~2.4 s for it. It does not
+happen in the cluster while Chain's Service resolves; it does wherever Chain's name is missing
+(the demo, local runs, a misconfigured `MIND_CHAIN__BASE_URL`). Recorded, not changed: R3's to
+decide.
 
-- `ChainHierarchyClient` sets `DEFAULT_TIMEOUT_SECONDS = 0.2` "to fail fast on a struggling
-  one". In both runs every request failed with `ConnectError: [Errno 11001] getaddrinfo
-  failed` after **1.14-1.58 s** -- 12 of 12, i.e. 6-8x the timeout.
-- The name lookup happens before the connection, and httpx's timeout does not cover it, so a
-  name that does not resolve costs whatever the resolver takes.
-- Each task paid ~2.3-2.9 s for it: `/ancestors` inside the score, then `/children` for the
-  rescore cascade, one after the other on the thread that handles the task's event.
-- In the cluster `resonance-flow-chain` resolves, so this does not happen there while Chain's
-  Service exists. It does wherever Chain's name is missing: the demo, local runs, a
-  misconfigured `MIND_CHAIN__BASE_URL`.
-- For R3 to decide: whether a failed lookup should be bounded too (or Chain's absence noticed
-  once rather than per request). Not started in #482.
+### Fixed during these runs: the lazy import stalled the first item
+
+Importing `sentence_transformers` only when a model is loaded (`d2d134a2`) took ~380 MB off Mind's
+API (`serving-reliability-482.md`). But in the landed runner, which embeds, it moved the import
+into the first item to reach the duplicate check: in the two runs right after it
+(`20261027T092505Z-natural`, `20261027T093406Z-slack-first`) that item stalled ~100 s and ~33 s
+before its first embedding, unrecorded, with the items behind it waiting. The import alone
+measured 20 s warm. `3e8505db` warms the model at the landed runner's start-up, beside
+`asr.warm_up()`; in both runs above the first embedding follows the LLM call within ~0.15 s.
+
+### Each created task is embedded twice (week 8, not changed)
+
+The duplicate check embeds a candidate's text; when Inbox creates the task, indexing embeds the
+same text again (`task_text(title, description)`). Measured: 23-56 ms and 0.16-0.41 CPU s per
+repeat, one per created task -- about 1% of an item's calls at most. A cache would have to cross from
+the sender's loop to the listener's thread; not worth it at this size. Noted for week 8, when
+volume might make it matter.
+
+## Runs not used
+
+- `20261027T092505Z-natural`, `20261027T093406Z-slack-first` -- the first runs with embedding
+  recorded, before `3e8505db`: each has the first-item import stall above, and the second
+  overlapped other work on the machine. They are evidence for that fix, not a baseline; not kept.
+
+## History: the 2026-10-26 runs
+
+Kept under `pipeline-baseline-482/20261026T*/`, recorded before embedding and vector queries
+were instrumented (both stages show no records there -- not measured, not zero), on code
+`7d902f66`. Their ASR is in the table above; otherwise:
+
+| | 10-26 natural | 10-26 slack-first |
+|---|---|---|
+| LLM extraction, 3 calls | 6.7 s, $0.0132825 | 6.0 s, $0.01331625 |
+| OCR (email) | 0.9 s | 1.3 s |
+| Scoring, 3 calls, all degraded | 4.0 s | 4.1 s |
+| Chain requests, all failed | 1.14-1.40 s each | 1.14-1.58 s each |
+| All recorded calls | 32.0 s | 44.3 s |
+| Demo result | 1/6 | 4/6 |
 
 ## Known limitations
 
-- **One run per order.** No variance, no p95 worth the name: three calls per stage at most,
-  and the one stage seen twice under different conditions (ASR) differs by 1.7x.
-- **Windows laptop, not the cluster.** No container CPU limits; OCR CPU unmeasured; thread CPU
-  in 15.6 ms steps; other load on the machine not recorded.
-- **Embedding and vector queries not measured** -- waiting for R3's approval of the
-  instrumentation (`embeddings.py`, `pgvector_store.py`). Their absence is a gap, not a zero:
-  `duplicate_check` and `task_created` show no calls at all, and the listener's work that
-  likely slowed the slack-first ASR is invisible.
+- **One run per order** with every stage measured. No variance, no p95 worth the name, and ASR
+  alone varies ~4x between runs.
+- **Windows laptop, not the cluster.** No container CPU limits; OCR CPU unmeasured; thread CPU in
+  15.6 ms steps; the machine's power and thermal state not controlled.
 - **Scoring degraded throughout** (above).
 - **Demo correctness is 1/6 and 4/6** (`demo_flow/README.md`): in natural one of the meeting's
   tasks is never created, so never indexed or scored; in neither run is a dependency published.
-- **Rescores not attributed.** None happened in these runs; a re-score from the rescore worker
-  would carry no item or task.
-- **Warm processes.** Whisper is loaded at start-up (`asr.warm_up()`), so model loading is not
-  in these numbers; the embedding model's first load is in no number at all.
+- **Not recorded:** `upsert` into the index, Kafka, MinIO, Inbox -- the last three show only in
+  an item's span. A re-score from the rescore worker carries no item or task (none happened here).
+- **Warm processes.** Whisper and the embedding model are loaded at start-up, so model loading is
+  in no number here.
 
 ## Reproduce
 

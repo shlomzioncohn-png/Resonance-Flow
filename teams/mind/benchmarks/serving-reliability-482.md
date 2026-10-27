@@ -19,7 +19,7 @@ reproduce it with `benchmarks/serving_reliability.py` (its docstring says how).
 | Does memory grow over repeated jobs? | **No.** 250.6-257.1 MB after each of 6 calls |
 | Does the API survive concurrent requests? | **Yes.** 32 clients for 30 s: 0 errors, still running |
 | Does `/health` stay truthful under load? | **It stays fast and correct** (max 26.6 ms at 32 clients, never over 1 s). It does **not** report the score publisher -- the contract today, see below |
-| Anything at risk? | **The API's memory: 453 MB idle against a 512Mi limit**, and an estimated ASR timeout if the landed runner is ever deployed with the chart's default CPU limit |
+| Anything at risk? | The API's memory was: **453 MB idle against a 512Mi limit** -- **78 MB since the lazy import** (`d2d134a2`, below). Still open: an estimated ASR timeout if the landed runner is ever deployed with the chart's default CPU limit |
 
 ## ASR: the longest job (`serving_reliability.py asr-long`)
 
@@ -99,10 +99,35 @@ model:** `/related` reads stored vectors, and scoring needs no embeddings. Measu
 a Linux container's figure was not measured and may differ (`kubectl top` would say). The
 score publisher, which this run did not start, adds its own on top.
 
-**A cheap win, confirmed by measurement, not applied:** importing `sentence_transformers` only
-when a model is first loaded (inside `_get_model()`) would take that ~380 MB out of every
-process that never embeds -- the API above all. It is R3's file (`embeddings/embeddings.py`), so
-it is proposed to her alongside the instrumentation patch.
+**A cheap win, confirmed by measurement -- applied with R3's approval (`d2d134a2`):**
+`sentence_transformers` is now imported when a model is first loaded, so a process that never
+embeds -- the API above all -- no longer carries it. Importing `mind.api.main` in a fresh process:
+**447.6 MB before, 74.2 MB after**, with torch and sentence-transformers not loaded (a test,
+`tests/api/test_api_imports.py`, keeps it so). The landed runner, which does embed, warms the
+model at start-up (`3e8505db`) -- without that, its first item paid the import inside its handler
+(`pipeline-baseline-482.md`, "Fixed during these runs").
+
+### After the lazy import (2026-10-27, `3e8505db`)
+
+The same measurement, same script and settings, the day after:
+
+| | 8 clients | 32 clients |
+|---|---|---|
+| `/related` requests, errors | 4,225, 0 | 3,721, 0 |
+| `/related` throughput | 140.8 /s | 124.0 /s |
+| `/related` p50 / p95 / max | 44 / 97 / 152 ms | 259 / 315 / 388 ms |
+| `/health` idle p50 / p95 / max | 2.7 / 3.4 / 4.0 ms | 2.2 / 3.9 / 9.0 ms |
+| `/health` under load p50 / p95 / max | 6.4 / 12.2 / 22.3 ms | 7.4 / 11.6 / 30.1 ms |
+| `/health` over 1 s, failed | 0 of 114, 0 | 0 of 113, 0 |
+| **API memory idle / max under load** | **78.1 / 82.0 MB** | **78.4 / 85.2 MB** |
+| **Ready after start** | **2.4 s** | **2.6 s** |
+
+- **Memory: 85 MB at most under load, 16% of the 512Mi limit** (was 86%). Still Windows, not the
+  pod; `kubectl top` on the cluster is the check that counts.
+- **Start-up: 2.4 s instead of 22 s** -- the 20 s import is gone from it.
+- `/related` was faster too (p95 315 ms at 32 clients, was 1,810), and its throughput still
+  drops from 8 to 32 clients (141 -> 124 /s). Whether the import's memory caused the earlier
+  saturation, or the laptop's state did, one run each cannot say -- see the noise below.
 
 ## `/health`: what it reports (tests: `tests/api/test_health_under_load.py`)
 
@@ -122,11 +147,13 @@ it is proposed to her alongside the instrumentation patch.
 
 ## For week 8
 
-1. **API memory headroom** (Relay, R3): 453 MB of 512Mi idle; the lazy import above is the cheap
-   fix. Check the real pod's usage in the cluster.
+1. **API memory headroom** (Relay): 453 MB of 512Mi idle before the lazy import, 78 MB after it
+   on this laptop. Check the real pod's usage in the cluster.
 2. **ASR on a deployed runner** (whoever deploys it, #483): at the default 500m CPU a 10-minute
    recording would exceed `TRANSCRIBE_TIMEOUT_S` (estimate). Size CPU, or the timeout, for it.
-3. **`/related` saturation** (R3, #475): throughput falls from 8 to 32 clients.
+3. **`/related` saturation** (R3, #475): throughput falls from 8 to 32 clients (84 -> 55 /s
+   before the lazy import, 141 -> 124 /s after).
 4. **`/health/live` + `/health/ready`** (Relay): if the publisher's health should reach the probes.
-5. **Laptop noise:** ~2x on identical ASR work. Week 8's targets need several runs, or a machine
-   whose clock is pinned.
+5. **Laptop noise:** up to ~4x on identical ASR work across the demo runs (6.9-29.3 s for the same
+   67.5 s, `pipeline-baseline-482.md`), 2.6x in the long job above. Week 8's targets need several
+   runs, or a machine whose clock is pinned.

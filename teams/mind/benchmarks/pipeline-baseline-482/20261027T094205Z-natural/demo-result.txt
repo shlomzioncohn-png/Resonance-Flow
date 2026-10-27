@@ -1,0 +1,16 @@
+
+demo flow result
+----------------
+  T2 'Finish the updated cost sheet' (from meeting): tier=TASK_TIER_OPERATIONAL urgency=3 role=- effort=240 deadline=2026-10-28T15:00:00Z inbox_id=53e29edb-6b9a-49ce-91ab-f9ae98f8c322
+  T1 'Send Northwind the price quote' (from meeting): tier=TASK_TIER_OPERATIONAL urgency=3 role=TASK_ROLE_CONTEXT_SALESPERSON effort=- deadline=2026-10-29T15:00:00Z inbox_id=-
+  T1 'Send the pricing proposal to Northwind' (from slack): tier=TASK_TIER_OPERATIONAL urgency=3 role=TASK_ROLE_CONTEXT_SALESPERSON effort=- deadline=2026-10-29T15:00:00Z inbox_id=4fbc3aac-3143-4345-be01-e595257ce32d
+  T3 'Complete, sign and return the supplier registration form' (from email): tier=TASK_TIER_OPERATIONAL urgency=3 role=- effort=15 deadline=2026-10-30T15:00:00Z inbox_id=78c73290-5bb3-4ea9-9f12-15937549a813
+
+  FAIL  three tasks come out, the expected ones: 4 requested, 3 created by Inbox
+  FAIL  Inbox created every task Mind requested: no task.created for: T1 'Send Northwind the price quote' (from meeting)
+  FAIL  T1 is one task, not 2 (meeting + slack): 2 request(s): T1 'Send Northwind the price quote' (from meeting); T1 'Send the pricing proposal to Northwind' (from slack)
+  FAIL  T1 depends on T2, on task.dependencies.proposed: 0 message(s) on task.dependencies.proposed, none for this pair
+  FAIL  tasks carry tier, urgency, role_context, owner, effort and deadline where expected: T2: no roleContext, no suggested owner (expected Omer); T1: no suggested owner (expected Dana); T1: no suggested owner (expected Dana); T3: no roleContext, no suggested owner (expected Dana)
+  PASS  every created task gets a score on task.score.proposed: 3 scored
+
+  1/6 criteria pass
