@@ -13,7 +13,7 @@ be caught **before it merges**, not after it is already on the target branch.
 | Schema Registry | a throwaway container in the runner (`services:`), same Apicurio image as prod | the real, live registry in the cluster |
 | Compared against | the schema versions on **whatever branch the PR targets** (its base branch, pulled from Git — not hardcoded to `main`) | whatever is currently registered live |
 | On success | PR is mergeable | new schema version is **registered** |
-| On failure | PR is blocked | Job fails, sync-wave stops |
+| On failure | PR is blocked | Job fails, later sync-waves (Traefik) stop; services are already deployed |
 
 CI never has a live cluster, so it can't ask the real registry "is this
 compatible?". Instead it recreates the answer: stand up an ephemeral registry,
@@ -22,8 +22,8 @@ dry-run check the cluster hook runs. Same tool, same semantics, just earlier.
 
 The ephemeral-infra-in-CI idea is borrowed from the team's smoke tests
 ([`setup-service-infra`](../../../.github/actions/setup-service-infra)), which spin up
-a kind cluster per run. A Schema Registry has no Helm chart yet, and needs no
-Kubernetes, so a plain service container is enough here.
+a kind cluster per run. The registry check needs no Kubernetes, so a plain service
+container is enough here.
 
 ## Files
 
