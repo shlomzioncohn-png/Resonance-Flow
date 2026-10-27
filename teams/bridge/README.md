@@ -167,10 +167,12 @@ matters for task detection (`RealEmailSourceReader`).
    ```
 
 2. Run the app on the host (needs local Maven + JDK 21 — see "Running locally with Maven"
-   above):
+   above). The manual sync/run endpoints have no auth, so they're off unless
+   `BRIDGE_MANUAL_TRIGGERS_ENABLED=true` (they stay off in the cluster; the scheduled jobs don't
+   need them):
 
    ```bash
-   mvn spring-boot:run
+   BRIDGE_MANUAL_TRIGGERS_ENABLED=true mvn spring-boot:run
    ```
 
 3. Trigger ingestion for a source:

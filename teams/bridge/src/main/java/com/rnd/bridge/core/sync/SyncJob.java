@@ -3,7 +3,7 @@ package com.rnd.bridge.core.sync;
 import com.rnd.bridge.core.IntakeResult;
 
 /**
- * One scheduled sync source (CRM, or an {@code UnstructuredIntakeController}-backed source).
+ * One scheduled sync source (CRM, or an {@code UnstructuredIntakeService}-backed source).
  * {@link SyncJobScheduler} collects every bean of this type and owns cron registration + failure handling.
  */
 public interface SyncJob {

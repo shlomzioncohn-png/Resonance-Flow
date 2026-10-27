@@ -50,8 +50,8 @@ import org.slf4j.LoggerFactory;
  * CalendarReadResult-per-call design exists for: two overlapping reads against the same
  * singleton reader instance can never see each other's token, because there is no shared field
  * either could overwrite (see CalendarReadResult/RealCalendarSourceReader's javadoc).
- * Doesn't cover what UnstructuredIntakeController does with the result afterward - that's
- * UnstructuredIntakeControllerTest's job (safe advancement/freezing on failure).
+ * Doesn't cover what UnstructuredIntakeService does with the result afterward - that's
+ * UnstructuredIntakeServiceTest's job (safe advancement/freezing on failure).
  * Calendar/Calendar.Events/Calendar.Events.List are mocked (Mockito.RETURNS_SELF for the
  * fluent set* chain, since AbstractGoogleClientRequest's setters return "this") because
  * Calendar.Events.List.execute() would otherwise make a real HTTP call; Events/Event/
@@ -185,7 +185,7 @@ class RealCalendarSourceReaderTest {
     /**
      * The concurrency property the CalendarReadResult design exists for: two reads overlapping
      * in time against the SAME singleton reader instance (as would happen if two HTTP /run
-     * requests raced each other in production - see UnstructuredIntakeController) must each get
+     * requests raced each other in production - see UnstructuredIntakeService) must each get
      * back exactly their own token, never the other's. Forces the overlap explicitly (both
      * requests' execute() blocks until both are in flight, then both are released together) so
      * this isn't just passing by lucky scheduling - with the old shared lastSyncToken field,
@@ -419,7 +419,7 @@ class RealCalendarSourceReaderTest {
      * nextSyncToken (which is exactly what happened while orderBy was set unconditionally -
      * Google doesn't return one for an ordered full query), readPages must not throw - it
      * returns the result with a null token, same as FixtureCalendarSourceReader always does.
-     * The cursor-save consequence of that null (UnstructuredIntakeController's
+     * The cursor-save consequence of that null (UnstructuredIntakeService's
      * rejected==0 && token!=null gate never firing) is covered on the controller's own test,
      * not here.
      */

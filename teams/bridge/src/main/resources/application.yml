@@ -99,6 +99,12 @@ bridge:
   structured-tasks-topic: ${BRIDGE_STRUCTURED_TASKS_TOPIC:bridge.structured.tasks}
   manual-sync:
     enabled: false
+  # The HTTP sync/run endpoints (CRM, GitHub, Jira, unstructured intake, media) have no auth, so
+  # they're off unless this is set; the scheduled jobs call the same services directly and don't
+  # need them. Turn it on for local runs and scripts/verify-e2e.sh. Slack's /api/bridge/slack/events
+  # is not affected - it verifies Slack's signature itself.
+  manual-triggers:
+    enabled: ${BRIDGE_MANUAL_TRIGGERS_ENABLED:false}
   # Deployment-wide tenant for lanes whose sources carry no tenant (GitHub, Jira).
   # Inbox's tasks.tenant_id is NOT NULL; same env var as crm.organization-id per
   # Daniel's guidance - one CRM_ORGANIZATION_ID value serves every lane. Blank means
