@@ -10,19 +10,29 @@ raises ValueError -- nothing meaningful to embed.
 
 `embed()`/`embed_batch()` block (CPU inference) -- use the `_async`
 wrappers from async code.
+
+`sentence_transformers` (and torch under it, ~380 MB) is imported when the
+model is first loaded, not when this module is (#482): every process that
+imports `mind.embeddings` without ever embedding -- Mind's API above all, whose
+/related reads stored vectors -- would otherwise carry it.
+`embeddings.SentenceTransformer` still resolves, through the module's
+`__getattr__`.
 """
+
+from __future__ import annotations
 
 import asyncio
 import threading
 import time
 from pathlib import Path
-from typing import Any
-
-from sentence_transformers import SentenceTransformer
+from typing import TYPE_CHECKING, Any
 
 from mind.config import EmbeddingModelSettings
 from mind.observability.compute import CpuClock
 from mind.observability.tracking import CallKind, CallStatus, record_call
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 EMBEDDING_DIM = 384
 MAX_SEQ_LENGTH = 512
@@ -45,6 +55,26 @@ _model: SentenceTransformer | None = None
 _model_lock = threading.Lock()
 
 
+def __getattr__(name: str) -> Any:
+    """`embeddings.SentenceTransformer`, imported on first access (see the module docstring)."""
+    if name == "SentenceTransformer":
+        from sentence_transformers import SentenceTransformer
+
+        return SentenceTransformer
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _sentence_transformer() -> type[SentenceTransformer]:
+    """The class to build the model with: one a test patched onto this module,
+    else sentence_transformers', imported now."""
+    patched: type[SentenceTransformer] | None = globals().get("SentenceTransformer")
+    if patched is not None:
+        return patched
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer
+
+
 def _get_model() -> SentenceTransformer:
     # threading.Lock, not asyncio.Lock -- runs on worker threads.
     global _model
@@ -56,7 +86,7 @@ def _get_model() -> SentenceTransformer:
                     if EMBEDDING_MODEL_LOCAL_DIR is not None and EMBEDDING_MODEL_LOCAL_DIR.is_dir()
                     else EMBEDDING_MODEL_NAME
                 )
-                _model = SentenceTransformer(model_source)
+                _model = _sentence_transformer()(model_source)
                 _model.max_seq_length = MAX_SEQ_LENGTH
     return _model
 

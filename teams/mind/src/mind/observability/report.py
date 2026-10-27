@@ -65,8 +65,8 @@ EXPECTED_KINDS: dict[str, str] = {
     CallKind.ASR: "ASR (`asr.transcribe`)",
     CallKind.OCR: "OCR (`ocr.extract_text`)",
     CallKind.LLM: "LLM extraction and classification (`BasicExtractor._call`)",
-    CallKind.EMBEDDING: "embedding (`embeddings.embed`) -- needs R3's change",
-    CallKind.VECTOR_QUERY: "vector query (`PgTenantStore.search`) -- needs R3's change",
+    CallKind.EMBEDDING: "embedding (`embeddings.embed`/`embed_batch`)",
+    CallKind.VECTOR_QUERY: "vector query (`PgTenantStore.search`)",
     CallKind.SCORING: "scoring (`RecordedScorer`, in the API)",
     CallKind.CHAIN: "Chain's traversal API (`RecordingClient`, in the API)",
 }

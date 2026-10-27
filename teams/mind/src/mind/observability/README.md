@@ -243,8 +243,8 @@ counts, and an unknown cost stays `None` instead of `0.0`:
 |---|---|---|---|---|---|
 | Scoring (`HierarchicalRankingModel.score`, in the API) | `scoring` | `hierarchical-ranking` | `duration_ms`, Chain requests inside it included | `cpu_s`: this thread's CPU | `RecordedScorer`, wired in `score_publisher_runner.py` |
 | Chain's traversal API (`ChainHierarchyClient`, R3's) | `chain` | `chain-ancestors`, `chain-children` | `duration_ms`, the whole request | n/a | `RecordingClient`, the client's HTTP client |
-| Embedding (`embeddings.embed`/`embed_batch`, R3's) | `embedding` | -- | -- | -- | **not yet**: waits for R3 (below) |
-| Vector query (`PgTenantStore.search`, R3's) | `vector_query` | -- | -- | -- | **not yet**: waits for R3 (below) |
+| Embedding (`embeddings.embed`/`embed_batch`, R3's) | `embedding` | `bge-small-en-v1.5-local` | `duration_ms` of `model.encode()`, the model's first load left out; a batch is one call | `cpu_s`: process-wide (torch spreads an encode over a thread pool) | `embeddings._encode()`, approved by R3 |
+| Vector query (`PgTenantStore.search`, R3's) | `vector_query` | `pgvector-search` | `duration_ms`, from asking the pool for a connection to the last row | n/a | `PgTenantStore.search()`, approved by R3 |
 
 Tokens and dollars apply to none of them. No stage has a duration limit
 yet: a limit waits for the baseline #482 measures, as the OCR/ASR
@@ -255,7 +255,11 @@ The scoring and Chain stages are recorded from the outside -- the model is
 wrapped, and the Chain client gets an HTTP client built with the same base
 URL and timeout -- so neither R1's publisher nor R3's model or client
 changed. Embedding and vector queries can only be timed inside R3's
-`embeddings/` code; that change is proposed to R3, not made.
+`embeddings/` code; that change was proposed to R3 and made with her
+approval, as was importing `sentence_transformers` only when a model is
+first loaded (~380 MB off every process that never embeds, the API's
+included -- `benchmarks/serving-reliability-482.md`). An `upsert` is not
+recorded.
 
 ### When Chain cannot be asked
 
