@@ -1,0 +1,68 @@
+[
+  {
+    "partition": 0,
+    "offset": 0,
+    "timestamp_ms": 1793015934029,
+    "key": "ae1bba81-af79-452c-8ba3-6937ab09f474",
+    "headers": {},
+    "value": {
+      "event_id": "a4ceca44-86a8-4189-9fe1-cedb61d6397a",
+      "task_id": "ae1bba81-af79-452c-8ba3-6937ab09f474",
+      "tier": "TASK_TIER_TACTICAL",
+      "mind_score": 0.47089323,
+      "confidence": 0.95,
+      "tenant_id": "00000000-0000-0000-0000-000000000001",
+      "scored_at": "2026-10-26T11:58:52.092643Z",
+      "factors": {
+        "hierarchy": 0.0,
+        "impact": 0.275,
+        "quick_win": 0.0,
+        "time_pressure": 0.19589323017476315
+      }
+    }
+  },
+  {
+    "partition": 0,
+    "offset": 1,
+    "timestamp_ms": 1793015963485,
+    "key": "36dd9c2c-6e15-4de2-9fa6-7afebd09d50c",
+    "headers": {},
+    "value": {
+      "event_id": "1a4249b1-bc00-451a-b9f0-fbce41a5a86b",
+      "task_id": "36dd9c2c-6e15-4de2-9fa6-7afebd09d50c",
+      "tier": "TASK_TIER_OPERATIONAL",
+      "mind_score": 0.21311991,
+      "confidence": 1.0,
+      "tenant_id": "00000000-0000-0000-0000-000000000001",
+      "scored_at": "2026-10-26T11:59:22.207881Z",
+      "factors": {
+        "hierarchy": 0.0,
+        "impact": 0.125,
+        "quick_win": 0.0,
+        "time_pressure": 0.08811991413238626
+      }
+    }
+  },
+  {
+    "partition": 0,
+    "offset": 2,
+    "timestamp_ms": 1793015968389,
+    "key": "a31e7d3a-db76-4ce0-ae46-3820eb5921c3",
+    "headers": {},
+    "value": {
+      "event_id": "f2c62c3f-e292-491d-9ed1-12d837f7ca3b",
+      "task_id": "a31e7d3a-db76-4ce0-ae46-3820eb5921c3",
+      "tier": "TASK_TIER_OPERATIONAL",
+      "mind_score": 0.261094,
+      "confidence": 1.0,
+      "tenant_id": "00000000-0000-0000-0000-000000000001",
+      "scored_at": "2026-10-26T11:59:27.223061Z",
+      "factors": {
+        "hierarchy": 0.0,
+        "impact": 0.125,
+        "quick_win": 0.08750000000000001,
+        "time_pressure": 0.04859399594381927
+      }
+    }
+  }
+]

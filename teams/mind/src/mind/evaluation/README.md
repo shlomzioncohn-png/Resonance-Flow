@@ -725,6 +725,56 @@ establish: the real-data slice does not yet measure ranking quality for any
 model that has actually been run against it — it proves only that the harness
 pipes real AMI data through any `RankingModel` implementation end to end.
 
+## Real pipeline output through the harness (#174)
+
+The real-data slice above is still hand-written scenarios. #174 asks what happens
+when the harness meets tasks the pipeline actually produced. **Diagnostic only:
+nothing is fixed here; the fixes are #175.**
+
+**What was run.** The three tasks (T1–T3) of one `demo_flow` run (slack-first,
+2026-10-26), exported by Michal Brecher from the run's stack as `task.created`
+and `task.score.proposed`, the event in each message's `value` with proto field
+names. They are kept in `eval/real_output/2026-10-26_demo-slack-first/`.
+`scripts/diagnose_real_tasks.py` replays them, no stack and no model call:
+
+```bash
+python scripts/diagnose_real_tasks.py
+```
+
+**Result: the harness rejects all three tasks when it loads them**, before any
+model runs. Each `value` into `Task.model_validate`, unchanged:
+
+| field | the harness expects | real output | tasks |
+|---|---|---|---|
+| `task_id` | `task_id`, matching `^[a-z0-9_]+$` | `id`, a UUID with hyphens | 3/3 |
+| `tier` | `operational` / `tactical` / `strategic` | `TASK_TIER_TACTICAL` (the proto enum name) | 3/3 |
+| `effort_estimate` | required, by that name | `effort_estimate_minutes`; absent on T1 | 3/3; 1/3 |
+| `description` | required | absent on T1 | 1/3 |
+| `blocked` | required | absent; Chain's `is_available` arrives instead | 3/3 |
+| everything else | `extra="forbid"` | 10–12 more fields (`tenant_id`, `urgency`, `status`, `confidence`…) | 3/3 |
+
+With only the obvious renames done (`id` → `task_id`, the effort name, the tier
+lowercased, `blocked=False`), one gap is still left on every task: **the UUID
+fails `task_id`'s pattern**. That one does not show from reading the models side
+by side; it took real ids.
+
+`LongestDescriptionModel`, the length-bias probe, crashes on T1
+(`len(None)`): the first thing an optional `description` would break.
+
+**All of these are harness assumptions, none a bug in the pipeline's output.**
+Empty `description`, `tier` and effort are valid states the extraction contract
+allows (#351, #352).
+
+**The live path holds.** The same events through `InboxTask` (#357) and
+`SegmentedRankingModel`, scored at each event's `scored_at`, give exactly the
+`mind_score` the run published (0.470893, 0.213120, 0.261094), including T1
+with its empty fields. So real tasks already reach the model correctly; only the
+scenario path of the harness cannot take them.
+
+**Limitations.** Three tasks from one run of a synthetic scenario. Fields the
+harness does not read are out of scope here (`role_context` empty on T2 and T3,
+no suggested owner) — both already show as FAIL in the demo's own check.
+
 ## Extraction-quality eval
 
 A **second, separate** harness — not a variant of the ranking metric above, which
