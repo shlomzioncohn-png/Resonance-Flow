@@ -14,11 +14,15 @@ wrappers from async code.
 
 import asyncio
 import threading
+import time
 from pathlib import Path
+from typing import Any
 
 from sentence_transformers import SentenceTransformer
 
 from mind.config import EmbeddingModelSettings
+from mind.observability.compute import CpuClock
+from mind.observability.tracking import CallKind, CallStatus, record_call
 
 EMBEDDING_DIM = 384
 MAX_SEQ_LENGTH = 512
@@ -33,6 +37,9 @@ EMBEDDING_MODEL_LOCAL_DIR: Path | None = (
     if _embedding_model_settings.model_cache_dir
     else None
 )
+
+# What record_call() files every encode under (#482): one row per model.
+EMBEDDING_CALL_NAME = f"{EMBEDDING_MODEL_NAME.rsplit('/', 1)[-1]}-local"
 
 _model: SentenceTransformer | None = None
 _model_lock = threading.Lock()
@@ -54,6 +61,30 @@ def _get_model() -> SentenceTransformer:
     return _model
 
 
+def _encode(model: SentenceTransformer, texts: str | list[str]) -> Any:
+    """model.encode(), recorded with record_call() (#482): wall time and CPU
+    seconds, ERROR if it raised. The model is loaded before the clock starts,
+    as ASR's window leaves Whisper's load out. A batch is one call. CPU is
+    process-wide (observability/compute.py): torch spreads one encode over a
+    thread pool, so this thread's own CPU would leave most of it out."""
+    clock = CpuClock()
+    started = time.perf_counter()
+    status = CallStatus.ERROR
+    try:
+        vectors = model.encode(texts, normalize_embeddings=True)
+        status = CallStatus.SUCCESS
+        return vectors
+    finally:
+        record_call(
+            EMBEDDING_CALL_NAME,
+            (time.perf_counter() - started) * 1000,
+            None,
+            kind=CallKind.EMBEDDING,
+            status=status,
+            cpu_s=clock.elapsed_s(),
+        )
+
+
 def task_text(title: str, description: str) -> str:
     """Canonical title+description join for embedding a task -- every
     producer (#470, #245, #471) must use this, or their vectors aren't
@@ -67,7 +98,7 @@ def embed(text: str, *, is_query: bool = False) -> list[float]:
         raise ValueError(f"embed() got text with no extractable content: {text!r}")
     if is_query:
         text = BGE_QUERY_INSTRUCTION + text
-    vector = _get_model().encode(text, normalize_embeddings=True)
+    vector = _encode(_get_model(), text)
     return vector.tolist()
 
 
@@ -80,7 +111,7 @@ def embed_batch(texts: list[str], *, is_query: bool = False) -> list[list[float]
             raise ValueError(f"embed_batch() got text with no extractable content: {text!r}")
     if is_query:
         texts = [BGE_QUERY_INSTRUCTION + t for t in texts]
-    vectors = _get_model().encode(texts, normalize_embeddings=True)
+    vectors = _encode(_get_model(), texts)
     return vectors.tolist()
 
 
