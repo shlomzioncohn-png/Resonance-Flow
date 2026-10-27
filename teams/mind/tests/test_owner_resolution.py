@@ -277,3 +277,43 @@ def test_an_email_to_oneself_still_looks_up_someone_else_it_names() -> None:
 
 def test_an_email_to_oneself_never_looks_up_the_sender_by_name() -> None:
     assert _look_up("Dana Cohen", recipient=True, sender=f"Dana Cohen <{DANA}>") is None
+
+
+# --- a name and the recipient that are not the same person ---------------------
+
+
+@pytest.mark.parametrize("recipients", [(f"Dana Cohen <{DANA}>",), (DANA,)])
+def test_a_name_that_is_not_the_recipient_is_no_owner(
+    recipients: tuple[str, ...], caplog: pytest.LogCaptureFixture
+) -> None:
+    """ "Yossi Levi will sign it" sent to Dana, answered with both: one of the
+    two is wrong, and the address would send Dana at 1.0. In doubt, nobody."""
+
+    with caplog.at_level(logging.INFO, logger="mind.task_creation"):
+        assert _look_up("Yossi Levi", recipient=True, recipients=recipients) is None
+
+    assert "not the recipient" in caplog.text
+    assert "Yossi" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("mention", "recipient"),
+    [
+        ("Dana", f"Dana Cohen <{DANA}>"),
+        ("Dana Cohen", f"Dana Cohen <{DANA}>"),
+        # No display name: the address before "@" spells her.
+        ("Dana", DANA),
+    ],
+)
+def test_the_recipients_own_name_keeps_the_recipient(mention: str, recipient: str) -> None:
+    """ "Hi Dana, please sign" sent to Dana: one person, twice."""
+
+    assert _look_up(mention, recipient=True, recipients=(recipient,)) == DANA
+
+
+def test_the_directory_is_asked_by_the_bare_address() -> None:
+    assert _look_up(recipient=True, recipients=(f"Dana Cohen <{DANA}>",)) == DANA
+
+
+def test_an_email_to_oneself_is_seen_through_the_recipients_name() -> None:
+    assert _look_up(recipient=True, recipients=(f"Dana Cohen <{DANA}>",), sender=DANA) is None

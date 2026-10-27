@@ -613,4 +613,4 @@ def test_a_named_sender_and_a_string_of_recipients_reach_the_item() -> None:
     (item,) = _items(_landed(ref, source_type="EMAIL"), _Trace({BODY_KEY: body.encode()}))
 
     assert item.sender == "Avraham Katz <ak@acme.example>"
-    assert item.recipients == ("dana@acme.example", "omer@acme.example")
+    assert item.recipients == ("Dana Cohen <dana@acme.example>", "omer@acme.example")

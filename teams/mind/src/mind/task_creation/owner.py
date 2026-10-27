@@ -54,13 +54,13 @@ class SuggestedOwner:
     confidence: float
 
 
-def _sender_words(sender: str) -> set[str]:
-    """The words a sender's name can be spelled from: the display name, if
-    there is one, and the address before its "@". Never the domain, which is
-    the company's: "Acme" is not the sender."""
+def _person_words(person: str) -> set[str]:
+    """The words a person's name can be spelled from, for a sender or a
+    recipient: the display name, if there is one, and the address before its
+    "@". Never the domain, which is the company's: "Acme" is not the sender."""
 
     words: set[str] = set()
-    for part in sender.replace("<", " ").replace(">", " ").split():
+    for part in person.replace("<", " ").replace(">", " ").split():
         local = part.split("@", 1)[0]
         words.update(_WORD.findall(local.lower()))
     return words
@@ -78,8 +78,12 @@ def is_the_sender(owner_mention: str, sender: str | None) -> bool:
 
     if not sender:
         return False
+    return _spelled_from(owner_mention, sender)
+
+
+def _spelled_from(owner_mention: str, person: str) -> bool:
     mention = set(_WORD.findall(owner_mention.lower()))
-    return bool(mention) and mention <= _sender_words(sender)
+    return bool(mention) and mention <= _person_words(person)
 
 
 def what_to_look_up(
@@ -92,9 +96,11 @@ def what_to_look_up(
     """What to ask the directory for: an address, a name, or None for nothing.
 
     The recipient is looked up by the address in the email record, and only
-    when there is one: which of several was asked is a guess. Then it wins
-    over a name: mostly both are one person ("Hi Dana, please sign" sent to
-    Dana), and her address is surer than her first name. Without one
+    when there is one: which of several was asked is a guess. Given with a
+    name, the two must be one person ("Hi Dana, please sign" sent to Dana),
+    told by the recipient's display name or address; then the address is
+    surer. If they are two ("Yossi Levi will sign it" sent to Dana), one
+    answer is wrong, and the address would send it at 1.0: no owner. Without one
     recipient (a chat, several) the name is looked up instead, so a stray
     flag costs nothing, and the same when the one recipient is the sender
     (an email to oneself). A name that is the sender's own is never looked up.
@@ -103,11 +109,18 @@ def what_to_look_up(
 
     if owner_is_recipient:
         sender_address = parseaddr(sender)[1].lower() if sender else ""
-        to_self = len(recipients) == 1 and recipients[0].lower() == sender_address
-        if len(recipients) == 1 and not to_self:
-            if owner_mention is not None:
-                logger.info("owner: both the recipient and a name; keeping the recipient")
-            return recipients[0]
+        address = parseaddr(recipients[0])[1] if len(recipients) == 1 else ""
+        to_self = bool(address) and address.lower() == sender_address
+        if address and not to_self:
+            if owner_mention is None:
+                return address
+            if _spelled_from(owner_mention, recipients[0]):
+                logger.info(
+                    "owner: both the recipient and a name, one person; keeping the recipient"
+                )
+                return address
+            logger.info("owner: the name given is not the recipient's; no owner sent")
+            return None
         logger.info(
             "owner: the task is the recipient's, but %s; %s",
             "the one recipient is the sender"

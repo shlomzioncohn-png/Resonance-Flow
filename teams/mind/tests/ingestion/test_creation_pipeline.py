@@ -574,3 +574,28 @@ async def test_a_duplicate_is_never_looked_up() -> None:
     await parts.pipeline.handle(_event(), [_chat_item()])
 
     assert (parts.producer.sent, directory.asked) == ([], [])
+
+
+class BrokenDirectory:
+    """#131 promises never to raise; a bug there must not cost the task."""
+
+    def find_candidates(self, tenant_id: UUID, name: str) -> list[Candidate]:
+        raise RuntimeError(f"directory bug looking up {name}")
+
+
+async def test_a_directory_that_raises_sends_the_task_with_no_owner(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The owner is optional: an error looking it up must not stop the message
+    and bring it back for ever, holding up every task in it."""
+
+    parts = Parts(MALKI_TAKES_IT, directory=BrokenDirectory())  # type: ignore[arg-type]
+
+    with caplog.at_level(logging.ERROR, logger="mind.ingestion.creation_pipeline"):
+        await parts.pipeline.handle(_event(), [_chat_item()])
+
+    assert _no_owner_sent(_sent_request(parts))
+    assert "directory" in caplog.text and "RuntimeError" in caplog.text
+    # The error's own words may hold the name asked for, which no owner log
+    # line carries; they go to DEBUG only.
+    assert "Malki" not in caplog.text

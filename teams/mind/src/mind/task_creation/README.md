@@ -253,15 +253,23 @@ Mind suggests an owner; it never assigns one (#132). What reaches Inbox is
   email asks the person it is sent to. That person's address is taken from
   the email record, and only when there is one recipient: a model copying it
   off the To line could as well copy the From line's. `owner.what_to_look_up`
-  turns the two into the one string the directory is asked for, or none. With
-  one recipient the address wins over a name: mostly both are one person ("Hi
-  Dana, please sign" sent to Dana), and her address is surer than her first
-  name; when the name was someone else ("Yossi will sign it" sent to Dana)
-  this picks the wrong one, so it is logged, to count. Without one recipient
-  (a chat, several) the name is looked up instead, and so it is when the one
-  recipient is the sender (an email to oneself). An address is found only once #131
-  matches addresses exactly, as agreed with its author; #131's draft matches
-  words, and an address matches nobody there.
+  turns the two into the one string the directory is asked for, or none.
+  Each recipient keeps its display name beside the address ("Dana Cohen
+  <dana@…>"); the directory is asked by the address alone.
+- **The recipient and a name must be one person.** Given both, the name must
+  be spelled from the recipient's display name or the address before its "@"
+  ("Hi Dana, please sign" sent to Dana): then the address is surer than a
+  first name. If they are two people ("Yossi Levi will sign it" sent to Dana)
+  one answer is wrong, and the address would send it at 1.0, an exact match:
+  no owner, logged. Without one recipient (a chat, several) the name is looked
+  up instead, and so it is when the one recipient is the sender (an email to
+  oneself). An address is found only once #131 matches addresses exactly, as
+  agreed with its author; #131's draft matches words, and an address matches
+  nobody there.
+- **A directory that fails costs only the owner.** #131 promises never to
+  raise; if it does, the task goes with no owner, rather than the message
+  failing and coming back for ever. The error is logged by its type only, as
+  its message may hold the name asked for; the trace is at DEBUG.
 - **The sender is never the owner.** The prompt says so, but a sender who signs
   "Thanks, Avi" has written the name, so grounding keeps it, and a live run
   returned it. `owner.is_the_sender` drops a name whose every word is the

@@ -197,9 +197,9 @@ def test_a_single_recipient_as_a_string_is_one_recipient() -> None:
     )
 
 
-def test_an_address_record_keeps_the_senders_name_and_only_the_recipients_address() -> None:
-    """The name helps tell the sender's own name apart; a recipient is looked
-    up in Inbox by address alone."""
+def test_an_address_record_keeps_the_name_beside_the_address() -> None:
+    """The name tells the sender's signature apart, and tells whether a name
+    the model gave is the recipient's. Inbox is still asked by address alone."""
 
     record = {
         "from": {"name": "Lisa Grant", "email": "lisa.grant@northwind.example"},
@@ -210,7 +210,7 @@ def test_an_address_record_keeps_the_senders_name_and_only_the_recipients_addres
     body = _read(record)
 
     assert body.sender == "Lisa Grant <lisa.grant@northwind.example>"
-    assert body.recipients == ("dana@brightline.example",)
+    assert body.recipients == ("Dana Cohen <dana@brightline.example>",)
 
 
 @pytest.mark.parametrize("text", ["not json", '{"subject": "no body"}', "[1, 2]"])
@@ -236,21 +236,23 @@ def test_a_sender_that_is_not_one_address_is_none(value: object) -> None:
 @pytest.mark.parametrize(
     ("to", "recipients"),
     [
-        # How a mail header writes people: the address alone goes on.
-        ("Dana Cohen <dana@brightline.example>", ("dana@brightline.example",)),
+        ("Dana Cohen <dana@brightline.example>", ("Dana Cohen <dana@brightline.example>",)),
         # Several in one string are several recipients, not one.
         (
             "Dana Cohen <dana@brightline.example>, omer@brightline.example",
-            ("dana@brightline.example", "omer@brightline.example"),
+            ("Dana Cohen <dana@brightline.example>", "omer@brightline.example"),
         ),
-        ('"Cohen, Dana" <dana@brightline.example>', ("dana@brightline.example",)),
-        (["Dana <dana@brightline.example>"], ("dana@brightline.example",)),
+        ('"Cohen, Dana" <dana@brightline.example>', ('"Cohen, Dana" <dana@brightline.example>',)),
+        (["Dana <dana@brightline.example>"], ("Dana <dana@brightline.example>",)),
         # Not an address: nobody to look up.
         ("Dana Cohen", ()),
     ],
 )
-def test_each_recipient_is_one_bare_address(to: object, recipients: tuple[str, ...]) -> None:
-    """Agreed with #131: Mind sends the address alone, matched there exactly."""
+def test_each_recipient_is_one_address_with_its_name(
+    to: object, recipients: tuple[str, ...]
+) -> None:
+    """One recipient each, written the way a header writes one person: the
+    owner check reads the name, and Inbox is asked by the address alone."""
 
     assert _read({"to": to, "body": "Hi."}).recipients == recipients
 

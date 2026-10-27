@@ -68,12 +68,37 @@ def _sender(value: object) -> str | None:
     return senders[0] if len(senders) == 1 else None
 
 
-def _addresses(value: object) -> tuple[str, ...]:
-    """Each recipient's bare address. A header writes people as
-    "Dana Cohen <dana@…>", several to a string, and #131 matches the address
-    alone, exactly; what holds no address names nobody to look up."""
+# What a display name must be quoted for, so the address can be read back
+# out of "Name <address>" (owner.what_to_look_up): "Cohen, Dana" has a comma.
+_SPECIALS = set('()<>@,;:\\".[]')
 
-    return tuple(address for _, address in getaddresses(_texts(value)) if "@" in address)
+
+def _person(name: str, address: str) -> str:
+    name, address = " ".join(name.split()), address.strip()
+    if not name:
+        return address
+    if _SPECIALS & set(name):
+        name = '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return f"{name} <{address}>"
+
+
+def _addresses(value: object) -> tuple[str, ...]:
+    """Each recipient, one person each, written the way a header writes one:
+    "Dana Cohen <dana@…>", or the address alone when the record has no name.
+    A header puts several in a string; an address record keeps its name. The
+    name tells whether a name the model gave is the recipient's; Inbox is
+    asked by the address alone. What holds no address names nobody."""
+
+    values = value if isinstance(value, list) else [value]
+    people: list[tuple[str, str]] = []
+    for v in values:
+        if isinstance(v, dict):
+            name, email = v.get("name"), v.get("email")
+            if isinstance(email, str):
+                people.append((name if isinstance(name, str) else "", email))
+        elif isinstance(v, str):
+            people.extend(getaddresses([" ".join(v.split())]))
+    return tuple(_person(name, address) for name, address in people if "@" in address)
 
 
 def email_body_text(text: str, object_key: str) -> str:

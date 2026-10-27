@@ -147,8 +147,21 @@ class CreationPipeline:
         if look_up is None:
             return request
         # A blocking call, like the extraction above: #131 answers from its
-        # cache, and asks Inbox only when that has expired.
-        owner = choose_owner(self._directory.find_candidates(tenant_id, look_up))
+        # cache, and asks Inbox only when that has expired. It promises not to
+        # raise; if it does, the task goes without an owner, which is optional,
+        # rather than the message failing and coming back for ever.
+        # The error is logged by type: its message may hold the name or the
+        # address asked for, which no owner log carries. The trace is at DEBUG.
+        try:
+            candidates = self._directory.find_candidates(tenant_id, look_up)
+        except Exception as error:
+            logger.error(
+                "creation: the owner directory failed (%s); the task goes with no owner",
+                type(error).__name__,
+            )
+            logger.debug("creation: the owner directory's error", exc_info=True)
+            return request
+        owner = choose_owner(candidates)
         if owner is None:
             return request
         return request.model_copy(
