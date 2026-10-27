@@ -744,8 +744,10 @@ names. They are kept in `eval/real_output/2026-10-26_demo-slack-first/`.
 python scripts/diagnose_real_tasks.py
 ```
 
-**Result: the harness rejects all three tasks when it loads them**, before any
-model runs. Each `value` into `Task.model_validate`, unchanged:
+**Result: the harness rejected all three tasks when it loaded them**, before any
+model ran. This records the harness as it was before #175 (run on 17cd38ee);
+the same script on the current code shows the fixes below instead. Each
+`value` into `Task.model_validate`, unchanged:
 
 | field | the harness expects | real output | tasks |
 |---|---|---|---|
@@ -792,6 +794,9 @@ no suggested owner) — both already show as FAIL in the demo's own check.
 - `LongestDescriptionModel` reads a missing description as length 0 instead of
   crashing. It was the only code under `evaluation/` that assumed the fields
   were filled; `scoring/` already handled empty ones (#357).
+- The hand-written set in `eval/personas/` still fills all three on every task:
+  `tests/test_personas.py` fails if one is left out, so the optional schema does
+  not loosen the curated set.
 
 With these, `scripts/diagnose_real_tasks.py`'s second pass accepts all three
 demo tasks.
@@ -818,9 +823,20 @@ segmented model, and `mind-ci.yaml` runs it after the smoke check. It fails if
 the harness cannot load or score those tasks; it has no accuracy gate (one
 scenario is not a number). Locally: exit 0 as is; with `description` made
 required again on purpose, exit 1 naming `tasks/0/description`; exit 0 once
-restored. The same proof on a PR is still to do: the Mind CI job is skipped on
-draft PRs, and in October 2026 it was not starting at all ("an Actions budget is
-preventing further use").
+restored. The Mind CI job is skipped on draft PRs, so the same red-then-green
+proof on GitHub is recorded on the PR that lands this.
+
+That scenario is written down once, so it cannot notice a later change to what
+real tasks look like. `tests/test_real_output_through_harness.py` can: it takes
+the recorded `task.created` events and builds each task the way the live path
+does today — the current generated proto (parsed strictly, so a field the
+proto no longer knows is an error), then `to_scoring_task` — and loads it into
+`Task`, checks that T1's empty fields stay empty, and that the harness's copy
+scores exactly like the live `InboxTask`. A change to the proto, to
+`to_scoring_task` or to `Task` that breaks this fails in the PR that makes it
+(checked: `description` made required again fails 3 tests; an event field the
+proto does not know fails on parsing). What it cannot catch is a change in what
+the pipeline produces (say, tier no longer filled): that takes a new demo run.
 
 **The persona set is unchanged.** All 42 scenarios scored before (49c5ab1c,
 this branch's base) and after, with `segmented`, `dummy`, `nearest-deadline`,
