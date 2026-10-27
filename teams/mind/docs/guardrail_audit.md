@@ -46,11 +46,11 @@ Outcomes:
 |---|---|---|---|---|
 | `no_action_items` | extraction | Small talk, no action item | failure, or confidence < 0.5 | **graceful** since #690: an empty task list. Before #690 it was **silent**: invented task "Catch up next week", confidence **0.855**. |
 | `noise_scan` | OCR | Pixel noise, no text (seed 488) | `NO_TEXT_RECOGNIZED`, or mean < 60 | **low confidence**: 2 junk "words" (`oe`, `fe`), mean **23.39**, both flagged low |
-| `crosstalk_audio` | ASR | Clean fixture mixed with itself, 1 s delayed. The reference goes through the same gain and padding without the copy, so only the overlap differs. | lower than the reference | **partial**: mean **0.747 → 0.549**, but **no** segment flagged low. The text is garbled: "...to the Phrenae report by the Friday's team by F" |
+| `crosstalk_audio` | ASR | Clean fixture mixed with itself, 1 s delayed. The reference goes through the same gain and padding without the copy, so only the overlap differs. | lower than the reference | **partial**: mean **0.742 → 0.543**, but **no** segment flagged low. The text is garbled: "...to the Thunang report by the Friday's team by F" |
 
 The two non-English cases are run as well, but they are accepted limitations rather than findings. See [Accepted known limitations](#accepted).
 
-OCR and ASR were run on R4's machine (tesseract and Whisper `base.en`), because R1's machine has neither. The tests are deterministic, with a fixed seed, mixing done in code and a pinned model hash.
+OCR and ASR were run on R4's machine (tesseract and Whisper `base.en`), because R1's machine has neither. The tests are deterministic, with a fixed seed, mixing done in code and a pinned model hash. The numbers above come from the run on `3a800780` (2026-10-26), after `asr.py` changed on `main`. The first run (2026-10-20) gave cross-talk 0.747 → 0.549, and noise was the same.
 
 Thresholds:
 
@@ -85,7 +85,7 @@ Both cases are within their acceptable outcomes, so there is no finding against 
 
 - **Cross-talk lowers confidence but does not trip the flag.** Mean confidence dropped by about a quarter, while the transcript was clearly garbled, yet no segment fell below 0.368. A consumer that only reads `low_confidence_segments` would treat this transcript as clean. Comparing `mean_confidence` against the source's usual level would catch it. Whether that is worth doing is R4's call, and it is not asserted here. The overlap is the same voice, likely easier than two real speakers.
 
-Nothing on `main` passes OCR or ASR confidence into extraction yet (the #349 consumer is not on `main`), so today even a flagged transcript would reach extraction as ordinary text.
+Nothing on `main` calls OCR or ASR from the pipeline yet, and nothing outside `multimodal/` reads their confidence. So today even a flagged transcript would reach extraction as ordinary text.
 
 ## <a id="accepted"></a>3. Accepted known limitations
 
@@ -94,7 +94,7 @@ Nothing on `main` passes OCR or ASR confidence into extraction yet (the #349 con
 | Case | Component | Observed | Test |
 |---|---|---|---|
 | `non_english_text` | extraction | A Hebrew task was silently translated to "Send the budget report to finance", at confidence **0.641**. The title grounding did react (English words absent from the Hebrew text cost 25%), but nothing flagged the language, and the prompt's "never translate the content" was not followed. | `xfail(strict=True)`, reason "accepted limitation" |
-| `non_english_audio` | ASR | Whisper (`base.en`, pinned to English) wrote an invented English sentence, "We will see you in the next video.", at mean **0.309**. Its one segment is flagged low. | Asserts only that it does not crash, and prints the values. The threshold check was dropped after the first run, by mentor review (see `deviation` in `cases.json`). |
+| `non_english_audio` | ASR | Whisper (`base.en`, pinned to English) writes an invented English sentence. On `3a800780` it wrote "Thank you very much for watching, and I will see you in the next video." at mean **0.370**, just above R4's 0.368, so `low_confidence_count=0` and nothing marks it as suspect. Before `asr.py` changed on `main`, the same recording gave "We will see you in the next video." at 0.309, and that one was flagged. The flag sits right at the edge for this input, and a small code change moved the result across it. Spotted by R4 on the re-run. | Asserts only that it does not crash, and prints the values. The threshold check was dropped after the first run, by mentor review (see `deviation` in `cases.json`). |
 
 ## <a id="reported"></a>4. Reported
 
