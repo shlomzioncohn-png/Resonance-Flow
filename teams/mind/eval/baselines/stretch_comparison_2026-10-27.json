@@ -1,6 +1,6 @@
 {
-    "baseline_record": "eval/baselines/baseline_score_2026-10-25.json",
-    "stretch_record": "eval/baselines/stretch_score_2026-10-26.json",
+    "baseline_record": "eval/baselines/baseline_score_2026-10-27.json",
+    "stretch_record": "eval/baselines/stretch_score_2026-10-27.json",
     "baseline_model_name": "SegmentedRankingModel",
     "stretch_model_name": "HierarchicalRankingModel",
     "total_scenarios": 42,

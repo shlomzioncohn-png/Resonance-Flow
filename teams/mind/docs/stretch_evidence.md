@@ -16,14 +16,19 @@
 | | Baseline | Stretch |
 |---|---|---|
 | Model | `SegmentedRankingModel` (#354) | `HierarchicalRankingModel` (#474, PR #974) |
-| Model commit | `b16bfecc` | `87bba9c9` (this branch, with #974 merged in) |
-| Record | [`baseline_score_2026-10-25.json`](../eval/baselines/baseline_score_2026-10-25.json) | [`stretch_score_2026-10-26.json`](../eval/baselines/stretch_score_2026-10-26.json) |
+| Model commit | `d585d3b0` | `d585d3b0` |
+| Record | [`baseline_score_2026-10-27.json`](../eval/baselines/baseline_score_2026-10-27.json) | [`stretch_score_2026-10-27.json`](../eval/baselines/stretch_score_2026-10-27.json) |
 
 - **Same persona set for both:** `eval/personas` + `eval/hierarchy` at commit
-  `f07b5e71`, 42 scenarios. The stretch run loaded the baseline from its record
-  (`--compare-to`), which refuses a record whose persona-set checksum differs, so
-  the baseline was not re-scored.
-- **The diff:** [`stretch_comparison_2026-10-26.json`](../eval/baselines/stretch_comparison_2026-10-26.json),
+  `d585d3b0`, 42 scenarios, all `team_lead_approved`. The stretch run loaded the
+  baseline from its record (`--compare-to`), which refuses a record whose
+  persona-set checksum differs, so the baseline was not re-scored.
+- **Why 2026-10-27 and not the 2026-10-25 baseline:** the team lead approved the
+  last 12 scenarios, which changed the persona-set checksum, so the baseline was
+  re-recorded on the approved set. Its scores are identical to 2026-10-25 (only
+  the commit, checksum and approval-count labels differ), and so are the stretch
+  scores and the diff. See the README's "Baseline score" section.
+- **The diff:** [`stretch_comparison_2026-10-27.json`](../eval/baselines/stretch_comparison_2026-10-27.json),
   produced by #464's `diff_reports`.
 - **What the stretch does:** for a task with ancestors, `score = 0.5 * own + 0.5 *
   mean(ancestor importance)`, where `own` is the baseline's own score for that
@@ -163,11 +168,11 @@ and is reported to her as a finding.
 ## Reproduce
 
 This is the command that produced the stretch record, from a clean working tree
-at `87bba9c9`. From `teams/mind`:
+at `d585d3b0`. From `teams/mind`:
 
 ```bash
 python -m mind.evaluation.run --model hierarchical \
-    --compare-to eval/baselines/baseline_score_2026-10-25.json \
+    --compare-to eval/baselines/baseline_score_2026-10-27.json \
     --record-stretch eval/baselines/stretch_score_<date>.json \
     --comparison-out eval/baselines/stretch_comparison_<date>.json \
     --model-commit <sha> --persona-set-commit <sha>

@@ -531,6 +531,10 @@ python -m mind.evaluation.run --model <stretch-model> \
 
 ### 2026-10-25: segmented baseline recorded
 
+> **Superseded by the 2026-10-27 entry below**, which has the same scores on
+> the same scenarios. Only the approval flags (and so the checksum) changed.
+> The file is kept unchanged, because recorded baselines are never edited.
+
 - **Record:** [`eval/baselines/baseline_score_2026-10-25.json`](../../../eval/baselines/baseline_score_2026-10-25.json)
 - **Model:** `SegmentedRankingModel` (#354), `--model segmented`, model commit
   `b16bfecc`.
@@ -577,6 +581,24 @@ on a staging-only alert, or that a mislabelled leak is the real severity. This
 is the case #535's hard scenario was written to catch: an inflated label
 against an understated real impact.
 
+### 2026-10-27: baseline re-recorded after the last 12 approvals
+
+- **Record:** [`eval/baselines/baseline_score_2026-10-27.json`](../../../eval/baselines/baseline_score_2026-10-27.json).
+  This is the current baseline, and the one #487 compares against.
+- **Why a new record:** the team lead approved the 12 scenarios that were still
+  `team_lead_approved: false` (#535's 6 hard scenarios and the 6 in
+  `hierarchy_decides/`). Flipping the flags changes the files, so the
+  persona-set checksum changes (`f5639b84…` → `64509cdc…`), and
+  `load_baseline_record` refuses the 2026-10-25 record against the current
+  set. Recorded baselines are never edited, so the run went to a new file.
+- **Model:** `SegmentedRankingModel`, `--model segmented`. Model commit and
+  persona-set commit are both `d585d3b0`, the commit that flips the flags.
+- **Scores are identical to 2026-10-25.** Field by field, the two records differ
+  only in `recorded_on`, `model_commit`, `persona_set.commit`,
+  `persona_set.checksum`, and `persona_set.team_lead_approved` (30 → 42).
+  The combined / per-group / per-role numbers, every prediction, and every
+  candidate score are equal. The table, the misses and the two examples above
+  all apply unchanged.
 - **Compared against:** the stretch model (#474) was scored against this record
   on the same set: 76.2% (32/42), with 9 scenarios changed (4 wrong → right,
   5 right → wrong). Records, diff and explanations are in
