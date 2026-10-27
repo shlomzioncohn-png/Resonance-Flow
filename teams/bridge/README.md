@@ -1,9 +1,18 @@
 # Team Bridge - Service
 
-Foundation module for Team Bridge (source adapters & communication ingestion).
+Team Bridge's service: source adapters and communication ingestion for Resonance-Flow.
 
-This is a minimal Spring Boot skeleton. No business logic or real APIs are implemented yet - the
-goal of this stage is a clean, working Maven/Spring Boot project that later work can build on.
+Bridge has two paths into the system:
+
+- **Structured** (GitHub, Jira, HubSpot/Salesforce CRM): each item is mapped to the canonical
+  Task and published as a Protobuf `StructuredTaskEvent` to `bridge.structured.tasks`, which
+  Inbox consumes.
+- **Unstructured** (Gmail, Drive, Slack, WhatsApp, Calendar, Zoom/BigBlueButton recordings,
+  scanned documents): the raw content is landed in MinIO and a pointer `RawObjectEvent` is
+  published to `bridge.raw.landed`. Bridge never builds a Task here - Mind does.
+
+Publishing to Kafka needs the `kafka` Spring profile; without it every lane falls back to
+`LoggingPayloadPublisher`, which only logs.
 
 ## Sub-roles (4 developers)
 
@@ -20,26 +29,32 @@ goal of this stage is a clean, working Maven/Spring Boot project that later work
 - Spring Boot 3.3.13 (Maven)
 - Docker / Docker Compose
 
-The Unstructured-intake and meeting/doc/audio lanes (below) now run against real local MinIO +
-Redpanda via Docker Compose, sharing the same MinIO bucket/Kafka topic. The other 2 lanes
-(GitHub, CRM) haven't wired their infra yet.
+Locally, the Unstructured-intake and meeting/doc/audio lanes (below) run against MinIO +
+Redpanda via Docker Compose, sharing the same MinIO bucket/Kafka topic. In the cluster every lane
+runs through the shared Helm chart (`components.bridge` in
+`teams/relay/helm/resonance-flow/values.yaml`), which also sets the tenant settings
+`CRM_ORGANIZATION_ID` and `BRIDGE_TENANT_ID` - keep those two equal.
 
 ## Project structure
 
 ```
 src/main/java/com/rnd/bridge/
 ├── BridgeApplication.java   # Spring Boot entry point
-├── controller/               # shared/cross-lane (currently empty)
-├── service/                  # shared/cross-lane (currently empty)
-├── repository/
-├── dto/
-├── config/
-├── core/                      # shared pipeline contract (SourceReader/PayloadMapper/…)
+├── core/                      # shared pipeline: AbstractIntakeLane, SourceReader/PayloadMapper/…, SyncJob scheduling
+├── publish/                   # PayloadPublisher implementations (Kafka, or logging without the kafka profile)
+├── task/                      # canonical Task model, StructuredTaskEvent mapping, enrichment
+├── github/                    # Hadas's GitHub lane
+├── jira/                      # Hadas's Jira lane
+├── crm/                       # Ruth's CRM lane (HubSpot, Salesforce)
+├── intake/                    # Malki's lane — see "Unstructured-intake lane" below
+├── media/                     # Esther's lane — see "Meeting/doc/audio hand-off" below
 ├── raw/                       # shared RawObjectEvent model + validator (both unstructured lanes)
 ├── storage/                   # shared MinIO client (both unstructured lanes)
 ├── scoping/                   # shared scoping filter (Malki's lane; media lane skips it)
-├── intake/                    # Malki's lane — see "Unstructured-intake lane" below
-└── media/                     # Esther's lane — see "Meeting/doc/audio hand-off" below
+├── shared/                    # Kafka topic config shared by the unstructured lanes
+├── ai/                        # shared LLM client infrastructure (see its README.md)
+├── enrichment/                # dependency/severity/due-date suggestion types
+└── runner/                    # ManualSyncRunner
 src/main/resources/application.yml
 src/main/resources/fixtures/unstructured/   # synthetic Gmail/Drive/Slack/WhatsApp/Calendar data
 src/test/java/com/rnd/bridge/
@@ -89,8 +104,13 @@ docker compose down
 Gmail · Drive · Slack · WhatsApp · Calendar → scoping decision → land tagged raw object in
 MinIO → publish a pointer event to Kafka topic `bridge.raw.landed`. This lane never builds a
 `Task` — Mind consumes the pointer later and extracts the eventual Task from the landed object.
-No live source credentials are used yet; static fixtures under
-`src/main/resources/fixtures/unstructured/` stand in for the 5 real sources.
+Each source has a fixture reader and a real one, picked by `bridge.intake.<source>.mode`
+(`fixture` by default, `real` for the live API). Fixture mode reads the static data under
+`src/main/resources/fixtures/unstructured/`; real mode needs that source's credentials (see the
+comments next to each `mode` in `application.yml`).
+
+Real Gmail ingests only mail the user received: drafts, sent mail, spam and trash are skipped
+(`RealEmailSourceReader`).
 
 ### Running it locally
 
@@ -152,20 +172,26 @@ consecutive messages with no gap larger than `bridge.intake.chat.session-gap-min
 
 ### Scoping
 
-`ScopingFilterService` exists as its own class (a deliberate seam) but currently always returns
+`AllowlistScopingFilter` exists as its own class (a deliberate seam) but currently always returns
 `INCLUDED` — per direct instruction, no work-related-only filtering runs yet. Swapping in real
 filtering logic later should only touch this one class.
 
 ### RawObjectEvent schema
 
-`RawObjectEvent` matches the official JSON Schema exactly (`schemaVersion`, `objectKey`,
-`sourceType`, `tenantId`, `ingestedAt`, `scopeDecision`, `dedupKey`, `modality`, `traceId`,
-plus optional `contentType`/`sizeBytes`/`sourceTimestamp`; `language` is omitted — real
-language detection is out of scope for this skeleton). Two fields worth knowing:
-- `dedupKey` is a real `sha256:<64 hex>` digest of `sourceType + tenantId + naturalId` —
-  deterministic, so a retried publish produces the same key.
-- `traceId` is one UUID per intake run (one `POST .../run` call), shared by every event that
-  call produces — not one per individual event.
+`RawObjectEvent` (`raw/model/RawObjectEvent.java`, wire format
+`shared/proto/raw-object-event.proto`) describes one logical item - an email, a chat session,
+a recording - not one file: `schema_version`, `source_type`, `tenant_id`, `ingested_at`,
+`scope_decision`, `participants`, `source_timestamp`, `correlation_id`, `revision`,
+`change_type`, `change_significance_score`, `objects[]`, `source_ref` and an optional
+`classification`. Each file of the item is one entry in `objects[]` (its object key, content
+hash, content type, size, modality and `role`: `BODY`, `ATTACHMENT`, `SOURCE_METADATA`, …).
+Fields worth knowing:
+- `correlation_id` is deterministic per item (e.g. email: derived from tenant + Gmail message
+  id), so re-reading the same item never looks new.
+- `revision` goes up when the source item is edited; the dedup key is
+  `correlation_id:revision`, so an edit is a new event and a retry of the same revision is not.
+- `source_ref` is the platform's own id for the item (e.g. the email's `Message-ID`), or `null`
+  when there is none.
 
 ## Meeting/doc/audio hand-off (Esther)
 

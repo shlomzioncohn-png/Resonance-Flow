@@ -59,6 +59,10 @@ import org.springframework.stereotype.Component;
  * resync, exactly like Calendar's 410-on-expired-syncToken handling; readFull()'s own fresh
  * historyId (not a continuation of the expired one) is returned as part of that same
  * EmailReadResult.
+ * Only mail the user received is ingested: drafts (every autosave is a new message id, so each
+ * would land as its own object), the user's own sent mail, spam and trash are skipped - on the
+ * full scan via the FULL_SYNC_QUERY search, and on both paths via the message's labelIds, since
+ * users.history.list takes no search query.
  */
 @Component
 @ConditionalOnProperty(prefix = "bridge.intake.email", name = "mode", havingValue = "real")
@@ -66,6 +70,9 @@ public class RealEmailSourceReader implements EmailSourceReader {
 
     private static final Logger log = LoggerFactory.getLogger(RealEmailSourceReader.class);
     private static final Pattern ANGLE_BRACKET_EMAIL = Pattern.compile("<([^>]+)>");
+    // messages.list already leaves out spam and trash unless includeSpamTrash is set.
+    static final String FULL_SYNC_QUERY = "-in:drafts -in:sent";
+    static final Set<String> EXCLUDED_LABELS = Set.of("DRAFT", "SENT", "SPAM", "TRASH");
 
     private final GoogleCredentialsProvider credentialsProvider;
     private final BridgeTenantId tenantId;
@@ -141,7 +148,9 @@ public class RealEmailSourceReader implements EmailSourceReader {
             if (page.getMessages() != null) {
                 for (Message summary : page.getMessages()) {
                     Message full = getFull(gmail, summary.getId());
-                    records.addAll(toSourceRecords(gmail, full));
+                    if (!isExcluded(full)) {
+                        records.addAll(toSourceRecords(gmail, full));
+                    }
                     if (full.getHistoryId() != null
                             && (maxMessageHistoryId == null || full.getHistoryId().compareTo(maxMessageHistoryId) > 0)) {
                         maxMessageHistoryId = full.getHistoryId();
@@ -174,7 +183,10 @@ public class RealEmailSourceReader implements EmailSourceReader {
             if (page.getHistory() != null) {
                 for (History history : page.getHistory()) {
                     if (history.getMessagesAdded() != null) {
-                        history.getMessagesAdded().forEach(added -> changedMessageIds.add(added.getMessage().getId()));
+                        history.getMessagesAdded().stream()
+                                .map(added -> added.getMessage())
+                                .filter(added -> !isExcluded(added))
+                                .forEach(added -> changedMessageIds.add(added.getId()));
                     }
                 }
             }
@@ -186,14 +198,17 @@ public class RealEmailSourceReader implements EmailSourceReader {
 
         List<SourceRecord> records = new ArrayList<>();
         for (String messageId : changedMessageIds) {
-            records.addAll(toSourceRecords(gmail, getFull(gmail, messageId)));
+            Message full = getFull(gmail, messageId);
+            if (!isExcluded(full)) {
+                records.addAll(toSourceRecords(gmail, full));
+            }
         }
         return new EmailReadResult(records, nextHistoryId);
     }
 
     private ListMessagesResponse listPage(Gmail gmail, String pageToken) {
         try {
-            return gmail.users().messages().list("me").setPageToken(pageToken).execute();
+            return gmail.users().messages().list("me").setQ(FULL_SYNC_QUERY).setPageToken(pageToken).execute();
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to list Gmail messages", e);
         }
@@ -205,6 +220,13 @@ public class RealEmailSourceReader implements EmailSourceReader {
                 .setStartHistoryId(new java.math.BigInteger(startHistoryId))
                 .setPageToken(pageToken)
                 .execute();
+    }
+
+    /** A message with no labelIds (history entries sometimes omit them) is kept; the full message
+     * fetched afterwards is checked again. */
+    private static boolean isExcluded(Message message) {
+        List<String> labels = message.getLabelIds();
+        return labels != null && labels.stream().anyMatch(EXCLUDED_LABELS::contains);
     }
 
     private Message getFull(Gmail gmail, String messageId) {

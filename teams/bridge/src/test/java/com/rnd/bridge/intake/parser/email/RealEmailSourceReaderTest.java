@@ -143,6 +143,58 @@ class RealEmailSourceReaderTest {
     }
 
     @Test
+    void fullSyncSearchesOutDraftsAndSentMailAndSkipsAnyThatStillCarryThoseLabels() throws IOException {
+        Gmail.Users.Messages.List listRequest =
+                mock(Gmail.Users.Messages.List.class, Mockito.RETURNS_SELF);
+        Gmail.Users.Messages.Get inboxRequest =
+                mock(Gmail.Users.Messages.Get.class, Mockito.RETURNS_SELF);
+        Gmail.Users.Messages.Get draftRequest =
+                mock(Gmail.Users.Messages.Get.class, Mockito.RETURNS_SELF);
+        when(messages.list("me")).thenReturn(listRequest);
+        when(listRequest.execute()).thenReturn(new ListMessagesResponse()
+                .setMessages(List.of(new Message().setId("inbox"), new Message().setId("draft"))));
+        when(messages.get("me", "inbox")).thenReturn(inboxRequest);
+        when(inboxRequest.execute()).thenReturn(message("inbox", "100").setLabelIds(List.of("INBOX")));
+        when(messages.get("me", "draft")).thenReturn(draftRequest);
+        when(draftRequest.execute()).thenReturn(message("draft", "101").setLabelIds(List.of("DRAFT")));
+        when(getProfileRequest.execute()).thenReturn(new Profile().setHistoryId(new BigInteger("500")));
+
+        EmailReadResult result = reader().read(ReadCursor.full());
+
+        verify(listRequest).setQ("-in:drafts -in:sent");
+        // One message lands as two records (BODY + SOURCE_METADATA), so two records = one message.
+        assertThat(result.records()).hasSize(2);
+        assertThat(result.records()).extracting(SourceRecord::sourceRef)
+                .contains("<inbox@mail.gmail.com>").doesNotContain("<draft@mail.gmail.com>");
+        assertThat(result.nextHistoryId()).isEqualTo("500");
+    }
+
+    @Test
+    void incrementalSyncSkipsDraftsAndSentMailWithoutFetchingThem() throws IOException {
+        Gmail.Users.History.List historyRequest =
+                mock(Gmail.Users.History.List.class, Mockito.RETURNS_SELF);
+        Gmail.Users.Messages.Get getRequest =
+                mock(Gmail.Users.Messages.Get.class, Mockito.RETURNS_SELF);
+        when(history.list("me")).thenReturn(historyRequest);
+        List<HistoryMessageAdded> added = List.of(
+                new HistoryMessageAdded().setMessage(new Message().setId("draft").setLabelIds(List.of("DRAFT"))),
+                new HistoryMessageAdded().setMessage(new Message().setId("sent").setLabelIds(List.of("SENT"))),
+                new HistoryMessageAdded().setMessage(new Message().setId("m2").setLabelIds(List.of("INBOX"))));
+        when(historyRequest.execute()).thenReturn(new ListHistoryResponse()
+                .setHistory(List.of(new History().setMessagesAdded(added)))
+                .setHistoryId(new BigInteger("200")));
+        when(messages.get("me", "m2")).thenReturn(getRequest);
+        when(getRequest.execute()).thenReturn(message("m2", "200").setLabelIds(List.of("INBOX")));
+
+        EmailReadResult result = reader().read(new ReadCursor(null, "100"));
+
+        assertThat(result.records()).hasSize(2);
+        assertThat(result.records()).extracting(SourceRecord::sourceRef).contains("<m2@mail.gmail.com>");
+        verify(messages, never()).get("me", "draft");
+        verify(messages, never()).get("me", "sent");
+    }
+
+    @Test
     void expiredHistoryIdTriggersAFullResyncAndReturnsTheFreshHistoryId() throws IOException {
         Gmail.Users.History.List historyRequest =
                 mock(Gmail.Users.History.List.class, Mockito.RETURNS_SELF);
