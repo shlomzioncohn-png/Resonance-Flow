@@ -1,7 +1,7 @@
 # App-of-apps bootstrap. Apply this once against a cluster that already
 # has ArgoCD (and its CRDs) installed - apply argocd-cm-patch.yaml first,
-# it's required for the sync-wave ordering below to actually gate on
-# kafka's health rather than being a no-op (see that file for why):
+# it's required for the sync-wave ordering of apps/ to actually gate on
+# each child's health rather than being a no-op (see that file for why):
 #
 #   kubectl apply -f teams/relay/argocd/argocd-cm-patch.yaml
 #   kubectl apply -f teams/relay/argocd/root-app.yaml
