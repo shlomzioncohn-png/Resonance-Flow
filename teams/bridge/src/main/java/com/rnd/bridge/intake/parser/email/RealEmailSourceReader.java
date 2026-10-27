@@ -147,7 +147,13 @@ public class RealEmailSourceReader implements EmailSourceReader {
             ListMessagesResponse page = listPage(gmail, pageToken);
             if (page.getMessages() != null) {
                 for (Message summary : page.getMessages()) {
-                    Message full = getFull(gmail, summary.getId());
+                    Message full;
+                    try {
+                        full = getFull(gmail, summary.getId());
+                    } catch (MessageNotFoundException e) {
+                        log.warn("Gmail message {} no longer exists (404) - skipping", summary.getId());
+                        continue;
+                    }
                     if (!isExcluded(full)) {
                         records.addAll(toSourceRecords(gmail, full));
                     }
@@ -198,7 +204,13 @@ public class RealEmailSourceReader implements EmailSourceReader {
 
         List<SourceRecord> records = new ArrayList<>();
         for (String messageId : changedMessageIds) {
-            Message full = getFull(gmail, messageId);
+            Message full;
+            try {
+                full = getFull(gmail, messageId);
+            } catch (MessageNotFoundException e) {
+                log.warn("Gmail message {} no longer exists (404) - skipping", messageId);
+                continue;
+            }
             if (!isExcluded(full)) {
                 records.addAll(toSourceRecords(gmail, full));
             }
@@ -232,8 +244,21 @@ public class RealEmailSourceReader implements EmailSourceReader {
     private Message getFull(Gmail gmail, String messageId) {
         try {
             return gmail.users().messages().get("me", messageId).setFormat("full").execute();
+        } catch (GoogleJsonResponseException e) {
+            if (e.getStatusCode() == 404) {
+                throw new MessageNotFoundException(messageId, e);
+            }
+            throw new UncheckedIOException("Failed to fetch Gmail message " + messageId, e);
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to fetch Gmail message " + messageId, e);
+        }
+    }
+
+    /** Internal signal that a single message id is gone (deleted between history/list and the
+     * get call) - callers skip just that message instead of failing the whole run. */
+    private static final class MessageNotFoundException extends RuntimeException {
+        MessageNotFoundException(String messageId, GoogleJsonResponseException cause) {
+            super("Gmail message " + messageId + " not found (404)", cause);
         }
     }
 

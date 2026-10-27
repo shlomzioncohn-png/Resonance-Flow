@@ -295,6 +295,37 @@ class RealEmailSourceReaderTest {
         verify(messages, never()).list(any());
     }
 
+    @Test
+    void incrementalSyncSkipsA404MessageAndStillReadsTheOthers() throws IOException {
+        Gmail.Users.History.List historyRequest =
+                mock(Gmail.Users.History.List.class, Mockito.RETURNS_SELF);
+        Gmail.Users.Messages.Get okRequest1 = mock(Gmail.Users.Messages.Get.class, Mockito.RETURNS_SELF);
+        Gmail.Users.Messages.Get missingRequest = mock(Gmail.Users.Messages.Get.class, Mockito.RETURNS_SELF);
+        Gmail.Users.Messages.Get okRequest2 = mock(Gmail.Users.Messages.Get.class, Mockito.RETURNS_SELF);
+        when(history.list("me")).thenReturn(historyRequest);
+        List<HistoryMessageAdded> added = List.of(
+                new HistoryMessageAdded().setMessage(new Message().setId("m1")),
+                new HistoryMessageAdded().setMessage(new Message().setId("deleted")),
+                new HistoryMessageAdded().setMessage(new Message().setId("m2")));
+        when(historyRequest.execute()).thenReturn(new ListHistoryResponse()
+                .setHistory(List.of(new History().setMessagesAdded(added)))
+                .setHistoryId(new BigInteger("200")));
+        when(messages.get("me", "m1")).thenReturn(okRequest1);
+        when(okRequest1.execute()).thenReturn(message("m1", "150"));
+        when(messages.get("me", "deleted")).thenReturn(missingRequest);
+        when(missingRequest.execute()).thenThrow(expiredHistoryIdException());
+        when(messages.get("me", "m2")).thenReturn(okRequest2);
+        when(okRequest2.execute()).thenReturn(message("m2", "200"));
+
+        EmailReadResult result = reader().read(new ReadCursor(null, "100"));
+
+        assertThat(result.records()).hasSize(4);
+        assertThat(result.records()).extracting(SourceRecord::sourceRef)
+                .contains("<m1@mail.gmail.com>", "<m2@mail.gmail.com>")
+                .doesNotContain("<deleted@mail.gmail.com>");
+        assertThat(result.nextHistoryId()).isEqualTo("200");
+    }
+
     private static GoogleJsonResponseException expiredHistoryIdException() {
         HttpResponseException.Builder builder = new HttpResponseException.Builder(404, "Not Found", new HttpHeaders());
         return new GoogleJsonResponseException(builder, null);
