@@ -25,6 +25,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -39,6 +41,8 @@ import org.springframework.stereotype.Component;
 @Component
 @ConditionalOnProperty(prefix = "bridge.intake.slack", name = "mode", havingValue = "real")
 public class RealSlackSourceReader implements SlackSourceReader {
+
+    private static final Logger log = LoggerFactory.getLogger(RealSlackSourceReader.class);
 
     private final SlackApiProperties properties;
     private final BridgeTenantId tenantId;
@@ -63,6 +67,17 @@ public class RealSlackSourceReader implements SlackSourceReader {
         this.properties = properties;
         this.tenantId = tenantId;
         this.methods = Slack.getInstance().methods(properties.botToken());
+        this.userNameResolver = userNameResolver;
+    }
+
+    /** Test-only seam: lets tests inject a mocked MethodsClient instead of the real one the
+     * public constructor always builds from a live bot token. */
+    RealSlackSourceReader(
+            SlackApiProperties properties, BridgeTenantId tenantId, SlackUserNameResolver userNameResolver,
+            MethodsClient methods) {
+        this.properties = properties;
+        this.tenantId = tenantId;
+        this.methods = methods;
         this.userNameResolver = userNameResolver;
     }
 
@@ -93,7 +108,11 @@ public class RealSlackSourceReader implements SlackSourceReader {
                 String threadId = hasReplies(message) ? message.getTs() : message.getThreadTs();
                 messages.add(toChatMessage(channelId, message, threadId));
                 if (hasReplies(message)) {
-                    messages.addAll(readReplies(channelId, message.getTs()));
+                    try {
+                        messages.addAll(readReplies(channelId, message.getTs()));
+                    } catch (SlackThreadGoneException e) {
+                        log.warn("Skipping Slack thread - no longer available: ts={}", message.getTs());
+                    }
                 }
             }
             cursor = response.getResponseMetadata() == null ? null : response.getResponseMetadata().getNextCursor();
@@ -137,6 +156,9 @@ public class RealSlackSourceReader implements SlackSourceReader {
                     .limit(200)
                     .build());
             if (!response.isOk()) {
+                if ("thread_not_found".equals(response.getError())) {
+                    throw new SlackThreadGoneException();
+                }
                 throw new IllegalStateException(
                         "Slack conversations.replies failed for channel " + channelId + " ts " + rootTs
                                 + ": " + response.getError());
@@ -185,13 +207,19 @@ public class RealSlackSourceReader implements SlackSourceReader {
                 threadId);
     }
 
-    private List<ChatMessage.Attachment> resolveAttachments(List<File> files) {
+    // Package-visible (not private) so RealSlackSourceReaderTest can exercise the gone-file skip
+    // path directly with a plain File POJO, without mocking the real network HttpClient.
+    List<ChatMessage.Attachment> resolveAttachments(List<File> files) {
         if (files == null || files.isEmpty()) {
             return List.of();
         }
         List<ChatMessage.Attachment> attachments = new ArrayList<>();
         for (File file : files) {
-            attachments.add(downloadFile(file));
+            try {
+                attachments.add(downloadFile(file));
+            } catch (SlackFileGoneException e) {
+                log.warn("Skipping Slack file attachment - no longer available: fileId={}", file.getId());
+            }
         }
         return attachments;
     }
@@ -199,12 +227,19 @@ public class RealSlackSourceReader implements SlackSourceReader {
     // conversations.history returns file metadata only; the actual bytes live behind
     // url_private_download and require the bot token as a Bearer credential to fetch.
     private ChatMessage.Attachment downloadFile(File file) {
+        if (file.getUrlPrivateDownload() == null) {
+            // Slack omits url_private_download entirely once a file has been deleted/tombstoned.
+            throw new SlackFileGoneException();
+        }
         try {
             HttpRequest request = HttpRequest.newBuilder(URI.create(file.getUrlPrivateDownload()))
                     .header("Authorization", "Bearer " + properties.botToken())
                     .GET()
                     .build();
             HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            if (response.statusCode() == 404) {
+                throw new SlackFileGoneException();
+            }
             if (response.statusCode() != 200) {
                 throw new IllegalStateException(
                         "Failed to download Slack file " + file.getName() + ": HTTP " + response.statusCode());
@@ -218,5 +253,14 @@ public class RealSlackSourceReader implements SlackSourceReader {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted while downloading Slack file: " + file.getName(), e);
         }
+    }
+
+    /** The Slack thread (conversations.replies -> thread_not_found) or file
+     * (url_private_download missing, or 404 on download) is gone - distinct from any other
+     * Slack API/HTTP failure, which must still fail the run exactly as before. */
+    private static final class SlackThreadGoneException extends RuntimeException {
+    }
+
+    private static final class SlackFileGoneException extends RuntimeException {
     }
 }
