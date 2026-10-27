@@ -847,12 +847,19 @@ identical, the same top task in all 42. The frozen baseline
 **What the scenario shows about the segmented model** — findings, not fixed
 here, and the scenario was not changed for them:
 
-1. It picks the hand-written task, which has no tier. Scored by the tactical
-   rule, where no deadline is neutral, it outranks the supplier form, an
-   operational task whose Friday deadline the operational scale reads as far
-   off. So `ASSUMED_TIER` is not neutral against an operational task.
+1. It picks the hand-written task, which has no tier, over the supplier form
+   (base 0.496 against 0.261; final 0.647 against 0.483), for two reasons.
+   **The operational rule itself:** its scale is 8 hours, so the form's
+   deadline four days out gives time pressure 0.075 — below the 0.15 an
+   operational task gets with no deadline at all. The same form with no
+   deadline would score 0.310, not 0.261: the distant date lowers it.
+   **The weights:** the untiered task is scored by the tactical rule
+   (`ASSUMED_TIER`), where no deadline is 0.30 (not neutral; 0.5 is
+   strategic's) and impact weighs 0.55 against operational's 0.25, so impact
+   gives it 0.330 (0.55 × 0.600) against the form's 0.125 (0.25 × 0.500).
 2. The keyword lexicon misses negation: "nothing depends on it" counts in the
-   task's favour as "depends on it".
+   task's favour as "depends on it", which is why its impact is 0.600 and not
+   the 0.500 the form gets.
 
 ## Extraction-quality eval
 
