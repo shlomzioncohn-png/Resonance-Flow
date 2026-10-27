@@ -10,6 +10,11 @@ COPY test ./test
 COPY --from=shared proto ./shared/proto
 RUN mvn -B package -DskipTests -Dproto.root=/app/shared/proto
 
+# E2E client (scripts/e2e.sh builds it with --target e2e).
+FROM build AS e2e
+RUN mvn -B -q dependency:build-classpath -Dmdep.includeScope=test -Dmdep.outputFile=/app/classpath.txt
+ENTRYPOINT ["sh", "-c", "exec java -cp target/classes:target/test-classes:$(cat /app/classpath.txt) pipe.e2e.NotificationDeliveryE2E"]
+
 # Run stage
 FROM eclipse-temurin:21-jre
 WORKDIR /app

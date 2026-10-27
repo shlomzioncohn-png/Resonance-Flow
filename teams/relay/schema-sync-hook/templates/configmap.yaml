@@ -90,7 +90,7 @@ metadata:
     {{- include "schema-sync-hook.labels" . | nindent 4 }}
 
 data:
-  {{- /* A library row repeats its file under a second subject - one key per file. */}}
+  {{- /* A file can back several subjects (one per topic, or a library row) - one key per file. */}}
   {{- $files := dict }}
   {{- range .Files.Lines "files/schema-subjects.tsv" }}
   {{- $line := trim . }}
