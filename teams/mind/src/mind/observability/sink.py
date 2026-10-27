@@ -21,8 +21,9 @@ process gets a new pid, so a new file.
 no permission) is counted, logged at ERROR on the first failure and every
 100th after it, and the call is still in the in-memory ledger and the log.
 
-The line format, `mind.model_call/1`, is documented in the README ("The
-JSONL file"); `to_json_line` is its one writer.
+The line format, `mind.model_call/2`, is documented in the README ("The
+JSONL file"); `to_json_line` is its one writer. /2 is /1 plus `audio_s`
+(#484); a reader takes both, /1's `audio_s` being unknown.
 """
 
 from __future__ import annotations
@@ -42,7 +43,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("mind.observability")
 
-SCHEMA = "mind.model_call/1"
+SCHEMA = "mind.model_call/2"
+#: Every format a reader accepts: /1 is /2 without `audio_s`.
+READABLE_SCHEMAS = frozenset({"mind.model_call/1", SCHEMA})
 
 #: Log a write failure the first time and then every this many.
 _LOG_EVERY_N_FAILURES = 100
@@ -57,7 +60,7 @@ def default_process_name() -> str:
 
 
 def to_json_line(record: ModelCallRecord, *, process: str, pid: int) -> str:
-    """One record as a `mind.model_call/1` line, newline included.
+    """One record as a `mind.model_call/2` line, newline included.
 
     Every key is always present; a measure that is unknown or does not apply
     is null -- which of the two follows from `kind`, by the same rules as the
@@ -77,6 +80,7 @@ def to_json_line(record: ModelCallRecord, *, process: str, pid: int) -> str:
         "prompt_tokens": record.prompt_tokens,
         "completion_tokens": record.completion_tokens,
         "degraded": record.degraded,
+        "audio_s": round(record.audio_s, 3) if record.audio_s is not None else None,
         "item": record.item,
         "task": record.task,
         "stage": record.stage,

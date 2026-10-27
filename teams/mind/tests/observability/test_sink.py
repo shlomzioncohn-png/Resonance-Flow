@@ -34,7 +34,7 @@ from mind.observability.tracking import (
 TASK = "4d0c6f2a-8b1e-4c3d-9a7f-1e2b3c4d5e6f"
 ITEM = item_ref("550e8400-e29b-41d4-a716-446655440000", "ref-1")
 
-#: Every key a line has, always -- the documented `mind.model_call/1` format.
+#: Every key a line has, always -- the documented `mind.model_call/2` format.
 KEYS = {
     "schema",
     "ts",
@@ -49,6 +49,7 @@ KEYS = {
     "prompt_tokens",
     "completion_tokens",
     "degraded",
+    "audio_s",
     "item",
     "task",
     "stage",
@@ -119,6 +120,7 @@ def test_a_call_is_one_line_in_this_processs_file(monkeypatch: pytest.MonkeyPatc
         "prompt_tokens": None,
         "completion_tokens": None,
         "degraded": True,
+        "audio_s": None,
         "item": ITEM,
         "task": TASK,
         "stage": "score",
@@ -279,3 +281,10 @@ def test_a_measure_json_cannot_hold_is_a_failed_write_not_an_error(tmp_path: Pat
     assert sink.write(ModelCallRecord("m", math.nan, None)) is False
     assert sink.failures == 1
     assert not sink.path.exists()
+
+
+def test_an_asr_call_carries_the_audio_it_ran_on():
+    # #484: a cost per audio minute needs the minutes.
+    record = ModelCallRecord("whisper", 7000.0, None, kind=CallKind.ASR, cpu_s=26.0, audio_s=67.5)
+    line = json.loads(to_json_line(record, process="mind-landed", pid=1))
+    assert (line["schema"], line["audio_s"]) == ("mind.model_call/2", 67.5)

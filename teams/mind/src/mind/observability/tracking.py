@@ -115,6 +115,9 @@ class ModelCallRecord:
     # without its ancestors because Chain could not be asked. Its result is
     # not the full path's, so it is counted apart rather than passed off as one.
     degraded: bool = False
+    # Seconds of audio an ASR call ran on, after the cap (#484) -- what a cost
+    # per audio minute is reckoned against. None for every other call.
+    audio_s: float | None = None
     # Which item, Inbox task and stage the call was made for (#482), from the
     # context it was recorded in (observability/context.py); None outside one.
     item: str | None = None
@@ -508,6 +511,7 @@ def record_call(
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
     degraded: bool = False,
+    audio_s: float | None = None,
 ) -> ModelCallRecord:
     """Record one model call.
 
@@ -532,6 +536,7 @@ def record_call(
             provider reports it.
         degraded: The call succeeded on a fallback path, so its result is
             not the full path's (see ModelCallRecord.degraded).
+        audio_s: Seconds of audio an ASR call ran on, after the cap.
 
     Returns:
         The stored record, for callers that want to log or assert on it
@@ -556,6 +561,7 @@ def record_call(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         degraded=degraded,
+        audio_s=audio_s,
         item=context.item,
         task=context.task,
         stage=context.stage,

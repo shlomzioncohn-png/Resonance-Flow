@@ -415,3 +415,53 @@ def test_many_items_leave_the_per_item_table_out(tmp_path: Path):
     for i in range(report._ITEM_TABLE_MAX_ROWS + 1):
         simple_item(tmp_path, f"i{i}", 10 + i, usd=0.001)
     assert f"{report._ITEM_TABLE_MAX_ROWS + 1} items: too many for a row each" in rendered(tmp_path)
+
+
+# --- #484: ASR per minute of audio, and the /1 files from before it ---------------------
+
+
+def test_asr_cost_is_given_per_minute_of_audio(tmp_path: Path):
+    write(
+        tmp_path,
+        "mind-landed",
+        [
+            rec("whisper", CallKind.ASR, 7_000, 7.0, stage="to_text", cpu_s=26.0, audio_s=67.5),
+            rec("whisper", CallKind.ASR, 9_000, 20.0, stage="to_text", cpu_s=34.0, audio_s=67.5),
+        ],
+    )
+    [line] = [x for x in rendered(tmp_path).splitlines() if x.startswith("| 2 |")]
+    # 135 s of audio = 2.25 min; 60 CPU s / 2.25 = 26.7; 16 s / 2.25 = 7.1.
+    assert line == "| 2 | 2.2 min | 26.7 | 7.1 |"
+
+
+def test_a_v1_file_is_read_and_its_audio_length_is_unknown_not_zero(tmp_path: Path):
+    tmp_path.mkdir(exist_ok=True)
+    v1 = json.loads(
+        to_json_line(
+            rec("whisper", CallKind.ASR, 7_000, 7.0, stage="to_text", cpu_s=26.0),
+            process="mind-landed",
+            pid=1,
+        )
+    )
+    v1["schema"] = "mind.model_call/1"
+    del v1["audio_s"]
+    (tmp_path / "model-calls-mind-landed-1.jsonl").write_text(json.dumps(v1) + "\n", "utf-8")
+
+    loaded = report.load(tmp_path)
+    [call] = loaded.calls
+    assert (call.kind, call.audio_s, loaded.invalid_lines) == ("asr", None, 0)
+    assert "Audio length not recorded for any of the 1 ASR call(s)" in rendered(tmp_path)
+
+
+def test_asr_calls_without_a_length_are_left_out_of_the_per_minute_figure(tmp_path: Path):
+    write(
+        tmp_path,
+        "mind-landed",
+        [
+            rec("whisper", CallKind.ASR, 7_000, 7.0, stage="to_text", cpu_s=26.0, audio_s=60.0),
+            rec("whisper", CallKind.ASR, 9_000, 20.0, stage="to_text", cpu_s=34.0),
+        ],
+    )
+    text = rendered(tmp_path)
+    assert "| 1 | 1.0 min | 26.0 | 7.0 |" in text
+    assert "Left out: 1 ASR call(s) with no audio length recorded." in text

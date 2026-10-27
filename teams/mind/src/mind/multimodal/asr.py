@@ -809,6 +809,9 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
         if not model_unavailable:
             duration_ms = (time.perf_counter() - start) * 1000  # VAD + Whisper, for rtf
             cpu_s = cpu.elapsed_s()
+            # The audio the call ran on, after the cap -- what a cost per
+            # audio minute is reckoned against (#484).
+            audio_s = len(audio) / SAMPLE_RATE
             # A local model's cost is its CPU seconds, not dollars (#479).
             record_call(
                 model_name,
@@ -817,8 +820,8 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
                 kind=CallKind.ASR,
                 status=status,
                 cpu_s=cpu_s,
+                audio_s=audio_s,
             )
-            audio_s = len(audio) / SAMPLE_RATE
             logger.info(
                 "asr_call model=%s audio_s=%.1f rtf=%.3f cpu_s=%.1f segments=%d timed_out=%s "
                 "capped=%s incomplete_file=%s",

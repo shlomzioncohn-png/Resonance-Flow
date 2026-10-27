@@ -56,7 +56,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from mind.observability.sink import SCHEMA
+from mind.observability.sink import READABLE_SCHEMAS
 from mind.observability.tracking import CallKind, percentile
 
 #: Stages of the full flow that should be in a run, and what records them.
@@ -86,10 +86,13 @@ _SMALL_SAMPLE = 20
 #: figures stand for them.
 _ITEM_TABLE_MAX_ROWS = 50
 
+#: The line formats read, as named in the report.
+_FORMATS = "mind.model_call/1 or /2"
+
 
 @dataclass(frozen=True)
 class Call:
-    """One line of a `mind.model_call/1` file."""
+    """One line of a `mind.model_call/1` or `/2` file."""
 
     process: str
     pid: int
@@ -107,6 +110,8 @@ class Call:
     stage: str | None
     end: datetime
     run: str = ""
+    #: Seconds of audio an ASR call ran on; None when not recorded (a /1 line).
+    audio_s: float | None = None
 
     @property
     def start(self) -> datetime:
@@ -192,7 +197,7 @@ def load_runs(roots: Iterable[Path], *, since: datetime | None = None) -> Loaded
 def _parse(text: str, *, run: str = "") -> Call | None:
     try:
         line = json.loads(text)
-        if line.get("schema") != SCHEMA:
+        if line.get("schema") not in READABLE_SCHEMAS:
             return None
         return Call(
             process=str(line["process"]),
@@ -211,6 +216,7 @@ def _parse(text: str, *, run: str = "") -> Call | None:
             stage=line["stage"],
             end=datetime.fromisoformat(line["ts"]),
             run=run,
+            audio_s=float(line["audio_s"]) if line.get("audio_s") is not None else None,  # /2
         )
     except (ValueError, KeyError, TypeError, AttributeError):
         return None
@@ -433,6 +439,7 @@ def render(loaded: Loaded, *, title: str) -> str:
     out += _cost_by_stage(calls)
     out += _by_stage(calls)
     out += _by_model(calls)
+    out += _asr_per_minute(calls)
     out += _scoring(calls)
     out += _by_item(calls, many_runs=len(loaded.runs) > 1)
     out += _runs_compared(calls, loaded.runs)
@@ -459,7 +466,7 @@ def _what_was_read(loaded: Loaded) -> list[str]:
     else:
         out.append(f"- Files: {len(loaded.files)}, from {len(processes)} processes")
     out.append(
-        f"- Calls recorded: {len(calls)}; lines not read (not `{SCHEMA}`): {loaded.invalid_lines}"
+        f"- Calls recorded: {len(calls)}; lines not read (not `{_FORMATS}`): {loaded.invalid_lines}"
     )
     if loaded.since is not None:
         out.append(
@@ -662,6 +669,43 @@ def _by_model(calls: Sequence[Call]) -> list[str]:
             f"{t.tokens_text()} |"
         )
     return [*out, ""]
+
+
+def _asr_per_minute(calls: Sequence[Call]) -> list[str]:
+    """ASR's cost per minute of audio (#484): CPU seconds and wall time over the
+    audio the calls ran on. Only calls that recorded their audio's length
+    (`mind.model_call/2`) count; the others are counted beside it."""
+    asr = [c for c in calls if c.kind == CallKind.ASR]
+    if not asr:
+        return []
+    known = [c for c in asr if c.audio_s]
+    out = ["## ASR per minute of audio", ""]
+    if not known:
+        return [
+            *out,
+            (
+                f"Audio length not recorded for any of the {len(asr)} ASR call(s) "
+                "(`mind.model_call/1` files): no per-minute figure."
+            ),
+            "",
+        ]
+    minutes = sum(c.audio_s or 0.0 for c in known) / 60
+    wall_s = sum(c.duration_ms for c in known) / 1000
+    cpu_known = [c for c in known if c.cpu_s is not None]
+    cpu_minutes = sum(c.audio_s or 0.0 for c in cpu_known) / 60
+    cpu_text = (
+        f"{sum(c.cpu_s or 0.0 for c in cpu_known) / cpu_minutes:.1f}" if cpu_minutes else "unknown"
+    )
+    out += [
+        "| ASR calls | Audio | CPU s per audio minute | Wall s per audio minute |",
+        "|---|---|---|---|",
+        f"| {len(known)} | {minutes:.1f} min | {cpu_text} | {wall_s / minutes:.1f} |",
+        "",
+    ]
+    missing = len(asr) - len(known)
+    if missing:
+        out += [f"Left out: {missing} ASR call(s) with no audio length recorded.", ""]
+    return out
 
 
 def _scoring(calls: Sequence[Call]) -> list[str]:
@@ -872,7 +916,7 @@ def _reliability(loaded: Loaded) -> list[str]:
             "totals, not in any per-item figure."
         )
     if loaded.invalid_lines:
-        out.append(f"- {loaded.invalid_lines} line(s) were not `{SCHEMA}` and were not read.")
+        out.append(f"- {loaded.invalid_lines} line(s) were not `{_FORMATS}` and were not read.")
     if loaded.duplicate_runs:
         out.append("- Found twice and read once: " + "; ".join(loaded.duplicate_runs))
     if loaded.since is not None:
