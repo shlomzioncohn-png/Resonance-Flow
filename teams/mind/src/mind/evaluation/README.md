@@ -896,3 +896,7 @@ groups results by meeting through it (see "The extracted-item contract"); each
 Still a gap: content longer than `extraction.prompts.MAX_CONTENT_CHARS` (8000) is
 truncated, and a meeting's action items cluster in its closing recap, so a long
 transcript can still lose items. Truncation is now logged.
+
+## Guardrail eval
+
+A separate, deliberately adversarial set (`eval/guardrails/`, `tests/test_guardrails.py`) that feeds bad input to extraction, OCR and ASR and checks for graceful failure instead of confident output. It is not part of the persona set or its score. Findings and the per-component confidence audit: [`docs/guardrail_audit.md`](../../../docs/guardrail_audit.md) (#488).
