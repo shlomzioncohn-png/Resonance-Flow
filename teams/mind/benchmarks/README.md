@@ -18,6 +18,9 @@ resulting decision into the relevant README or an ADR.
   `serving_reliability.py`.
   Laptop numbers; the API's memory, 453 MB of a 512Mi limit, is 78 MB since
   the lazy import.
+- `cost-latency-484.md` — **draft** of #484's written conclusion: the most
+  expensive stage, cost per item, what is trending badly -- from the demo
+  dataset; its 1,000-item half waits for #483.
 - `ocr-asr-benchmark.md` — OCR: 5 configs benchmarked (Tesseract psm 3/6/11,
   PaddleOCR mobile/server); Tesseract `--psm 11` chosen on latency and memory,
   with the accuracy trade (PaddleOCR is ~2.7x more accurate) documented. ASR:

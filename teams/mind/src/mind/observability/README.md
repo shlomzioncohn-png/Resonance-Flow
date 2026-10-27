@@ -335,12 +335,13 @@ Inbox has a task id, so its calls have an item but no task.
 
 With `MIND_MONITORING__CALLS_DIR` set, every record_call() is also appended to
 `<calls_dir>/model-calls-<process>-<pid>.jsonl`: UTF-8, one JSON object per
-line, `\n`-terminated, flushed as written. Format `mind.model_call/1` -- every
-key on every line:
+line, `\n`-terminated, flushed as written. Format `mind.model_call/2` -- every
+key on every line. `/2` is `/1` plus `audio_s` (#484); readers take both, and a
+`/1` line's audio length is unknown, not zero.
 
 | Key | Type | Meaning |
 |---|---|---|
-| `schema` | string | `"mind.model_call/1"` |
+| `schema` | string | `"mind.model_call/2"` |
 | `ts` | string | when the call was recorded, ISO 8601 UTC, microseconds |
 | `process` | string | `MIND_MONITORING__PROCESS_NAME`, or the script's name |
 | `pid` | int | the writing process |
@@ -352,6 +353,7 @@ key on every line:
 | `cost_usd` | number \| null | US dollars |
 | `prompt_tokens`, `completion_tokens` | int \| null | as the LLM provider reported them |
 | `degraded` | bool | succeeded on a fallback path |
+| `audio_s` | number \| null | seconds of audio an ASR call ran on, after the cap; null for every other call |
 | `item`, `task`, `stage` | string \| null | the context above |
 
 A null measure is either unknown or not applicable, and `kind` says which,
@@ -428,6 +430,7 @@ one-off measurement.
 | Where the cost goes, by stage | each stage's share of the dollars, the CPU seconds and the wall time |
 | Latency and cost, by stage and call | p50, p95 and max per stage and call name, with its CPU seconds, dollars and tokens |
 | By model | every call of a model across stages, with CPU seconds and dollars per call |
+| ASR per minute of audio | CPU seconds and wall seconds per minute of audio, over the ASR calls that recorded their audio's length (`/2` files) |
 | Scoring: full and degraded | how many scores had Chain's ancestors, and how long the fallback took |
 | Per item | a row per item (left out above 50 items: the per-type figures stand for them) |
 | Runs compared | per run: items, errors, degraded scores, cost per item, p95 of ASR / OCR / LLM / scoring -- did a change help or hurt |
@@ -457,8 +460,8 @@ estimate at this data's mix of item types, and the report says so.
 
 ### What it labels as unreliable
 
-- A stage with no record: **not measured, not zero** -- today embedding and
-  vector queries (waiting for R3), and OCR's CPU on Windows.
+- A stage with no record: **not measured, not zero**. So are OCR's CPU on
+  Windows and the audio length of ASR calls in `/1` files (before #484).
 - A total with any unpriced LLM call or unmeasured CPU is followed by the
   count it is missing (`+ 2 unmeasured`); a per-item figure with such a gap
   is marked `>=`. Both are lower bounds.
@@ -467,8 +470,8 @@ estimate at this data's mix of item types, and the report says so.
   and says little on its own.
 - Calls with no item (the rescore worker): in the totals, in no per-item
   figure.
-- Lines that are not `mind.model_call/1`, runs found twice, and calls left
-  out by `--since`.
+- Lines that are not `mind.model_call/1` or `/2`, runs found twice, and calls
+  left out by `--since`.
 - The 10,000-item figure, as an estimate.
 
 ### The ring buffer
@@ -489,18 +492,25 @@ reading a directory of runs, a run found twice, an item per run, `--since`
 (every unit, a date, a bad value, the CLI), the default directory, more
 lines than the ring buffer holds, max latency, the by-model table, cost per
 item and the 10,000-item figure, the `>=` marks, item types, the runs
-compared, and the small-sample and many-items cases.
+compared, the small-sample and many-items cases, and ASR per minute of audio
+(including a `/1` file, read with its audio length unknown).
+`tests/test_cost_latency_monitoring.py` checks that ASR records the audio it
+ran on, up to the cap.
 
 ### Not done yet
 
 - **The 1,000-item run** (#483) -- the second headline dataset. It waits for
   #483; the report needs no change for it, only the run's directory.
 - **The written conclusion** -- the most expensive stage, the cost per item,
-  anything trending badly -- goes in `benchmarks/` once both datasets are
-  in. From the two #482 demo runs (6 items): ASR is nearly all of the
-  measured CPU (~39 CPU s a meeting) and 64% of the wall time; an item costs ~$0.0044 in
-  LLM calls whatever its type.
-- **Cost per ASR minute** -- the JSONL file does not record the audio's
-  length, so the report gives CPU seconds per recording, not per minute.
-  `benchmarks/serving-reliability-482/asr-long.json` has a long recording's
-  measurement to read it against.
+  anything trending badly -- is drafted in `benchmarks/cost-latency-484.md`
+  from the demo dataset; its 1,000-item half waits for that run. From the
+  current #482 baseline (the two 2026-10-27 runs, 6 items, every stage
+  recorded): `to_text` -- ASR, with OCR's unmeasured CPU beside it -- is 93% of
+  the measured CPU (~31 CPU s a meeting) and 38% of the wall time in calls;
+  an item costs ~$0.0044 in LLM calls whatever its
+  type; 10,000 items at the demo's mix, ~$45 and at least 30 CPU-hours.
+- **Cost per ASR minute** is reported for runs recorded since `audio_s` was
+  added (`mind.model_call/2`); the #482 baseline's files are `/1`, so the
+  report says it is not recorded there. Worked out by hand from them (the
+  meeting is 67.5 s): 23-30 CPU s per audio minute; the long-job measurement
+  (`benchmarks/serving-reliability-482.md`), 17-31.
