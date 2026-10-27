@@ -33,3 +33,25 @@ def test_the_model_class_is_still_reachable_from_the_module():
     from mind.embeddings import embeddings
 
     assert embeddings.SentenceTransformer.__name__ == "SentenceTransformer"
+
+
+def test_warm_up_loads_the_model_and_says_so(monkeypatch):
+    from mind.embeddings import embeddings
+
+    loaded = []
+    monkeypatch.setattr(embeddings, "_get_model", lambda: loaded.append(True))
+
+    assert embeddings.warm_up() is True
+    assert loaded == [True]
+
+
+def test_warm_up_never_raises_a_failed_load(monkeypatch, caplog):
+    from mind.embeddings import embeddings
+
+    def broken() -> None:
+        raise OSError("model files missing")
+
+    monkeypatch.setattr(embeddings, "_get_model", broken)
+
+    assert embeddings.warm_up() is False
+    assert "embedding model not ready at start-up" in caplog.text

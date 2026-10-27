@@ -37,6 +37,7 @@ from mind.dependencies.kafka_sink import KafkaDependencySink
 from mind.dependencies.publisher import DependencyPublisher
 from mind.embeddings.base import SearchResult
 from mind.embeddings.duplicate_detection import find_duplicate
+from mind.embeddings.embeddings import warm_up as warm_up_embeddings
 from mind.embeddings.pgvector_store import PgVectorStore
 from mind.extraction.assembly import source_ref_for_inbox
 from mind.extraction.config import ExtractionConfig
@@ -157,6 +158,9 @@ def main() -> None:
     provider = build_provider()
     # Load Whisper now, not inside the first audio message's handler (R4, #478).
     asr.warm_up()
+    # And the embedding model: its import is lazy since #482, so the first item
+    # to reach the duplicate check would otherwise wait 20-100 s for it.
+    warm_up_embeddings()
 
     threading.excepthook = _die_on_thread_crash
     producer = ProtobufProducer()

@@ -124,6 +124,13 @@ class World:
         monkeypatch.setattr(runner, "minio_reader", lambda: _read)
         monkeypatch.setattr(runner, "build_provider", lambda: self.provider)
         monkeypatch.setattr(runner.asr, "warm_up", lambda: True)
+        self.embeddings_warmed = False
+
+        def warm_up_embeddings() -> bool:
+            self.embeddings_warmed = True
+            return True
+
+        monkeypatch.setattr(runner, "warm_up_embeddings", warm_up_embeddings)
         monkeypatch.setattr(runner, "ProtobufProducer", lambda: self.producer)
         monkeypatch.setattr(runner, "PgVectorStore", make_store)
         monkeypatch.setattr(runner, "find_duplicate", find_duplicate)
@@ -278,3 +285,13 @@ def test_task_created_replies_are_attributed_to_their_task_and_item(
     consumer.run(TaskCreatedEvent, lambda event, msg: seen.append(current_context()))
 
     assert seen == [CallContext(item=ITEM_REF, task=TASK_ID, stage="task_created")]
+
+
+def test_the_embedding_model_is_warmed_at_start_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    # #482: its import is lazy, so without this the first item to reach the
+    # duplicate check would wait for it (20-100 s measured) inside its handler.
+    world = World(monkeypatch, [])
+
+    world.run_main()
+
+    assert world.embeddings_warmed

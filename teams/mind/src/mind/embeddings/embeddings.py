@@ -16,12 +16,14 @@ model is first loaded, not when this module is (#482): every process that
 imports `mind.embeddings` without ever embedding -- Mind's API above all, whose
 /related reads stored vectors -- would otherwise carry it.
 `embeddings.SentenceTransformer` still resolves, through the module's
-`__getattr__`.
+`__getattr__`. A process that does embed calls `warm_up()` at start-up, so
+that import is not paid inside its first message.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
 from pathlib import Path
@@ -33,6 +35,8 @@ from mind.observability.tracking import CallKind, CallStatus, record_call
 
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
+
+logger = logging.getLogger(__name__)
 
 EMBEDDING_DIM = 384
 MAX_SEQ_LENGTH = 512
@@ -89,6 +93,24 @@ def _get_model() -> SentenceTransformer:
                 _model = _sentence_transformer()(model_source)
                 _model.max_seq_length = MAX_SEQ_LENGTH
     return _model
+
+
+def warm_up() -> bool:
+    """Import sentence-transformers and load the model now, not on the first embed.
+
+    For a process that embeds -- the landed runner -- to call once at start-up,
+    as it calls `asr.warm_up()`: since the import is lazy, the first message to
+    need an embedding would otherwise wait for it inside its Kafka handler, and
+    every message queued behind it with it -- measured at 20 s warm and ~100 s
+    on a cold disk cache on a laptop (#482). Never raises: on False the reason
+    is logged, and the first embed tries again (a failed load is not cached).
+    """
+    try:
+        _get_model()
+    except Exception:
+        logger.exception("embedding model not ready at start-up")
+        return False
+    return True
 
 
 def _encode(model: SentenceTransformer, texts: str | list[str]) -> Any:
