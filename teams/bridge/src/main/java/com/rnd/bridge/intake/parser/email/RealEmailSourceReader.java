@@ -301,9 +301,17 @@ public class RealEmailSourceReader implements EmailSourceReader {
         int index = 0;
         for (MessagePart attachment : attachmentParts) {
             index++;
+            byte[] bytes;
+            try {
+                bytes = attachmentBytes(gmail, message.getId(), attachment);
+            } catch (AttachmentNotFoundException e) {
+                log.warn("Gmail attachment {} on message {} no longer exists - publishing message without it",
+                        attachment.getBody().getAttachmentId(), message.getId());
+                continue;
+            }
             records.add(new SourceRecord(
                     RawSourceType.EMAIL, tenantId.value(), naturalId + "|attachment-" + index, correlationId,
-                    occurredAt, from, participants, null, null, attachmentBytes(gmail, message.getId(), attachment),
+                    occurredAt, from, participants, null, null, bytes,
                     attachment.getMimeType(), attachment.getFilename(), index, attachmentCount, List.of(), 0));
         }
         return records;
@@ -415,9 +423,24 @@ public class RealEmailSourceReader implements EmailSourceReader {
                     .get("me", messageId, body.getAttachmentId())
                     .execute();
             return Base64.getUrlDecoder().decode(fetched.getData());
+        } catch (GoogleJsonResponseException e) {
+            if (e.getStatusCode() == 404 || e.getStatusCode() == 410) {
+                throw new AttachmentNotFoundException(body.getAttachmentId(), messageId, e);
+            }
+            throw new UncheckedIOException(
+                    "Failed to fetch Gmail attachment " + body.getAttachmentId() + " on message " + messageId, e);
         } catch (IOException e) {
             throw new UncheckedIOException(
                     "Failed to fetch Gmail attachment " + body.getAttachmentId() + " on message " + messageId, e);
+        }
+    }
+
+    /** Internal signal that a single attachment is gone (404/410, deleted between the message
+     * being parsed and the attachment byte fetch) - callers skip just that attachment and still
+     * publish the rest of the message. */
+    private static final class AttachmentNotFoundException extends RuntimeException {
+        AttachmentNotFoundException(String attachmentId, String messageId, GoogleJsonResponseException cause) {
+            super("Gmail attachment " + attachmentId + " on message " + messageId + " not found", cause);
         }
     }
 

@@ -460,4 +460,95 @@ class RealEmailSourceReaderTest {
         assertThat(metadata.mimeType()).isEqualTo("application/json");
         assertThat(new String(metadata.rawContent(), StandardCharsets.UTF_8)).isEqualTo(message.toString());
     }
+
+    // --- Attachment fetch (attachments().get): gone (404/410) is a per-attachment skip --------
+
+    private static MessagePart attachmentPart(String filename, String attachmentId) {
+        return new MessagePart()
+                .setFilename(filename)
+                .setMimeType("application/pdf")
+                .setBody(new MessagePartBody().setAttachmentId(attachmentId));
+    }
+
+    @Test
+    void goneAttachment404IsSkippedButMessageStillPublishesWithoutIt() throws IOException {
+        Message message = messageWithHeadersAndParts("m1",
+                standardHeaders("ruth@kamatech.org", "hadas@kamatech.org", null, "subject", "date"),
+                List.of(textPart("text/plain", "see attached"), attachmentPart("gone.pdf", "att-gone")));
+
+        Gmail.Users.Messages.Attachments attachments = mock(Gmail.Users.Messages.Attachments.class);
+        Gmail.Users.Messages.Attachments.Get attachmentRequest =
+                mock(Gmail.Users.Messages.Attachments.Get.class, Mockito.RETURNS_SELF);
+        when(messages.attachments()).thenReturn(attachments);
+        when(attachments.get("me", "m1", "att-gone")).thenReturn(attachmentRequest);
+        when(attachmentRequest.execute()).thenThrow(expiredHistoryIdException());
+
+        EmailReadResult result = readSingleMessage(message);
+
+        assertThat(result.records()).hasSize(2); // BODY + SOURCE_METADATA, no attachment record
+        assertThat(result.records()).extracting(SourceRecord::objectRole)
+                .doesNotContain(Role.ATTACHMENT);
+    }
+
+    @Test
+    void goneAttachment410IsSkippedButMessageStillPublishesWithoutIt() throws IOException {
+        Message message = messageWithHeadersAndParts("m1",
+                standardHeaders("ruth@kamatech.org", "hadas@kamatech.org", null, "subject", "date"),
+                List.of(textPart("text/plain", "see attached"), attachmentPart("gone.pdf", "att-gone")));
+
+        Gmail.Users.Messages.Attachments attachments = mock(Gmail.Users.Messages.Attachments.class);
+        Gmail.Users.Messages.Attachments.Get attachmentRequest =
+                mock(Gmail.Users.Messages.Attachments.Get.class, Mockito.RETURNS_SELF);
+        when(messages.attachments()).thenReturn(attachments);
+        when(attachments.get("me", "m1", "att-gone")).thenReturn(attachmentRequest);
+        HttpResponseException.Builder builder = new HttpResponseException.Builder(410, "Gone", new HttpHeaders());
+        when(attachmentRequest.execute()).thenThrow(new GoogleJsonResponseException(builder, null));
+
+        EmailReadResult result = readSingleMessage(message);
+
+        assertThat(result.records()).hasSize(2);
+    }
+
+    @Test
+    void attachmentFetchedSuccessfullyLandsAsItsOwnRecordAlongsideOthers() throws IOException {
+        Message message = messageWithHeadersAndParts("m1",
+                standardHeaders("ruth@kamatech.org", "hadas@kamatech.org", null, "subject", "date"),
+                List.of(textPart("text/plain", "see attached"), attachmentPart("gone.pdf", "att-gone"),
+                        attachmentPart("kept.pdf", "att-ok")));
+
+        Gmail.Users.Messages.Attachments attachments = mock(Gmail.Users.Messages.Attachments.class);
+        Gmail.Users.Messages.Attachments.Get goneRequest =
+                mock(Gmail.Users.Messages.Attachments.Get.class, Mockito.RETURNS_SELF);
+        Gmail.Users.Messages.Attachments.Get okRequest =
+                mock(Gmail.Users.Messages.Attachments.Get.class, Mockito.RETURNS_SELF);
+        when(messages.attachments()).thenReturn(attachments);
+        when(attachments.get("me", "m1", "att-gone")).thenReturn(goneRequest);
+        when(goneRequest.execute()).thenThrow(expiredHistoryIdException());
+        when(attachments.get("me", "m1", "att-ok")).thenReturn(okRequest);
+        String encoded = Base64.getUrlEncoder().encodeToString("pdf bytes".getBytes(StandardCharsets.UTF_8));
+        when(okRequest.execute()).thenReturn(new MessagePartBody().setData(encoded));
+
+        EmailReadResult result = readSingleMessage(message);
+
+        assertThat(result.records()).hasSize(3); // BODY + SOURCE_METADATA + the one kept attachment
+        assertThat(result.records().get(2).rawContent())
+                .isEqualTo("pdf bytes".getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void genericAttachmentFetchErrorStillPropagates() throws IOException {
+        Message message = messageWithHeadersAndParts("m1",
+                standardHeaders("ruth@kamatech.org", "hadas@kamatech.org", null, "subject", "date"),
+                List.of(textPart("text/plain", "see attached"), attachmentPart("file.pdf", "att-1")));
+
+        Gmail.Users.Messages.Attachments attachments = mock(Gmail.Users.Messages.Attachments.class);
+        Gmail.Users.Messages.Attachments.Get attachmentRequest =
+                mock(Gmail.Users.Messages.Attachments.Get.class, Mockito.RETURNS_SELF);
+        when(messages.attachments()).thenReturn(attachments);
+        when(attachments.get("me", "m1", "att-1")).thenReturn(attachmentRequest);
+        when(attachmentRequest.execute()).thenThrow(new IOException("boom"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                java.io.UncheckedIOException.class, () -> readSingleMessage(message));
+    }
 }
