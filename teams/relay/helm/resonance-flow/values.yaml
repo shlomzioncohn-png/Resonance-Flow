@@ -219,7 +219,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/bridge"
       pullPolicy: IfNotPresent
-      tag: "94c3259"
+      tag: "1df8b9e"
     containerPort: 8080
     service: *defaultService
     resources: *defaultResources
@@ -596,7 +596,6 @@ components:
     resources: *defaultResources
     <<: *defaultHealthProbes
     env: {}
-
   notification-delivery:
     enabled: true
     replicaCount: 1
@@ -714,8 +713,9 @@ minio:
   enabled: true
   mode: standalone
   defaultBuckets: bridge-raw
- # Bitnami moved the MinIO images to bitnamilegacy/*.
-# This chart uses the new image location.
+  # Bitnami moved the MinIO images to bitnamilegacy/*.
+
+  # This chart uses the new image location.
   image:
     registry: docker.io
     repository: bitnamilegacy/minio
