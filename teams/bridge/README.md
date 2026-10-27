@@ -109,8 +109,8 @@ Each source has a fixture reader and a real one, picked by `bridge.intake.<sourc
 `src/main/resources/fixtures/unstructured/`; real mode needs that source's credentials (see the
 comments next to each `mode` in `application.yml`).
 
-Real Gmail ingests only mail the user received: drafts, sent mail, spam and trash are skipped
-(`RealEmailSourceReader`).
+Real Gmail skips drafts, spam and trash; the user's own sent mail is ingested too, since it
+matters for task detection (`RealEmailSourceReader`).
 
 ### Running it locally
 

@@ -143,55 +143,77 @@ class RealEmailSourceReaderTest {
     }
 
     @Test
-    void fullSyncSearchesOutDraftsAndSentMailAndSkipsAnyThatStillCarryThoseLabels() throws IOException {
+    void fullSyncSearchesOutOnlyDraftsAndIngestsSentMailButStillSkipsDraftSpamTrashLabels() throws IOException {
         Gmail.Users.Messages.List listRequest =
                 mock(Gmail.Users.Messages.List.class, Mockito.RETURNS_SELF);
         Gmail.Users.Messages.Get inboxRequest =
                 mock(Gmail.Users.Messages.Get.class, Mockito.RETURNS_SELF);
+        Gmail.Users.Messages.Get sentRequest =
+                mock(Gmail.Users.Messages.Get.class, Mockito.RETURNS_SELF);
         Gmail.Users.Messages.Get draftRequest =
+                mock(Gmail.Users.Messages.Get.class, Mockito.RETURNS_SELF);
+        Gmail.Users.Messages.Get spamRequest =
+                mock(Gmail.Users.Messages.Get.class, Mockito.RETURNS_SELF);
+        Gmail.Users.Messages.Get trashRequest =
                 mock(Gmail.Users.Messages.Get.class, Mockito.RETURNS_SELF);
         when(messages.list("me")).thenReturn(listRequest);
         when(listRequest.execute()).thenReturn(new ListMessagesResponse()
-                .setMessages(List.of(new Message().setId("inbox"), new Message().setId("draft"))));
+                .setMessages(List.of(new Message().setId("inbox"), new Message().setId("sent"),
+                        new Message().setId("draft"), new Message().setId("spam"), new Message().setId("trash"))));
         when(messages.get("me", "inbox")).thenReturn(inboxRequest);
         when(inboxRequest.execute()).thenReturn(message("inbox", "100").setLabelIds(List.of("INBOX")));
+        when(messages.get("me", "sent")).thenReturn(sentRequest);
+        when(sentRequest.execute()).thenReturn(message("sent", "102").setLabelIds(List.of("SENT")));
         when(messages.get("me", "draft")).thenReturn(draftRequest);
         when(draftRequest.execute()).thenReturn(message("draft", "101").setLabelIds(List.of("DRAFT")));
+        when(messages.get("me", "spam")).thenReturn(spamRequest);
+        when(spamRequest.execute()).thenReturn(message("spam", "103").setLabelIds(List.of("SPAM")));
+        when(messages.get("me", "trash")).thenReturn(trashRequest);
+        when(trashRequest.execute()).thenReturn(message("trash", "104").setLabelIds(List.of("TRASH")));
         when(getProfileRequest.execute()).thenReturn(new Profile().setHistoryId(new BigInteger("500")));
 
         EmailReadResult result = reader().read(ReadCursor.full());
 
-        verify(listRequest).setQ("-in:drafts -in:sent");
+        verify(listRequest).setQ("-in:drafts");
         // One message lands as two records (BODY + SOURCE_METADATA), so two records = one message.
-        assertThat(result.records()).hasSize(2);
+        assertThat(result.records()).hasSize(4);
         assertThat(result.records()).extracting(SourceRecord::sourceRef)
-                .contains("<inbox@mail.gmail.com>").doesNotContain("<draft@mail.gmail.com>");
+                .contains("<inbox@mail.gmail.com>", "<sent@mail.gmail.com>")
+                .doesNotContain("<draft@mail.gmail.com>", "<spam@mail.gmail.com>", "<trash@mail.gmail.com>");
         assertThat(result.nextHistoryId()).isEqualTo("500");
     }
 
     @Test
-    void incrementalSyncSkipsDraftsAndSentMailWithoutFetchingThem() throws IOException {
+    void incrementalSyncFetchesSentMailButStillSkipsDraftSpamTrashWithoutFetchingThem() throws IOException {
         Gmail.Users.History.List historyRequest =
                 mock(Gmail.Users.History.List.class, Mockito.RETURNS_SELF);
+        Gmail.Users.Messages.Get sentRequest =
+                mock(Gmail.Users.Messages.Get.class, Mockito.RETURNS_SELF);
         Gmail.Users.Messages.Get getRequest =
                 mock(Gmail.Users.Messages.Get.class, Mockito.RETURNS_SELF);
         when(history.list("me")).thenReturn(historyRequest);
         List<HistoryMessageAdded> added = List.of(
                 new HistoryMessageAdded().setMessage(new Message().setId("draft").setLabelIds(List.of("DRAFT"))),
+                new HistoryMessageAdded().setMessage(new Message().setId("spam").setLabelIds(List.of("SPAM"))),
+                new HistoryMessageAdded().setMessage(new Message().setId("trash").setLabelIds(List.of("TRASH"))),
                 new HistoryMessageAdded().setMessage(new Message().setId("sent").setLabelIds(List.of("SENT"))),
                 new HistoryMessageAdded().setMessage(new Message().setId("m2").setLabelIds(List.of("INBOX"))));
         when(historyRequest.execute()).thenReturn(new ListHistoryResponse()
                 .setHistory(List.of(new History().setMessagesAdded(added)))
                 .setHistoryId(new BigInteger("200")));
+        when(messages.get("me", "sent")).thenReturn(sentRequest);
+        when(sentRequest.execute()).thenReturn(message("sent", "199").setLabelIds(List.of("SENT")));
         when(messages.get("me", "m2")).thenReturn(getRequest);
         when(getRequest.execute()).thenReturn(message("m2", "200").setLabelIds(List.of("INBOX")));
 
         EmailReadResult result = reader().read(new ReadCursor(null, "100"));
 
-        assertThat(result.records()).hasSize(2);
-        assertThat(result.records()).extracting(SourceRecord::sourceRef).contains("<m2@mail.gmail.com>");
+        assertThat(result.records()).hasSize(4);
+        assertThat(result.records()).extracting(SourceRecord::sourceRef)
+                .contains("<m2@mail.gmail.com>", "<sent@mail.gmail.com>");
         verify(messages, never()).get("me", "draft");
-        verify(messages, never()).get("me", "sent");
+        verify(messages, never()).get("me", "spam");
+        verify(messages, never()).get("me", "trash");
     }
 
     @Test

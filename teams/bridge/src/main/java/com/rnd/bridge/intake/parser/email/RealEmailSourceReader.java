@@ -59,10 +59,10 @@ import org.springframework.stereotype.Component;
  * resync, exactly like Calendar's 410-on-expired-syncToken handling; readFull()'s own fresh
  * historyId (not a continuation of the expired one) is returned as part of that same
  * EmailReadResult.
- * Only mail the user received is ingested: drafts (every autosave is a new message id, so each
- * would land as its own object), the user's own sent mail, spam and trash are skipped - on the
- * full scan via the FULL_SYNC_QUERY search, and on both paths via the message's labelIds, since
- * users.history.list takes no search query.
+ * Drafts (every autosave is a new message id, so each would land as its own object), spam and
+ * trash are skipped - on the full scan via the FULL_SYNC_QUERY search, and on both paths via the
+ * message's labelIds, since users.history.list takes no search query. The user's own sent mail is
+ * ingested (Daniel/#1052: sent mail matters for task detection too).
  */
 @Component
 @ConditionalOnProperty(prefix = "bridge.intake.email", name = "mode", havingValue = "real")
@@ -71,8 +71,8 @@ public class RealEmailSourceReader implements EmailSourceReader {
     private static final Logger log = LoggerFactory.getLogger(RealEmailSourceReader.class);
     private static final Pattern ANGLE_BRACKET_EMAIL = Pattern.compile("<([^>]+)>");
     // messages.list already leaves out spam and trash unless includeSpamTrash is set.
-    static final String FULL_SYNC_QUERY = "-in:drafts -in:sent";
-    static final Set<String> EXCLUDED_LABELS = Set.of("DRAFT", "SENT", "SPAM", "TRASH");
+    static final String FULL_SYNC_QUERY = "-in:drafts";
+    static final Set<String> EXCLUDED_LABELS = Set.of("DRAFT", "SPAM", "TRASH");
 
     private final GoogleCredentialsProvider credentialsProvider;
     private final BridgeTenantId tenantId;
