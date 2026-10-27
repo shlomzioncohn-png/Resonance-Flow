@@ -47,6 +47,8 @@ final class WhatsAppExportLineParser {
 
     @FunctionalInterface
     interface AttachmentResolver {
+        /** Null means the referenced attachment file is gone - the message is still parsed,
+         * just without an Attachment. */
         ChatMessage.Attachment resolve(String filename, String mimeType);
     }
 
@@ -85,6 +87,7 @@ final class WhatsAppExportLineParser {
         String filename = matcher.group(1);
         int dot = filename.lastIndexOf('.');
         String mimeType = dot < 0 ? null : ATTACHMENT_MIME_BY_EXTENSION.get(filename.substring(dot + 1).toLowerCase());
-        return List.of(attachmentResolver.resolve(filename, mimeType));
+        ChatMessage.Attachment attachment = attachmentResolver.resolve(filename, mimeType);
+        return attachment == null ? List.of() : List.of(attachment);
     }
 }
