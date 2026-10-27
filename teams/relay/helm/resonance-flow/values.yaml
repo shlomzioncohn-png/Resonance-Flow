@@ -224,6 +224,13 @@ components:
     service: *defaultService
     resources: *defaultResources
     <<: *defaultHealthProbes
+    # Bridge only calls out (source APIs, Kafka, Postgres, MinIO); no component calls its
+    # HTTP API, and its manual /sync and /run endpoints have no auth. An empty allowFrom
+    # denies all in-cluster ingress - see templates/networkpolicy.yaml. Probes and the CD
+    # smoke test's port-forward are unaffected. Add a component here (or Traefik, for
+    # Slack's /api/bridge/slack/events) once something needs to reach Bridge.
+    networkPolicy:
+      allowFrom: []
     env:
       # Required so BridgeTaskKafkaConfig's Protobuf producer (and the
       # KafkaPayloadPublisher bean) activate - without it everything falls
