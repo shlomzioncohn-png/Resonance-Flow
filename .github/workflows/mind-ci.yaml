@@ -59,6 +59,12 @@ jobs:
       - name: Evaluation harness smoke check
         run: python -m mind.evaluation.run --model dummy --personas tests/fixtures/personas
 
+      # The harness against tasks shaped like real pipeline output (#175):
+      # UUID ids and empty description / tier / effort. Fails if it cannot load
+      # or score them.
+      - name: Evaluation harness on real-shaped tasks
+        run: make eval-real-shaped
+
   ci:
     needs: lint
     if: github.event_name == 'pull_request'

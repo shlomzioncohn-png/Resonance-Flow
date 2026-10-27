@@ -65,8 +65,8 @@ Scenario
 ├── scenario_id
 ├── persona        { role, seniority?, department? }
 ├── context         { free_time_minutes, current_datetime, time_horizon, constraints[] }
-├── tasks[]          { task_id, title, description, deadline?, effort_estimate,
-                        tier, blocked, parent_task_id? }
+├── tasks[]          { task_id, title, description?, deadline?, effort_estimate?,
+                        tier?, blocked, parent_task_id? }
 ├── expected_top_task_id
 ├── expected_reason
 ├── source          { type, source_detail? }
@@ -124,12 +124,12 @@ scenario — Chain consumes them downstream — they just can't be the reason.)
 
 | Field | Represents | Why it's needed | Allowed values | Required/Optional | Who uses it downstream | Example |
 |---|---|---|---|---|---|---|
-| `task_id` | Unique identifier within the scenario | Needed so `expected_top_task_id` can reference it | Unique string within the scenario | Required | expected_top_task_id | `"task_B"` |
+| `task_id` | Unique identifier within the scenario | Needed so `expected_top_task_id` can reference it | Unique within the scenario: snake_case, or a lowercase UUID as Inbox assigns (#175; `expected_top_task_id` follows the same rule) | Required | expected_top_task_id | `"task_B"` |
 | `title` | Short title | Human readability + occasionally used as a textual feature | String | Required | Lens (display), extraction pipeline (later) | `"Review PR #482"` |
-| `description` | Task detail | Gives the model (and a human reviewer) enough context to judge duration/urgency/relevance without outside knowledge | String | Required | The ranking model | `"Code review for the auth refactor PR"` |
+| `description` | Task detail | Gives the model (and a human reviewer) enough context to judge duration/urgency/relevance without outside knowledge | Non-empty string, or null | Optional since #175 (a real task often has none); every scenario in this set fills it | The ranking model | `"Code review for the auth refactor PR"` |
 | `deadline` | Due date/time, if any | Establishes urgency relative to `current_datetime` | ISO 8601 datetime or `null` | Optional (nullable) | Urgency calculation | `"2026-08-23T17:00:00"` |
-| `effort_estimate` | How long the task takes, **in minutes** | The eval set's concrete, minutes-valued form of the canonical `Task.effort_estimate` (owned by Inbox). Recorded so Chain can do constraint satisfaction downstream | Positive integer (minutes) | Required | Chain (constraint satisfaction); the ranking model may use it as a weak per-task feature, but the correct answer must not hinge on comparing it to `free_time_minutes` | `20` |
-| `tier` | Kind of task (not the role!) | Separates "who the person is" from "what kind of work this is" — see Persona ≠ Tier above | `operational` / `tactical` / `strategic` (lowercase — matches the canonical Task schema and `src/mind/scoring/`) | Required | R2 (segmented ranking — a separate scoring rule per tier) | `"operational"` |
+| `effort_estimate` | How long the task takes, **in minutes** | The eval set's concrete, minutes-valued form of the canonical `Task.effort_estimate` (owned by Inbox). Recorded so Chain can do constraint satisfaction downstream | Positive integer (minutes), or null | Optional since #175; every scenario in this set fills it | Chain (constraint satisfaction); the ranking model may use it as a weak per-task feature, but the correct answer must not hinge on comparing it to `free_time_minutes` | `20` |
+| `tier` | Kind of task (not the role!) | Separates "who the person is" from "what kind of work this is" — see Persona ≠ Tier above | `operational` / `tactical` / `strategic` (lowercase — matches the canonical Task schema and `src/mind/scoring/`), or null | Optional since #175 (the segmented model then scores by `ASSUMED_TIER`); every scenario in this set fills it | R2 (segmented ranking — a separate scoring rule per tier) | `"operational"` |
 | `blocked` | Whether the task can currently be worked on | A blocked task should generally not be the expected correct answer | Boolean | Required | The ranking model; Chain (actual task selection) | `false` |
 | `parent_task_id` | The `task_id` of this task's parent in the **cross-tier** org hierarchy (a dev task under a manager task), matching the canonical `Task.parent_task_id` | Gives the week-7 hierarchical value-propagation model something to propagate. In production the ancestors come from Chain's traversal API; in the eval they come from the fixed node file [`eval/hierarchy/nodes.json`](../hierarchy/nodes.json), so the comparison stays reproducible. **Not** the old same-tier `dependencies` array — that was removed deliberately | String or `null`. Points *outside* the scenario, at a node in `eval/hierarchy/nodes.json` — never at a candidate task (checked by `mind.evaluation.hierarchy.validate_hierarchy_links`). `null` = an orphan, on purpose | Optional (nullable). Set in 21 of the 36 scenarios — which, and why, is in **Hierarchy** in `src/mind/evaluation/README.md` | R1/R3 (week-7 stretch) | `"mgr_reorg_quarterly_initiative"` |
 

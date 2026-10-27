@@ -1,4 +1,4 @@
-.PHONY: install dev test lint fmt run run-local run-index-consumer run-landed-consumer eval eval-ci schema migrate migrate-local docker-build docker-up proto demo-artifacts demo-check-media demo-feed demo-feed-slack-first demo-flow demo-flow-slack-first
+.PHONY: install dev test lint fmt run run-local run-index-consumer run-landed-consumer eval eval-ci eval-real-shaped schema migrate migrate-local docker-build docker-up proto demo-artifacts demo-check-media demo-feed demo-feed-slack-first demo-flow demo-flow-slack-first
 
 install:
 	pip install -e .
@@ -56,6 +56,15 @@ run-landed-consumer: proto
 
 eval:
 	python -m mind.evaluation.run --personas eval/personas
+
+# Used by CI (#175). eval/real_shaped/ holds scenarios built from real pipeline
+# output (task.created), with the fields a real task leaves empty. It is kept
+# out of eval/personas/ so the frozen set and its baseline stay as they are.
+# This checks that the harness still loads and runs such tasks, through the
+# real model, so a change to the pipeline's output that the harness cannot take
+# fails here. No accuracy gate: one scenario is not a number.
+eval-real-shaped:
+	python -m mind.evaluation.run --personas eval/real_shaped --model segmented
 
 # Used by CI. Three independent checks:
 #  - time_horizon rule (eval/check_time_horizon.py — thin wrapper; the real

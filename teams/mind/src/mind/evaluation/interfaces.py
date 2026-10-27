@@ -44,6 +44,15 @@ SourceType = Literal["synthetic", "real", "AMI", "FUNSD", "other"]
 # set entry that silently never matches.
 SOURCE_TYPES_REQUIRING_DETAIL: frozenset[SourceType] = frozenset({"AMI", "FUNSD", "other"})
 
+# A task id: a hand-written scenario's snake_case id, or Inbox's task UUID in
+# lowercase, so a scenario can be built from real `task.created` output (#174,
+# #175). Not any string: an uppercase or braced UUID, or a typo with a space, is
+# still rejected. Shared by `task_id` and `expected_top_task_id`, so the two
+# cannot accept different ids.
+TASK_ID_PATTERN = (
+    r"^(?:[a-z0-9_]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
+)
+
 
 class Task(BaseModel):
     """A single candidate task within a persona evaluation scenario.
@@ -55,18 +64,21 @@ class Task(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     task_id: str = Field(
-        pattern=r"^[a-z0-9_]+$",
+        pattern=TASK_ID_PATTERN,
         description=(
             "Unique within this scenario. Referenced by expected_top_task_id. "
-            "Same character rule as scenario_id (lowercase, digits, underscore)."
+            "Either scenario_id's character rule (lowercase, digits, underscore) "
+            "or a lowercase UUID, as Inbox assigns to a real task."
         ),
     )
     title: str = Field(min_length=1)
-    description: str = Field(
+    description: str | None = Field(
+        default=None,
         min_length=1,
         description=(
             "Enough detail that a model (and a human reader) can judge duration, "
-            "urgency and relevance without outside knowledge."
+            "urgency and relevance without outside knowledge. null or absent when "
+            "there is none, as on many real tasks (#174); never an empty string."
         ),
     )
     deadline: datetime | None = Field(
@@ -76,23 +88,28 @@ class Task(BaseModel):
             "Evaluated against context.current_datetime."
         ),
     )
-    effort_estimate: int = Field(
+    effort_estimate: int | None = Field(
+        default=None,
         ge=1,
         description=(
             "Effort estimate for the task, in minutes — the eval set's concrete form "
             "of the canonical Task.effort_estimate (owned by Inbox). Recorded for "
             "Chain's downstream constraint-satisfaction step; the ranking model sees "
             "it, but a scenario's correct answer must not hinge on comparing it to "
-            "context.free_time_minutes (see eval/personas/README.md)."
+            "context.free_time_minutes (see eval/personas/README.md). null or absent "
+            "when the content gave no basis for one (#352)."
         ),
     )
-    tier: Tier = Field(
+    tier: Tier | None = Field(
+        default=None,
         description=(
             "What KIND of task this is — independent of persona. A Developer can "
             "receive an operational or a tactical task; tier is not implied by role. "
             "Lowercase values, matching the canonical Task schema (Inbox) and "
-            "src/mind/scoring/. See 'Persona ≠ Tier' in eval/personas/README.md."
-        )
+            "src/mind/scoring/. See 'Persona ≠ Tier' in eval/personas/README.md. "
+            "null or absent when extraction left it unset (#351); the model then "
+            "scores by an assumed tier."
+        ),
     )
     blocked: bool = Field(
         description=(
@@ -228,6 +245,7 @@ class PersonaEvaluationScenario(BaseModel):
         ),
     )
     expected_top_task_id: str = Field(
+        pattern=TASK_ID_PATTERN,
         description=(
             "The task_id (from `tasks`) a correct model must pick as the single best "
             "use of the persona's free time. Must equal the task_id of exactly one "

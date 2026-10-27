@@ -31,6 +31,9 @@ class RankingModel(Protocol):
   `effort_estimate` (minutes; the eval set's form of the canonical
   `Task.effort_estimate`), `tier`, `blocked`, `parent_task_id` (nullable; points
   at a node in `eval/hierarchy/nodes.json` — see **Hierarchy** below).
+  `description`, `effort_estimate` and `tier` may be null, and `task_id` may be a
+  lowercase UUID, as on real tasks (#175 — see **Real pipeline output through
+  the harness** below).
 - `ScoreContext`: just `current_datetime` — the model may judge how near a
   `deadline` is, and nothing else about the persona's situation (per the mentor's
   review). The harness fixes it to the scenario's `current_datetime`; it is never
@@ -774,6 +777,66 @@ scenario path of the harness cannot take them.
 **Limitations.** Three tasks from one run of a synthetic scenario. Fields the
 harness does not read are out of scope here (`role_context` empty on T2 and T3,
 no suggested owner) — both already show as FAIL in the demo's own check.
+
+### The fixes, and the check that keeps them (#175)
+
+**The harness now takes real-shaped tasks.** In `Task` (`interfaces.py`):
+
+- `task_id` and `expected_top_task_id` share one pattern, `TASK_ID_PATTERN`:
+  snake_case as before, **or** a lowercase UUID. Not any string: an uppercase or
+  braced UUID is still rejected.
+- `description`, `effort_estimate` and `tier` are optional. Empty is `null` (or
+  the key absent), never `""` or `0`; a non-null value is checked as before.
+- `scenario.schema.json` is regenerated. `personas.sha256` does not change: the
+  checksum covers the scenario files, not the schema.
+- `LongestDescriptionModel` reads a missing description as length 0 instead of
+  crashing. It was the only code under `evaluation/` that assumed the fields
+  were filled; `scoring/` already handled empty ones (#357).
+
+With these, `scripts/diagnose_real_tasks.py`'s second pass accepts all three
+demo tasks.
+
+**What the model does with an empty field** — already decided in the model,
+not in the harness, which passes `null` through: no tier → scored by
+`ASSUMED_TIER` (`tactical`, the middle of both axes) and logged
+`tier_assumed`; no effort estimate → no quick-win bonus (the absence of a bonus,
+not a penalty); no description → nothing added to the text the lexicons read.
+A missing tier or estimate also lowers the score's confidence.
+
+**A scenario with empty fields, outside the frozen set.**
+`eval/real_shaped/salesperson_demo_quote_blocked_vs_supplier_form.json`: Dana
+(Salesperson) with two real tasks from the demo run, kept as they came (UUID
+ids; the price quote has no description and no effort estimate), and one
+hand-written task with no tier and no deadline, since no real task came
+without a tier. `blocked` is set from the demo's expected answer (the quote
+waits for Omer's cost sheet). Correct answer: the supplier registration form.
+It is in its own folder so `eval/personas/`, its checksum and the frozen
+baseline stay as they are; it goes through the same schema and loader.
+
+**CI.** `make eval-real-shaped` runs the harness on `eval/real_shaped/` with the
+segmented model, and `mind-ci.yaml` runs it after the smoke check. It fails if
+the harness cannot load or score those tasks; it has no accuracy gate (one
+scenario is not a number). Locally: exit 0 as is; with `description` made
+required again on purpose, exit 1 naming `tasks/0/description`; exit 0 once
+restored. The same proof on a PR is still to do: the Mind CI job is skipped on
+draft PRs, and in October 2026 it was not starting at all ("an Actions budget is
+preventing further use").
+
+**The persona set is unchanged.** All 42 scenarios scored before (49c5ab1c,
+this branch's base) and after, with `segmented`, `dummy`, `nearest-deadline`,
+`skip-blocked-nearest-deadline` and `longest-description`: every task's score
+identical, the same top task in all 42. The frozen baseline
+(`baseline_score_2026-10-25.json`) still loads, 33/42.
+
+**What the scenario shows about the segmented model** — findings, not fixed
+here, and the scenario was not changed for them:
+
+1. It picks the hand-written task, which has no tier. Scored by the tactical
+   rule, where no deadline is neutral, it outranks the supplier form, an
+   operational task whose Friday deadline the operational scale reads as far
+   off. So `ASSUMED_TIER` is not neutral against an operational task.
+2. The keyword lexicon misses negation: "nothing depends on it" counts in the
+   task's favour as "depends on it".
 
 ## Extraction-quality eval
 
