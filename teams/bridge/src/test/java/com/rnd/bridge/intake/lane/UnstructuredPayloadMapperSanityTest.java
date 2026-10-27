@@ -88,6 +88,35 @@ class UnstructuredPayloadMapperSanityTest {
     }
 
     @Test
+    void anEmailBodyPlusSourceMetadataPlusAttachmentMapToOneEventWithThreeObjects() {
+        SourceRecord body = new SourceRecord(
+                RawSourceType.EMAIL, "kamatech", "EMAIL|ruth@kamatech.org|2026-08-18T11:00:00Z", "corr-9",
+                Instant.parse("2026-08-18T11:00:00Z"), "ruth@kamatech.org", List.of("ruth@kamatech.org"),
+                "invoice", "From: ruth@kamatech.org\n\nbody text", "body text".getBytes(StandardCharsets.UTF_8),
+                "text/plain; charset=UTF-8", null, 0, 1, List.of(), 0);
+        SourceRecord metadata = new SourceRecord(
+                RawSourceType.EMAIL, "kamatech", "EMAIL|ruth@kamatech.org|2026-08-18T11:00:00Z|metadata", "corr-9",
+                Instant.parse("2026-08-18T11:00:00Z"), "ruth@kamatech.org", List.of("ruth@kamatech.org"),
+                "invoice", null, "{\"id\":\"m\"}".getBytes(StandardCharsets.UTF_8), "application/json", null, 0, 1,
+                List.of(), 0).withRole(Role.SOURCE_METADATA);
+        SourceRecord attachment = new SourceRecord(
+                RawSourceType.EMAIL, "kamatech", "EMAIL|ruth@kamatech.org|2026-08-18T11:00:00Z|attachment", "corr-9",
+                Instant.parse("2026-08-18T11:00:00Z"), "ruth@kamatech.org", List.of("ruth@kamatech.org"),
+                null, null, "fake-audio-bytes".getBytes(StandardCharsets.UTF_8), "audio/opus", "voice-note.opus", 1,
+                1, List.of(), 0);
+
+        RawObjectEvent event = mapper.map(List.of(body, metadata, attachment), Instant.now());
+
+        assertThat(event.objects()).hasSize(3);
+        assertThat(event.objects().get(0).role()).isEqualTo(Role.BODY);
+        assertThat(event.objects().get(1).role()).isEqualTo(Role.SOURCE_METADATA);
+        assertThat(event.objects().get(1).objectKey()).endsWith(".json");
+        assertThat(event.objects().get(0).objectKey()).endsWith(".txt");
+        assertThat(event.objects().get(2).role()).isEqualTo(Role.ATTACHMENT);
+        assertThat(event.participants()).containsExactly("ruth@kamatech.org");
+    }
+
+    @Test
     void outerEventFieldsComeFromTheGroupsPrimaryBodyRecordNotAnAttachment() {
         SourceRecord body = new SourceRecord(
                 RawSourceType.EMAIL, "kamatech", "id-1", "corr-4", Instant.parse("2026-08-18T09:00:00Z"),

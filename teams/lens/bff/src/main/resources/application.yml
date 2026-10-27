@@ -18,6 +18,11 @@ inbox:
   connect-timeout-ms: ${INBOX_CONNECT_TIMEOUT_MS:2000}
   read-timeout-ms: ${INBOX_READ_TIMEOUT_MS:10000}
 
+# Chain (dependency graph, task history) - see ChainClient. Every call sends X-Tenant-Id.
+chain:
+  service:
+    url: ${CHAIN_SERVICE_URL:http://chain-service:8081}
+
 management:
   endpoints:
     web:

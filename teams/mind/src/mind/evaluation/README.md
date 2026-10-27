@@ -557,6 +557,26 @@ python -m mind.evaluation.run --model <stretch-model> \
   `higher_manager_approved_vision_memo`, `manager_idle_new_hires`,
   `developer_inflated_p0`, `field_engineer_released_controller`,
   `salesperson_dead_rfp`.
+
+**Where it was right: `developer_prod_crash_vs_backlog_feature`.** The model
+picked `task_crash`, the null-pointer crash in checkout (0.858), which is the
+correct answer, over the order-history widget (0.427) and the wiki refresh
+(0.438). Its reasoning names what decides it: the deadline is 3 hours away (the
+support SLA) and the wording says "customers" and "escalated". The other two
+have no deadline and their own wording plays them down ("not requested by
+anyone", "nobody is waiting").
+
+**Where it was wrong: `developer_inflated_p0_vs_understated_data_leak`.** The
+model picked `task_staging`, "[P0] Staging health dashboard is red" (0.854). It
+should have picked `task_leak` (0.586): titled "Minor", but its description
+shows customers seeing other accounts' invoices right now, with a
+regulator-notification window closing Friday. The model weighed the nearer
+deadline (3 hours vs. 28) and the words "production" and "customer" in the
+staging task's text. It does not read that the [P0] tag is a template default
+on a staging-only alert, or that a mislabelled leak is the real severity. This
+is the case #535's hard scenario was written to catch: an inflated label
+against an understated real impact.
+
 - **Compared against:** the stretch model (#474) was scored against this record
   on the same set: 76.2% (32/42), with 9 scenarios changed (4 wrong → right,
   5 right → wrong). Records, diff and explanations are in

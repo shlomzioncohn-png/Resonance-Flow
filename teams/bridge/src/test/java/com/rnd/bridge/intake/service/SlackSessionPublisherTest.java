@@ -14,6 +14,7 @@ import com.rnd.bridge.intake.lane.GroupStateStore;
 import com.rnd.bridge.intake.model.ChatMessage;
 import com.rnd.bridge.intake.model.GroupState;
 import com.rnd.bridge.raw.RawObjectValidator;
+import com.rnd.bridge.raw.TestTenantId;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -108,6 +109,38 @@ class SlackSessionPublisherTest {
         GroupState afterPublish = groupStateStore.load(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", stateWithLandedAttachment.groupId())
                 .orElseThrow();
         assertThat(afterPublish.published()).isTrue();
+    }
+
+    @Test
+    void publishedEventCarriesSourceRefAsChatIdColonTs() {
+        ChatMessage message = new ChatMessage(
+                RawSourceType.SLACK, TestTenantId.VALID, "chat-a", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi",
+                List.of(), "m1", null);
+        ChatGroupStateReconciler.RealtimeReconcileResult result = reconciler.reconcileNonThreadedMessage(message);
+
+        sessionPublisher.publishSession(result.groupState(), Instant.parse("2026-08-18T09:45:00Z"));
+
+        ArgumentCaptor<RawObjectEvent> captor = ArgumentCaptor.forClass(RawObjectEvent.class);
+        org.mockito.Mockito.verify(kafkaPublisher).publish(captor.capture());
+        assertThat(captor.getValue().sourceRef()).isEqualTo("chat-a:m1");
+    }
+
+    @Test
+    void publishedEventHasNullSourceRefWhenGroupWasEmptiedByDeletion() {
+        ChatMessage message = new ChatMessage(
+                RawSourceType.SLACK, TestTenantId.VALID, "chat-a", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi",
+                List.of(), "m1", null);
+        reconciler.reconcileNonThreadedMessage(message);
+        ChatGroupStateReconciler.RemovalResult removal =
+                reconciler.removeMessage(RawSourceType.SLACK, TestTenantId.VALID, "m1");
+        assertThat(removal.groupState().messages()).isEmpty();
+
+        sessionPublisher.publishSession(removal.groupState(), Instant.parse("2026-08-18T09:45:00Z"));
+
+        ArgumentCaptor<RawObjectEvent> captor = ArgumentCaptor.forClass(RawObjectEvent.class);
+        org.mockito.Mockito.verify(kafkaPublisher).publish(captor.capture());
+        assertThat(captor.getValue().sourceRef()).isNull();
+        assertThat(captor.getValue().changeType()).isEqualTo(com.rnd.bridge.raw.model.ChangeType.DELETE_REVIEW);
     }
 
     @Test

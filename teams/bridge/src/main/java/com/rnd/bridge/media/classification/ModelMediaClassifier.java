@@ -22,8 +22,9 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Duration;
-import java.util.Arrays;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -113,25 +114,79 @@ public class ModelMediaClassifier {
 
     private static final String MEETING_PROMPT = SHARED_RULES + """
 
-            The item is a recorded meeting, given as its topic and a transcript excerpt between
-            <transcript> and </transcript>.
+            The item is a recorded meeting, given as its topic, duration, headcount and a transcript
+            excerpt between <transcript> and </transcript>. The transcript may be in Hebrew, English
+            or both; judge it in whatever language it is in.
             categories:
               PLANNING: planning or prioritizing work. STANDUP: short status round.
               CUSTOMER_CALL: with a customer, prospect or partner. INTERVIEW: a hiring interview.
               ONE_ON_ONE: a manager/report or peer 1:1. SOCIAL: non-work chat.
-              TEST: a mic/connection check or recording with no real content.
+              TEST: a mic/connection check or a recording with no real content - e.g. only
+                "can you hear me", "testing", "one, two", "שומעים אותי", "אחת שתיים", silence
+                or background noise, with no discussion of work.
               OTHER: anything else.
+            The first minutes of a real meeting often hold greetings, small talk and mic checks:
+            classify by the excerpt as a whole, not by how it opens.
+            TEST and SOCIAL items are dropped from the pipeline, so a real work meeting wrongly
+            labeled either one is lost. Give TEST or SOCIAL a category_confidence of 0.8 or more
+            only when the excerpt clearly holds no work discussion at all; if any part may be
+            work, lower it.
+            Category and quality are separate: background noise with no speech is TEST with
+            quality POOR; a real meeting with noisy audio keeps its real category, with quality POOR.
             """;
+
+    /**
+     * One line per category the model may answer - every DocumentCategory except BLANK, which only
+     * the pixel rule decides. Checked complete at class load, so a new enum value can't silently
+     * reach the model undefined.
+     */
+    static final Map<DocumentCategory, String> DOCUMENT_CATEGORY_DEFINITIONS = documentCategoryDefinitions();
 
     private static final String DOCUMENT_PROMPT = SHARED_RULES + """
 
-            The item is a scanned document, given as images of its first non-blank pages.
-            categories: %s.
-              OTHER: none of the above fits.
-            """.formatted(Arrays.stream(DocumentCategory.values())
-                    .filter(category -> category != DocumentCategory.BLANK)
-                    .map(Enum::name)
-                    .collect(Collectors.joining(", ")));
+            The item is a scanned document, given as images of its first non-blank pages - a
+            sample, not always the whole document. It may be in Hebrew, English or both; the
+            category is the kind of document, whatever its language.
+            categories:
+            %s
+            ADVERTISEMENT items are dropped from the pipeline, so a real work document wrongly
+            labeled one is lost. Give ADVERTISEMENT a category_confidence of 0.8 or more only when
+            the page is clearly promotional; a vendor quote, price list or offer addressed to us
+            is work, not an advertisement.
+            quality for a scan: POOR when it is blurred, skewed, cut off, low-resolution or partly
+            covered but still readable; UNREADABLE when its text cannot be made out at all.
+            sensitivity for a scan: HIGH for an ID card or passport, a payslip, a medical record,
+            bank or card details, or a contract naming an individual's salary or termination.
+            """.formatted(DOCUMENT_CATEGORY_DEFINITIONS.entrySet().stream()
+                    .map(entry -> "  " + entry.getKey().name() + ": " + entry.getValue())
+                    .collect(Collectors.joining("\n")));
+
+    private static Map<DocumentCategory, String> documentCategoryDefinitions() {
+        Map<DocumentCategory, String> definitions = new EnumMap<>(DocumentCategory.class);
+        definitions.put(DocumentCategory.LETTER, "formal correspondence addressed to a person or organization.");
+        definitions.put(DocumentCategory.FORM, "a form with fields to fill in, filled or blank.");
+        definitions.put(DocumentCategory.EMAIL, "a printed email, with From/To/Subject headers.");
+        definitions.put(DocumentCategory.HANDWRITTEN, "mostly handwritten notes, not a filled-in form.");
+        definitions.put(DocumentCategory.ADVERTISEMENT, "promotional material: a flyer, brochure or ad.");
+        definitions.put(DocumentCategory.SCIENTIFIC_REPORT, "a technical or research report, often internal.");
+        definitions.put(DocumentCategory.SCIENTIFIC_PUBLICATION, "a published paper or journal article.");
+        definitions.put(DocumentCategory.SPECIFICATION, "a technical specification, data sheet or requirements document.");
+        definitions.put(DocumentCategory.FILE_FOLDER, "a folder cover, tab or label page, not the content inside.");
+        definitions.put(DocumentCategory.NEWS_ARTICLE, "a newspaper or magazine article.");
+        definitions.put(DocumentCategory.BUDGET, "a budget, financial plan or table of figures.");
+        definitions.put(DocumentCategory.INVOICE, "an invoice, receipt or bill.");
+        definitions.put(DocumentCategory.PRESENTATION, "presentation slides.");
+        definitions.put(DocumentCategory.QUESTIONNAIRE, "a survey or list of questions to answer.");
+        definitions.put(DocumentCategory.RESUME, "a CV or resume.");
+        definitions.put(DocumentCategory.MEMO, "a short internal note, often headed To/From/Subject or \"Memo\".");
+        definitions.put(DocumentCategory.OTHER, "none of the above fits.");
+        for (DocumentCategory category : DocumentCategory.values()) {
+            if (category != DocumentCategory.BLANK && !definitions.containsKey(category)) {
+                throw new IllegalStateException("No prompt definition for DocumentCategory." + category);
+            }
+        }
+        return definitions;
+    }
 
     private final LlmClients llmClients;
     private final ObjectMapper objectMapper;
@@ -198,17 +253,32 @@ public class ModelMediaClassifier {
         if (topic != null && !topic.isBlank()) {
             text.append("Topic: ").append(truncate(topic.strip(), MAX_TOPIC_CHARS)).append('\n');
         }
-        if (metadata != null && metadata.startedAt() != null && metadata.endedAt() != null) {
-            text.append("Duration: ")
-                    .append(Duration.between(metadata.startedAt(), metadata.endedAt()).toMinutes())
-                    .append(" minutes\n");
+        durationOf(metadata).ifPresent(duration -> text.append("Duration: ").append(describe(duration)).append('\n'));
+        if (metadata != null) {
+            metadata.distinctParticipantCount()
+                    .ifPresent(count -> text.append("Participants: ").append(count).append('\n'));
         }
-        if (metadata != null && metadata.participants() != null && !metadata.participants().isEmpty()) {
-            text.append("Participants: ").append(metadata.participants().size()).append('\n');
-        }
-        String excerpt = TRANSCRIPT_TAG.matcher(truncate(spoken, properties.transcriptExcerptChars())).replaceAll(" ");
+        String excerpt = TRANSCRIPT_TAG.matcher(excerptOf(spoken, properties.transcriptExcerptChars())).replaceAll(" ");
         text.append("Transcript excerpt:\n<transcript>\n").append(excerpt).append("\n</transcript>");
         return text.toString();
+    }
+
+    /** Same source as ClassificationRules: start/end timestamps when both exist, else Zoom's whole minutes. */
+    private static Optional<Duration> durationOf(MeetingMetadata metadata) {
+        if (metadata == null) {
+            return Optional.empty();
+        }
+        if (metadata.startedAt() != null && metadata.endedAt() != null) {
+            return Optional.of(Duration.between(metadata.startedAt(), metadata.endedAt()));
+        }
+        return Optional.ofNullable(metadata.durationMinutes()).map(Duration::ofMinutes);
+    }
+
+    /** Seconds below two minutes - "0 minutes" for a 50-second call tells the model nothing. */
+    private static String describe(Duration duration) {
+        return duration.compareTo(Duration.ofMinutes(2)) < 0
+                ? duration.toSeconds() + " seconds"
+                : duration.toMinutes() + " minutes";
     }
 
     /** The classifier recorded is the model that actually answered - after a fallback, not the primary. */
@@ -274,6 +344,21 @@ public class ModelMediaClassifier {
         } catch (IOException e) {
             throw new IllegalStateException("Failed to re-encode page image as PNG", e);
         }
+    }
+
+    /**
+     * The opening and a slice from the middle, half the budget each, when the transcript is longer
+     * than the budget. The opening alone is often greetings and mic checks, which made real
+     * meetings look like TEST or SOCIAL.
+     */
+    static String excerptOf(String spoken, int maxChars) {
+        if (spoken.length() <= maxChars) {
+            return spoken;
+        }
+        int half = maxChars / 2;
+        int middleStart = Math.max(half, (spoken.length() - half) / 2);
+        return spoken.substring(0, half) + "\n[...]\n"
+                + spoken.substring(middleStart, middleStart + (maxChars - half));
     }
 
     private static String truncate(String text, int maxChars) {

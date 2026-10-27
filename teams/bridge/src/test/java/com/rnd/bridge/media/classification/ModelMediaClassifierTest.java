@@ -66,6 +66,31 @@ class ModelMediaClassifierTest {
     }
 
     @Test
+    void headcountIsDistinctPeopleSoARejoinCountsOnce() {
+        chatClient.reply = verdict("PLANNING");
+        MeetingMetadata rejoined = new MeetingMetadata("1", "Sprint planning", null,
+                Instant.parse("2026-10-11T09:00:00Z"), Instant.parse("2026-10-11T09:30:00Z"),
+                List.of(new ParticipantActivity("a", "Dana Levi", null, null),
+                        new ParticipantActivity("a", "Dana Levi", null, null),
+                        new ParticipantActivity("b", "Yossi Cohen", null, null)));
+
+        classifier.classifyMeeting(new MeetingClassificationInput(rejoined, TRANSCRIPT));
+
+        assertThat(chatClient.userText).contains("Participants: 2", "Duration: 30 minutes");
+    }
+
+    @Test
+    void shortMeetingDurationIsSentInSecondsNotZeroMinutes() {
+        chatClient.reply = verdict("TEST");
+        MeetingMetadata shortCall = new MeetingMetadata("1", "Quick check", null,
+                Instant.parse("2026-10-11T09:00:00Z"), Instant.parse("2026-10-11T09:00:50Z"), List.of());
+
+        classifier.classifyMeeting(new MeetingClassificationInput(shortCall, TRANSCRIPT));
+
+        assertThat(chatClient.userText).contains("Duration: 50 seconds").doesNotContain("0 minutes");
+    }
+
+    @Test
     void transcriptIsFencedAndCannotCloseItsOwnFence() {
         chatClient.reply = verdict("PLANNING");
         String hostile = "WEBVTT\n\n1\n00:00:01.000 --> 00:00:04.000\n"
@@ -86,6 +111,21 @@ class ModelMediaClassifierTest {
         classifier.classifyMeeting(new MeetingClassificationInput(longTopic, TRANSCRIPT));
 
         assertThat(chatClient.userText).contains("Topic: " + "x".repeat(200) + "\n").doesNotContain("x".repeat(201));
+    }
+
+    @Test
+    void longTranscriptExcerptKeepsTheOpeningAndASliceFromTheMiddle() {
+        String spoken = "a".repeat(1000) + "b".repeat(1000) + "c".repeat(1000);
+
+        String excerpt = ModelMediaClassifier.excerptOf(spoken, 1000);
+
+        assertThat(excerpt).startsWith("a".repeat(500) + "\n[...]\n");
+        assertThat(excerpt).contains("b".repeat(500)).doesNotContain("c");
+    }
+
+    @Test
+    void shortTranscriptIsSentWhole() {
+        assertThat(ModelMediaClassifier.excerptOf("hello there", 1000)).isEqualTo("hello there");
     }
 
     @Test
@@ -174,6 +214,30 @@ class ModelMediaClassifierTest {
 
         assertThat(chatClient.systemPrompt).contains("INVOICE", "SCIENTIFIC_PUBLICATION", "MEMO", "OTHER");
         assertThat(chatClient.systemPrompt).doesNotContain("BLANK");
+    }
+
+    @Test
+    void everyDocumentCategoryTheModelMayAnswerHasADefinitionInThePrompt() {
+        chatClient.reply = verdict("MEMO");
+
+        classifier.classifyDocument(ClassificationTestSupport.contentScan(1, 1));
+
+        for (DocumentCategory category : DocumentCategory.values()) {
+            if (category == DocumentCategory.BLANK) {
+                continue;
+            }
+            assertThat(chatClient.systemPrompt).contains(
+                    category.name() + ": " + ModelMediaClassifier.DOCUMENT_CATEGORY_DEFINITIONS.get(category));
+        }
+    }
+
+    @Test
+    void documentPromptMentionsHebrewAndTheAdvertisementBar() {
+        chatClient.reply = verdict("MEMO");
+
+        classifier.classifyDocument(ClassificationTestSupport.contentScan(1, 1));
+
+        assertThat(chatClient.systemPrompt).contains("Hebrew", "ADVERTISEMENT items are dropped");
     }
 
     @Test

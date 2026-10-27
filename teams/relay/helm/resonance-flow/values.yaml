@@ -219,7 +219,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/bridge"
       pullPolicy: IfNotPresent
-      tag: "94c3259"
+      tag: "1df8b9e"
     containerPort: 8080
     service: *defaultService
     resources: *defaultResources
@@ -229,10 +229,22 @@ components:
       # KafkaPayloadPublisher bean) activate - without it everything falls
       # back to LoggingPayloadPublisher and nothing reaches Inbox.
       SPRING_PROFILES_ACTIVE: "kafka"
-      # Deployment must --set a real Inbox tenant UUID (blank fails CrmLaneConfig's
-      # kafka-profile startup check by design). Feeds both bridge.crm.organization-id
-      # and bridge.organization-id (GitHub/Jira) via application.yml.
-      CRM_ORGANIZATION_ID: ""
+      # Bridge reads its Inbox tenant UUID from two separate settings:
+      #   CRM_ORGANIZATION_ID -> structured lanes (CRM, GitHub, Jira), via
+      #                          bridge.crm.organization-id and bridge.organization-id
+      #   BRIDGE_TENANT_ID    -> unstructured lanes (Email, Slack, WhatsApp, Drive,
+      #                          Calendar, Media), via bridge.tenant-id
+      # Keep them equal. If they differ, one source's tasks land in one tenant and
+      # another's in a different one: users of one tenant miss the other's tasks, and
+      # Mind's per-tenant duplicate detection can't match across them.
+      # Both default to Inbox's built-in "System" tenant (V15__add_system_admin.sql),
+      # which exists in every environment. To use a real tenant, override BOTH, e.g.
+      # in environments/shared.yaml.
+      # CRM_ORGANIZATION_ID must not be blank: with the kafka profile active,
+      # CrmLaneConfig fails startup on a blank value by design, which crashed the
+      # CD smoke test and blocked every Bridge deploy since #996.
+      CRM_ORGANIZATION_ID: "00000000-0000-0000-0000-000000000001"
+      BRIDGE_TENANT_ID: "00000000-0000-0000-0000-000000000001"
     objectStorage:
       bucket: "bridge-raw"
     config:
@@ -532,7 +544,9 @@ components:
     enabled: true
     replicaCount: 1
     image:
-      # In-memory Apicurio registry - not durable, fine for dev/CI only.
+      # In-memory Apicurio registry - not durable, fine for dev/CI only. Any restart (e.g. a
+      # liveness kill under load) drops every schema: rerun schema-sync-hook, then restart the
+      # producers - Confluent clients cache the latest version they looked up.
       repository: "apicurio/apicurio-registry-mem"
       pullPolicy: IfNotPresent
       tag: "2.5.11.Final"
@@ -582,7 +596,6 @@ components:
     resources: *defaultResources
     <<: *defaultHealthProbes
     env: {}
-
   notification-delivery:
     enabled: true
     replicaCount: 1
@@ -682,6 +695,9 @@ kafka:
   controller:
     replicaCount: 1
     controllerOnly: false
+    # Bitnami's default heap is 75% of the limit (576Mi of 768Mi), leaving too little for
+    # Kafka's off-heap memory - it got OOMKilled under load. Kafka leans on the page cache.
+    heapOpts: -XX:InitialRAMPercentage=50 -XX:MaxRAMPercentage=50
     resources:
       # 192Mi was OOMKilling the JVM before it finished KRaft storage formatting on
       # startup (verified locally - combined broker+controller needs more headroom).
@@ -697,8 +713,9 @@ minio:
   enabled: true
   mode: standalone
   defaultBuckets: bridge-raw
- # Bitnami moved the MinIO images to bitnamilegacy/*.
-# This chart uses the new image location.
+  # Bitnami moved the MinIO images to bitnamilegacy/*.
+
+  # This chart uses the new image location.
   image:
     registry: docker.io
     repository: bitnamilegacy/minio
@@ -713,7 +730,9 @@ minio:
       cpu: 100m
       memory: 128Mi
     limits:
-      cpu: 150m
+      # Bitnami's setup script gives each `mc` call a fixed 5s timeout; at 150m they took
+      # 4-7s, so it misread MinIO as stopped and crashed on "port already in use".
+      cpu: 300m
       memory: 192Mi
 postgresql:
   enabled: true

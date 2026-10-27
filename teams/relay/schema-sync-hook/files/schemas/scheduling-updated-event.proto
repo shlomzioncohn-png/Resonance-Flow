@@ -1,5 +1,4 @@
 syntax = "proto3";
-
 package com.rnd.inbox.event;
 
 option java_package = "com.rnd.inbox.event";

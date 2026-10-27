@@ -7,6 +7,7 @@ import com.rnd.chain.exception.GlobalExceptionHandler;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.service.TaskStateHistoryService;
+import com.rnd.chain.service.TenantStateHistoryService;
 import com.rnd.chain.tenant.TaskOwnershipService;
 import com.rnd.chain.tenant.TenantContext;
 import com.rnd.chain.testsupport.TaskFixtures;
@@ -42,6 +43,9 @@ class TaskStateHistoryControllerTest {
 
     @MockBean
     private TaskStateHistoryService service;
+
+    @MockBean
+    private TenantStateHistoryService tenantStateHistoryService;
 
     @MockBean
     private TenantContext tenantContext;
