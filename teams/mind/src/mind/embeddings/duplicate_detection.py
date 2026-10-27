@@ -12,7 +12,10 @@ async def find_duplicate(
 ) -> SearchResult | None:
     """Best match for this candidate task, if it clears threshold. "No
     match" is the default: threshold=None reads Settings.duplicate_similarity_threshold.
-    Full task vs full task (is_query=False) -- not #245's mention-vs-passage case."""
+    Full task vs full task (is_query=False) -- not #245's mention-vs-passage case.
+    The returned match's `.confidence` (#476) is its distance above
+    threshold, not its raw `.similarity` -- see embeddings/README.md,
+    "Confidence". `None` (no match) carries no confidence at all."""
     if threshold is None:
         threshold = get_settings().duplicate_similarity_threshold
     text = task_text(title, description)

@@ -158,15 +158,17 @@ class CreationPipeline:
                 )
                 if match is not None:
                     # Mind has no update path and Inbox no "possible duplicate"
-                    # field: sending would only make a second task.
+                    # field: sending would only make a second task -- confidence
+                    # (#476) has nowhere to go but this log line.
                     logger.info(
                         "creation: %s task %d not sent, %s is a duplicate of task %s "
-                        "(similarity %.3f)",
+                        "(similarity %.3f, confidence %.3f)",
                         event.correlation_id,
                         task_index,
                         _loggable_title(event, request.title),
                         match.task_id,
                         match.similarity,
+                        match.confidence,
                     )
                     continue
 

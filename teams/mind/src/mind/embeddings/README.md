@@ -267,6 +267,70 @@ Unlike the two tables above, both sides here are real task_ids from the 21-task 
 
 **Known limitation:** chosen on 21 hand-authored synthetic tasks (20 cases for the related-task calibration, 26 synthetic test sentences each for the other two), not real production data. Must be re-validated once real tasks/mentions exist (week 8) -- re-run the same script against real data without changing the method.
 
+## Confidence (#476)
+
+Every inference MIND makes from a similarity score -- a duplicate flag
+(#471), a related-task result (#472), a proposed dependency edge (#244) --
+carries a `confidence` in `[0.0, 1.0]`, the same plain-float scale R2 uses
+for `effort_estimate_confidence` and `AssigneeCandidate.confidence`
+(#132/#360): a 0.7 from either side of the team means the same thing.
+
+**The mapping -- distance above the decision threshold, not raw
+similarity:** `embeddings/confidence.py`'s `confidence_from_similarity(similarity,
+threshold)` is the one function behind all three inferences. A hit right
+at its own threshold is the most marginal call that still counts as a
+match at all, and gets confidence `0.0` -- not whatever its raw
+similarity happens to look like (0.80 can sound high; against a 0.80
+threshold it is the least confident call possible). A perfect match
+(`similarity=1.0`) is confidence `1.0`. Linear in between:
+
+```
+confidence = (similarity - threshold) / (1.0 - threshold)
+```
+
+This is deliberately **not** `similarity` copied straight into the
+field -- that was the mistake #476 flagged review attention at. Two
+pairs can have the same raw similarity (say 0.85) and deserve very
+different confidence: 0.85 against a 0.80 threshold is marginal (low
+confidence); 0.85 against a 0.60 threshold is comfortable (higher
+confidence). The threshold each inference reads is its own existing
+setting -- `Settings.duplicate_similarity_threshold`,
+`Settings.related_task_threshold`, `Settings.dependency_match_threshold`
+(see "Threshold calibration" above) -- unchanged by this issue; #476 is
+explicit that changing a threshold is a separate, deliberate relevance
+decision, not a side effect of adding confidence.
+
+**Where it lives:** `SearchResult.confidence` (`embeddings/base.py`) --
+`None` on a raw, unfiltered `store.search()` hit (there is no threshold
+yet to measure distance from), set by `resolve_dependency_targets()`
+(#244/#471) and `find_related()` (#472) the moment each applies its own
+threshold. Exposed externally as `RelatedTask.confidence`
+(`GET /v1/tasks/{task_id}/related`) and `DependencyEdge.confidence`
+(`task.dependencies.proposed`, sent to Chain). `find_duplicate()`'s
+confidence has nowhere to go externally -- Inbox has no "possible
+duplicate" field (see `duplicate_detection.py`) -- so it's only ever
+logged, at the point `creation_pipeline.py` decides not to send a
+duplicate.
+
+**#244 already existed and was reviewed, not rebuilt:** `DependencyEdge.confidence`
+was already wired end to end before this issue -- the field existed, but
+`publisher.py` set it from the mention's raw `.similarity`, exactly the
+mistake above. Fixed to read `.confidence` (threshold-distance) instead.
+
+**The empty case (#476 point 5):** `find_related()` returning `[]`, or
+`find_duplicate()` returning `None`, carries no confidence value at all --
+a deliberate decision, not an oversight. "Nothing in the index clears
+the bar" is a structural fact about the index's current contents, not a
+graded inference about a specific candidate; there is no similarity
+score to measure distance from. A caller that wants to distinguish "we
+checked and found nothing" from "we didn't check" already can, from the
+empty list/`None` itself -- no separate confidence field would add
+information.
+
+Tests: `pytest tests/test_search_confidence.py -v` (the mapping itself,
+pure, no DB) plus the confidence-specific cases in
+`test_dependency_resolution.py` and `tests/test_dependencies_publish.py`.
+
 ## #472: related-task search latency
 
 `benchmarks/related_tasks_benchmark.py` measures `find_related()` end to end (`get_vector()` + `search()`, not just raw `search()` -- #87's `vector_search_benchmark.py` already covers that alone), twice:
@@ -282,7 +346,7 @@ Agreed with R4 and wired into `api/v1/router.py` (`src/mind/contracts/related_ta
 
 ```
 GET /v1/tasks/{task_id}/related
--> 200 {"related": [{"task_id": str, "similarity": float}, ...]}
+-> 200 {"related": [{"task_id": str, "similarity": float, "confidence": float}, ...]}
 ```
 
 The router reads the tenant of `task_id` from its row (`index.tenant_of()`) and calls `find_related()` on `index.for_tenant(...)`, so results never cross tenants (#841).

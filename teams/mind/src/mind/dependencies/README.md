@@ -81,6 +81,16 @@ deduped by `event_id`). Two caveats, not glossed over:
   instance, is not actually deduped. This design accepts that; it isn't
   idempotent against every failure mode, only against the common one.
 
+## Confidence on a proposed edge (#476)
+
+`DependencyEdge.confidence` already existed (#244) before this issue --
+reviewed against #476's reasoning, not rebuilt. It used to be the
+mention's raw cosine similarity; now it's that similarity's distance
+above `Settings.dependency_match_threshold`, from the same
+`confidence_from_similarity()` the other two inferences (duplicate,
+related-task) use. See `embeddings/README.md`, "Confidence" for the
+mapping and why a raw similarity is the wrong thing to send.
+
 ## Running the tests
 
 ```

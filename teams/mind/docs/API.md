@@ -60,14 +60,15 @@ itself never included. Always `200` — an unindexed `task_id`, an empty
 index, and "nothing clears the relatedness floor" all come back as
 `related: []`, never a `404` or `500`. See
 `src/mind/embeddings/README.md` for the relatedness threshold and how
-it's calibrated.
+it's calibrated, and its "Confidence" section (#476) for `confidence`
+below.
 
 **Response — `200 OK`**
 
 ```json
 {
   "related": [
-    { "task_id": "task-456", "similarity": 0.83 }
+    { "task_id": "task-456", "similarity": 0.83, "confidence": 0.41 }
   ]
 }
 ```
@@ -77,6 +78,7 @@ it's calibrated.
 | `related` | array | Ranked, best match first. Empty array for "nothing related" — see above. |
 | `related[].task_id` | string | A related task's id. |
 | `related[].similarity` | number | Cosine similarity, `-1.0`–`1.0`. |
+| `related[].confidence` | number | `0.0`–`1.0`, distance above the decision threshold — not the raw similarity above. |
 
 **Status codes**
 

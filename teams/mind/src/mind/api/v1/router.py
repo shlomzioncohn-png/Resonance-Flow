@@ -17,9 +17,15 @@ from fastapi import APIRouter, Depends, Request
 from mind.api.instrumentation import instrumented_call
 from mind.contracts.related_tasks import RelatedTask, RelatedTasksResponse
 from mind.embeddings import find_related
-from mind.embeddings.base import VectorIndex
+from mind.embeddings.base import SearchResult, VectorIndex
 
 router = APIRouter(prefix="/v1")
+
+
+def _as_related_task(r: SearchResult) -> RelatedTask:
+    # find_related() always sets confidence (#476) on a result it returns.
+    assert r.confidence is not None
+    return RelatedTask(task_id=r.task_id, similarity=r.similarity, confidence=r.confidence)
 
 
 def get_vector_index(request: Request) -> VectorIndex:
@@ -42,6 +48,4 @@ async def get_related_tasks(task_id: str, index: VectorIndexDep) -> RelatedTasks
         results = (
             [] if tenant_id is None else await find_related(index.for_tenant(tenant_id), task_id)
         )
-    return RelatedTasksResponse(
-        related=[RelatedTask(task_id=r.task_id, similarity=r.similarity) for r in results]
-    )
+    return RelatedTasksResponse(related=[_as_related_task(r) for r in results])

@@ -77,7 +77,7 @@ def _matched(task_id: str, *, mentions: tuple[str, ...] = ()) -> MatchedReply:
 
 
 async def test_on_task_created_publishes_a_resolved_mention(adapter, sink):
-    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9, confidence=0.9)]):
         await adapter.on_task_created(_matched(TASK_A, mentions=("the DB upgrade",)))
 
     [event] = sink.sent
@@ -112,7 +112,7 @@ async def test_on_task_created_with_an_unparseable_task_id_logs_and_returns(
 
 
 async def test_on_task_created_passes_the_matched_tenant_id_through(adapter, sink):
-    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9, confidence=0.9)]):
         await adapter.on_task_created(_matched(TASK_A, mentions=("the DB upgrade",)))
 
     [event] = sink.sent

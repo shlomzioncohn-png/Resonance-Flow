@@ -98,8 +98,16 @@ class DependencyPublisher:
                     task_id,
                 )
                 continue
-            if target_uuid not in candidates or result.similarity > candidates[target_uuid]:
-                candidates[target_uuid] = result.similarity
+            # #476: the published confidence is distance above threshold
+            # (resolve_dependency_targets sets it), not the raw similarity
+            # -- a hit that only just cleared dependency_match_threshold
+            # must not read as a confident edge to Chain.
+            confidence = result.confidence
+            assert confidence is not None, (
+                "resolve_dependency_targets always sets confidence on a filtered hit"
+            )
+            if target_uuid not in candidates or confidence > candidates[target_uuid]:
+                candidates[target_uuid] = confidence
 
         for target_uuid, confidence in candidates.items():
             event_id = uuid5(_NAMESPACE, f"{task_id_normalized}:{target_uuid}")

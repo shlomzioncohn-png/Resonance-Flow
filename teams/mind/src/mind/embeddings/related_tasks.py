@@ -2,6 +2,7 @@
 
 from mind.config import get_settings
 from mind.embeddings.base import SearchResult, VectorStore
+from mind.embeddings.confidence import confidence_from_similarity
 
 DEFAULT_K = 5
 
@@ -10,7 +11,12 @@ async def find_related(
     store: VectorStore, task_id: str, *, k: int = DEFAULT_K, threshold: float | None = None
 ) -> list[SearchResult]:
     """Up to k related tasks, task_id itself excluded. [] on no embedding,
-    empty index, or nothing above threshold -- never an error."""
+    empty index, or nothing above threshold -- never an error. No
+    confidence is attached to that empty-list case itself (#476): it's a
+    structural fact ("nothing in the index clears the bar"), not a graded
+    inference -- see embeddings/README.md, "Confidence". Every task that
+    *is* returned has `.confidence` (#476) set from its distance above
+    `threshold`, not its raw `.similarity`."""
     if k <= 0:
         raise ValueError(f"k must be positive, got {k}")
     if threshold is None:
@@ -19,4 +25,8 @@ async def find_related(
     if vector is None:
         return []
     candidates = await store.search(vector, k=k, exclude_task_id=task_id)
-    return [c for c in candidates if c.similarity >= threshold]
+    return [
+        c.model_copy(update={"confidence": confidence_from_similarity(c.similarity, threshold)})
+        for c in candidates
+        if c.similarity >= threshold
+    ]

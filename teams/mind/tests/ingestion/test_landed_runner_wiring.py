@@ -160,7 +160,9 @@ def test_a_landed_item_is_sent_and_its_reply_matched_through_the_listeners_flow(
 
 
 def test_a_duplicate_is_not_sent(monkeypatch: pytest.MonkeyPatch) -> None:
-    world = World(monkeypatch, [_message()], match=SearchResult(task_id=TASK_ID, similarity=0.9))
+    world = World(
+        monkeypatch, [_message()], match=SearchResult(task_id=TASK_ID, similarity=0.9, confidence=0.7)
+    )
 
     world.run_main()
 

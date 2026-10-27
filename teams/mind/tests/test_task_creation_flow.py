@@ -413,7 +413,7 @@ async def test_the_full_round_trip_from_send_to_a_published_dependency() -> None
 
     with patch(
         "mind.dependencies.publisher.resolve_dependency_targets",
-        AsyncMock(return_value=[[SearchResult(task_id=DEPENDS_ON_TASK_ID, similarity=0.9)]]),
+        AsyncMock(return_value=[[SearchResult(task_id=DEPENDS_ON_TASK_ID, similarity=0.9, confidence=0.9)]]),
     ) as mock_resolve:
         await flow.on_task_created(*_reply(correlation_id))
 
