@@ -381,6 +381,19 @@ class Settings(BaseSettings):
     duplicate_similarity_threshold: float = Field(default=0.761, ge=0.0, le=1.0)
     dependency_match_threshold: float = Field(default=0.666, ge=0.0, le=1.0)
     related_task_threshold: float = Field(default=0.711, ge=0.0, le=1.0)
+    # #918: "memory" (PendingRequests/PendingDependencies) for a test or a
+    # throwaway local run with no database; "postgres" survives a restart
+    # and is the only choice that makes sense anywhere real, hence the default.
+    # WARNING: for the dependency pending store specifically, "memory" is
+    # only coherent within a single process. landed_consumer_runner.py
+    # (adds a pending mention) and index_consumer_runner.py (retries it)
+    # are two separate OS processes with no shared memory -- with
+    # "memory", a mention added in one is never visible to the other, so
+    # dependency retry (#918) silently never fires. "memory" still works
+    # for the creation-request pending store (task_creation/pending.py),
+    # which only ever needs to be shared within landed_consumer_runner.py's
+    # own process.
+    pending_store_backend: Literal["memory", "postgres"] = "postgres"
     vector_store: VectorStoreSettings
     embedding_model: EmbeddingModelSettings = Field(default_factory=EmbeddingModelSettings)
 

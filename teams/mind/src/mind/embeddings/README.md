@@ -294,8 +294,24 @@ The router reads the tenant of `task_id` from its row (`index.tenant_of()`) and 
 `index_consumer_runner.py` treats any exception from a handler as fatal
 (`os._exit`, so a stuck/dead connection can't quietly retry forever against
 the same backend) -- so `PgVectorStore`'s pool can't hand out a connection
-it doesn't believe is live. Three mechanisms, each covering a gap the
-others don't:
+it doesn't believe is live. The one deliberate exception: an `on_indexed`
+callback (#918) is wrapped in its own try/except inside `handle_task_created`
+and never escapes to this fatal path -- its own state, if any, is durable
+(Postgres), so a failed attempt is safe to retry from the next indexed
+task rather than worth taking the whole consumer down for.
+
+**Open question (review, not settled here):** that `except Exception` is
+broad -- it catches a config/logic bug in the callback the same way it
+catches a transient Postgres hiccup, silently. Narrowing it to
+Postgres-specific exceptions (`psycopg.OperationalError`, pool errors)
+would mean `index_consumer.py`'s dispatch has to know about a specific
+backend, which today it doesn't -- it's backend-agnostic by design. A
+narrower catch could instead live in `index_consumer_runner.py` (which
+already knows it's Postgres), wrapping the callback there rather than in
+`handle_task_created` itself. Not done here; flagging for the team
+lead's call on whether that coupling is worth it.
+
+Three mechanisms, each covering a gap the others don't:
 
 - `check=AsyncConnectionPool.check_connection` -- probes a connection
   before handing it to a caller; a dead one is discarded and replaced
