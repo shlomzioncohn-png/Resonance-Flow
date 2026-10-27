@@ -219,7 +219,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/bridge"
       pullPolicy: IfNotPresent
-      tag: "1df8b9e"
+      tag: "3df6727"
     containerPort: 8080
     service: *defaultService
     resources: *defaultResources
