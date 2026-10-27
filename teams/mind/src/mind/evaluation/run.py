@@ -36,11 +36,13 @@ from mind.evaluation.personas import (
 from mind.scoring.ancestor_source import FixtureAncestorSource
 from mind.scoring.hierarchical_model import HierarchicalRankingModel
 from mind.scoring.hierarchy import load_hierarchy
+from mind.scoring.segmented_model import SegmentedRankingModel
 
 #: Checked against --model before anything fallible (personas, hierarchy)
 #: loads, so a typo fails fast. Must match `models`' keys below.
 _MODEL_CHOICES = frozenset(
-    {"dummy", "nearest-deadline", "skip-blocked-nearest-deadline", "longest-description", "hierarchical"}
+    {"dummy", "nearest-deadline", "skip-blocked-nearest-deadline", "longest-description", "segmented",
+     "hierarchical"}
 )
 
 
@@ -70,6 +72,7 @@ def main() -> None:
         help="Model to evaluate: 'dummy' (constant score, plumbing only), "
              "'nearest-deadline', 'skip-blocked-nearest-deadline' or 'longest-description' "
              "(the cheap baselines from eval/personas/README.md's 'Cheap-baseline scores' table), "
+             "or 'segmented' (R2's segmented-ranking baseline, #354 — the one #486 records), "
              "or 'hierarchical' (#474: R2's baseline plus propagation over --hierarchy).",
     )
     parser.add_argument(
@@ -183,6 +186,7 @@ def main() -> None:
         "nearest-deadline": NearestDeadlineModel(),
         "skip-blocked-nearest-deadline": SkipBlockedNearestDeadlineModel(),
         "longest-description": LongestDescriptionModel(),
+        "segmented": SegmentedRankingModel(),
         "hierarchical": HierarchicalRankingModel(FixtureAncestorSource(fixture)),
     }
     # Safe: args.model is one of choices=sorted(_MODEL_CHOICES), which must match these keys.
