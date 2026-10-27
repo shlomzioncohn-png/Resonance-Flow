@@ -1,5 +1,6 @@
 package com.rnd.bridge.intake.parser.whatsapp;
 
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.WhatsAppImportProperties;
 import com.rnd.bridge.intake.model.ChatMessage;
 import java.io.BufferedReader;
@@ -28,9 +29,11 @@ import org.springframework.stereotype.Component;
 public class RealWhatsAppSourceReader implements WhatsAppSourceReader {
 
     private final WhatsAppImportProperties properties;
+    private final BridgeTenantId tenantId;
 
-    public RealWhatsAppSourceReader(WhatsAppImportProperties properties) {
+    public RealWhatsAppSourceReader(WhatsAppImportProperties properties, BridgeTenantId tenantId) {
         this.properties = properties;
+        this.tenantId = tenantId;
     }
 
     @Override
@@ -71,7 +74,7 @@ public class RealWhatsAppSourceReader implements WhatsAppSourceReader {
                     continue;
                 }
                 WhatsAppExportLineParser.parseLine(
-                                properties.tenantId(), chatId, line, exportZone, (filename, mimeType) ->
+                                tenantId.value(), chatId, line, exportZone, (filename, mimeType) ->
                                         readAttachment(importDir, filename, mimeType))
                         .ifPresent(messages::add);
             }

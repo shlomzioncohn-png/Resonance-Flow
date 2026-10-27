@@ -8,6 +8,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.SlackApiProperties;
 import com.rnd.bridge.intake.model.ChatMessage;
 import com.slack.api.methods.MethodsClient;
@@ -33,13 +34,14 @@ class RealSlackSourceReaderTest {
 
     private final MethodsClient methods = mock(MethodsClient.class);
     private final SlackUserNameResolver userNameResolver = new SlackUserNameResolver(methods);
+    private static final BridgeTenantId TENANT_ID = new BridgeTenantId("kamatech");
     private final RealSlackSourceReader reader = new RealSlackSourceReader(
-            new SlackApiProperties("xoxb-fake", "kamatech", List.of("C123"), null), userNameResolver);
+            new SlackApiProperties("xoxb-fake", List.of("C123"), null), TENANT_ID, userNameResolver);
 
     @Test
     void failsFastWhenBotTokenIsNotConfigured() {
         assertThatThrownBy(() -> new RealSlackSourceReader(
-                        new SlackApiProperties(null, "kamatech", List.of("C123"), null), userNameResolver))
+                        new SlackApiProperties(null, List.of("C123"), null), TENANT_ID, userNameResolver))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("bot-token");
     }
@@ -47,7 +49,7 @@ class RealSlackSourceReaderTest {
     @Test
     void failsFastWhenNoChannelsAreConfigured() {
         assertThatThrownBy(() -> new RealSlackSourceReader(
-                        new SlackApiProperties("xoxb-fake", "kamatech", List.of(), null), userNameResolver))
+                        new SlackApiProperties("xoxb-fake", List.of(), null), TENANT_ID, userNameResolver))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("channels");
     }

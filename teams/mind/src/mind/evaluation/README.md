@@ -489,6 +489,32 @@ format" if a field is ever renamed or removed, instead of a validation error.
 `Report` it was written from, so the week-7 comparison (#487) diffs the stretch
 run against the recorded baseline instead of a re-run.
 
+### Recording the stretch run and the comparison (#487)
+
+The stretch is scored against the recorded baseline in one run:
+
+```bash
+python -m mind.evaluation.run --model <stretch-model> \
+    --compare-to eval/baselines/baseline_score_<YYYY-MM-DD>.json \
+    --record-stretch eval/baselines/stretch_score_<YYYY-MM-DD>.json \
+    --comparison-out eval/baselines/stretch_comparison_<YYYY-MM-DD>.json \
+    --model-commit <model-sha> --persona-set-commit <persona-set-sha>
+```
+
+- **`--compare-to`** loads the baseline with `load_baseline_record` before
+  scoring and never re-scores it. A record from a different persona set
+  (checksum mismatch) fails the run before scoring. After scoring, the run
+  prints #464's `diff_reports` summary: accuracy before → after, how many
+  scenarios changed in each direction, and every changed scenario.
+- **`--record-stretch`** writes the stretch run in the same `BaselineRecord`
+  format, with the same rules as `--record-baseline`: write-once, both commits
+  required, and written only after the accuracy gates. It cannot be combined
+  with `--record-baseline` in the same run.
+- **`--comparison-out`** (needs `--compare-to`) writes the `ComparisonReport`
+  as JSON, with `baseline_record` and `stretch_record` naming the two files it
+  compares (team-relative paths, like the records). It is write-once too: an
+  existing file fails the run before scoring.
+
 ### 2026-09-23: no week-5 baseline number exists yet
 
 - **Checked:** `origin/main` @ `c7e6c507` (2026-09-23).
@@ -502,6 +528,81 @@ run against the recorded baseline instead of a re-run.
 - **Next:** measured over all 30 scenarios in `eval/personas/` once #354 lands
   (expected start of week 7, 2026-10-04), then recorded here with the model
   commit and the persona-set version.
+
+### 2026-10-25: segmented baseline recorded
+
+> **Superseded by the 2026-10-27 entry below**, which has the same scores on
+> the same scenarios. Only the approval flags (and so the checksum) changed.
+> The file is kept unchanged, because recorded baselines are never edited.
+
+- **Record:** [`eval/baselines/baseline_score_2026-10-25.json`](../../../eval/baselines/baseline_score_2026-10-25.json)
+- **Model:** `SegmentedRankingModel` (#354), `--model segmented`, model commit
+  `b16bfecc`.
+- **Persona set:** `eval/personas` + `eval/hierarchy`, commit `f07b5e71`,
+  **42 scenarios**, not the 30 the 2026-09-23 entry expected: #535 added 6 hard
+  scenarios and #507 added the 6 in `hierarchy_decides/`.
+
+| Slice | Top-1 |
+|---|---|
+| **Combined (42)** | **78.6% (33/42)** |
+| Original set, all but `hierarchy_decides` (36) | 86.1% (31/36) |
+| `cross_tier` (16) | 87.5% (14/16) |
+| `same_tier` (20) | 85.0% (17/20) |
+| `hierarchy_decides` (6) | 33.3% (2/6) |
+| CEO / Developer / Field Engineer (7 each) | 85.7% (6/7) |
+| Higher Manager / Manager / Salesperson (7 each) | 71.4% (5/7) |
+
+- **`hierarchy_decides`, as designed:** it misses all four scenarios the
+  hierarchy decides (`manager_restructuring_team_signoff`,
+  `salesperson_core_target_proposal`, `higher_manager_migration_budget`,
+  `ceo_expansion_partnership`) and gets both controls. The baseline does not
+  read `parent_task_id`, so it has nothing to decide these with.
+- **Original-set misses:** all 5 are from #535's hard scenarios:
+  `higher_manager_approved_vision_memo`, `manager_idle_new_hires`,
+  `developer_inflated_p0`, `field_engineer_released_controller`,
+  `salesperson_dead_rfp`.
+
+**Where it was right: `developer_prod_crash_vs_backlog_feature`.** The model
+picked `task_crash`, the null-pointer crash in checkout (0.858), which is the
+correct answer, over the order-history widget (0.427) and the wiki refresh
+(0.438). Its reasoning names what decides it: the deadline is 3 hours away (the
+support SLA) and the wording says "customers" and "escalated". The other two
+have no deadline and their own wording plays them down ("not requested by
+anyone", "nobody is waiting").
+
+**Where it was wrong: `developer_inflated_p0_vs_understated_data_leak`.** The
+model picked `task_staging`, "[P0] Staging health dashboard is red" (0.854). It
+should have picked `task_leak` (0.586): titled "Minor", but its description
+shows customers seeing other accounts' invoices right now, with a
+regulator-notification window closing Friday. The model weighed the nearer
+deadline (3 hours vs. 28) and the words "production" and "customer" in the
+staging task's text. It does not read that the [P0] tag is a template default
+on a staging-only alert, or that a mislabelled leak is the real severity. This
+is the case #535's hard scenario was written to catch: an inflated label
+against an understated real impact.
+
+### 2026-10-27: baseline re-recorded after the last 12 approvals
+
+- **Record:** [`eval/baselines/baseline_score_2026-10-27.json`](../../../eval/baselines/baseline_score_2026-10-27.json).
+  This is the current baseline, and the one #487 compares against.
+- **Why a new record:** the team lead approved the 12 scenarios that were still
+  `team_lead_approved: false` (#535's 6 hard scenarios and the 6 in
+  `hierarchy_decides/`). Flipping the flags changes the files, so the
+  persona-set checksum changes (`f5639b84…` → `64509cdc…`), and
+  `load_baseline_record` refuses the 2026-10-25 record against the current
+  set. Recorded baselines are never edited, so the run went to a new file.
+- **Model:** `SegmentedRankingModel`, `--model segmented`. Model commit and
+  persona-set commit are both `d585d3b0`, the commit that flips the flags.
+- **Scores are identical to 2026-10-25.** Field by field, the two records differ
+  only in `recorded_on`, `model_commit`, `persona_set.commit`,
+  `persona_set.checksum`, and `persona_set.team_lead_approved` (30 → 42).
+  The combined / per-group / per-role numbers, every prediction, and every
+  candidate score are equal. The table, the misses and the two examples above
+  all apply unchanged.
+- **Compared against:** the stretch model (#474) was scored against this record
+  on the same set: 76.2% (32/42), with 9 scenarios changed (4 wrong → right,
+  5 right → wrong). Records, diff and explanations are in
+  [`docs/stretch_evidence.md`](../../../docs/stretch_evidence.md).
 
 ## Real data slice
 
@@ -845,3 +946,7 @@ groups results by meeting through it (see "The extracted-item contract"); each
 Still a gap: content longer than `extraction.prompts.MAX_CONTENT_CHARS` (8000) is
 truncated, and a meeting's action items cluster in its closing recap, so a long
 transcript can still lose items. Truncation is now logged.
+
+## Guardrail eval
+
+A separate, deliberately adversarial set (`eval/guardrails/`, `tests/test_guardrails.py`) that feeds bad input to extraction, OCR and ASR and checks for graceful failure instead of confident output. It is not part of the persona set or its score. Findings and the per-component confidence audit: [`docs/guardrail_audit.md`](../../../docs/guardrail_audit.md) (#488).

@@ -64,7 +64,7 @@ public class FixtureCalendarSourceReader implements CalendarSourceReader {
                     RawSourceType.CALENDAR, tenantId, eventId, correlationId, occurredAt, organizer,
                     List.of(organizer), textOrNull(node.get("summary")), textOrNull(node.get("description")),
                     node.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, attachmentCount, List.of(),
-                    state.revision()));
+                    state.revision()).withSourceRef(eventId));
 
             if (attachments != null) {
                 int index = 0;
@@ -95,6 +95,6 @@ public class FixtureCalendarSourceReader implements CalendarSourceReader {
         return new SourceRecord(
                 RawSourceType.CALENDAR, tenantId, eventId, state.correlationId(), Instant.now(), null, List.of(),
                 null, null, node.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(),
-                state.revision(), ChangeType.DELETE_REVIEW);
+                state.revision(), ChangeType.DELETE_REVIEW).withSourceRef(eventId);
     }
 }

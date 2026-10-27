@@ -7,6 +7,7 @@ import com.rnd.bridge.core.IntakeResult;
 import com.rnd.bridge.intake.lane.GroupStateStore;
 import com.rnd.bridge.intake.lane.UnstructuredIntakeLane;
 import com.rnd.bridge.intake.model.ChatMessage;
+import com.rnd.bridge.intake.model.SlackMessageDeletion;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.parser.SourceRecordGrouper;
 import com.rnd.bridge.intake.service.ChatGroupStateReconciler;
@@ -145,26 +146,60 @@ public class SlackEventsController {
      * duplicate one.
      */
     private ResponseEntity<?> handleEventCallback(JsonNode root) {
-        Optional<ChatMessage> parsed = eventMessageParser.parse(root.get("event"));
-        if (parsed.isEmpty()) {
-            return ResponseEntity.ok().build();
+        JsonNode event = root.get("event");
+        Optional<ChatMessage> parsed = eventMessageParser.parse(event);
+        if (parsed.isPresent()) {
+            boolean allPublished = reconcileAndPublish(parsed.get());
+            return allPublished
+                    ? ResponseEntity.ok().build()
+                    : ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
-        boolean allPublished = reconcileAndPublish(parsed.get());
-        return allPublished
-                ? ResponseEntity.ok().build()
-                : ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        Optional<SlackMessageDeletion> deletion = eventMessageParser.parseDeletion(event);
+        if (deletion.isPresent()) {
+            boolean allPublished = reconcileAndPublishDeletion(deletion.get());
+            return allPublished
+                    ? ResponseEntity.ok().build()
+                    : ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+        return ResponseEntity.ok().build();
     }
 
     private boolean reconcileAndPublish(ChatMessage message) {
-        if (message.threadId() != null) {
+        if (isThreadReply(message)) {
             // Threaded groups keep today's immediate merge+publish semantics - unaffected by the
             // non-thread delayed-publish design (see class javadoc), and never scheduled.
             return publishGroups(reconciler.group(List.of(message)));
         }
+        // A thread root that already has replies carries thread_ts == its own ts on Slack's
+        // message_changed payload (SlackEventMessageParser just passes that through - see its
+        // javadoc), so isThreadReply(message) is false here even though message.threadId() is
+        // non-null. Stripping it back to null before handing off is what lets this message take
+        // the branch below instead of the one above: reconcileNonThreadedMessage's own
+        // threadRouted case (see its javadoc) is exactly the designed handler for "this id
+        // resolves to an existing thread group" and is what actually reaches the channel group
+        // via findChannelGroupIfDifferentFromThread/scheduleOrReschedule - routing a root edit
+        // into reconciler.group(List.of(message)) above instead would update only the thread
+        // group and never touch/reschedule the channel group's own still-living copy of the root.
+        ChatMessage nonThreadMessage = withoutSelfThreadId(message);
         // Only newly-arrived attachments are landed here, never published - the transcript stays
         // pending in GroupState for SlackSessionScheduler's inactivity timer to publish, together
-        // with every attachment landed during the session (see SlackSessionPublisher).
-        ChatGroupStateReconciler.RealtimeReconcileResult result = reconciler.reconcileNonThreadedMessage(message);
+        // with every attachment landed during the session (see SlackSessionPublisher). Unless
+        // this message's own id actually resolves to an existing thread group (a thread root's
+        // edit - its event carries no threadId of its own, see
+        // ChatGroupStateReconciler.resolveCurrentGroupId) - that case is routed by the resolved
+        // group's kind, not by event shape, and publishes immediately like any other thread group.
+        ChatGroupStateReconciler.RealtimeReconcileResult result =
+                reconciler.reconcileNonThreadedMessage(nonThreadMessage);
+        if (result.threadRouted()) {
+            // Channel-group step first, uncaught - see reconcileAndPublishDeletion's javadoc for
+            // the full ordering rationale (docs/plans/slack-superseded-fix.md §2b): a root edit
+            // may also have updated the channel group's own still-living copy of the root, and
+            // scheduling that is never allowed to influence the boolean this method returns.
+            if (result.channelGroupState() != null) {
+                sessionScheduler.scheduleOrReschedule(result.channelGroupState());
+            }
+            return publishGroups(result.newAttachmentRecords());
+        }
         boolean allLanded = landAttachments(result.newAttachmentRecords());
         // Scheduling is keyed on "does this GroupState still need publishing", not on whether
         // this event was a genuinely-new message - an edit can just as well produce a fresh
@@ -179,6 +214,80 @@ public class SlackEventsController {
             sessionScheduler.scheduleOrReschedule(result.groupState());
         }
         return allLanded;
+    }
+
+    /**
+     * False for a thread root whose Slack payload sets {@code thread_ts == ts} on itself (every
+     * real reply, and a thread_broadcast reply, always has threadId() distinct from its own
+     * id() - only a root-with-replies' own message carries them equal). See
+     * {@link #withoutSelfThreadId} for why this distinction, not a plain null check, is what
+     * decides routing here.
+     */
+    private static boolean isThreadReply(ChatMessage message) {
+        return message.threadId() != null && !message.threadId().equals(message.id());
+    }
+
+    /**
+     * Strips threadId back to null for exactly the case {@link #isThreadReply} excludes: a
+     * thread root whose own message_changed payload carries {@code thread_ts == ts}. Without
+     * this, reconciler.reconcileNonThreadedMessage would reject the message outright (it only
+     * accepts threadId() == null - see its javadoc) instead of reaching its own threadRouted
+     * case, which is the one place that still merges into AND reschedules the channel group's
+     * own still-living copy of the root (see findChannelGroupIfDifferentFromThread). Every other
+     * message is returned unchanged.
+     */
+    private static ChatMessage withoutSelfThreadId(ChatMessage message) {
+        if (isThreadReply(message) || message.threadId() == null) {
+            return message;
+        }
+        return new ChatMessage(
+                message.sourceType(), message.tenantId(), message.chatId(), message.sender(),
+                message.timestamp(), message.text(), message.attachments(), message.id(), null);
+    }
+
+    /**
+     * message_deleted / nested-tombstone path: resolves and removes the message via
+     * ChatGroupStateReconciler.removeMessage, then routes by the resolved group's own kind -
+     * never by event shape, since a deletion event carries no threadId at all (see
+     * SlackMessageDeletion's javadoc). A thread group publishes the (possibly now empty)
+     * transcript immediately, exactly like any other thread reconcile; a non-thread group's
+     * removal only advances GroupState - the inactivity timer (now possibly sped up via
+     * correctionDelay, see SlackSessionScheduler) publishes it later. An unknown/already-removed
+     * messageId is a no-op - acknowledged, nothing scheduled or published.
+     * <p>
+     * A root deletion/edit now also updates the channel group's own still-living copy of the
+     * root (see ChatGroupStateReconciler §2 / docs/plans/slack-superseded-fix.md §2b). That
+     * channel-group step is always done FIRST, scheduled, uncaught: if
+     * {@code sessionScheduler.scheduleOrReschedule} itself throws (an unexpected RuntimeException
+     * out of GroupStateStore.update), it propagates straight to Spring's default 500, which is
+     * correct - the thread side (attempted next, below) hasn't even run yet, so the whole event
+     * must be retried. Scheduling the channel group is purely internal state, never influences
+     * this method's returned boolean, exactly like the ordinary non-thread branch above always
+     * returns true after a schedule-only call regardless of whether the TaskScheduler
+     * registration could be said to have "succeeded". Only the thread group's publish result
+     * (the only step with an external Kafka-facing ack) participates in the returned boolean.
+     * A retry (Slack redelivering on a non-2xx) is safe on both sides: the channel-group
+     * merge/removal reuses the exact same mergeIntoGroupState/removeMessage primitives the
+     * ordinary single-group path already proves idempotent against a redelivered event (see
+     * duplicateDeliveryOfTheSameEditDoesNotAdvanceTheRevisionTwice/
+     * removeMessageTwiceIsANoOpTheSecondTime), and scheduleOrReschedule always cancels-and-
+     * replaces rather than double-scheduling.
+     */
+    private boolean reconcileAndPublishDeletion(SlackMessageDeletion deletion) {
+        ChatGroupStateReconciler.RemovalResult result =
+                reconciler.removeMessage(deletion.sourceType(), deletion.tenantId(), deletion.messageId());
+        if (!result.removed()) {
+            return true;
+        }
+        if (result.isThreadGroup()) {
+            if (result.channelGroupState() != null) {
+                sessionScheduler.scheduleOrReschedule(result.channelGroupState());
+            }
+            List<SourceRecord> records = reconciler.toSourceRecordsForPublishedGroup(result.groupState());
+            return publishGroups(records);
+        }
+        sessionScheduler.scheduleOrReschedule(result.groupState());
+        return true;
     }
 
     // Threaded path only: groups the reconciler's flat SourceRecord list by correlationId (one

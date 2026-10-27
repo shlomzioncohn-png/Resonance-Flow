@@ -17,6 +17,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  */
 @ConfigurationProperties(prefix = "bridge.intake.slack")
 public record SlackApiProperties(
-        String botToken, String tenantId, List<String> channels,
+        String botToken, List<String> channels,
         String signingSecret) {
 }

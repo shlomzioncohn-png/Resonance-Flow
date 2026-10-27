@@ -16,5 +16,11 @@
     "mimeType": "image/jpeg",
     "modifiedTime": "2026-08-16T20:00:00Z",
     "description": null
+  },
+  {
+    "tenantId": "kamatech",
+    "id": "del-7a8b9c",
+    "name": "Old-Draft.docx",
+    "trashed": true
   }
 ]
