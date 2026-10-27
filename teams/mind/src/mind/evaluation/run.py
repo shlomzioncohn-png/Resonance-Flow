@@ -340,6 +340,19 @@ def main() -> None:
         )
         sys.exit(1)
 
+    # Diffed before anything is written: a comparison that fails must not leave a
+    # (write-once, therefore blocking) stretch record behind without its diff.
+    comparison: ComparisonReport | None = None
+    if baseline is not None:
+        try:
+            comparison = diff_reports(baseline, combined_report)
+        except ValueError as e:
+            print(f"Cannot compare: {e}", file=sys.stderr)
+            sys.exit(1)
+        print("=== Comparison against the recorded baseline ===")
+        print(_comparison_summary(comparison))
+        print("================================================\n")
+
     # Written last, after both accuracy gates: a run the project's own CI treats as a
     # regression must not leave a (write-once, therefore blocking) record behind.
     if record_path is not None and provenance is not None:
@@ -360,23 +373,18 @@ def main() -> None:
             sys.exit(1)
         print(f"{record_kind.capitalize()} recorded to {record_path} (commit it).\n")
 
-    if baseline is not None:
-        comparison = diff_reports(baseline, combined_report)
-        print("=== Comparison against the recorded baseline ===")
-        print(_comparison_summary(comparison))
-        print("================================================\n")
-        if args.comparison_out is not None:
-            try:
-                _write_comparison(
-                    args.comparison_out,
-                    comparison,
-                    baseline_record=args.compare_to,
-                    stretch_record=record_path,
-                )
-            except BaselineRecordError as e:
-                print(f"Cannot write comparison: {e}", file=sys.stderr)
-                sys.exit(1)
-            print(f"Comparison written to {args.comparison_out} (commit it).\n")
+    if comparison is not None and args.comparison_out is not None:
+        try:
+            _write_comparison(
+                args.comparison_out,
+                comparison,
+                baseline_record=args.compare_to,
+                stretch_record=record_path,
+            )
+        except BaselineRecordError as e:
+            print(f"Cannot write comparison: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Comparison written to {args.comparison_out} (commit it).\n")
 
 
 if __name__ == "__main__":

@@ -360,6 +360,30 @@ def test_the_comparison_names_the_record_this_run_wrote_whichever_flag_wrote_it(
     assert data["stretch_record"] == new.as_posix()
 
 
+def test_a_comparison_that_fails_leaves_no_stretch_record_or_diff_behind(
+    monkeypatch, tmp_path, capsys
+):
+    baseline = _record_baseline(monkeypatch, tmp_path)
+    stretch = tmp_path / "stretch.json"
+    comparison = tmp_path / "comparison.json"
+
+    def _fail(*_args, **_kwargs):
+        raise ValueError("scenario sets differ")
+
+    monkeypatch.setattr("mind.evaluation.run.diff_reports", _fail)
+    with pytest.raises(SystemExit) as exit_info:
+        _run_cli(
+            monkeypatch, tmp_path,
+            "--compare-to", str(baseline), "--comparison-out", str(comparison),
+            "--record-stretch", str(stretch),
+        )
+
+    assert exit_info.value.code == 1
+    assert "Cannot compare: scenario sets differ" in capsys.readouterr().err
+    assert not stretch.exists()
+    assert not comparison.exists()
+
+
 @pytest.mark.parametrize(
     "extra",
     [
