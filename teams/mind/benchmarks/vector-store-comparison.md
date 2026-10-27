@@ -370,14 +370,13 @@ headroom before <300ms would even become a concern, and the one recall
 miss is attributable to the embedding model's inherent limits on a hard
 paraphrase, not to index accuracy.
 
-**Resolved by #475 below:** review flagged (via `EXPLAIN`) that at this
-10,000-row scale, with `hnsw.ef_search = 400`, Postgres's planner may
-choose a sequential scan over the HNSW index for this query shape. Confirmed
-with a real `EXPLAIN ANALYZE` against a 10,000-row table (see "Live-path
-latency under load" below): the planner does use the HNSW index at this
-scale -- `Index Scan using ..._embedding_hnsw_idx`, not a seq scan. (At a
-much smaller scale, ~50 rows, it does choose a bitmap/seq scan instead --
-expected, and not a concern at the 10,000-row target.)
+**Investigated and fixed by #475 below:** review flagged (via `EXPLAIN`)
+that at this 10,000-row scale, with `hnsw.ef_search = 400`, Postgres's
+planner may choose a sequential scan over the HNSW index for this query
+shape. It does: see "Live-path latency under load" below. The production
+`search_effort` default (400) made the planner cost an HNSW scan above a
+plain Seq Scan + sort at this row count -- the index went unused, and the
+live-path p95 target failed, until `search_effort` was lowered to 200.
 
 ## Foundation Gate benchmark (week 3)
 
@@ -540,39 +539,63 @@ gets the same 10,000 rows.
 
 ### Results (10,000 rows, 1,647-seed multi-domain corpus)
 
-| avg (ms) | p50 (ms) | p95 (ms) | p99 (ms) | max (ms) |
-|---:|---:|---:|---:|---:|
-| 123.90 | 120.83 | 161.45 | 189.45 | 200.39 |
+**The original "HNSW confirmed in use" conclusion below was wrong.**
+`_explain_hnsw_is_used` hand-wrote its own `EXPLAIN` query -- a fixed
+`[0.01]*dim` vector, `LIMIT 5`, no `exclude_task_id`, and (the setting
+that actually matters here) no `hnsw.iterative_scan` -- which is not the
+query `search()` runs. Fixed to literally replay
+`PgTenantStore._search_query()`, with `search()`'s own `set_config`
+calls, a real stored vector, and a real excluded task_id. Re-run against
+the real 10,000-row table, it reports `hnsw_index_used: False` -- the
+real query is a Seq Scan, not HNSW, at the then-default `search_effort`
+of 400.
 
-**<300ms p95 target: PASS**, with roughly 139ms (46%) of headroom left --
-comfortable, but nowhere near the ~18x headroom the isolated `search()`-only
-number above suggested. The full live path (5 round trips, 20-way
-concurrency, a writer competing for the same connection pool) costs
-roughly 10x what an isolated `search()` call does; the earlier number was
-real but was never the thing #475 asks to prove.
+| search_effort | avg (ms) | p50 (ms) | p95 (ms) | p99 (ms) | max (ms) | HNSW used | <300ms p95 |
+|---:|---:|---:|---:|---:|---:|:---:|:---:|
+| 400 (previous default) | 219.12 | 215.81 | 319.79 | 350.71 | 399.79 | No (Seq Scan) | **FAIL** |
+| 200 (current default) | 72.79 | 71.60 | 91.30 | 99.52 | 111.30 | **Yes** | **PASS** |
 
-**HNSW confirmed in use at this scale**, not assumed: `EXPLAIN (ANALYZE,
-FORMAT TEXT)` against the live 10,000-row table returns
-`Index Scan using task_embeddings_benchmark_475_embedding_hnsw_idx`, not
-a sequential or bitmap scan -- resolving the open question flagged above.
-(At a much smaller scale tested during development, ~50 rows, the planner
-instead chose a bitmap scan over the tenant_id index -- the right call at
-that size, and not a concern at the 10,000-row target.)
+(This replaces an earlier recorded number here -- 161.45ms p95, "PASS" --
+taken against the same broken `EXPLAIN` check, before this fix. A fresh
+run at `search_effort=400` on this machine gives 319.79ms, not 161.45ms;
+whatever the original run measured, it wasn't accompanied by a
+representative plan check, so it isn't trusted here. The numbers above
+are reproducible with `--ef-search 400` / `--ef-search 200`.)
 
-### Breaking point and diagnosis
+### Diagnosis: why the planner skips the index (#475 asks for this)
 
-Not explored past 10,000 rows in this pass: the target is comfortably met
-(46% headroom), and with only one scale tested there is no second data
-point yet to extrapolate a breaking point from. Where the time goes at
-10,000 rows is not a mystery, though -- it is the 5 round trips per call
-above, under contention from concurrency and a competing writer, not the
-vector search itself (the HNSW scan alone, per `EXPLAIN ANALYZE`, is
-single-digit milliseconds). A later pass that re-runs this at 50,000 and
-100,000 rows would show whether that per-call cost grows with table size
-or stays flat (HNSW's own query cost is expected to scale roughly
-`O(log n)`, so the round-trip/contention overhead, not the index, is the
-more likely bottleneck as scale grows) -- not done here to keep this PR's
-scope to what #475 asks for at the stated floor.
+Not a missing `ANALYZE` -- tested directly: running `ANALYZE` on the
+freshly loaded table doesn't change the plan; still Seq Scan. The actual
+cause is `hnsw.ef_search` itself: pgvector's planner cost estimate for an
+HNSW index scan scales with `ef_search` (how many candidate nodes a scan
+visits), and at 400 that estimate exceeds a plain Seq Scan + sort's cost
+for this 10,000-row table -- the planner picks Seq Scan, correctly by its
+own cost model. Lowering `ef_search` lowers the HNSW cost estimate until
+the planner switches back to the index.
+
+Binary-searched the crossover on this table: HNSW is used through
+`ef_search=260`, not at 275 or above. Recall@5 against the exact
+(brute-force) top-5, averaged over 30 sampled queries, is flat at
+**98.7%** for every value from 200-260 that keeps HNSW in use (worst
+single query: 60%) -- there's no recall reason to sit close to the
+260-275 edge, since recall doesn't improve by doing so, only margin
+against future data growth or stats drift shrinks.
+
+**Change made:** `VectorStoreSettings.search_effort`'s default lowered
+from 400 to 200 (`src/mind/config.py`) -- comfortable margin below the
+measured ~260-275 crossover, confirmed end-to-end above (p95 91.30ms,
+HNSW in use). The "100% recall" the 400 default appeared to have wasn't
+real accuracy -- it's what exact search gives you when the index isn't
+running at all, which is also why it was slow.
+
+### Breaking point
+
+Not explored past 10,000 rows in this pass, now that the index is
+actually engaged and p95 (91.30ms) has ~3.3x headroom under target.
+Finding where p95 crosses 300ms at `search_effort=200` needs 50,000+ and
+100,000-row runs -- not done here; the benchmark script's
+`--vectors`/`--ef-search` flags make that a direct follow-up
+(`--vectors 50000 --ef-search 200`, then `100000`).
 
 ### Known limitations
 
@@ -580,9 +603,9 @@ scope to what #475 asks for at the stated floor.
   1,647 unique scenarios, each reused ~6 times with re-texturing. More
   domains narrow the gap further but do not close it completely; a
   production corpus this size would have far more independent scenarios.
-- **The `EXPLAIN ANALYZE` plan was captured with a fixed, synthetic query
-  vector** (not a literal replay of one of the 300 measured queries) --
-  representative of the same query shape and scale, not a replay.
+- **HNSW build-time quality (`ef_construction`) still untuned** --
+  only `ef_search` (query-time) was tuned here; see "Follow-up" above
+  (#270).
 - **Connection-pool size (25) and concurrency (20) are this benchmark's
   own choices**, not derived from a measured production concurrency
   profile, which does not exist yet to measure.

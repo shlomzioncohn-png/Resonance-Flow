@@ -24,9 +24,10 @@ Measures, as #475 requires:
     at once, via a bounded semaphore), and with writes happening
     concurrently (a background task continuously upserting new rows,
     like the real index consumer does).
-  - An `EXPLAIN ANALYZE` of the same query shape, to confirm the planner
-    actually uses the HNSW index at this scale rather than a sequential
-    scan -- an explicit open question from `vector-store-comparison.md`
+  - An `EXPLAIN ANALYZE` of the literal query `search()` runs (not a
+    hand-written approximation of it), to confirm the planner actually
+    uses the HNSW index at this scale rather than a sequential scan -- an
+    explicit open question from `vector-store-comparison.md`
     ("Follow-up", #270) that this closes.
 
 Run (from teams/mind/, with vector-store up and migrated):
@@ -63,8 +64,7 @@ from mind.api.v1.router import get_related_tasks
 from mind.config import VectorStoreSettings, get_settings
 from mind.embeddings import embed_batch, task_text
 from mind.embeddings.base import DEMO_TENANT_ID
-from mind.embeddings.embeddings import EMBEDDING_DIM
-from mind.embeddings.pgvector_store import PgVectorStore
+from mind.embeddings.pgvector_store import PgTenantStore, PgVectorStore
 
 BENCHMARK_TABLE = "task_embeddings_benchmark_475"
 RESULTS_PATH = Path(__file__).resolve().parent / "related_tasks_live_path_benchmark_results.json"
@@ -136,36 +136,43 @@ async def _measured_query(index: PgVectorStore, task_id: str, sem: asyncio.Semap
         return (time.perf_counter() - start) * 1000
 
 
-async def _explain_hnsw_is_used(settings: VectorStoreSettings) -> str:
-    """#270: confirm the planner picks the HNSW index at this scale,
-    rather than a sequential scan -- previously flagged, never checked."""
-    fake_vector = [0.01] * EMBEDDING_DIM
+async def _explain_hnsw_is_used(
+    settings: VectorStoreSettings,
+    tenant_store: PgTenantStore,
+    sample_task_id: str,
+    sample_vector: list[float],
+) -> str:
+    """#270, fixed per #475 review: an earlier version of this check hand-wrote
+    its own query (a fake constant vector, no `exclude_task_id`, and -- the
+    one that actually matters -- no `hnsw.iterative_scan`), which is not the
+    query `search()` runs and silently passed even when the real path took a
+    seq scan. Replays `PgTenantStore._search_query()` itself, with the same
+    `set_config` calls `search()` makes, a real stored vector, and a real
+    excluded task_id -- the exact statement `find_related()` sends."""
+    query = tenant_store._search_query(exclude_completed=False, exclude_task_id=True)
     async with (
         await psycopg.AsyncConnection.connect(str(settings.dsn.get_secret_value())) as conn,
         conn.cursor() as cur,
     ):
         await cur.execute(
-            "SELECT set_config('hnsw.ef_search', %s, false);", (str(settings.search_effort),)
+            "SELECT set_config('hnsw.ef_search', %s, true);", (str(settings.search_effort),)
         )
+        await cur.execute("SELECT set_config('hnsw.iterative_scan', 'strict_order', true);")
         await cur.execute(
-            sql.SQL(
-                "EXPLAIN (ANALYZE, FORMAT TEXT) "
-                "SELECT task_id FROM {table} "
-                "WHERE tenant_id = %s ORDER BY embedding <=> %s::vector LIMIT 5;"
-            ).format(table=sql.Identifier(settings.table)),
-            (str(DEMO_TENANT_ID), fake_vector),
+            sql.SQL("EXPLAIN (ANALYZE, FORMAT TEXT) ") + query,
+            (sample_vector, tenant_store._tenant_id, sample_task_id, sample_vector, 5),
         )
         rows = await cur.fetchall()
         return "\n".join(r[0] for r in rows)
 
 
-async def _run(n_vectors: int) -> dict:
+async def _run(n_vectors: int, ef_search: int) -> dict:
     # Instrumentation logs one JSON line per call; silence it here so
     # hundreds of concurrent benchmark calls don't flood stdout.
     logging.getLogger("mind.instrumentation").setLevel(logging.WARNING)
 
     settings = get_settings().vector_store.model_copy(
-        update={"table": BENCHMARK_TABLE, "search_effort": 400}
+        update={"table": BENCHMARK_TABLE, "search_effort": ef_search}
     )
     await create_vector_store_test_table(settings)
     index = PgVectorStore(settings, max_conn=POOL_SIZE)
@@ -175,7 +182,9 @@ async def _run(n_vectors: int) -> dict:
         ids = await _load_rows(index, tenant_store, n_vectors)
 
         print("Confirming the HNSW index is actually used (#270)...")
-        plan = await _explain_hnsw_is_used(settings)
+        sample_vector = await tenant_store.get_vector(ids[0])
+        assert sample_vector is not None
+        plan = await _explain_hnsw_is_used(settings, tenant_store, ids[0], sample_vector)
         print(plan)
         uses_hnsw = "Index Scan" in plan and "hnsw" in plan.lower()
 
@@ -204,6 +213,7 @@ async def _run(n_vectors: int) -> dict:
 
         stats = {
             "n_vectors": n_vectors,
+            "ef_search": ef_search,
             "n_queries": N_MEASURED_QUERIES,
             "n_concurrent": N_CONCURRENT,
             "writes_during_measurement": writes_during_measurement,
@@ -233,10 +243,16 @@ async def _run(n_vectors: int) -> dict:
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--vectors", type=int, default=10_000)
+    # Mirrors VectorStoreSettings.search_effort's production default (#475
+    # review): 400 made the planner cost an HNSW scan above Seq Scan + sort
+    # at 10,000 rows, so the index went unused -- see
+    # vector-store-comparison.md's "Live-path latency" section for why the
+    # default moved to 200.
+    parser.add_argument("--ef-search", type=int, default=200)
     args = parser.parse_args()
 
     random.seed(475)
-    stats = await _run(args.vectors)
+    stats = await _run(args.vectors, args.ef_search)
 
     def _write() -> None:
         RESULTS_PATH.write_text(json.dumps(stats, indent=2))

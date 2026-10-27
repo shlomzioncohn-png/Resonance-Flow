@@ -324,7 +324,13 @@ class VectorStoreSettings(BaseModel):
 
     dsn: Secret[PostgresDsn]
     table: str = "task_embeddings"
-    search_effort: int = Field(default=400, ge=1)
+    # #475: 400 made the planner cost an HNSW scan above a plain Seq Scan +
+    # sort at 10,000 rows, so the index went unused -- p95 319.79ms, FAIL.
+    # 200 keeps the index in use (p95 91.30ms) for 98.7% recall@5 vs exact
+    # (vs. the 400 case's "100%", which isn't real accuracy -- it's exact
+    # search because the index wasn't running at all). See
+    # benchmarks/vector-store-comparison.md, "Live-path latency under load".
+    search_effort: int = Field(default=200, ge=1)
     # No embedding_dim: the column width is baked into the migration
     # (migrations/versions/0001_initial_vector_schema.py), not config.
 
