@@ -452,17 +452,21 @@ def validate_size(size: str, meetings: list[Meeting]) -> list[WindowResult]:
     """Every window of every meeting with one Whisper size.
 
     Runs in its own fresh process (see run_validation): transcribe() loads its
-    model once per process, from WHISPER_MODEL, so the size is set before the
-    first call."""
-    os.environ["WHISPER_MODEL"] = size
+    model once per process, so the size is set before the first call. ASR reads
+    it from config.yaml's asr.whisper_model, which wins over WHISPER_MODEL
+    (#481), so this process gets a config.yaml of its own naming the size --
+    the host's config, if any, cannot pick the model being measured."""
+    out_dir = _OUTPUT_DIR / size
+    out_dir.mkdir(parents=True, exist_ok=True)
+    config_file = out_dir / "config.yaml"
+    config_file.write_text(f"asr:\n  whisper_model: {size}\n", encoding="utf-8")
+    os.environ["CONFIG_FILE_PATH"] = str(config_file)
     from mind.multimodal import asr
 
     # Loads the model and the VAD session up front, so neither lands in the
     # first window's latency.
     if not asr.warm_up():
         raise RuntimeError(f"Whisper {size} could not be loaded -- see the log above")
-    out_dir = _OUTPUT_DIR / size
-    out_dir.mkdir(parents=True, exist_ok=True)
     rows = []
     for meeting in meetings:
         reference = load_reference(meeting.words_files)

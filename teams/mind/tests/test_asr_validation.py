@@ -25,6 +25,7 @@ from benchmarks.asr_validation import (
     reference_text,
     reference_window,
     score,
+    validate_size,
     validate_window,
     validation_windows,
     window_wav,
@@ -350,6 +351,29 @@ def test_a_record_under_another_size_fails_loudly(tmp_path: Path):
     wrong = _fake_transcribe("we need", model="whisper-tiny.en-int8-local")
     with pytest.raises(RuntimeError, match="not base.en"):
         validate_window(wrong, "base.en", audio, _reference(tmp_path), _WINDOW)
+
+
+@pytest.mark.parametrize("host_config", [None, "asr:\n  whisper_model: base.en\n"])
+def test_each_size_runs_under_a_config_naming_that_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_config: str | None
+):
+    # Since #481 config.yaml's asr.whisper_model wins over WHISPER_MODEL. Without
+    # a config of its own the run could not start (no CONFIG_FILE_PATH), and a
+    # host config naming another size would have been measured instead.
+    if host_config is None:
+        monkeypatch.delenv("CONFIG_FILE_PATH", raising=False)
+    else:
+        host = tmp_path / "host-config.yaml"
+        host.write_text(host_config, encoding="utf-8")
+        monkeypatch.setenv("CONFIG_FILE_PATH", str(host))
+    monkeypatch.setattr("benchmarks.asr_validation._OUTPUT_DIR", tmp_path / "out")
+    monkeypatch.setattr("mind.multimodal.asr.warm_up", lambda: True)
+
+    assert validate_size("tiny.en", meetings=[]) == []
+
+    from mind.multimodal import asr
+
+    assert asr._model_name() == "whisper-tiny.en-int8-local"
 
 
 def test_a_failed_transcription_is_not_scored(tmp_path: Path):

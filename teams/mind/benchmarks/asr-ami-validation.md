@@ -2,7 +2,9 @@
 
 **Status: measurement infrastructure complete; results provisional.** The file
 set is not final (it waits on R2, who owns the AMI slice), and neither the model
-nor the pipeline's time limits were changed on these numbers.
+nor the pipeline's time limits were changed on these numbers. The numbers are
+from a re-run on 2026-10-28, on the pipeline after #481; the first run
+(2026-10-15) measured `small.en` only partially — see F1.
 
 This document keeps three kinds of statement apart, and each section says which
 one it holds:
@@ -85,7 +87,7 @@ rates. Only the WER is unique: when two alignments cost the same, how errors
 split into S/D/I is jiwer's choice.
 
 **Engine and host:** faster-whisper int8, CPU, 4 threads, beam 5; one dev
-laptop, 2026-10-15. `tiny.en`/`small.en` load unpinned weights (no sha256
+laptop, 2026-10-15 and again 2026-10-28. `tiny.en`/`small.en` load unpinned weights (no sha256
 check — `PINNED_WHISPER_MODELS` pins only `base.en`); they were hash-checked
 when placed by hand in #135.
 
@@ -98,6 +100,12 @@ python -m benchmarks.asr_error_analysis
 pytest tests/test_asr_validation.py tests/test_asr_error_analysis.py -v
 ```
 
+No `CONFIG_FILE_PATH` is needed: since #481, ASR takes the model size from
+config.yaml's `asr.whisper_model` before `WHISPER_MODEL`, so each size's
+process writes its own `local-data/ami/asr-validation/<size>/config.yaml`
+naming that size — a config.yaml on the host cannot swap the model being
+measured.
+
 (The issue names `python -m mind.multimodal.asr_benchmark`; benchmarks live in
 `benchmarks/` and run as `python -m benchmarks.<name>` — see
 `benchmarks/README.md` — and are not part of the `mind` package.)
@@ -106,54 +114,68 @@ pytest tests/test_asr_validation.py tests/test_asr_error_analysis.py -v
 
 ### F1. WER per window and overall
 
-One run per size. Overlapped = share of the window's reference words spoken
-while another speaker was speaking (F3).
+The 2026-10-28 run, one run per size; every window completed for every size.
+Overlapped = share of the window's reference words spoken while another
+speaker was speaking (F3).
 
 | Window | Overlapped | tiny.en | base.en | small.en |
 |---|---|---|---|---|
-| IS1008b 442–682 | 24.9% | 0.258 | 0.272 | 0.336 **(truncated)** |
+| IS1008b 442–682 | 24.9% | 0.258 | 0.272 | 0.237 |
 | IS1008b 884–1124 | 12.6% | 0.127 | 0.124 | 0.107 |
 | IS1008b 1326–1566 | 3.7% | 0.068 | 0.059 | 0.059 |
 | IB4003 506–746 | 10.9% | 0.161 | 0.152 | 0.135 |
 | IB4003 1012–1252 | 32.3% | 0.253 | 0.245 | 0.220 |
-| IB4003 1517–1757 | 28.7% | 0.250 | 0.244 | 0.214 |
+| IB4003 1517–1757 | 28.7% | 0.247 | 0.246 | 0.214 |
 
 Pooled:
 
 | | tiny.en | base.en | small.en |
 |---|---|---|---|
-| IS1008b (3 windows) | 0.139 | 0.138 | 0.149 (incl. truncated) |
-| IB4003 (3 windows) | 0.223 | 0.215 | 0.191 |
-| **Overall, all 6 windows** | 0.188 | **0.183** | 0.174 (incl. truncated) |
-| **Overall, the 5 windows all sizes completed** | 0.180 | **0.173** | **0.154** |
-| Substitutions / deletions / insertions (5 windows) | 169 / 450 / 22 | 137 / 465 / 13 | 101 / 428 / 20 |
+| IS1008b (3 windows) | 0.139 | 0.138 | 0.123 |
+| IB4003 (3 windows) | 0.222 | 0.216 | 0.191 |
+| **Overall, all 6 windows** | 0.188 | **0.184** | **0.163** |
+| Substitutions / deletions / insertions | 197 / 524 / 30 | 160 / 554 / 21 | 120 / 505 / 27 |
 
-- **The truncated window.** `small.en` was cut off by the pipeline's timeout on
-  IS1008b 442–682. Its 0.336 counts audio that was never transcribed, so it is
-  not comparable; the 5-window row leaves that window out for every size.
+- **The 2026-10-15 run measured `small.en` on 5 windows only.** The
+  pipeline's timeout cut it off on IS1008b 442–682 (0.336, counting audio never
+  transcribed), so that run reported small.en on the other 5 windows (0.154)
+  and called it not viable on its latency (F2, D2). On 2026-10-28 the same window completed
+  (0.237), so the 6-window figure above is the first complete one.
+- **The re-run reproduces the first.** Of the 17 windows both runs completed,
+  16 have the identical transcript; the one that differs is IB4003 1517–1757
+  for tiny.en and base.en (0.250 → 0.247, 0.244 → 0.246). base.en's overall
+  WER moved 0.183 → 0.184.
 - **Within one size, windows range ~4.6x** (base.en: 0.059 to 0.272). The
   overall figure hides that spread.
-- **base.en's normalized WER is 0.183**, against #135's rough 0.263 on the
+- **base.en's normalized WER is 0.184**, against #135's rough 0.263 on the
   same two meetings. Different spans, though: whole meetings there, windows
   here — so the gap is not the effect of normalization alone.
 
 ### F2. Runtime (from the `record_call()` records)
 
-| | RTF per window | CPU s per 240 s window | Calls over the 120 s "slow" limit |
-|---|---|---|---|
-| tiny.en | 0.058–0.165 | 37–85 | 0 of 6 |
-| base.en | 0.109–0.370 | 71–254 | 0 of 6 |
-| small.en | 0.603–0.765 (5 windows); 1.200 truncated | 399–508 | **6 of 6** |
+| | RTF per window, 10-28 | CPU s per 240 s window, 10-28 | RTF, 10-15 | CPU s, 10-15 |
+|---|---|---|---|---|
+| tiny.en | 0.060–0.167 | 37–87 | 0.058–0.165 | 37–85 |
+| base.en | 0.129–0.221 | 69–146 | 0.109–0.370 | 71–254 |
+| small.en | 0.153–0.499 | 140–303 | 0.603–0.765 (5 windows); 1.200 truncated | 399–508 |
 
-- **The truncated call ran 288 s**, against a `TRANSCRIBE_TIMEOUT_S` of 240 s.
-- **base.en's RTF here (~0.2) is about twice #135's clean run (~0.1).** Host
-  load during this run was not controlled — see H5.
+- **On 10-28 no call passed the 120 s "slow" limit** for any size (small.en's
+  slowest: RTF 0.499, ~120 s). On 10-15 every small.en call did, and the
+  truncated one ran 288 s against a `TRANSCRIBE_TIMEOUT_S` of 240 s.
+- **small.en took about half the time and CPU on 10-28 for the same
+  transcripts** (the 5 windows both runs completed are identical, F1). Same
+  output means the same decoding work, so the difference is the host's state,
+  not the pipeline: on this laptop, the same work varies ~2x between runs.
+- **base.en's RTF (~0.13–0.22) is still above #135's clean run (~0.1).** See
+  H5.
+- **CPU per window, summed over the 6 windows (10-28):** tiny.en 404 s,
+  base.en 726 s, small.en 1,597 s — small.en is 2.2x base.en.
 
 ### F3. What the errors are
 
-**Deletions dominate:** 552 of base.en's 733 errors (75%), and the deletion
-count moves little with model size (428–465 on the 5 windows). small.en's gain
-is mostly in substitutions (F1).
+**Deletions dominate:** 554 of base.en's 735 errors (75%), and the deletion
+count moves little with model size (505–554). small.en's gain is mostly in
+substitutions: 120 against base.en's 160 (F1).
 
 **Deletions concentrate in overlapped speech.** A reference word counts as
 overlapped when another speaker's word intersects it in time (AMI word
@@ -162,23 +184,23 @@ timings).
 | Size | Words | Overlapped: deletion rate | Not overlapped: deletion rate | Ratio | Overlapped: subst. rate | Not: subst. rate |
 |---|---|---|---|---|---|---|
 | tiny.en | all | 0.398 | 0.067 | 5.9x | 0.090 | 0.039 |
-| base.en | all | **0.411** | **0.072** | **5.7x** | 0.075 | 0.032 |
-| base.en | without response words* | 0.366 | 0.068 | 5.4x | 0.074 | 0.031 |
-| small.en (5 windows) | all | 0.390 | 0.058 | 6.7x | 0.045 | 0.025 |
+| base.en | all | **0.411** | **0.073** | **5.6x** | 0.075 | 0.032 |
+| base.en | without response words* | 0.366 | 0.069 | 5.3x | 0.074 | 0.031 |
+| small.en | all | 0.403 | 0.060 | 6.7x | 0.048 | 0.026 |
 
 \* yeah, yes, yep, okay, right, oh, no, sure — often overlapped and often
 dropped, so left out to check they don't produce the effect alone. They don't:
 the ratio barely changes.
 
-- **Overlapped words are 19.4% of the reference but 57.8% of base.en's
-  deletions** (319 of 552); 59.0% for tiny.en, 61.0% for small.en.
+- **Overlapped words are 19.4% of the reference but 57.6% of base.en's
+  deletions** (319 of 554); 59.0% for tiny.en, 62.0% for small.en.
 - **Window by window, the order of overlap and WER mostly agree** (F1 table):
   the 3.7%-overlap window has the lowest WER, the 24.9–32.3% windows the
   highest.
 - **The exception is IB4003 506–746:** 10.9% overlap but 93 deletions (base.en),
   far more than IS1008b 884–1124 at 12.6% overlap with 37.
 
-**Most deletions are isolated words.** For base.en, 109 of 552 deletions (19.7%)
+**Most deletions are isolated words.** For base.en, 109 of 554 deletions (19.7%)
 sit in runs of 5+ consecutive words (15 runs, the longest 12 words) — whole
 utterances missing. Most deleted words (overlapped / not): yeah 42/11, the 11/25,
 it's 8/11, okay 10/4, no 8/1.
@@ -196,7 +218,8 @@ pairs, no pair more than 3 times.
 ### F4. The worst stretches, read
 
 The `asr_error_analysis` report ranks 30 s bins by error rate (bins with 20+
-reference words). base.en's worst four, read against the reference:
+reference words). base.en's worst four, read against the reference (the same
+four in both runs):
 
 1. **IB4003 1162–1192 s (0.37):**
    - Two speakers trade short turns. The transcript keeps one speaker's
@@ -236,7 +259,7 @@ reference words). base.en's worst four, read against the reference:
   - *Why it matters:* interleaving speakers by start time is a guess at word
     order. A transcript holding both speakers in another order would also
     score deletions.
-  - *Against reordering:* insertions are few (13–22 on the 5 windows) — a
+  - *Against reordering:* insertions are few (21–30 per size) — a
     reordered word would show up as an insertion or substitution.
   - *Test:* bag-of-words recall of each overlapped stretch, independent of
     order.
@@ -247,18 +270,21 @@ reference words). base.en's worst four, read against the reference:
     timing, and see which speakers the deleted words belong to.
 - **H4 — small.en is really ~2 WER points better, mostly fewer
   substitutions.**
-  - *Fits:* 5 windows, one run of each size.
-  - *Unknown:* run-to-run noise for small.en, which samples on fallback
-    (#135). base.en repeated almost exactly (0.184 and 0.183 overall; 5 of 6
-    windows identical) — that says nothing about small.en.
-  - *Test:* repeat the run, more windows.
-- **H5 — base.en's latency (~0.2 RTF, vs. ~0.1 in #135) is host load, not
-  pipeline overhead.**
-  - *Unknown:* the run did not control host load; the chunked
-    VAD + `transcribe()` path could also cost more than #135's direct call.
+  - *Fits:* 6 windows (0.184 → 0.163), and run-to-run noise looks small: the
+    5 windows small.en completed in both runs have identical transcripts,
+    although it samples on fallback (#135).
+  - *Unknown:* whether 2 points hold over more meetings — 6 windows from 2
+    meetings is a small sample.
+  - *Test:* the final file set (D1).
+- **H5 — base.en's latency (~0.13–0.22 RTF, vs. ~0.1 in #135) is host load,
+  not pipeline overhead.**
+  - *Supports it:* small.en took half the time on 10-28 for identical
+    transcripts (F2), so host state alone moves this laptop's latency ~2x.
+  - *Unknown:* the chunked VAD + `transcribe()` path could still cost more
+    than #135's direct call; neither run controlled host load.
   - *Test:* a run on a quiet machine, then compare with #135.
-- **H6 — The timeout overshoots (288 s vs. 240 s) because it is checked only
-  between segments.**
+- **H6 — The timeout overshoots (288 s vs. 240 s, on 10-15) because it is
+  checked only between segments.**
   - *Source:* reading `_transcribe()` — the elapsed time is checked per chunk
     and per decoded segment, so one long decode (with fallback) runs past the
     limit.
@@ -280,16 +306,21 @@ reference words). base.en's worst four, read against the reference:
     averaged in.
 - **D2 — The long-term model size.**
   - *What the data supports:* keep `base.en`, as #135 decided — confirmed on
-    normalized WER, not revised.
-    - Over tiny.en: 0.7 points of WER and 19% fewer substitutions at
-      1.4–2.3x the latency per window.
-    - small.en: more accurate (H4), but at its measured RTF (0.6–0.77) it
-      exceeds the monitoring "slow" limit on every 4-minute call. A recording
-      of `MAX_DURATION_S` (600 s) would need ~360–460 s, past
-      `TRANSCRIBE_TIMEOUT_S` — so small.en is not viable with the pipeline's
-      current limits.
+    normalized WER, not revised. The case against small.en is cost and the
+    time limit, not that it is too slow on every call (the 10-15 reading).
+    - Over tiny.en: 0.4 points of WER and 19% fewer substitutions, at 1.8x
+      the CPU.
+    - small.en is 2.1 points better (0.163 vs. 0.184), mostly on
+      substitutions (120 vs. 160: names and domain terms, F3). It does not
+      help where most words are lost: overlapped speech is deleted at the
+      same rate (0.403 vs. 0.411).
+    - It costs 2.2x base.en's CPU (F2). A recording of `MAX_DURATION_S`
+      (600 s) at its measured RTF would take ~90–300 s on 10-28's host and
+      ~360–460 s on 10-15's, against a `TRANSCRIBE_TIMEOUT_S` of 240 s — on
+      a laptop with 4 threads, before any pod CPU limit.
   - *Not decided:* moving to small.en means also deciding the timeout and the
-    compute budget. Nothing was changed on provisional numbers.
+    compute budget. Worth reopening only if wrong names and terms turn out to
+    hurt extraction (R2/R1). Nothing was changed on provisional numbers.
 - **D3 — Diarization / per-speaker channels.** H1 suggests the mixed channel
   loses overlapped speech, so a single-channel model will not recover it.
   Whether that matters is R2's call (out of scope for #480 unless she says
@@ -302,7 +333,7 @@ reference words). base.en's worst four, read against the reference:
 
 Measured on base.en, provisional set:
 
-- **About 1 reference word in 5 is wrong or missing** (WER 0.183). It varies a
+- **About 1 reference word in 5 is wrong or missing** (WER 0.184). It varies a
   lot by stretch: ~6% in the window with the least overlapping speech, ~25% in
   the most overlapped ones (F1).
 - **Missing, not invented, is the main error.** 3 of 4 errors are deletions
