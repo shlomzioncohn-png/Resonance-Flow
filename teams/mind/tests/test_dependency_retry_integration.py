@@ -56,7 +56,7 @@ async def index():
 
 
 @pytest.fixture
-async def pending():
+async def pending(migrated_db):
     p = PostgresPendingDependencyStore(os.environ["MIND_VECTOR_STORE__DSN"])
     await p.open()
     yield p

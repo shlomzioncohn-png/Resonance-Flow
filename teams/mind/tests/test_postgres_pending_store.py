@@ -36,7 +36,7 @@ def _request(**overrides: object) -> PendingRequest:
 
 
 @pytest.fixture
-async def store():
+async def store(migrated_db):
     s = PostgresPendingStore(os.environ["MIND_VECTOR_STORE__DSN"])
     await s.open()
     yield s

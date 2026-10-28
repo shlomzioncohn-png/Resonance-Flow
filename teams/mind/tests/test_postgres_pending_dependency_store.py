@@ -17,7 +17,7 @@ OTHER_TENANT = UUID("1a9c3e2b-5d4f-4a8e-9b1c-2d7e5b0c4a99")
 
 
 @pytest.fixture
-async def store():
+async def store(migrated_db):
     s = PostgresPendingDependencyStore(os.environ["MIND_VECTOR_STORE__DSN"])
     await s.open()
     yield s
