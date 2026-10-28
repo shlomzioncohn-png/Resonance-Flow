@@ -69,6 +69,7 @@ Two runs per configuration are not a trend, so this is what the runs so far show
 
 ## What this does not cover
 
+- **The 1,000-item run (#483)** -- not done yet. This conclusion will be updated after it.
 - **Full scoring** -- every score here is degraded; it needs a live Chain.
 - **The infrastructure's cost** -- Kafka, MinIO, Postgres, Inbox, the machine. No dollar figure here
   includes them, and CPU seconds are machine time, not a bill.
