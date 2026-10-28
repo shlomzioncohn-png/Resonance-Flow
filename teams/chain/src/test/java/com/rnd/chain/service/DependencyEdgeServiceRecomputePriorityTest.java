@@ -25,8 +25,8 @@ import static org.mockito.Mockito.when;
 class DependencyEdgeServiceRecomputePriorityTest {
 
     private final UUID taskId = UUID.randomUUID();
-    private final TaskReadinessSnapshot before = new TaskReadinessSnapshot(taskId, UUID.randomUUID(), 1, 0);
-    private final TaskReadinessSnapshot after = new TaskReadinessSnapshot(taskId, UUID.randomUUID(), 0, 0);
+    private final TaskReadinessSnapshot before = new TaskReadinessSnapshot(taskId, TaskTestFixtures.DEFAULT_TENANT_ID, 1, 0);
+    private final TaskReadinessSnapshot after = new TaskReadinessSnapshot(taskId, TaskTestFixtures.DEFAULT_TENANT_ID, 0, 0);
 
     private TaskRepository taskRepository;
     private PriorityScoreService priorityScoreService;

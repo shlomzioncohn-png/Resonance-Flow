@@ -13,6 +13,7 @@ import com.rnd.bridge.raw.model.Quality;
 import com.rnd.bridge.raw.model.Sensitivity;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
 
 /**
@@ -21,12 +22,18 @@ import org.springframework.stereotype.Component;
  * obviously junk" is not a verdict, it just means the model gets to judge.
  * <p>
  * Deliberately no "empty transcript" rule: an empty transcript means transcription failed, not
- * that the meeting had no content - a real meeting must never be EXCLUDED for that.
+ * that the meeting had no content - a real meeting must never be EXCLUDED for that. The
+ * near-empty rule below needs at least one transcribed word, so it never fires on a failure.
  */
 @Component
 public class ClassificationRules {
 
-    static final String RULES_VERSION = "v2";
+    static final String RULES_VERSION = "v4";
+
+    /** A meeting this short whose transcript is also this sparse is a mic check, not a meeting. */
+    static final Duration NEAR_EMPTY_MAX_DURATION = Duration.ofMinutes(3);
+    static final int NEAR_EMPTY_MAX_WORDS = 15;
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
     private final Duration minMeetingDuration;
 
@@ -40,7 +47,22 @@ public class ClassificationRules {
             return Optional.of(ruleVerdict(MeetingCategory.TEST,
                     "meeting shorter than " + minMeetingDuration.toSeconds() + "s"));
         }
+        if (input.metadata() != null
+                && input.metadata().distinctParticipantCount().orElse(0) == 1) {
+            return Optional.of(ruleVerdict(MeetingCategory.TEST, "meeting had a single participant"));
+        }
+        int words = wordCount(Transcripts.spokenText(input.transcript()));
+        if (duration.isPresent() && duration.get().compareTo(NEAR_EMPTY_MAX_DURATION) < 0
+                && words > 0 && words < NEAR_EMPTY_MAX_WORDS) {
+            return Optional.of(ruleVerdict(MeetingCategory.TEST, "short meeting with only " + words
+                    + " transcribed words"));
+        }
         return Optional.empty();
+    }
+
+    private static int wordCount(String spoken) {
+        String trimmed = spoken.strip();
+        return trimmed.isEmpty() ? 0 : WHITESPACE.split(trimmed).length;
     }
 
     /**

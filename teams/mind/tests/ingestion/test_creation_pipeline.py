@@ -10,15 +10,16 @@ three tests.
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
-from tests.extraction.fakes import ScriptedProvider, answer_of
+from tests.extraction.fakes import DEADLINE_SETTINGS, ScriptedProvider, answer_of
 from tests.ingestion.test_landed_consumer import BODY, ITEM, KEY, TENANT, _message, _read
 from tests.test_index_consumer import FakeVectorIndex
 
-from mind.contracts import RawObjectEvent
+from mind.contracts import AssigneeType, RawObjectEvent
 from mind.contracts.base_enums import SourceType
 from mind.embeddings.base import SearchResult
 from mind.extraction.extractor import BasicExtractor, ExtractionItem
@@ -40,6 +41,7 @@ from mind.ingestion.seen_revisions import InMemoryRevisionStore
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.task_creation.correlation import correlation_id_for
 from mind.task_creation.flow import TaskCreationFlow
+from mind.task_creation.owner import Candidate
 from mind.task_creation.pending import PendingRequests
 from mind.task_creation.reply import MatchedReply
 
@@ -100,10 +102,12 @@ class Parts:
         match: SearchResult | None = None,
         producer: Any = None,
         index: "Index | None" = None,
+        directory: "Directory | None" = None,
     ) -> None:
         self.producer = producer or FakeProducer()
         self.store = FakeVectorIndex()
         self.index = index or Index(match)
+        self.directory = directory
         self.matched: list[MatchedReply] = []
 
         async def on_matched(matched: MatchedReply) -> None:
@@ -120,6 +124,8 @@ class Parts:
             extract=lambda item: extractor.extract(item.text, item.source_type, item.item_key),
             find_duplicate=self.index,
             sender=self.flow,
+            deadline_settings=DEADLINE_SETTINGS,
+            directory=directory,
         )
 
 
@@ -132,7 +138,9 @@ def _classification(sensitivity: str) -> dict[str, Any]:
     }
 
 
-def _event(revision: int = 0, sensitivity: str | None = None) -> RawObjectEvent:
+def _event(
+    revision: int = 0, sensitivity: str | None = None, source_timestamp: str | None = None
+) -> RawObjectEvent:
     classification = _classification(sensitivity) if sensitivity else None
     return RawObjectEvent.model_validate(
         {
@@ -142,6 +150,7 @@ def _event(revision: int = 0, sensitivity: str | None = None) -> RawObjectEvent:
             "tenant_id": TENANT,
             "correlation_id": str(ITEM),
             "ingested_at": "2026-10-18T09:00:00Z",
+            "source_timestamp": source_timestamp,
             "scope_decision": "INCLUDED",
             "revision": revision,
             "change_type": "UPSERT",
@@ -189,6 +198,34 @@ def test_a_landed_event_becomes_one_creation_request() -> None:
     # Searched in the item's own tenant only (#841).
     assert parts.index.asked == [(UUID(TENANT), TITLE, "Asked for in Slack, due tomorrow.")]
     assert store.processed_revision(ITEM) == 3
+
+
+DUE_TOMORROW = answer_of(
+    {**TASK, "deadline": {"phrase": "by tomorrow", "kind": "OFFSET", "amount": 1, "unit": "DAYS"}}
+)
+
+
+@pytest.mark.parametrize(
+    ("source_timestamp", "expected"),
+    [
+        # No source time: counted from when it landed, Sunday the 18th -> Monday
+        # the 19th, 17:00 in Israel.
+        (None, datetime(2026, 10, 19, 14, 0, tzinfo=UTC)),
+        # The source's own time wins: written Thursday the 15th -> Friday the 16th.
+        ("2026-10-15T09:00:00Z", datetime(2026, 10, 16, 14, 0, tzinfo=UTC)),
+    ],
+)
+async def test_the_deadline_is_counted_from_when_the_text_was_written(
+    source_timestamp: str | None, expected: datetime
+) -> None:
+    """#960: "by tomorrow" in the Slack message reaches Inbox as a moment."""
+
+    parts = Parts(DUE_TOMORROW)
+
+    await parts.pipeline.handle(_event(source_timestamp=source_timestamp), [_item()])
+
+    ((_, request, _),) = parts.producer.sent
+    assert request.deadline.ToDatetime(tzinfo=UTC) == expected
 
 
 async def _duplicate_log_line(caplog: pytest.LogCaptureFixture, event: RawObjectEvent) -> str:
@@ -269,6 +306,41 @@ async def test_each_task_of_a_text_gets_its_own_request() -> None:
     assert [request.title for _, request, _ in parts.producer.sent] == [TITLE, SECOND_TITLE]
     # Every task is checked for a duplicate on its own.
     assert [title for _, title, _ in parts.index.asked] == [TITLE, SECOND_TITLE]
+
+
+async def _matched_for_each_sent(parts: Parts, sent: list[UUID]) -> list[MatchedReply]:
+    """Inbox's task.created for every request sent, through the real flow."""
+
+    for number, correlation_id in enumerate(sent):
+        reply = TaskCreatedEvent(id=f"{TASK_ID[:-1]}{number}", tenant_id=TENANT, title=TITLE)
+        await parts.flow.on_task_created(reply, [("correlation_id", str(correlation_id).encode())])
+    return parts.matched
+
+
+async def test_a_tasks_dependency_mentions_reach_the_matched_reply() -> None:
+    # #359: extraction found them, but the pipeline did not hand them on, so
+    # #834's adapter (on_matched) always read an empty list and published nothing.
+    depends_on_the_second = {
+        **TASK,
+        "has_dependencies": True,
+        "dependency_mentions": [SECOND_TITLE],  # grounded by its sibling's title
+    }
+    parts = Parts(answer_of(depends_on_the_second, {**TASK, "title": SECOND_TITLE}))
+
+    sent = await parts.pipeline.handle(_event(), [_item()])
+    first, second = await _matched_for_each_sent(parts, sent)
+
+    assert first.request.dependency_mentions == (SECOND_TITLE,)
+    assert second.request.dependency_mentions == ()
+
+
+async def test_a_task_without_dependency_mentions_hands_on_none() -> None:
+    parts = Parts(ANSWER)
+
+    sent = await parts.pipeline.handle(_event(), [_item()])
+    (matched,) = await _matched_for_each_sent(parts, sent)
+
+    assert matched.request.dependency_mentions == ()
 
 
 async def test_each_item_owns_its_own_range_of_task_numbers() -> None:
@@ -397,3 +469,133 @@ async def test_an_environmental_failure_stops_before_the_next_item() -> None:
         await parts.pipeline.handle(_event(), [_item("a.txt"), _item("b.txt")])
 
     assert parts.producer.sent == []
+
+
+# --- the suggested owner (#132) --------------------------------------------------
+
+
+class Directory:
+    """#131's `find_candidates`: what it was asked, and what it answers."""
+
+    def __init__(self, *candidates: Candidate) -> None:
+        self.candidates = list(candidates)
+        self.asked: list[tuple[UUID, str]] = []
+
+    def find_candidates(self, tenant_id: UUID, name: str) -> list[Candidate]:
+        self.asked.append((tenant_id, name))
+        return self.candidates
+
+
+class _User:
+    def __init__(self, score: float) -> None:
+        self.assignee_type, self.id, self.score = AssigneeType.USER, uuid4(), score
+
+
+CHAT = "Ruth: Can someone send the updated price quote by tomorrow?\nMalki: Yes, I'm on it"
+MALKI_TAKES_IT = answer_of({**TASK, "owner_mention": "Malki"})
+
+
+def _chat_item() -> ExtractionItem:
+    return ExtractionItem(text=CHAT, source_type=SourceType.SLACK, item_key=KEY)
+
+
+def _sent_request(parts: Parts) -> Any:
+    """The message on the wire, as Inbox reads it."""
+
+    ((_, request, _),) = parts.producer.sent
+    return request
+
+
+def _no_owner_sent(request: Any) -> bool:
+    return not (
+        request.HasField("suggested_owner_user_id")
+        or request.HasField("suggested_owner_confidence")
+    )
+
+
+async def test_a_named_owner_goes_to_inbox_as_a_suggestion() -> None:
+    malki = _User(0.70)
+    parts = Parts(MALKI_TAKES_IT, directory=Directory(malki))
+
+    await parts.pipeline.handle(_event(), [_chat_item()])
+
+    assert parts.directory is not None
+    assert parts.directory.asked == [(UUID(TENANT), "Malki")]
+    request = _sent_request(parts)
+    assert request.suggested_owner_user_id == str(malki.id)
+    assert request.suggested_owner_confidence == pytest.approx(0.70)
+
+
+async def test_the_recipient_is_looked_up_by_the_items_own_address() -> None:
+    dana = _User(1.0)
+    parts = Parts(answer_of({**TASK, "owner_is_recipient": True}), directory=Directory(dana))
+    email = ExtractionItem(
+        text="Please send the updated price quote by tomorrow.",
+        source_type=SourceType.EMAIL,
+        item_key=KEY,
+        sender="ruth@acme-demo.test",
+        recipients=("dana.cohen@acme-demo.test",),
+    )
+
+    await parts.pipeline.handle(_event(), [email])
+
+    assert parts.directory is not None
+    assert parts.directory.asked == [(UUID(TENANT), "dana.cohen@acme-demo.test")]
+    assert _sent_request(parts).suggested_owner_user_id == str(dana.id)
+
+
+async def test_no_match_still_sends_the_task_with_no_owner() -> None:
+    """No match, a tie, or Inbox down: #131 answers [] or choose_owner None."""
+
+    parts = Parts(MALKI_TAKES_IT, directory=Directory())
+
+    await parts.pipeline.handle(_event(), [_chat_item()])
+
+    assert _no_owner_sent(_sent_request(parts))
+
+
+async def test_without_a_directory_nothing_is_looked_up() -> None:
+    """Until #131 is on main the runner passes none: tasks go as before."""
+
+    parts = Parts(MALKI_TAKES_IT)
+
+    await parts.pipeline.handle(_event(), [_chat_item()])
+
+    assert _no_owner_sent(_sent_request(parts))
+
+
+async def test_a_duplicate_is_never_looked_up() -> None:
+    """It is not sent, so asking Inbox's directory for it would be wasted."""
+
+    directory = Directory(_User(1.0))
+    match = SearchResult(task_id=TASK_ID, similarity=0.97)
+    parts = Parts(MALKI_TAKES_IT, match=match, directory=directory)
+
+    await parts.pipeline.handle(_event(), [_chat_item()])
+
+    assert (parts.producer.sent, directory.asked) == ([], [])
+
+
+class BrokenDirectory:
+    """#131 promises never to raise; a bug there must not cost the task."""
+
+    def find_candidates(self, tenant_id: UUID, name: str) -> list[Candidate]:
+        raise RuntimeError(f"directory bug looking up {name}")
+
+
+async def test_a_directory_that_raises_sends_the_task_with_no_owner(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The owner is optional: an error looking it up must not stop the message
+    and bring it back for ever, holding up every task in it."""
+
+    parts = Parts(MALKI_TAKES_IT, directory=BrokenDirectory())  # type: ignore[arg-type]
+
+    with caplog.at_level(logging.ERROR, logger="mind.ingestion.creation_pipeline"):
+        await parts.pipeline.handle(_event(), [_chat_item()])
+
+    assert _no_owner_sent(_sent_request(parts))
+    assert "directory" in caplog.text and "RuntimeError" in caplog.text
+    # The error's own words may hold the name asked for, which no owner log
+    # line carries; they go to DEBUG only.
+    assert "Malki" not in caplog.text

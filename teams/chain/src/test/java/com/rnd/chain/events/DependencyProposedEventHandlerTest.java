@@ -135,6 +135,10 @@ class DependencyProposedEventHandlerTest {
         DependencyProposedEventHandler handler =
                 new DependencyProposedEventHandler(
                         dependencyService,
+                        edgeService,
+                        schedulingUpdateService,
+                        new SchedulingPublishListener(taskRepo, schedulingUpdateService),
+                        taskReadinessRepository,
                         template);
 
         return new Fixture(

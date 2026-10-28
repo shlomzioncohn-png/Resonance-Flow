@@ -3,7 +3,9 @@ package com.rnd.chain.service;
 import com.rnd.chain.dto.TaskReadinessSnapshot;
 import com.rnd.chain.dto.PageResponse;
 import com.rnd.chain.dto.Task;
+import com.rnd.chain.dto.TaskStateEventType;
 import com.rnd.chain.dto.TaskStateHistoryEntry;
+import com.rnd.chain.dto.TaskStateHistoryRow;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.PostgresTaskRepository;
 import com.rnd.chain.repository.PostgresTaskStateHistoryRepository;
@@ -89,6 +91,18 @@ class TaskStateHistoryRollbackPostgresTest {
                 public Map<UUID, Instant> findLatestBlockedSinceByTaskIds(
                     List<UUID> taskIds) {
                     return Map.of();
+                }
+
+                @Override
+                public List<TaskStateHistoryRow> findByTenant(UUID tenantId, Instant from, Instant to,
+                                                              List<TaskStateEventType> types, Instant afterTime,
+                                                              long afterSequence, int limit) {
+                    return real.findByTenant(tenantId, from, to, types, afterTime, afterSequence, limit);
+                }
+
+                @Override
+                public Map<UUID, Instant> findCurrentlyBlockedSince(UUID tenantId, List<UUID> taskIds) {
+                    return real.findCurrentlyBlockedSince(tenantId, taskIds);
                 }
             };
         }

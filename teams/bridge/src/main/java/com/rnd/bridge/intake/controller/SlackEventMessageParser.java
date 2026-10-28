@@ -6,8 +6,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.SlackApiProperties;
 import com.rnd.bridge.intake.model.ChatMessage;
+import com.rnd.bridge.intake.model.SlackMessageDeletion;
 import com.rnd.bridge.intake.parser.slack.SlackUserNameResolver;
 import com.rnd.bridge.raw.model.RawSourceType;
 import com.slack.api.model.File;
@@ -23,12 +25,15 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
  * Converts a verified Slack Events API "event_callback" payload's inner {@code event} object
- * into a {@link ChatMessage}, for the two shapes this real-time path supports: a plain,
- * newly-posted "message" event with no subtype, and a "message_changed" edit. Deliberately
+ * into a {@link ChatMessage}, for the shapes this real-time path supports: a plain, newly-posted
+ * "message" event with no subtype or with subtype "file_share" (a message posted with an
+ * attached file), and a "message_changed" edit. Deliberately
  * parses into the Slack SDK's own {@link Message} model (the same type
  * {@code RealSlackSourceReader} gets back from conversations.history) rather than hand-rolled
  * JSON field access — the Events API's message event (and the nested "message" object inside a
@@ -52,6 +57,8 @@ import org.springframework.stereotype.Component;
 @Component
 class SlackEventMessageParser {
 
+    private static final Logger log = LoggerFactory.getLogger(SlackEventMessageParser.class);
+
     // The Slack SDK's Message/File models are annotated for Gson (SerializedName), not Jackson -
     // there is no @JsonProperty mapping "thread_ts" -> threadTs etc. for our app's shared
     // ObjectMapper to pick up. A small dedicated snake_case mapper reuses the SDK's DTO shape
@@ -62,11 +69,14 @@ class SlackEventMessageParser {
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     private final SlackApiProperties properties;
+    private final BridgeTenantId tenantId;
     private final SlackUserNameResolver userNameResolver;
     private final HttpClient httpClient = HttpClient.newHttpClient();
 
-    SlackEventMessageParser(SlackApiProperties properties, SlackUserNameResolver userNameResolver) {
+    SlackEventMessageParser(
+            SlackApiProperties properties, BridgeTenantId tenantId, SlackUserNameResolver userNameResolver) {
         this.properties = properties;
+        this.tenantId = tenantId;
         this.userNameResolver = userNameResolver;
     }
 
@@ -77,11 +87,84 @@ class SlackEventMessageParser {
         if (!event.hasNonNull("subtype")) {
             return parseMessageNode(event, event);
         }
-        if ("message_changed".equals(event.get("subtype").asText()) && event.hasNonNull("message")) {
-            return parseMessageNode(event, event.get("message"));
+        String subtype = event.get("subtype").asText();
+        // A message posted with an attached file arrives as a top-level "message" event with
+        // subtype "file_share" instead of no subtype at all - same shape otherwise (text,
+        // thread_ts, files), so it's routed through the identical parseMessageNode path as a
+        // plain message rather than being dropped.
+        if ("file_share".equals(subtype)) {
+            return parseMessageNode(event, event);
+        }
+        // "Also send to channel" on a thread reply arrives as a top-level "message" event with
+        // subtype "thread_broadcast" and its own thread_ts - same shape otherwise, and treated as
+        // an ordinary thread reply (lands only in the thread transcript via its threadId, never
+        // the channel group - no channel-group handling here by design).
+        if ("thread_broadcast".equals(subtype)) {
+            return parseMessageNode(event, event);
+        }
+        if ("message_changed".equals(subtype) && event.hasNonNull("message")) {
+            JsonNode nested = event.get("message");
+            // A root-with-replies deletion arrives as message_changed with a nested
+            // "tombstone" subtype, not message_deleted at all - handled by parseDeletion
+            // instead of being misread as an ordinary text edit (see SlackMessageDeletion's
+            // javadoc). A link-unfurl's nested message is Slack's own "bot_message" subtype,
+            // typically missing "user" - ignored outright (neither edit nor new message),
+            // same as the existing top-level bot_message rejection below. A nested "file_share"
+            // or "thread_broadcast" subtype (editing a message that has a file, or editing a
+            // thread reply that broadcast to the channel) isn't special-cased at all - it falls
+            // straight through to parseMessageNode below, same as an edit with no subtype.
+            if (nested.hasNonNull("subtype")) {
+                String nestedSubtype = nested.get("subtype").asText();
+                if ("tombstone".equals(nestedSubtype) || "bot_message".equals(nestedSubtype)) {
+                    return Optional.empty();
+                }
+            }
+            return parseMessageNode(event, nested);
         }
         // message_deleted, bot messages, channel-join notices, malformed message_changed
         // payloads (no nested "message"), etc. - not this step's scope.
+        log.info("Dropping unsupported Slack event type=message subtype={}", subtype);
+        return Optional.empty();
+    }
+
+    /**
+     * The deletion counterpart to {@link #parse(JsonNode)}: recognizes the two Slack shapes
+     * that mean "this message no longer exists" - see {@link SlackMessageDeletion}'s javadoc.
+     * For {@code message_deleted}, identity comes from the top-level {@code deleted_ts} field
+     * (authoritative per Slack's own docs), never the event's own {@code ts}/{@code event_ts}
+     * (the deletion notification's own timestamp). {@code previous_message.ts}, when present,
+     * carries the same value as a redundant copy - cross-checked here and logged on mismatch,
+     * but {@code deleted_ts} always wins.
+     */
+    Optional<SlackMessageDeletion> parseDeletion(JsonNode event) {
+        if (event == null || !event.hasNonNull("type") || !"message".equals(event.get("type").asText())
+                || !event.hasNonNull("subtype") || !event.hasNonNull("channel")) {
+            return Optional.empty();
+        }
+        String subtype = event.get("subtype").asText();
+        String channel = event.get("channel").asText();
+        if ("message_deleted".equals(subtype)) {
+            if (!event.hasNonNull("deleted_ts")) {
+                return Optional.empty();
+            }
+            String deletedTs = event.get("deleted_ts").asText();
+            JsonNode previousMessage = event.get("previous_message");
+            if (previousMessage != null && previousMessage.hasNonNull("ts")
+                    && !deletedTs.equals(previousMessage.get("ts").asText())) {
+                log.warn(
+                        "Slack message_deleted deleted_ts={} disagrees with previous_message.ts={} - using deleted_ts",
+                        deletedTs, previousMessage.get("ts").asText());
+            }
+            return Optional.of(new SlackMessageDeletion(RawSourceType.SLACK, tenantId.value(), channel, deletedTs));
+        }
+        if ("message_changed".equals(subtype) && event.hasNonNull("message")) {
+            JsonNode nested = event.get("message");
+            if (nested.hasNonNull("subtype") && "tombstone".equals(nested.get("subtype").asText())
+                    && nested.hasNonNull("ts")) {
+                return Optional.of(
+                        new SlackMessageDeletion(RawSourceType.SLACK, tenantId.value(), channel, nested.get("ts").asText()));
+            }
+        }
         return Optional.empty();
     }
 
@@ -119,7 +202,7 @@ class SlackEventMessageParser {
         long epochMillis = Math.round(Double.parseDouble(message.getTs()) * 1000);
         return Optional.of(new ChatMessage(
                 RawSourceType.SLACK,
-                properties.tenantId(),
+                tenantId.value(),
                 message.getChannel(),
                 userNameResolver.resolveUserName(message.getUser()),
                 Instant.ofEpochMilli(epochMillis),

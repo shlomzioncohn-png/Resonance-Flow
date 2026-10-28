@@ -1,15 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import { expect, fn, userEvent, within } from 'storybook/test';
+import { signedInAs } from '@/mocks/session';
 import Sidebar from './Sidebar';
-
-// RoleProvider (mounted in .storybook/preview.tsx) hydrates the role from
-// localStorage on mount - seed it before the story renders and clear it after,
-// so a role never leaks into the next story.
-const ROLE_STORAGE_KEY = 'lens.role';
-const withRole = (role: 'TENANT_ADMIN' | 'EMPLOYEE') => () => {
-  window.localStorage.setItem(ROLE_STORAGE_KEY, role);
-  return () => window.localStorage.removeItem(ROLE_STORAGE_KEY);
-};
 
 const meta = {
   component: Sidebar,
@@ -17,7 +9,7 @@ const meta = {
   parameters: {
     layout: 'fullscreen',
     // Sidebar reads usePathname() from next/navigation (App Router).
-    nextjs: { appDirectory: true, navigation: { pathname: '/' } },
+    nextjs: { appDirectory: true, navigation: { pathname: '/manager' } },
   },
   args: {
     variant: 'permanent',
@@ -29,18 +21,9 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-// No role set yet: every section is listed.
-export const Default: Story = {
-  play: async ({ canvas }) => {
-    const nav = canvas.getByRole('navigation', { name: 'Primary' });
-    await expect(within(nav).getByRole('link', { name: 'Dashboard' })).toBeVisible();
-    await expect(within(nav).getByRole('link', { name: 'Manager Dashboard' })).toBeVisible();
-    await expect(within(nav).getByRole('link', { name: 'My Workspace' })).toBeVisible();
-  },
-};
-
+// A manager sees only the Manager section.
 export const ManagerRole: Story = {
-  beforeEach: withRole('TENANT_ADMIN'),
+  beforeEach: signedInAs('TEAM_LEAD'),
   parameters: { nextjs: { navigation: { pathname: '/manager/workload' } } },
   play: async ({ canvas }) => {
     await expect(await canvas.findByRole('link', { name: 'Workload' })).toBeVisible();
@@ -48,8 +31,9 @@ export const ManagerRole: Story = {
   },
 };
 
+// An employee sees only the Employee section.
 export const EmployeeRole: Story = {
-  beforeEach: withRole('EMPLOYEE'),
+  beforeEach: signedInAs('EMPLOYEE'),
   parameters: { nextjs: { navigation: { pathname: '/employee' } } },
   play: async ({ canvas }) => {
     await expect(await canvas.findByRole('link', { name: 'My Tasks' })).toBeVisible();
@@ -57,10 +41,19 @@ export const EmployeeRole: Story = {
   },
 };
 
+// Signed out: no links at all.
+export const SignedOut: Story = {
+  play: async ({ canvas }) => {
+    const nav = canvas.getByRole('navigation', { name: 'Primary' });
+    await expect(within(nav).queryAllByRole('link')).toHaveLength(0);
+  },
+};
+
 // The `temporary` variant is the mobile drawer - it is hidden from `md` up, so
 // the story pins a mobile viewport. The drawer renders in a portal, outside the
 // canvas, hence `within(document.body)`.
 export const MobileDrawer: Story = {
+  beforeEach: signedInAs('TEAM_LEAD'),
   args: { variant: 'temporary' },
   globals: { viewport: { value: 'mobile1', isRotated: false } },
   play: async ({ args }) => {

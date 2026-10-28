@@ -58,6 +58,14 @@ class ScorableTask(Protocol):
     @property
     def blocked(self) -> bool: ...
 
+    # The immediate parent in the eval's own fixture (#473), or null for a
+    # root or an orphan. Read only by the week-7 propagation's harness-side
+    # ancestor walk (`FixtureAncestorSource`) -- never by the live path, since
+    # Inbox carries no such field; `InboxTask.parent_task_id` is always None,
+    # and production asks Chain's traversal API instead (`ChainAncestorSource`).
+    @property
+    def parent_task_id(self) -> str | None: ...
+
 
 def _a_scenario_task_is_scorable(task: Task) -> ScorableTask:
     """Checked by mypy, never called: the harness must keep working unchanged.

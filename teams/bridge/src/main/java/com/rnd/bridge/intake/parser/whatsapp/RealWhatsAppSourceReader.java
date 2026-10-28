@@ -1,5 +1,6 @@
 package com.rnd.bridge.intake.parser.whatsapp;
 
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.WhatsAppImportProperties;
 import com.rnd.bridge.intake.model.ChatMessage;
 import java.io.BufferedReader;
@@ -8,10 +9,13 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -27,10 +31,14 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(prefix = "bridge.intake.whatsapp", name = "mode", havingValue = "real")
 public class RealWhatsAppSourceReader implements WhatsAppSourceReader {
 
-    private final WhatsAppImportProperties properties;
+    private static final Logger log = LoggerFactory.getLogger(RealWhatsAppSourceReader.class);
 
-    public RealWhatsAppSourceReader(WhatsAppImportProperties properties) {
+    private final WhatsAppImportProperties properties;
+    private final BridgeTenantId tenantId;
+
+    public RealWhatsAppSourceReader(WhatsAppImportProperties properties, BridgeTenantId tenantId) {
         this.properties = properties;
+        this.tenantId = tenantId;
     }
 
     @Override
@@ -71,7 +79,7 @@ public class RealWhatsAppSourceReader implements WhatsAppSourceReader {
                     continue;
                 }
                 WhatsAppExportLineParser.parseLine(
-                                properties.tenantId(), chatId, line, exportZone, (filename, mimeType) ->
+                                tenantId.value(), chatId, line, exportZone, (filename, mimeType) ->
                                         readAttachment(importDir, filename, mimeType))
                         .ifPresent(messages::add);
             }
@@ -84,8 +92,11 @@ public class RealWhatsAppSourceReader implements WhatsAppSourceReader {
         try {
             byte[] content = Files.readAllBytes(attachmentPath);
             return new ChatMessage.Attachment(filename, mimeType, content);
+        } catch (NoSuchFileException e) {
+            log.warn("Skipping WhatsApp attachment - file no longer present: filename={}", filename);
+            return null;
         } catch (IOException e) {
-            throw new UncheckedIOException("Referenced chat attachment not found: " + attachmentPath, e);
+            throw new UncheckedIOException("Failed to read chat attachment: " + attachmentPath, e);
         }
     }
 

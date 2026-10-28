@@ -43,7 +43,8 @@ public class GitHubSyncScheduler {
                 .collectList()
                 .doOnNext(tasks -> {
                     log.info("Fetched {} tasks from GitHub. Publishing to Kafka.", tasks.size());
-                    publishAll(tasks);
+                    int published = publishAll(tasks);
+                    log.info("Published {}/{} GitHub task(s).", published, tasks.size());
                 })
                 .doOnError(error -> log.error("Scheduled GitHub sync failed", error))
                 .block(Duration.ofMinutes(10));
@@ -53,13 +54,16 @@ public class GitHubSyncScheduler {
      * publish() blocks and fails the record - so each task gets its own attempt:
      * one invalid/unpublishable record must not kill the rest of the batch.
      */
-    private void publishAll(List<Task> tasks) {
+    private int publishAll(List<Task> tasks) {
+        int published = 0;
         for (Task task : tasks) {
             try {
                 taskPublisher.publish(task);
+                published++;
             } catch (PublishException | ValidationException e) {
                 log.error("Failed to publish GitHub task {}", task.sourceRef(), e);
             }
         }
+        return published;
     }
 }

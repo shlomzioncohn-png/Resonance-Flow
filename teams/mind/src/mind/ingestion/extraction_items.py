@@ -33,7 +33,7 @@ from mind.contracts.raw_object_event_enums import (
 )
 from mind.extraction.extractor import ExtractionItem
 from mind.extraction.prompts import MAX_CONTENT_CHARS
-from mind.ingestion.email_body import email_body_text
+from mind.ingestion.email_body import EmailBody, read_email_body
 from mind.ingestion.event_objects import ObjectReader, read_event_object, tenant_uuid
 from mind.ingestion.to_text import MediaPipeline, text_of
 from mind.multimodal.asr import transcribe
@@ -210,8 +210,11 @@ def extraction_items(
         return []
     tenant_uuid(event)
     source_type = task_source_type(event.source_type)
+    # The email's record, as read with its body: who it is from and to (#132).
+    email: EmailBody | None = None
 
     def text_of_file(obj: RawObjectRef) -> str | None:
+        nonlocal email
         content = read_event_object(obj, read_object, event.correlation_id)
         if content is None:
             return None
@@ -224,7 +227,8 @@ def extraction_items(
             and obj.modality is Modality.TEXT
         ):
             # The whole record, attachments inline as base64 (email_body.py).
-            text = email_body_text(text, obj.object_key)
+            email = read_email_body(text, obj.object_key)
+            text = email.text
         if not text.strip():
             logger.info("extraction_items: %s has no text in it, skipped", obj.object_key)
             return None
@@ -258,4 +262,12 @@ def extraction_items(
     parts.sort(key=lambda part: part[0])
     content_files = [o for o in event.objects if o.role is not ObjectRole.SOURCE_METADATA]
     text = item_text([(obj, text) for _, obj, text in parts], headed=len(content_files) > 1)
-    return [ExtractionItem(text=text, source_type=source_type, item_key=str(event.correlation_id))]
+    return [
+        ExtractionItem(
+            text=text,
+            source_type=source_type,
+            item_key=str(event.correlation_id),
+            sender=email.sender if email else None,
+            recipients=email.recipients if email else (),
+        )
+    ]

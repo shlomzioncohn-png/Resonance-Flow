@@ -92,3 +92,11 @@ async def embed_async(text: str, *, is_query: bool = False) -> list[float]:
 async def embed_batch_async(texts: list[str], *, is_query: bool = False) -> list[list[float]]:
     """Non-blocking embed_batch() for async callers."""
     return await asyncio.to_thread(embed_batch, texts, is_query=is_query)
+
+
+def similarity(a: str, b: str) -> float:
+    """How alike two sentences are, 0..1."""
+    vec_a = embed(a)
+    vec_b = embed(b)
+    cosine = sum(x * y for x, y in zip(vec_a, vec_b))  # embed() normalizes, so dot product = cosine
+    return max(0.0, min(1.0, cosine))

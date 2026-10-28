@@ -14,8 +14,8 @@ from ..config import SEVERITIES, GeneratorConfig
 from ..model import TIERS, EdgeBatch, Project, TaskSpec, pick_upstream, task_uuid, typical_days
 from ..timeutil import snap_to_work_time
 
-T0_RANGE = (0.03, 0.55)  # resolved patterns start early enough to finish before the history ends
-ONGOING_SHARE = 0.35  # of the diseases that can be ongoing: still unresolved when the history ends
+T0_RANGE = (0.03, 0.88)  # a pattern may start anywhere along the history; one that cannot finish in time is still going on at the end
+ONGOING_SHARE = 0.15  # of the diseases that can be ongoing: planted to be still unresolved at the end (late starters are too)
 
 
 def by_severity(values: tuple, severity: str):

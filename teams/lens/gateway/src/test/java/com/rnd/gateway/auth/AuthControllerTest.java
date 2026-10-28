@@ -9,6 +9,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.UUID;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -46,7 +47,8 @@ public class AuthControllerTest {
         // Given
         UUID userId = UUID.randomUUID();
         when(loginRateLimiter.allowRequest(anyString())).thenReturn(true);
-        when(authService.login(new AuthLoginRequestDto("test@example.com", "Password123!")))
+        // any(): AuthLoginRequestDto has no equals(), so a new instance would never match
+        when(authService.login(any(AuthLoginRequestDto.class)))
             .thenReturn(new AuthLoginResponseDto(
                 3600, userId, "Test User", "EMPLOYEE"
             ));
@@ -66,7 +68,7 @@ public class AuthControllerTest {
     public void testLoginRateLimitExceededAfterFailedAttempts() throws Exception {
         // Given
         when(loginRateLimiter.allowRequest(anyString())).thenReturn(false);
-        when(authService.login(new AuthLoginRequestDto("test@example.com", "WrongPassword")))
+        when(authService.login(any(AuthLoginRequestDto.class)))
             .thenThrow(new BffAuthClient.InvalidCredentialsException());
 
         // When & Then

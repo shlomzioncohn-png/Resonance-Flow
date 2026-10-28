@@ -1,6 +1,8 @@
 package com.rnd.bff.controller;
 
 import com.rnd.bff.dto.ManagerKpisDTO;
+import com.rnd.bff.dto.ProjectTaskCountsDTO;
+import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.service.ManagerKpisService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -13,6 +15,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * Manager Dashboard (/manager) data. Gateway forwards GET
@@ -45,5 +49,31 @@ public class ManagerDashboardController {
 
         logger.info("Manager KPIs request - actorId: {}, period: {}, project: {}", userId, period, project);
         return ResponseEntity.ok(managerKpisService.getKpis(userId, period, project));
+    }
+
+    @Operation(summary = "Task counts per project",
+            description = "The tenant's tasks per project by state (in progress, snoozed, open, done) plus how many are overdue, A-Z. REJECTED and CANCELLED tasks aren't counted.")
+    @GetMapping("/projects")
+    public ResponseEntity<List<ProjectTaskCountsDTO>> getProjectTaskCounts(
+            @RequestHeader("X-User-Id") String userId) {
+
+        logger.info("Manager project task counts request - actorId: {}", userId);
+        return ResponseEntity.ok(managerKpisService.getProjectTaskCounts(userId));
+    }
+
+    @Operation(summary = "Tasks in progress",
+            description = "The tenant's IN_PROGRESS tasks, soonest deadline first - the Work in progress screen.")
+    @GetMapping("/tasks/in-progress")
+    public ResponseEntity<List<TaskDTO>> getTasksInProgress(@RequestHeader("X-User-Id") String userId) {
+        logger.info("Manager tasks in progress request - actorId: {}", userId);
+        return ResponseEntity.ok(managerKpisService.getTasks(userId, ManagerKpisService.TaskView.IN_PROGRESS));
+    }
+
+    @Operation(summary = "Blocked and delayed tasks",
+            description = "The tenant's open tasks that are blocked (is_available=false) or past their deadline, soonest deadline first - the Blocked & delayed screen.")
+    @GetMapping("/tasks/blocked-delayed")
+    public ResponseEntity<List<TaskDTO>> getTasksBlockedOrDelayed(@RequestHeader("X-User-Id") String userId) {
+        logger.info("Manager blocked/delayed tasks request - actorId: {}", userId);
+        return ResponseEntity.ok(managerKpisService.getTasks(userId, ManagerKpisService.TaskView.BLOCKED_OR_DELAYED));
     }
 }

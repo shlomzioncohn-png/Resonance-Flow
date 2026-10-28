@@ -21,6 +21,19 @@ export interface ApiMockFixtures {
 }
 
 export const test = base.extend<ApiMockFixtures>({
+  // Every test starts signed in as an employee - the app sends signed-out
+  // users to /login. Same key and shape as RoleProvider's USER_STORAGE_KEY.
+  page: async ({ page }, use) => {
+    await page.addInitScript(() => {
+      window.sessionStorage.setItem(
+        'lens.user',
+        JSON.stringify({ id: 'e2e-employee', displayName: 'Eli Employee', role: 'EMPLOYEE' }),
+      );
+    });
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    await use(page);
+  },
+
   mockWorkspaceApi: async ({ page }, use) => {
     const requestCaptures: { url: string; method: string; body: any }[] = [];
     let routeHandled = false;

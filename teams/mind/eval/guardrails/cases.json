@@ -1,0 +1,94 @@
+{
+  "description": "Guardrail / adversarial eval set for #488. Separate from eval/personas/: the persona set tests ranking correctness on realistic scenarios, this set feeds deliberately bad input to each ML-inference point and checks for graceful failure. Expected behaviour was written before any case was run.",
+  "outcomes": {
+    "graceful_failure": "The component returned its own typed failure result, or (extraction, #690) an empty task list, instead of output.",
+    "low_confidence": "The component returned output, but its confidence is below the case's threshold.",
+    "partial": "Confidence reacted (lower than the clean reference) but stayed above the threshold. Documented, not asserted.",
+    "silent": "Output with confidence at or above the threshold: confident-looking output from garbage or out-of-scope input.",
+    "crash": "An exception instead of a result. Never acceptable.",
+    "output": "Output returned. Its confidence is recorded but not judged against a threshold (accepted-limitation cases only)."
+  },
+  "cases": [
+    {
+      "id": "no_action_items",
+      "component": "extraction",
+      "owner": "R2",
+      "call": "BasicExtractor.extract(text, source_type)",
+      "input": {
+        "kind": "text",
+        "source_type": "MEETING",
+        "text": "Good morning everyone. How was the weekend? Mine was great, we went to the beach. The weather was lovely. Anyway, nothing urgent today, let's just catch up next week."
+      },
+      "acceptable": ["graceful_failure", "low_confidence"],
+      "threshold": 0.5,
+      "threshold_source": "R1 audit marker only, not a product threshold (no confidence threshold holds a task back, extraction/README.md)."
+    },
+    {
+      "id": "noise_scan",
+      "component": "ocr",
+      "owner": "R4",
+      "call": "extract_text(png_bytes, filename=\"noise.png\")",
+      "input": {
+        "kind": "generated_image",
+        "generator": "uniform black/white pixel noise, no text",
+        "seed": 488
+      },
+      "acceptable": ["graceful_failure", "low_confidence"],
+      "preferred": "graceful_failure (NO_TEXT_RECOGNIZED)",
+      "threshold": 60.0,
+      "threshold_field": "mean_confidence",
+      "threshold_source": "R4's own LOW_CONFIDENCE_THRESHOLD (ocr.py, #449), 0-100 scale."
+    },
+    {
+      "id": "non_english_text",
+      "component": "extraction",
+      "owner": "R2",
+      "call": "BasicExtractor.extract(text, source_type)",
+      "input": {
+        "kind": "text",
+        "source_type": "MEETING",
+        "language": "he",
+        "text": "דנה, תשלחי בבקשה את דוח התקציב לכספים עד יום שלישי."
+      },
+      "acceptable": ["graceful_failure", "low_confidence"],
+      "threshold": 0.5,
+      "threshold_source": "Same R1 audit marker as no_action_items.",
+      "note": "A real task in the wrong language. The pipeline is English-only by decision, so a correctly translated English task with confidence >= threshold still counts as silent.",
+      "accepted_limitation": "English-only by team-lead decision: the observed behaviour is documented, not reported as a finding to fix (mentor review on PR #866)."
+    },
+    {
+      "id": "non_english_audio",
+      "component": "asr",
+      "owner": "R4",
+      "call": "transcribe(audio_bytes, filename=\"hebrew_budget_report.m4a\")",
+      "input": {
+        "kind": "audio_file",
+        "path": "tests/fixtures/asr/hebrew_budget_report.m4a",
+        "language": "he",
+        "content": "The same sentence as non_english_text, recorded by R1."
+      },
+      "acceptable": ["graceful_failure", "output"],
+      "note": "ASR is pinned to language=\"en\" with base.en, so Hebrew speech is forced through an English decoder.",
+      "accepted_limitation": "English-only by team-lead decision: only a crash fails this case; the values are printed for the report.",
+      "deviation": "Changed after the first run, by mentor review on PR #866: originally acceptable = [graceful_failure, low_confidence] below R4's 0.368. The threshold check was dropped because non-English input is out of scope by decision, not because of the result (which was below it: 0.309)."
+    },
+    {
+      "id": "crosstalk_audio",
+      "component": "asr",
+      "owner": "R4",
+      "call": "transcribe(mixed_bytes) vs transcribe(clean_bytes)",
+      "input": {
+        "kind": "generated_audio",
+        "source": "tests/fixtures/asr/short_meeting_note.wav",
+        "generator": "the clean file mixed with a copy of itself delayed by ~1 second",
+        "reference": "the clean file through the same gain and padding, without the delayed copy"
+      },
+      "acceptable": ["graceful_failure", "low_confidence", "partial"],
+      "threshold": 0.368,
+      "threshold_field": "mean_confidence",
+      "threshold_source": "R4's own LOW_CONFIDENCE_THRESHOLD (asr.py, #478).",
+      "silent_if": "mean_confidence(mixed) >= mean_confidence(clean)",
+      "note": "Asserted line is mixed < clean only. Below vs above 0.368 is documented in the report. Limitation: the overlap is the same voice, likely easier than two real speakers."
+    }
+  ]
+}
