@@ -25,6 +25,9 @@
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <minio.version>8.5.2</minio.version>
+        <!-- Latest stable at authoring time per Maven Central's listing; not re-verified live
+             in this change (no network access in this environment) - bump if that's stale. -->
+        <jsoup.version>1.18.1</jsoup.version>
         <protobuf.version>3.25.3</protobuf.version>
         <google-api-client.version>2.7.0</google-api-client.version>
         <google-oauth-client.version>1.36.0</google-oauth-client.version>
@@ -127,6 +130,14 @@
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
             <version>3.0.5</version>
+        </dependency>
+
+        <!-- HTML-to-text fallback for Email BODY when a message has no text/plain part. Not
+             managed by the Spring Boot BOM. -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>${jsoup.version}</version>
         </dependency>
 
         <!-- control-plane state (GroupStateStore/CursorStore/CalendarEventStateStore) -

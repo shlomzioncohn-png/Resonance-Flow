@@ -26,7 +26,7 @@ import org.springframework.stereotype.Component;
         prefix = "bridge.intake.whatsapp", name = "mode", havingValue = "fixture", matchIfMissing = true)
 public class FixtureWhatsAppSourceReader implements WhatsAppSourceReader {
 
-    private static final String WHATSAPP_TENANT_ID = "kamatech";
+    private static final String WHATSAPP_TENANT_ID = "00000000-0000-0000-0000-000000000001";
     // Fixtures are written as if exported from a phone in Israel, matching WHATSAPP_TENANT_ID.
     private static final ZoneId WHATSAPP_EXPORT_ZONE = ZoneId.of("Asia/Jerusalem");
 

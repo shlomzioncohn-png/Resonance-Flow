@@ -34,7 +34,7 @@ class RawObjectValidatorTest {
 
     @Test
     void validatePassesForAWellFormedEvent() {
-        assertThatCode(() -> validator.validate(eventWithTenantId("kamatech"))).doesNotThrowAnyException();
+        assertThatCode(() -> validator.validate(eventWithTenantId("00000000-0000-0000-0000-000000000001"))).doesNotThrowAnyException();
     }
 
     @Test
@@ -59,9 +59,19 @@ class RawObjectValidatorTest {
     }
 
     @Test
+    void validateRejectsANonUuidTenantId() {
+        // Mind passes tenant_id through to Inbox's tasks.tenant_id (a UUID) - "kamatech" used to
+        // leave Bridge and only fail there.
+        assertThatThrownBy(() -> validator.validate(eventWithTenantId("kamatech")))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("tenantId")
+                .hasMessageContaining("UUID");
+    }
+
+    @Test
     void validateRejectsNullCorrelationIdRegardlessOfTenantId() {
         RawObjectEvent event = RawObjectEvent.create(
-                RawSourceType.EMAIL, "kamatech", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+                RawSourceType.EMAIL, "00000000-0000-0000-0000-000000000001", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
                 List.of(), Instant.parse("2026-08-18T09:15:00Z"), null, 0, ChangeType.UPSERT, List.of(validRef()));
 
         assertThatThrownBy(() -> validator.validate(event))
@@ -72,7 +82,7 @@ class RawObjectValidatorTest {
     @Test
     void validateRejectsAnEmptyObjectList() {
         RawObjectEvent event = RawObjectEvent.create(
-                RawSourceType.EMAIL, "kamatech", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+                RawSourceType.EMAIL, "00000000-0000-0000-0000-000000000001", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
                 List.of(), Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, ChangeType.UPSERT, List.of());
 
         assertThatThrownBy(() -> validator.validate(event))
@@ -81,11 +91,25 @@ class RawObjectValidatorTest {
     }
 
     @Test
+    void validatePassesForADeleteReviewEventWithAnEmptyObjectList() {
+        // DELETE_REVIEW's own contract (Calendar's cancellation, Drive's trashed, and now
+        // Slack's emptied-group path) is an empty objects list - the logical item no longer
+        // exists. Regression test: this used to be unconditionally rejected by
+        // requireNonEmpty(objects), which would have blocked every DELETE_REVIEW event from ever
+        // reaching Kafka through the real (non-mocked) validator.
+        RawObjectEvent event = RawObjectEvent.create(
+                RawSourceType.SLACK, TestTenantId.VALID, Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+                List.of(), Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 1, ChangeType.DELETE_REVIEW, List.of());
+
+        assertThatCode(() -> validator.validate(event)).doesNotThrowAnyException();
+    }
+
+    @Test
     void validateRejectsAnObjectMissingItsContentHash() {
         RawObjectRef invalidRef = new RawObjectRef(Role.BODY, "EMAIL/kamatech/2026-08-18/x.json", null,
                 "application/json", 1L, Modality.TEXT);
         RawObjectEvent event = RawObjectEvent.create(
-                RawSourceType.EMAIL, "kamatech", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+                RawSourceType.EMAIL, "00000000-0000-0000-0000-000000000001", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
                 List.of(), Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, ChangeType.UPSERT,
                 List.of(invalidRef));
 

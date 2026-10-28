@@ -50,8 +50,8 @@ public class GitHubBridgeController {
 
         return gitHubClient.fetchAllTasks(targetOwner, targetRepo)
                 .collectList()
-                .doOnNext(this::publishTasks)
-                .map(fetched -> ResponseEntity.ok(Map.<String, Object>of("owner", targetOwner, "repo", targetRepo, "published", fetched.size())))
+                .map(fetched -> ResponseEntity.ok(Map.<String, Object>of("owner", targetOwner, "repo", targetRepo,
+                        "fetched", fetched.size(), "published", publishTasks(fetched))))
                 .doOnError(error -> log.error("Failed to sync GitHub tasks for {}/{}", targetOwner, targetRepo, error))
                 .onErrorResume(error -> Mono.just(ResponseEntity.internalServerError()
                         .body(Map.<String, Object>of("error", error.getMessage(), "owner", targetOwner, "repo", targetRepo))));
@@ -61,13 +61,16 @@ public class GitHubBridgeController {
      * publish() blocks and fails the record - so each task gets its own attempt:
      * one invalid/unpublishable record must not kill the rest of the batch.
      */
-    private void publishTasks(List<Task> tasks) {
+    private int publishTasks(List<Task> tasks) {
+        int published = 0;
         for (Task task : tasks) {
             try {
                 taskPublisher.publish(task);
+                published++;
             } catch (PublishException | ValidationException e) {
                 log.error("Failed to publish GitHub task {}", task.sourceRef(), e);
             }
         }
+        return published;
     }
 }

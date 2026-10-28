@@ -12,7 +12,7 @@ from uuid import uuid4
 from mind.contracts.base_enums import SourceType
 from mind.extraction.assembly import to_task_creation_requested
 from mind.extraction.extractor import BasicExtractor, ExtractionSuccess
-from tests.extraction.fakes import ScriptedProvider, answer_of
+from tests.extraction.fakes import DEADLINE_SETTINGS, WRITTEN_AT, ScriptedProvider, answer_of
 
 MEETING = (Path(__file__).parent / "fixtures" / "extraction" / "design_meeting.txt").read_text(
     encoding="utf-8"
@@ -75,7 +75,12 @@ def test_a_meeting_becomes_one_linked_proposal_per_action_item() -> None:
     assert pricing.fields.dependency_mentions == []
 
     proposals = to_task_creation_requested(
-        outcome, tenant_id=uuid4(), bridge_source_ref=None, bridge_correlation_id=uuid4()
+        outcome,
+        tenant_id=uuid4(),
+        bridge_source_ref=None,
+        bridge_correlation_id=uuid4(),
+        written_at=WRITTEN_AT,
+        deadline_settings=DEADLINE_SETTINGS,
     )
     assert [p.title for p in proposals] == [t.fields.title for t in outcome.tasks]
     assert all("dependency_mentions" not in p.model_dump() for p in proposals)

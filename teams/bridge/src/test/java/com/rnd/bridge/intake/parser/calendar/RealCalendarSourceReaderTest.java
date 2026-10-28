@@ -9,6 +9,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.google.api.client.googleapis.json.GoogleJsonResponseException;
 import com.google.api.client.http.HttpHeaders;
 import com.google.api.client.http.HttpResponseException;
@@ -18,6 +21,7 @@ import com.google.api.services.calendar.model.Event;
 import com.google.api.services.calendar.model.EventDateTime;
 import com.google.api.services.calendar.model.Events;
 import com.rnd.bridge.core.ReadCursor;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.CalendarImportProperties;
 import com.rnd.bridge.intake.lane.CalendarEventStateStore;
 import com.rnd.bridge.intake.model.SourceRecord;
@@ -37,6 +41,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.slf4j.LoggerFactory;
 
 /**
  * Covers the syncToken lifecycle in RealCalendarSourceReader.readPages/read: full vs.
@@ -55,7 +60,8 @@ import org.mockito.Mockito;
  */
 class RealCalendarSourceReaderTest {
 
-    private static final CalendarImportProperties PROPERTIES = new CalendarImportProperties("primary", "kamatech");
+    private static final CalendarImportProperties PROPERTIES = new CalendarImportProperties("primary");
+    private static final BridgeTenantId TENANT_ID = new BridgeTenantId("kamatech");
 
     private final Calendar calendar = mock(Calendar.class);
     private final Calendar.Events events = mock(Calendar.Events.class);
@@ -65,7 +71,7 @@ class RealCalendarSourceReaderTest {
         CalendarEventStateReconciler eventStateReconciler = new CalendarEventStateReconciler(
                 new CalendarEventStateStore(
                         new InMemoryObjectStorageClient(), ControlPlaneStateStores.inMemory(), new ObjectMapper()));
-        return new RealCalendarSourceReader(null, PROPERTIES, eventStateReconciler, calendar);
+        return new RealCalendarSourceReader(null, PROPERTIES, TENANT_ID, eventStateReconciler, calendar);
     }
 
     private Calendar.Events.List mockRequest() {
@@ -92,7 +98,7 @@ class RealCalendarSourceReaderTest {
         assertThat(result.records()).hasSize(1);
         assertThat(result.nextSyncToken()).isEqualTo("sync-token-1");
         verify(request, never()).setSyncToken(any());
-        verify(request).setOrderBy("startTime");
+        verify(request, never()).setOrderBy(any());
     }
 
     @Test
@@ -140,14 +146,27 @@ class RealCalendarSourceReaderTest {
         Events freshPage = new Events().setItems(List.of(event("e1"))).setNextSyncToken("sync-token-fresh");
         when(fullResyncRequest.execute()).thenReturn(freshPage);
 
-        CalendarReadResult result = reader().read(new ReadCursor(null, "expired-token"));
+        Logger readerLogger = (Logger) LoggerFactory.getLogger(RealCalendarSourceReader.class);
+        ListAppender<ILoggingEvent> logs = new ListAppender<>();
+        logs.start();
+        readerLogger.addAppender(logs);
+        try {
+            CalendarReadResult result = reader().read(new ReadCursor(null, "expired-token"));
 
-        assertThat(result.records()).hasSize(1);
-        verify(incrementalRequest).setSyncToken("expired-token");
-        // The recovery request is a full sync, not a continuation of the expired token.
-        verify(fullResyncRequest, never()).setSyncToken(any());
-        verify(fullResyncRequest).setOrderBy("startTime");
-        assertThat(result.nextSyncToken()).isEqualTo("sync-token-fresh");
+            assertThat(result.records()).hasSize(1);
+            verify(incrementalRequest).setSyncToken("expired-token");
+            // The recovery request is a full sync, not a continuation of the expired token.
+            verify(fullResyncRequest, never()).setSyncToken(any());
+            verify(fullResyncRequest, never()).setOrderBy(any());
+            assertThat(result.nextSyncToken()).isEqualTo("sync-token-fresh");
+
+            assertThat(logs.list)
+                    .anyMatch(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN
+                            && e.getFormattedMessage()
+                                    .equals("Calendar sync token expired (410) - falling back to full resync"));
+        } finally {
+            readerLogger.detachAppender(logs);
+        }
     }
 
     @Test
@@ -345,6 +364,75 @@ class RealCalendarSourceReaderTest {
         assertThat(java.util.UUID.fromString(record.correlationId())).isNotNull();
         assertThat(record.revision()).isZero();
         assertThat(record.changeType()).isEqualTo(com.rnd.bridge.raw.model.ChangeType.DELETE_REVIEW);
+    }
+
+    @Test
+    void ordinaryEventCarriesItsEventIdAsSourceRef() throws IOException {
+        Calendar.Events.List request = mockRequest();
+        when(events.list("primary")).thenReturn(request);
+        when(request.execute()).thenReturn(new Events()
+                .setItems(List.of(event("evt-1"))).setNextSyncToken("sync-token-1"));
+
+        SourceRecord record = reader().read(ReadCursor.full()).records().get(0);
+
+        assertThat(record.sourceRef()).isEqualTo("evt-1");
+    }
+
+    @Test
+    void cancelledEventAlsoCarriesItsEventIdAsSourceRef() throws IOException {
+        Calendar.Events.List request = mockRequest();
+        when(events.list("primary")).thenReturn(request);
+        when(request.execute()).thenReturn(new Events()
+                .setItems(List.of(cancelledEvent("evt-sparse", "etag-1"))).setNextSyncToken("sync-token-1"));
+
+        SourceRecord record = reader().read(ReadCursor.full()).records().get(0);
+
+        assertThat(record.sourceRef()).isEqualTo("evt-sparse");
+    }
+
+    /**
+     * orderBy("startTime") used to be set unconditionally on a full (token-less) list request -
+     * but Google rejects combining orderBy with syncToken, and more importantly, a full list with
+     * orderBy set never returns a nextSyncToken at all (see
+     * nullNextSyncTokenOnAFullListLeavesTheResultTokenNullAndDoesNotFailTheRead), which is what
+     * was silently preventing the cursor from ever being saved. listPage must never set it on
+     * either the full or incremental branch now.
+     */
+    @Test
+    void listPageNeverSetsOrderByOnEitherTheFullOrIncrementalBranch() throws IOException {
+        Calendar.Events.List fullRequest = mockRequest();
+        Calendar.Events.List incrementalRequest = mockRequest();
+        when(events.list("primary")).thenReturn(fullRequest, incrementalRequest);
+        when(fullRequest.execute()).thenReturn(new Events().setItems(List.of()).setNextSyncToken("sync-token-1"));
+        when(incrementalRequest.execute()).thenReturn(new Events().setItems(List.of()).setNextSyncToken("sync-token-2"));
+
+        RealCalendarSourceReader reader = reader();
+        reader.read(ReadCursor.full());
+        reader.read(new ReadCursor(null, "sync-token-1"));
+
+        verify(fullRequest, never()).setOrderBy(any());
+        verify(incrementalRequest, never()).setOrderBy(any());
+    }
+
+    /**
+     * Documents current behavior: when a full list's final page comes back with no
+     * nextSyncToken (which is exactly what happened while orderBy was set unconditionally -
+     * Google doesn't return one for an ordered full query), readPages must not throw - it
+     * returns the result with a null token, same as FixtureCalendarSourceReader always does.
+     * The cursor-save consequence of that null (UnstructuredIntakeController's
+     * rejected==0 && token!=null gate never firing) is covered on the controller's own test,
+     * not here.
+     */
+    @Test
+    void nullNextSyncTokenOnAFullListLeavesTheResultTokenNullAndDoesNotFailTheRead() throws IOException {
+        Calendar.Events.List request = mockRequest();
+        when(events.list("primary")).thenReturn(request);
+        when(request.execute()).thenReturn(new Events().setItems(List.of(event("e1"))));
+
+        CalendarReadResult result = reader().read(ReadCursor.full());
+
+        assertThat(result.records()).hasSize(1);
+        assertThat(result.nextSyncToken()).isNull();
     }
 
     private static GoogleJsonResponseException expiredTokenException() {

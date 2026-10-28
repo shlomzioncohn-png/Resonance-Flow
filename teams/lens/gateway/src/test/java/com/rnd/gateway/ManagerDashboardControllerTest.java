@@ -127,4 +127,53 @@ class ManagerDashboardControllerTest {
                 .andExpect(jsonPath("$.message").value("period must be one of 7d, 30d, 90d"));
         takeRequest();
     }
+
+    @Test
+    @Order(5)
+    @DisplayName("Project task counts: forwards with the mock identity and returns the list")
+    void forwardsAndReturnsProjectTaskCounts() throws Exception {
+        mockBff.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("[{\"projectId\":\"p-1\",\"project\":\"Alpha\",\"inProgress\":2,\"snoozed\":1,"
+                        + "\"open\":3,\"done\":4,\"overdue\":1}]"));
+
+        mockMvc.perform(get("/api/manager/dashboard/projects").with(jwt().authorities(MANAGER)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].project").value("Alpha"))
+                .andExpect(jsonPath("$[0].inProgress").value(2))
+                .andExpect(jsonPath("$[0].overdue").value(1));
+
+        RecordedRequest recorded = takeRequest();
+        assertThat(recorded.getPath()).isEqualTo("/manager/dashboard/projects");
+        assertThat(recorded.getHeader("X-User-Id")).isEqualTo("mgr_001");
+    }
+
+    @Test
+    @Order(7)
+    @DisplayName("Tasks in progress and blocked/delayed: forwarded to their BFF paths")
+    void forwardsTaskLists() throws Exception {
+        for (String view : new String[] {"in-progress", "blocked-delayed"}) {
+            mockBff.enqueue(new MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("[{\"id\":\"t-1\",\"title\":\"Fix login\",\"status\":\"IN_PROGRESS\",\"isAvailable\":false}]"));
+
+            mockMvc.perform(get("/api/manager/dashboard/tasks/" + view).with(jwt().authorities(MANAGER)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[0].title").value("Fix login"))
+                    .andExpect(jsonPath("$[0].isAvailable").value(false));
+
+            RecordedRequest recorded = takeRequest();
+            assertThat(recorded.getPath()).isEqualTo("/manager/dashboard/tasks/" + view);
+            assertThat(recorded.getHeader("X-User-Id")).isEqualTo("mgr_001");
+        }
+    }
+
+    @Test
+    @Order(6)
+    @DisplayName("Project task counts: no token returns 401")
+    void projectTaskCounts_noToken_returns401() throws Exception {
+        mockMvc.perform(get("/api/manager/dashboard/projects")).andExpect(status().isUnauthorized());
+    }
 }

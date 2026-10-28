@@ -12,6 +12,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import com.rnd.chain.events.SchedulingUpdatePublisher;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -41,6 +43,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("postgres")
 @SpringBootTest
 class TaskEligibilityServicePostgresConcurrencyTest {
+
+    // These tests are not about Kafka: a mock keeps the afterCommit scheduling publish from blocking on a broker.
+    @MockBean
+    private SchedulingUpdatePublisher schedulingUpdatePublisher;
 
     @org.springframework.beans.factory.annotation.Autowired
     private com.rnd.chain.repository.TaskReadinessRepository taskReadinessRepository;

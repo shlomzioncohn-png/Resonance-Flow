@@ -16,7 +16,7 @@ from mind.extraction.extractor import (
 )
 from mind.extraction.models import MAX_TASKS_PER_TEXT
 from mind.extraction.prompts import MAX_CONTENT_CHARS
-from tests.extraction.fakes import ScriptedProvider, answer_of
+from tests.extraction.fakes import DEADLINE_SETTINGS, WRITTEN_AT, ScriptedProvider, answer_of
 
 MEETING = (
     "Project Manager: Dana, please send the minutes to the client, thread MSG-4471. "
@@ -173,6 +173,8 @@ def test_every_task_becomes_its_own_proposal() -> None:
         tenant_id=tenant_id,
         bridge_source_ref="C024BE91L:1728900000.000100",
         bridge_correlation_id=uuid4(),
+        written_at=WRITTEN_AT,
+        deadline_settings=DEADLINE_SETTINGS,
     )
 
     assert [p.title for p in proposals] == [MINUTES["title"], LAB["title"]]
@@ -189,7 +191,12 @@ def test_no_task_means_no_proposal() -> None:
     assert isinstance(outcome, ExtractionSuccess)
 
     proposals = to_task_creation_requested(
-        outcome, tenant_id=uuid4(), bridge_source_ref=None, bridge_correlation_id=uuid4()
+        outcome,
+        tenant_id=uuid4(),
+        bridge_source_ref=None,
+        bridge_correlation_id=uuid4(),
+        written_at=WRITTEN_AT,
+        deadline_settings=DEADLINE_SETTINGS,
     )
 
     assert proposals == []

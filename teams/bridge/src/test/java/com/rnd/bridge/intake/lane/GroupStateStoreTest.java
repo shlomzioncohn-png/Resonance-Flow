@@ -164,9 +164,13 @@ class GroupStateStoreTest {
      * 4. revision 1 must remain published=false - the ack belongs to revision 0's content,
      *    which is no longer the group's current content, so confirming it now would
      *    incorrectly mark revision 1 as published when nothing has actually confirmed it yet.
+     * Named after revision staleness, not the (now-removed) {@code superseded} flag - this test
+     * never set or asserted on that flag; it is purely about a stale ack for an edited revision,
+     * with no claim in between (see staleConfirmCannotMarkANewerRevisionPublished below for the
+     * claimed variant), so it survives docs/plans/slack-superseded-fix.md unchanged.
      */
     @Test
-    void confirmPublishedIgnoresAStaleAckForARevisionThatHasSinceBeenSuperseded() {
+    void confirmPublishedIgnoresAStaleAckForARevisionThatWasSinceEdited() {
         // 1. revision 0 starts publishing.
         store.update(RawSourceType.SLACK, "kamatech", "g1", EMPTY, current -> new GroupState(
                 current.groupId(), current.sourceType(), current.tenantId(), current.chatId(), current.threadId(),

@@ -108,3 +108,11 @@ class DependencyPublisher:
             )
             # Off the loop: send() blocks until Kafka acks.
             await asyncio.to_thread(self._sink.send, event)
+            # Ids only, never the mention: it is written from the content (#359,
+            # so a demo shows the dependency stage the way it shows the others).
+            logger.info(
+                "dependencies: task %s depends on task %s (confidence %.3f), published",
+                task_id,
+                target_uuid,
+                confidence,
+            )

@@ -119,7 +119,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/mind"
       pullPolicy: IfNotPresent
-      tag: "22a8e01"
+      tag: "29aaca0"
     containerPort: 8000
     service: *defaultService
     metrics:
@@ -203,7 +203,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-bff"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "9474270"
     containerPort: 8082
     service: *defaultService
     metrics:
@@ -246,7 +246,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/bridge"
       pullPolicy: IfNotPresent
-      tag: "94c3259"
+      tag: "f82f899"
     containerPort: 8080
     service: *defaultService
     # base-path: / in bridge's application.yml, so no /actuator prefix.
@@ -255,7 +255,34 @@ components:
       path: /prometheus
     resources: *defaultResources
     <<: *defaultHealthProbes
-    env: {}
+    # Bridge only calls out (source APIs, Kafka, Postgres, MinIO); no component calls its
+    # HTTP API, and its manual /sync and /run endpoints have no auth. An empty allowFrom
+    # denies all in-cluster ingress - see templates/networkpolicy.yaml. Probes and the CD
+    # smoke test's port-forward are unaffected. Add a component here (or Traefik, for
+    # Slack's /api/bridge/slack/events) once something needs to reach Bridge.
+    networkPolicy:
+      allowFrom: []
+    env:
+      # Required so BridgeTaskKafkaConfig's Protobuf producer (and the
+      # KafkaPayloadPublisher bean) activate - without it everything falls
+      # back to LoggingPayloadPublisher and nothing reaches Inbox.
+      SPRING_PROFILES_ACTIVE: "kafka"
+      # Bridge reads its Inbox tenant UUID from two separate settings:
+      #   CRM_ORGANIZATION_ID -> structured lanes (CRM, GitHub, Jira), via
+      #                          bridge.crm.organization-id and bridge.organization-id
+      #   BRIDGE_TENANT_ID    -> unstructured lanes (Email, Slack, WhatsApp, Drive,
+      #                          Calendar, Media), via bridge.tenant-id
+      # Keep them equal. If they differ, one source's tasks land in one tenant and
+      # another's in a different one: users of one tenant miss the other's tasks, and
+      # Mind's per-tenant duplicate detection can't match across them.
+      # Both default to Inbox's built-in "System" tenant (V15__add_system_admin.sql),
+      # which exists in every environment. To use a real tenant, override BOTH, e.g.
+      # in environments/shared.yaml.
+      # CRM_ORGANIZATION_ID must not be blank: with the kafka profile active,
+      # CrmLaneConfig fails startup on a blank value by design, which crashed the
+      # CD smoke test and blocked every Bridge deploy since #996.
+      CRM_ORGANIZATION_ID: "00000000-0000-0000-0000-000000000001"
+      BRIDGE_TENANT_ID: "00000000-0000-0000-0000-000000000001"
     objectStorage:
       bucket: "bridge-raw"
     config:
@@ -266,9 +293,6 @@ components:
             - "configtree:/etc/resonance-flow/secrets/kafka/"
             - "configtree:/etc/resonance-flow/secrets/bridge-db/"
         kafka:
-          # GitHub currently publishes to bridge.github.tasks.
-          # Issue #275 will decide whether to use the shared topic instead.
-          topic: "bridge.github.tasks"
           properties:
             security.protocol: "SASL_PLAINTEXT"
             sasl.mechanism: "PLAIN"
@@ -329,7 +353,7 @@ components:
           zoom-recordings-dir: "${BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR:}"
           bbb-recordings-dir: "${BRIDGE_MEDIA_BBB_RECORDINGS_DIR:}"
           scanned-docs-dir: "${BRIDGE_MEDIA_SCANNED_DOCS_DIR:}"
-          tenant-id: "${BRIDGE_MEDIA_TENANT_ID:kamatech}"
+          tenant-id: "${BRIDGE_TENANT_ID:00000000-0000-0000-0000-000000000001}"
           min-file-size-bytes: "${BRIDGE_MEDIA_MIN_FILE_SIZE_BYTES:1}"
     volumeMounts:
       - name: object-storage-credentials
@@ -341,10 +365,6 @@ components:
       - name: bridge-db-credentials
         mountPath: /etc/resonance-flow/secrets/bridge-db
         readOnly: true
-    volumes:
-      - name: bridge-db-credentials
-        secret:
-          secretName: resonance-flow-bridge-db-credentials
     dependencySecretVolumes:
       - name: object-storage-credentials
         dependencyName: object-storage
@@ -354,6 +374,9 @@ components:
           - key: root-password
             path: minio.secret-key
     volumes:
+      - name: bridge-db-credentials
+        secret:
+          secretName: resonance-flow-bridge-db-credentials
       - name: kafka-credentials
         secret:
           secretName: resonance-flow-kafka-sasl-credentials
@@ -363,6 +386,8 @@ components:
     dependencies:
       - name: object-storage
         port: 9000
+      - name: schema-registry
+        port: 8080
       - name: postgresql
         port: 5432
       - name: schema-registry
@@ -375,7 +400,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-frontend"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "9474270"
     containerPort: 3000
     service: *defaultService
     resources:
@@ -411,7 +436,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-storybook"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "9474270"
     containerPort: 8080
     service: *defaultService
     resources:
@@ -445,7 +470,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/chain"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "012846e"
     containerPort: 8081
     service: *defaultService
     # base-path: / in chain's application.yml, so no /actuator prefix.
@@ -504,7 +529,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/inbox"
       pullPolicy: IfNotPresent
-      tag: "085a2e7"
+      tag: "4142843"
     containerPort: 8080
     service: *defaultService
     metrics:
@@ -575,7 +600,9 @@ components:
     team: relay
     replicaCount: 1
     image:
-      # In-memory Apicurio registry - not durable, fine for dev/CI only.
+      # In-memory Apicurio registry - not durable, fine for dev/CI only. Any restart (e.g. a
+      # liveness kill under load) drops every schema: rerun schema-sync-hook, then restart the
+      # producers - Confluent clients cache the latest version they looked up.
       repository: "apicurio/apicurio-registry-mem"
       pullPolicy: IfNotPresent
       tag: "2.5.11.Final"
@@ -619,7 +646,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-gateway"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "5b08464"
     containerPort: 8080
     service: *defaultService
     metrics:
@@ -650,7 +677,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/notification-delivery"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "4142843"
     containerPort: 8082
     service:
       type: ClusterIP
@@ -746,6 +773,9 @@ kafka:
   controller:
     replicaCount: 1
     controllerOnly: false
+    # Bitnami's default heap is 75% of the limit (576Mi of 768Mi), leaving too little for
+    # Kafka's off-heap memory - it got OOMKilled under load. Kafka leans on the page cache.
+    heapOpts: -XX:InitialRAMPercentage=50 -XX:MaxRAMPercentage=50
     resources:
       # 192Mi was OOMKilling the JVM before it finished KRaft storage formatting on
       # startup (verified locally - combined broker+controller needs more headroom).
@@ -804,8 +834,9 @@ minio:
   enabled: true
   mode: standalone
   defaultBuckets: bridge-raw
- # Bitnami moved the MinIO images to bitnamilegacy/*.
-# This chart uses the new image location.
+  # Bitnami moved the MinIO images to bitnamilegacy/*.
+
+  # This chart uses the new image location.
   image:
     registry: docker.io
     repository: bitnamilegacy/minio
@@ -820,7 +851,9 @@ minio:
       cpu: 100m
       memory: 128Mi
     limits:
-      cpu: 150m
+      # Bitnami's setup script gives each `mc` call a fixed 5s timeout; at 150m they took
+      # 4-7s, so it misread MinIO as stopped and crashed on "port already in use".
+      cpu: 300m
       memory: 192Mi
 postgresql:
   enabled: true

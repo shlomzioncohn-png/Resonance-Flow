@@ -4,11 +4,15 @@ package com.rnd.chain.controller;
 import com.rnd.chain.dto.AddDependencyRequest;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.service.TaskDependencyService;
+import com.rnd.chain.tenant.TaskOwnershipService;
+import com.rnd.chain.tenant.TenantContext;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
 import jakarta.validation.Valid;
+
+import lombok.RequiredArgsConstructor;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -25,6 +29,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/tasks")
+@RequiredArgsConstructor
 @Tag(
         name = "Task Dependencies",
         description = "Manage dependencies between tasks"
@@ -32,12 +37,8 @@ import java.util.UUID;
 public class TaskDependencyController {
 
     private final TaskDependencyService taskDependencyService;
-
-    public TaskDependencyController(
-            TaskDependencyService taskDependencyService) {
-
-        this.taskDependencyService = taskDependencyService;
-    }
+    private final TenantContext tenantContext;
+    private final TaskOwnershipService taskOwnershipService;
 
     @Operation(
             summary = "Add task dependency",
@@ -48,6 +49,7 @@ public class TaskDependencyController {
             @PathVariable UUID taskId,
             @Valid @RequestBody AddDependencyRequest request) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         TaskDependency createdDependency =
                 taskDependencyService.addDependency(
                         taskId,
@@ -73,6 +75,7 @@ public class TaskDependencyController {
             @PathVariable UUID taskId,
             @PathVariable UUID dependsOnTaskId) {
 
+        taskOwnershipService.requireTaskInTenant(taskId, tenantContext.requireTenantId());
         taskDependencyService.removeDependency(
                 taskId,
                 dependsOnTaskId);

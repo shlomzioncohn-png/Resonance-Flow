@@ -8,11 +8,17 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.SlackApiProperties;
 import com.rnd.bridge.intake.model.ChatMessage;
 import com.slack.api.methods.MethodsClient;
+import com.slack.api.methods.request.conversations.ConversationsHistoryRequest;
+import com.slack.api.methods.request.conversations.ConversationsRepliesRequest;
 import com.slack.api.methods.request.users.UsersInfoRequest;
+import com.slack.api.methods.response.conversations.ConversationsHistoryResponse;
+import com.slack.api.methods.response.conversations.ConversationsRepliesResponse;
 import com.slack.api.methods.response.users.UsersInfoResponse;
+import com.slack.api.model.File;
 import com.slack.api.model.Message;
 import com.slack.api.model.User;
 import java.util.List;
@@ -33,13 +39,14 @@ class RealSlackSourceReaderTest {
 
     private final MethodsClient methods = mock(MethodsClient.class);
     private final SlackUserNameResolver userNameResolver = new SlackUserNameResolver(methods);
+    private static final BridgeTenantId TENANT_ID = new BridgeTenantId("kamatech");
     private final RealSlackSourceReader reader = new RealSlackSourceReader(
-            new SlackApiProperties("xoxb-fake", "kamatech", List.of("C123"), null), userNameResolver);
+            new SlackApiProperties("xoxb-fake", List.of("C123"), null), TENANT_ID, userNameResolver);
 
     @Test
     void failsFastWhenBotTokenIsNotConfigured() {
         assertThatThrownBy(() -> new RealSlackSourceReader(
-                        new SlackApiProperties(null, "kamatech", List.of("C123"), null), userNameResolver))
+                        new SlackApiProperties(null, List.of("C123"), null), TENANT_ID, userNameResolver))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("bot-token");
     }
@@ -47,7 +54,7 @@ class RealSlackSourceReaderTest {
     @Test
     void failsFastWhenNoChannelsAreConfigured() {
         assertThatThrownBy(() -> new RealSlackSourceReader(
-                        new SlackApiProperties("xoxb-fake", "kamatech", List.of(), null), userNameResolver))
+                        new SlackApiProperties("xoxb-fake", List.of(), null), TENANT_ID, userNameResolver))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("channels");
     }
@@ -127,5 +134,69 @@ class RealSlackSourceReaderTest {
         assertThat(reader.toChatMessage("C123", second, null).sender()).isEqualTo("bob");
 
         verify(methods, times(1)).usersInfo(any(UsersInfoRequest.class));
+    }
+
+    // --- Attachment: gone-file skip (no network call needed - null url is detected up front) -
+
+    @Test
+    void goneFileWithNoDownloadUrlIsSkippedButOthersStillResolve() {
+        File gone = new File();
+        gone.setId("F1");
+        gone.setName("deleted.png");
+        File ok = new File();
+        ok.setId("F2");
+        ok.setName("kept.png");
+        ok.setUrlPrivateDownload(null); // also gone - both files in this fixture have no URL,
+        // proving the skip is per-file, not "abort on the first gone file in the list".
+
+        List<ChatMessage.Attachment> attachments = reader.resolveAttachments(List.of(gone, ok));
+
+        assertThat(attachments).isEmpty();
+    }
+
+    // --- conversations.replies: thread_not_found is a per-thread skip, other errors still fail -
+
+    private RealSlackSourceReader readerWithMockedMethods() {
+        return new RealSlackSourceReader(
+                new SlackApiProperties("xoxb-fake", List.of("C123"), null), TENANT_ID, userNameResolver, methods);
+    }
+
+    private ConversationsHistoryResponse historyWithThreadRoot(String rootTs) {
+        Message root = message(rootTs, rootTs, 1, "root question");
+        ConversationsHistoryResponse response = new ConversationsHistoryResponse();
+        response.setOk(true);
+        response.setMessages(List.of(root));
+        return response;
+    }
+
+    @Test
+    void threadNotFoundSkipsJustThatThreadButChannelReadStillCompletes() throws Exception {
+        RealSlackSourceReader r = readerWithMockedMethods();
+        when(methods.conversationsHistory(any(ConversationsHistoryRequest.class)))
+                .thenReturn(historyWithThreadRoot("1700000000.000100"));
+        ConversationsRepliesResponse repliesResponse = new ConversationsRepliesResponse();
+        repliesResponse.setOk(false);
+        repliesResponse.setError("thread_not_found");
+        when(methods.conversationsReplies(any(ConversationsRepliesRequest.class))).thenReturn(repliesResponse);
+
+        List<ChatMessage> result = r.read(null);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).id()).isEqualTo("1700000000.000100");
+    }
+
+    @Test
+    void otherConversationsRepliesErrorsStillFailTheRead() throws Exception {
+        RealSlackSourceReader r = readerWithMockedMethods();
+        when(methods.conversationsHistory(any(ConversationsHistoryRequest.class)))
+                .thenReturn(historyWithThreadRoot("1700000000.000100"));
+        ConversationsRepliesResponse repliesResponse = new ConversationsRepliesResponse();
+        repliesResponse.setOk(false);
+        repliesResponse.setError("rate_limited");
+        when(methods.conversationsReplies(any(ConversationsRepliesRequest.class))).thenReturn(repliesResponse);
+
+        assertThatThrownBy(() -> r.read(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("rate_limited");
     }
 }

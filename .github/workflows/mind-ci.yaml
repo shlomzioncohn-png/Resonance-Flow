@@ -24,12 +24,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Needs only Python (no kind/Docker/Postgres), so it runs on GitHub's
-  # runners and doesn't hold a slot on the shared self-hosted runner. Skipped
-  # on draft PRs; every other job needs lint, so they skip with it.
+  # Skipped on draft PRs; every other job needs lint, so they skip with it.
   lint:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 15  # a hung `make eval` must not run to the 6h default
     permissions:
       contents: read

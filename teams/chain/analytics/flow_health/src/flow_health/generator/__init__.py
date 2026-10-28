@@ -8,8 +8,9 @@ from .model import World
 from .planner import plan_world
 from .simulation import History, simulate
 from .validate import validate
+from .version import GENERATOR_VERSION
 
-__all__ = ["DISEASE_TYPES", "HOLDOUT_DISEASES", "SEVERITIES", "Dataset", "GeneratorConfig", "generate", "validate"]
+__all__ = ["GENERATOR_VERSION", "DISEASE_TYPES", "HOLDOUT_DISEASES", "SEVERITIES", "Dataset", "GeneratorConfig", "generate", "validate"]
 
 
 @dataclass

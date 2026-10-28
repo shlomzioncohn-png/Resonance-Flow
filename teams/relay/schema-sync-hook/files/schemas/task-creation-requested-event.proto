@@ -1,53 +1,46 @@
 syntax = "proto3";
-
 package com.rnd.inbox.event;
+
+import "google/protobuf/timestamp.proto";
+import "task-created-event.proto";
 
 option java_package = "com.rnd.inbox.event";
 option java_multiple_files = true;
 
-import "google/protobuf/timestamp.proto";
-import "task-created-event.proto";  // SourceType, TaskTier, TaskRoleContext, TaskStatus.
-
-// kafkaTopic: task.creation.requested
-// Published by MIND, consumed by Inbox (TaskCreationRequestConsumer), which turns it into a task.
-//
-// correlation_id is a payload field here - unlike task.created, where it's a Kafka header.
-// confidence is double: MIND's raw value, narrowed to Task.java's Float by Inbox.
-
 message TaskCreationRequestedEvent {
-  optional string event_id = 1;                    // UUID as string.
-  string correlation_id = 2;                       // UUID as string.
-  string tenant_id = 3;                            // UUID as string.
-  optional string project_id = 4;                  // UUID as string.
+  optional string event_id = 1;
+  string correlation_id = 2;
+  string tenant_id = 3;
+  optional string project_id = 4;
   string title = 5;
   optional string description = 6;
   SourceType source_type = 7;
   string source_ref = 8;
   optional TaskTier tier = 9;
   optional TaskRoleContext role_context = 10;
-  optional int32 urgency = 11;                     // 1..5.
-  optional int32 effort_estimate_minutes = 12;     // > 0.
+  optional int32 urgency = 11;
+  optional int32 effort_estimate_minutes = 12;
   optional google.protobuf.Timestamp deadline = 13;
-  optional TaskStatus status = 14;                 // Inbox defaults to NEW when unset.
-  optional double confidence = 15;                 // 0..1. optional: 0.0 must differ from absent.
-  optional bool has_dependencies = 16;             // optional: false must differ from absent.
-  optional string created_by_user_id = 17;         // UUID as string.
+  optional TaskStatus status = 14;
+  optional double confidence = 15;
+  optional bool has_dependencies = 16;
+  optional string created_by_user_id = 17;
   repeated Assignee assignees = 18;
+  optional double effort_estimate_confidence = 19;
+  optional string suggested_owner_user_id = 20;
+  optional double suggested_owner_confidence = 21;
 }
-
 message Assignee {
   AssigneeType assignee_type = 1;
-  string id = 2;                                    // UUID as string. USER -> user id, TEAM -> team id.
+  string id = 2;
   AssignmentRole assignment_role = 3;
-  optional string assigned_by = 4;                  // UUID as string.
+  optional string assigned_by = 4;
 }
-
 enum AssigneeType {
   ASSIGNEE_TYPE_UNSPECIFIED = 0;
   ASSIGNEE_TYPE_USER = 1;
   ASSIGNEE_TYPE_TEAM = 2;
 }
-
 enum AssignmentRole {
   ASSIGNMENT_ROLE_UNSPECIFIED = 0;
   ASSIGNMENT_ROLE_OWNER = 1;
