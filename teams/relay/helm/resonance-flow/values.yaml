@@ -109,7 +109,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/mind"
       pullPolicy: IfNotPresent
-      tag: "22a8e01"
+      tag: "29aaca0"
     containerPort: 8000
     service: *defaultService
     resources: *defaultResources
@@ -187,7 +187,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-bff"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "9474270"
     containerPort: 8082
     service: *defaultService
     resources: *defaultResources
@@ -365,7 +365,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-frontend"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "9474270"
     containerPort: 3000
     service: *defaultService
     resources:
@@ -401,7 +401,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-storybook"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "9474270"
     containerPort: 8080
     service: *defaultService
     resources:
@@ -435,7 +435,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/chain"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "012846e"
     containerPort: 8081
     service: *defaultService
     resources: *defaultResources
@@ -490,7 +490,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/inbox"
       pullPolicy: IfNotPresent
-      tag: "085a2e7"
+      tag: "4142843"
     containerPort: 8080
     service: *defaultService
     resources: *defaultResources
@@ -597,7 +597,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-gateway"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "5b08464"
     containerPort: 8080
     service: *defaultService
     resources: *defaultResources
@@ -609,7 +609,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/notification-delivery"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "4142843"
     containerPort: 8082
     service:
       type: ClusterIP
