@@ -87,6 +87,9 @@ export const OpenCountChip: Story = {
   args: { constraints: [] },
   render: () => (
     <div>
+      <div data-testid="one">
+        <OpenConstraintsChip count={1} />
+      </div>
       <div data-testid="two">
         <OpenConstraintsChip count={2} />
       </div>
@@ -99,6 +102,10 @@ export const OpenCountChip: Story = {
     </div>
   ),
   play: async ({ canvas }) => {
+    const one = within(canvas.getByTestId('one')).getByTestId('open-constraints-chip');
+    await expect(one).toHaveTextContent('1');
+    await expect(one).toHaveAccessibleName('1 open constraint');
+
     const chip = within(canvas.getByTestId('two')).getByTestId('open-constraints-chip');
     await expect(chip).toHaveTextContent('2');
     await expect(chip).toHaveAccessibleName('2 open constraints');

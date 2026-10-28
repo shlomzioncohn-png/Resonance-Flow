@@ -162,6 +162,29 @@ class ChainClientTest {
     }
 
     @Test
+    void feasibilityWithChainReturningAnEmptyListGivesNoConstraints() {
+        chain.expect(requestTo(CHAIN + "/tasks/" + TASK + "/constraints"))
+                .andExpect(header("X-Tenant-Id", TENANT))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        Map<String, TaskDependenciesDTO> result = client.getFeasibility("emp_001", TENANT, List.of(TASK));
+
+        chain.verify();
+        assertThat(result.get(TASK).getConstraints()).isNotNull().isEmpty();
+        assertThat(ConstraintDTO.countOpen(result.get(TASK).getConstraints())).isZero();
+    }
+
+    @Test
+    void feasibilityWithChainFailingGivesAnEmptyListInsteadOfThrowing() {
+        chain.expect(requestTo(CHAIN + "/tasks/" + TASK + "/constraints")).andRespond(withBadRequest());
+
+        Map<String, TaskDependenciesDTO> result = client.getFeasibility("emp_001", TENANT, List.of(TASK));
+
+        chain.verify();
+        assertThat(result.get(TASK).getConstraints()).isEmpty();
+    }
+
+    @Test
     void feasibilityWithoutATenantMakesNoCallsAndShowsNoConstraints() {
         Map<String, TaskDependenciesDTO> result = client.getFeasibility("emp_001", null, List.of(TASK));
 

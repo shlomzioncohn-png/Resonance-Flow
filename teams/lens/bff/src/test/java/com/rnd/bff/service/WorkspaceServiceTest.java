@@ -268,6 +268,20 @@ class WorkspaceServiceTest {
     }
 
     @Test
+    void listTasks_realInbox_chainThrows_stillReturnsTheListWithConstraintsUnknown() {
+        when(inboxClient.isMockEnabled()).thenReturn(false);
+        when(inboxClient.listTasks(anyString(), any(), any(), anyInt(), anyInt())).thenReturn(
+                TaskListResponseDTO.builder().items(List.of(task("t1", "HIGH", 30))).total(1).page(0).size(20).build());
+        when(chainClient.getFeasibility(anyString(), any(), anyList())).thenThrow(new RuntimeException("Chain down"));
+
+        TaskListResponseDTO result = workspaceService.listTasks("emp_001", null, null, 0, 20);
+
+        assertThat(result.getItems()).extracting(TaskDTO::getId).containsExactly("t1");
+        assertThat(result.getItems().get(0).getConstraints()).isNull();
+        assertThat(result.getItems().get(0).getOpenConstraintCount()).isNull();
+    }
+
+    @Test
     void listTasks_mockInbox_keepsMockConstraintsAndDoesNotCallChain() {
         when(inboxClient.listTasks(anyString(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(TaskListResponseDTO.builder().items(List.of(task("task_001", "HIGH", 30)))

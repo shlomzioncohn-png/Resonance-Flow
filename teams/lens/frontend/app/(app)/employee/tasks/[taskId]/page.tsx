@@ -142,7 +142,7 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
           <Card sx={{ flex: 1, minWidth: 0, width: '100%' }}>
             <CardContent>
               <>
-                <Typography variant="subtitle2" color="text.secondary">
+                <Typography variant="subtitle2" color="text.secondary" component="h2">
                   Description
                 </Typography>
                 <Typography variant="body1" sx={{ mb: 3 }}>
