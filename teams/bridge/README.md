@@ -53,7 +53,6 @@ src/main/java/com/rnd/bridge/
 ├── scoping/                   # shared scoping filter (Malki's lane; media lane skips it)
 ├── shared/                    # Kafka topic config shared by the unstructured lanes
 ├── ai/                        # shared LLM client infrastructure (see its README.md)
-├── enrichment/                # dependency/severity/due-date suggestion types
 └── runner/                    # ManualSyncRunner
 src/main/resources/application.yml
 src/main/resources/fixtures/unstructured/   # synthetic Gmail/Drive/Slack/WhatsApp/Calendar data
