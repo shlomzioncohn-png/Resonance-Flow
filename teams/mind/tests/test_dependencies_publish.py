@@ -15,7 +15,7 @@ import pytest
 
 from mind.contracts.task_dependencies_proposed import DependencyProposed
 from mind.dependencies.publisher import DependencyPublisher
-from mind.embeddings.base import SearchResult
+from mind.embeddings.confidence import ScoredResult
 
 TASK_A = "3f2c1a9e-7b4d-4e8a-9c1f-0a2b3c4d5e6f"
 TASK_B = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
@@ -50,7 +50,7 @@ def publisher(sink: ListSink) -> DependencyPublisher:
     return DependencyPublisher(index=_FakeIndex(), sink=sink)  # type: ignore[arg-type]
 
 
-def _resolved(*per_mention: list[SearchResult]):
+def _resolved(*per_mention: list[ScoredResult]):
     return patch(
         "mind.dependencies.publisher.resolve_dependency_targets",
         AsyncMock(return_value=list(per_mention)),
@@ -58,7 +58,7 @@ def _resolved(*per_mention: list[SearchResult]):
 
 
 async def test_a_resolved_mention_is_published_as_one_edge(publisher, sink) -> None:
-    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9, confidence=0.9)]):
+    with _resolved([ScoredResult(task_id=TASK_B, similarity=0.9, confidence=0.2)]):
         await publisher.publish_dependencies(
             task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
         )
@@ -67,13 +67,15 @@ async def test_a_resolved_mention_is_published_as_one_edge(publisher, sink) -> N
     assert str(event.task_id) == TASK_A
     assert event.tenant_id == TENANT
     assert event.dependencies[0].depends_on_task_id == UUID(TASK_B)
+    # #476 review item 1: Chain's PriorityScoreService is calibrated against
+    # raw similarity -- published value is .similarity, not .confidence.
     assert event.dependencies[0].confidence == pytest.approx(0.9)
 
 
 async def test_a_published_edge_is_logged_with_its_ids_and_not_its_mention(
     publisher, sink, caplog: pytest.LogCaptureFixture
 ) -> None:
-    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9, confidence=0.9)]), caplog.at_level("INFO"):
+    with _resolved([ScoredResult(task_id=TASK_B, similarity=0.9, confidence=0.2)]), caplog.at_level("INFO"):
         await publisher.publish_dependencies(
             task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
         )
@@ -93,7 +95,7 @@ async def test_nothing_is_logged_as_published_when_the_send_fails(
 
     sink.send = fail
     with (
-        _resolved([SearchResult(task_id=TASK_B, similarity=0.9, confidence=0.9)]),
+        _resolved([ScoredResult(task_id=TASK_B, similarity=0.9, confidence=0.2)]),
         caplog.at_level("INFO"),
         pytest.raises(RuntimeError),
     ):
@@ -119,7 +121,7 @@ async def test_an_unresolved_mention_is_logged_not_raised(
 
 
 async def test_one_unresolved_mention_does_not_block_another_resolved_one(publisher, sink) -> None:
-    with _resolved([], [SearchResult(task_id=TASK_B, similarity=0.9, confidence=0.9)]):
+    with _resolved([], [ScoredResult(task_id=TASK_B, similarity=0.9, confidence=0.2)]):
         await publisher.publish_dependencies(
             task_id=UUID(TASK_A),
             tenant_id=TENANT,
@@ -132,8 +134,8 @@ async def test_one_unresolved_mention_does_not_block_another_resolved_one(publis
 
 async def test_each_resolved_mention_becomes_its_own_event(publisher, sink) -> None:
     with _resolved(
-        [SearchResult(task_id=TASK_B, similarity=0.9, confidence=0.9)],
-        [SearchResult(task_id=TASK_C, similarity=0.8, confidence=0.8)],
+        [ScoredResult(task_id=TASK_B, similarity=0.9, confidence=0.2)],
+        [ScoredResult(task_id=TASK_C, similarity=0.8, confidence=0.3)],
     ):
         await publisher.publish_dependencies(
             task_id=UUID(TASK_A),
@@ -146,16 +148,18 @@ async def test_each_resolved_mention_becomes_its_own_event(publisher, sink) -> N
     assert targets == {UUID(TASK_B), UUID(TASK_C)}
 
 
-async def test_two_mentions_resolving_to_the_same_target_publish_one_edge_at_the_higher_confidence(
+async def test_two_mentions_resolving_to_the_same_target_publish_one_edge_at_the_higher_similarity(
     publisher, sink
 ) -> None:
-    """Both would compute the same event_id (task_id:target) -- sending both
-    at different confidences would just race Chain's dedup for which value
-    sticks, so this dedups by target first and keeps the higher one."""
+    """Both would compute the same event_id -- this dedups by target first
+    and keeps the higher similarity (#476 review item 1: the published
+    value is .similarity, for Chain's calibration, not .confidence).
+    Confidence is set to the opposite order on purpose, so a publisher
+    that dedups on `.confidence` instead would be caught here."""
 
     with _resolved(
-        [SearchResult(task_id=TASK_B, similarity=0.7, confidence=0.7)],
-        [SearchResult(task_id=TASK_B, similarity=0.95, confidence=0.95)],
+        [ScoredResult(task_id=TASK_B, similarity=0.95, confidence=0.3)],
+        [ScoredResult(task_id=TASK_B, similarity=0.70, confidence=0.6)],
     ):
         await publisher.publish_dependencies(
             task_id=UUID(TASK_A),
@@ -171,8 +175,8 @@ async def test_the_same_target_in_different_case_is_deduped_across_mentions(
     publisher, sink
 ) -> None:
     with _resolved(
-        [SearchResult(task_id=TASK_B.upper(), similarity=0.7, confidence=0.7)],
-        [SearchResult(task_id=TASK_B, similarity=0.95, confidence=0.95)],
+        [ScoredResult(task_id=TASK_B.upper(), similarity=0.95, confidence=0.3)],
+        [ScoredResult(task_id=TASK_B, similarity=0.70, confidence=0.6)],
     ):
         await publisher.publish_dependencies(
             task_id=UUID(TASK_A),
@@ -203,11 +207,11 @@ async def test_the_event_id_is_deterministic_so_a_redelivery_resends_the_same_ed
     """Chain dedups on event_id -- a redelivered task.created must recompute
     the exact same id for the same edge, not a fresh one."""
 
-    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9, confidence=0.9)]):
+    with _resolved([ScoredResult(task_id=TASK_B, similarity=0.9, confidence=0.2)]):
         await publisher.publish_dependencies(
             task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
         )
-    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9, confidence=0.9)]):
+    with _resolved([ScoredResult(task_id=TASK_B, similarity=0.9, confidence=0.2)]):
         await publisher.publish_dependencies(
             task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
         )
@@ -217,11 +221,11 @@ async def test_the_event_id_is_deterministic_so_a_redelivery_resends_the_same_ed
 
 
 async def test_a_different_target_gets_a_different_event_id(publisher, sink) -> None:
-    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9, confidence=0.9)]):
+    with _resolved([ScoredResult(task_id=TASK_B, similarity=0.9, confidence=0.2)]):
         await publisher.publish_dependencies(
             task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["mention one"]
         )
-    with _resolved([SearchResult(task_id=TASK_C, similarity=0.9, confidence=0.9)]):
+    with _resolved([ScoredResult(task_id=TASK_C, similarity=0.9, confidence=0.2)]):
         await publisher.publish_dependencies(
             task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["mention two"]
         )
@@ -232,7 +236,7 @@ async def test_a_different_target_gets_a_different_event_id(publisher, sink) -> 
 async def test_a_blank_mention_is_dropped_with_a_warning(
     publisher, sink, caplog: pytest.LogCaptureFixture
 ) -> None:
-    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9, confidence=0.9)]), caplog.at_level("WARNING"):
+    with _resolved([ScoredResult(task_id=TASK_B, similarity=0.9, confidence=0.2)]), caplog.at_level("WARNING"):
         await publisher.publish_dependencies(
             task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["  ", "the DB upgrade"]
         )
@@ -253,7 +257,7 @@ async def test_a_resolved_target_that_is_not_a_uuid_is_skipped_with_a_warning(
     publisher, sink, caplog: pytest.LogCaptureFixture
 ) -> None:
     with (
-        _resolved([SearchResult(task_id="not-a-uuid", similarity=0.9, confidence=0.9)]),
+        _resolved([ScoredResult(task_id="not-a-uuid", similarity=0.9, confidence=0.2)]),
         caplog.at_level("WARNING"),
     ):
         await publisher.publish_dependencies(
@@ -271,7 +275,7 @@ async def test_a_resolved_target_matching_the_task_itself_is_skipped_even_in_dif
     normalized id -- a self-match stored in different case would slip past
     it and get published as "A depends on A", which Chain rejects as a cycle."""
     with (
-        _resolved([SearchResult(task_id=TASK_A.upper(), similarity=0.9, confidence=0.9)]),
+        _resolved([ScoredResult(task_id=TASK_A.upper(), similarity=0.9, confidence=0.2)]),
         caplog.at_level("WARNING"),
     ):
         await publisher.publish_dependencies(
@@ -284,8 +288,8 @@ async def test_a_resolved_target_matching_the_task_itself_is_skipped_even_in_dif
 
 async def test_resolve_is_called_once_for_every_mention_together(publisher, sink) -> None:
     with _resolved(
-        [SearchResult(task_id=TASK_B, similarity=0.9, confidence=0.9)],
-        [SearchResult(task_id=TASK_C, similarity=0.8, confidence=0.8)],
+        [ScoredResult(task_id=TASK_B, similarity=0.9, confidence=0.2)],
+        [ScoredResult(task_id=TASK_C, similarity=0.8, confidence=0.3)],
     ) as mock_resolve:
         await publisher.publish_dependencies(
             task_id=UUID(TASK_A),

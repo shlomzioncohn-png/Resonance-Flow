@@ -21,7 +21,7 @@ from tests.test_index_consumer import FakeVectorIndex
 
 from mind.contracts import RawObjectEvent
 from mind.contracts.base_enums import SourceType
-from mind.embeddings.base import SearchResult
+from mind.embeddings.confidence import ScoredResult
 from mind.extraction.extractor import BasicExtractor, ExtractionItem
 from mind.extraction.models import MAX_TASKS_PER_TEXT
 from mind.extraction.providers.base import (
@@ -83,11 +83,11 @@ class BrokenProducer:
 class Index:
     """`find_duplicate` on a tenant's index: what it was asked, and what it answers."""
 
-    def __init__(self, match: SearchResult | None = None) -> None:
+    def __init__(self, match: ScoredResult | None = None) -> None:
         self.match = match
         self.asked: list[tuple[UUID, str, str]] = []
 
-    async def __call__(self, tenant_id: UUID, title: str, description: str) -> SearchResult | None:
+    async def __call__(self, tenant_id: UUID, title: str, description: str) -> ScoredResult | None:
         self.asked.append((tenant_id, title, description))
         return self.match
 
@@ -98,7 +98,7 @@ class Parts:
     def __init__(
         self,
         *answers: str | Exception,
-        match: SearchResult | None = None,
+        match: ScoredResult | None = None,
         producer: Any = None,
         index: "Index | None" = None,
     ) -> None:
@@ -228,7 +228,7 @@ async def _duplicate_log_line(caplog: pytest.LogCaptureFixture, event: RawObject
     """Run a duplicate through the pipeline; return the one line it logged."""
 
     caplog.set_level(logging.INFO, logger="mind.ingestion.creation_pipeline")
-    parts = Parts(ANSWER, match=SearchResult(task_id=TASK_ID, similarity=0.93, confidence=0.7))
+    parts = Parts(ANSWER, match=ScoredResult(task_id=TASK_ID, similarity=0.93, confidence=0.7))
 
     sent = await parts.pipeline.handle(event, [_item()])
 
@@ -357,10 +357,10 @@ async def test_one_duplicate_task_does_not_hold_back_the_others_of_its_text() ->
     class FirstIsADuplicate(Index):
         async def __call__(
             self, tenant_id: UUID, title: str, description: str
-        ) -> SearchResult | None:
+        ) -> ScoredResult | None:
             await super().__call__(tenant_id, title, description)
             return (
-                SearchResult(task_id=TASK_ID, similarity=0.9, confidence=0.7)
+                ScoredResult(task_id=TASK_ID, similarity=0.9, confidence=0.7)
                 if title == TITLE
                 else None
             )

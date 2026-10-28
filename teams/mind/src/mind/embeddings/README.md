@@ -300,11 +300,12 @@ setting -- `Settings.duplicate_similarity_threshold`,
 explicit that changing a threshold is a separate, deliberate relevance
 decision, not a side effect of adding confidence.
 
-**Where it lives:** `SearchResult.confidence` (`embeddings/base.py`) --
-`None` on a raw, unfiltered `store.search()` hit (there is no threshold
-yet to measure distance from), set by `resolve_dependency_targets()`
-(#244/#471) and `find_related()` (#472) the moment each applies its own
-threshold. Exposed externally as `RelatedTask.confidence`
+**Where it lives:** `ScoredResult` (`embeddings/confidence.py`) -- a
+`SearchResult` plus a required `confidence`, returned only by
+`resolve_dependency_targets()` (#244/#471) and `find_related()` (#472)
+once each has applied its own threshold; a raw, unfiltered
+`store.search()` hit stays a plain `SearchResult`, with no confidence to
+set yet. Exposed externally as `RelatedTask.confidence`
 (`GET /v1/tasks/{task_id}/related`) and `DependencyEdge.confidence`
 (`task.dependencies.proposed`, sent to Chain). `find_duplicate()`'s
 confidence has nowhere to go externally -- Inbox has no "possible

@@ -98,14 +98,12 @@ class DependencyPublisher:
                     task_id,
                 )
                 continue
-            # #476: the published confidence is distance above threshold
-            # (resolve_dependency_targets sets it), not the raw similarity
-            # -- a hit that only just cleared dependency_match_threshold
-            # must not read as a confident edge to Chain.
-            confidence = result.confidence
-            assert confidence is not None, (
-                "resolve_dependency_targets always sets confidence on a filtered hit"
-            )
+            # #476 review: Chain's PriorityScoreService already sums this
+            # field, calibrated against raw similarity -- sending the new
+            # threshold-distance confidence instead would silently change
+            # Chain's numbers. Keeping raw similarity here until that's
+            # coordinated with Chain.
+            confidence = result.similarity
             if target_uuid not in candidates or confidence > candidates[target_uuid]:
                 candidates[target_uuid] = confidence
 

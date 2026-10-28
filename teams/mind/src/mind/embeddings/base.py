@@ -30,16 +30,6 @@ class SearchResult(BaseModel):
         default=False,
         description="DONE/REJECTED/CANCELLED -- any status the index treats as finished.",
     )
-    confidence: float | None = Field(
-        default=None,
-        ge=0.0,
-        le=1.0,
-        description="How sure this hit is a real match, as distance above "
-        "the threshold that selected it (#476) -- not the raw similarity. "
-        "None on a raw, unfiltered search() hit; set once a caller applies "
-        "its own threshold (duplicate_detection.py, related_tasks.py, "
-        "dependency_resolution.py).",
-    )
 
 
 class VectorStore(ABC):

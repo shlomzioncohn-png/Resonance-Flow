@@ -20,7 +20,7 @@ from tests.ingestion.test_landed_consumer import ITEM, TENANT, _message, _read
 from tests.test_index_consumer import FakeTenantStore, FakeVectorIndex
 
 import mind.ingestion.landed_consumer_runner as runner
-from mind.embeddings.base import SearchResult
+from mind.embeddings.confidence import ScoredResult
 from mind.messaging.raw_object_event_pb2 import RawObjectEvent as RawObjectEventMessage
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.task_creation.correlation import correlation_id_for
@@ -64,7 +64,7 @@ class World:
         self,
         monkeypatch: pytest.MonkeyPatch,
         messages: list[RawObjectEventMessage],
-        match: SearchResult | None = None,
+        match: ScoredResult | None = None,
     ) -> None:
         self.stores: list[Store] = []
         self.searched_in: list[tuple[FakeVectorIndex, UUID]] = []
@@ -81,7 +81,7 @@ class World:
 
         async def find_duplicate(
             store: FakeTenantStore, title: str, description: str
-        ) -> SearchResult | None:
+        ) -> ScoredResult | None:
             # The tenant's slice of an index: which index, and which tenant (#841).
             self.searched_in.append((store.index, store.tenant_id))
             return match
@@ -161,7 +161,7 @@ def test_a_landed_item_is_sent_and_its_reply_matched_through_the_listeners_flow(
 
 def test_a_duplicate_is_not_sent(monkeypatch: pytest.MonkeyPatch) -> None:
     world = World(
-        monkeypatch, [_message()], match=SearchResult(task_id=TASK_ID, similarity=0.9, confidence=0.7)
+        monkeypatch, [_message()], match=ScoredResult(task_id=TASK_ID, similarity=0.9, confidence=0.7)
     )
 
     world.run_main()

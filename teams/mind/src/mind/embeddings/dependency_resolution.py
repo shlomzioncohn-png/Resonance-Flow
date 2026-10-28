@@ -8,8 +8,8 @@ strings in, one ranked result list out per string, same order.
 import asyncio
 
 from mind.config import get_settings
-from mind.embeddings.base import SearchResult, VectorStore
-from mind.embeddings.confidence import confidence_from_similarity
+from mind.embeddings.base import VectorStore
+from mind.embeddings.confidence import ScoredResult, score_above_threshold
 from mind.embeddings.search import nearest_tasks
 
 DEFAULT_K = 5
@@ -23,7 +23,7 @@ async def resolve_dependency_targets(
     threshold: float | None = None,
     is_query: bool = True,
     exclude_task_id: str | None = None,
-) -> list[list[SearchResult]]:
+) -> list[list[ScoredResult]]:
     """Up to k candidates per reference, same order as the input. "No
     match" is the default: threshold=None reads Settings.dependency_match_threshold,
     not "no filtering" -- pass threshold=0.0 explicitly for the raw,
@@ -31,11 +31,7 @@ async def resolve_dependency_targets(
     mention-vs-passage case; #471 passes is_query=False (full task vs
     full task -- symmetric, see nearest_tasks()). exclude_task_id keeps a
     task's own row out of its own results. Propagates ValueError on empty
-    text, same as embed().
-
-    Every surviving candidate's `.confidence` (#476) is set from its
-    distance above `threshold`, not from its raw `.similarity` -- see
-    `embeddings/confidence.py` and embeddings/README.md, "Confidence"."""
+    text, same as embed()."""
     if threshold is None:
         threshold = get_settings().dependency_match_threshold
     # exclude_completed=True at the store level, not a post-hoc Python
@@ -56,11 +52,4 @@ async def resolve_dependency_targets(
             for text in references
         )
     )
-    return [
-        [
-            c.model_copy(update={"confidence": confidence_from_similarity(c.similarity, threshold)})
-            for c in candidates
-            if c.similarity >= threshold
-        ]
-        for candidates in results
-    ]
+    return [score_above_threshold(candidates, threshold) for candidates in results]

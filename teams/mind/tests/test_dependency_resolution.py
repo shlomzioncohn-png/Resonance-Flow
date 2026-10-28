@@ -235,8 +235,6 @@ async def test_threshold_comparison_is_inclusive_at_the_boundary():
 
 
 async def test_each_surviving_candidate_carries_a_confidence_not_its_raw_similarity():
-    """#476: the published value is distance above threshold, not the raw
-    similarity -- a hit right at threshold must not read as confident."""
     store = AsyncMock()
     store.search.return_value = [
         SearchResult(task_id="task-at", similarity=0.8),
