@@ -703,4 +703,52 @@ model; add a usage instead.
 - Media classification is the first user (usages `media-meeting`, `media-document`).
   `BRIDGE_MEDIA_CLASSIFIER_API_KEY` still works as a fallback for `BRIDGE_AI_GEMINI_API_KEY`.
 - Not done yet: the Helm side (mounting the key into the cluster) - deliberately last, with relay,
-  once everything works locally. `EnrichmentService` (§9.3) is a natural next user.
+  once everything works locally.
+
+## 13. CRM LLM enrichment (`com.rnd.bridge.crm.enrichment`, added 2026-10-26)
+
+Optional layer on top of the CRM lane's deterministic ETL: an LLM rewrites a `CRM_DEAL` task's
+title and description into something more actionable, and optionally estimates effort. Full
+design and trade-offs: `docs/crm-llm-enrichment-design.md`; demo steps:
+`docs/crm-llm-enrichment-demo.md`. The old `com.rnd.bridge.enrichment` scaffold (§9.3's
+`EnrichmentService`/`NoOpEnrichmentService`, unrelated to this and never wired to anything) was
+deleted once this landed - don't confuse the two.
+
+**Flow:** `DealToTaskMapper` → `AbstractTaskMapper` (unmodified) → `SourceRoutingTaskEnricher`
+(`@Primary TaskEnricher`) → `CrmDealLlmEnricher` for `CRM_DEAL`, the existing
+`RuleBasedTaskEnricher` (unmodified) for every other source type.
+
+**What the LLM may change:** only `title`, `description`, `effortEstimateMinutes` on
+`EnrichmentOutput`. `status`, `urgency`, `deadline`, `sourceRef` and tenant identity always come
+from ETL - `CrmDealLlmEnricher` never sets them, and `AbstractTaskMapper` itself is unmodified.
+
+**Failure handling:** quota exhaustion, a timeout, a provider error, or a rejected reply (bad
+JSON / failed structural validation) all fall back to the deterministic ETL task - never an
+exception, never a stalled sync. v1 validates reply *structure* only, not factual correctness - a
+team-lead decision (regex-based grounding against the input text doesn't prove correctness and
+can reject a good reply); the model is instructed not to invent facts instead.
+
+**Classes (`com.rnd.bridge.crm.enrichment`):**
+- `CrmDealLlmEnricher` - the `TaskEnricher` for `CRM_DEAL`: skip rules, cache lookup, model call,
+  reply validation, merge into `EnrichmentOutput`.
+- `EnrichmentPromptBuilder` - builds the `LlmRequest` (title/description/status/deadline only,
+  description capped at 2,000 chars, deal text fenced against prompt injection);
+  `PROMPT_VERSION` lives here.
+- `EnrichmentReplyParser` - validates the model's JSON reply's structure; fixed
+  `RejectionReason` categories, never echoes the reply.
+- `EnrichmentReplyCache` - in-memory cache keyed by `sourceRef` + content fingerprint; see its
+  own Javadoc for isolation, eviction and TTL.
+- `CallRateLimiter` - minimum spacing between real model calls, so a sync can't exceed the
+  model's requests-per-minute limit.
+- `SourceRoutingTaskEnricher` - the `@Primary TaskEnricher`; routes by source type.
+- `CrmEnrichmentConfig` - bean wiring for the framework-free classes above (mirrors how
+  `CrmLaneConfig` treats `DealToTaskMapper`/`CrmTaskValidator`, §9.2).
+
+**Rules for future changes:**
+- Never add a protected field (status/urgency/deadline/sourceRef/tenant) to what
+  `CrmDealLlmEnricher` sets on `EnrichmentOutput`.
+- Bump `EnrichmentPromptBuilder.PROMPT_VERSION` whenever the prompt changes - it's part of the
+  cache key, so an old cached reply is never compared against a new prompt.
+- Never log the model's reply or the deal's own text - only `sourceRef` and a fixed category
+  (rejection reason / exception class name), same rule `com.rnd.bridge.ai` follows for its own
+  error messages.
