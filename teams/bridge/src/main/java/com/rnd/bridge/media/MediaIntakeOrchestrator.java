@@ -83,7 +83,7 @@ public class MediaIntakeOrchestrator {
     private final String tenantId;
     private final long minFileSizeBytes;
     private final List<IntakeSource> intakeSources;
-    // One run at a time: a manual POST and a scheduled run (MediaIntakeScheduler) must never scan
+    // One run at a time: a manual POST and a scheduled run (MediaSyncJob) must never scan
     // and move the same folders concurrently. A second caller waits for the first to finish.
     private final ReentrantLock runLock = new ReentrantLock();
 

@@ -50,7 +50,7 @@ class JiraClientTest {
     private WebClient.ResponseSpec responseSpec;
 
     @Spy
-    private JiraIssueMapper jiraIssueMapper = new JiraIssueMapper(new EnrichmentProperties(), new NoOpTaskEnricher());
+    private JiraIssueMapper jiraIssueMapper = new JiraIssueMapper(new EnrichmentProperties(), new NoOpTaskEnricher(), "");
 
     @Spy
     private TaskValidator taskValidator;

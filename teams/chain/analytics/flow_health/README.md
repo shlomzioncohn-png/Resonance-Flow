@@ -28,30 +28,41 @@ The generator itself uses only the standard library; the analysis code (loader, 
 
 | | `data/dev` | `data/eval` |
 |---|---|---|
-| seed | 42 | 4242 (`--eval-seed`) |
+| seed | 42 | 591009 (`--eval-seed`) |
 | use | build and tune the model | measure precision / recall, once, at the end |
 | disease types | all except the held-out `stuck_subgraph` | every type, including the held-out one |
 
 Different seeds mean different healthy tasks, teams and graph, so the model never sees the evaluation
-data in advance. On top of that the eval set contains a disease type the dev set never had. Excluding a
+data in advance. (The first eval seed, 4242, was looked at while the generator was being tuned, so it was retired and
+replaced; seed 4242 is now just another dev-style seed.) On top of that the eval set contains a disease type the dev set never had. Excluding a
 type does not change any other task's ids or behaviour (each disease and each task has its own seeded RNG).
+
+**The eval set is sealed.** Every file the generator writes is fingerprinted in `SEAL.json` (SHA-256 of each file).
+Develop only against `data/dev`; do not open `data/eval` until the final evaluation, and run
+`python -m flow_health.generator --verify data/eval` first (it also says if the sealed data came from an older generator version): it reports any file that was edited, added or removed.
+The seed alone is not proof of "untouched", because the same seed gives different data once the generator's
+code changes. That is what `GENERATOR_VERSION` (`generator/version.py`, written to `manifest.json` and `SEAL.json`) is for: a test
+fails whenever the data a seed produces changes without a version bump, and a sealed set has to be regenerated and
+re-sealed (and the evaluation redone) after one.
 
 ## What it produces (per set)
 
-Rows shaped exactly like Chain's two history tables (migrations `V2`, `V7`, `V9`), as CSV
-(empty cell = NULL, ready for `COPY ... CSV HEADER`):
+Rows shaped like Chain's two history tables (migrations `V2`, `V7`, `V9`), as CSV (empty cell = NULL, ready for
+`COPY ... CSV HEADER`). `task_state_history.csv` has two more columns than the real table: Inbox's `deadline`
+and `effort_estimate_minutes`, repeated on every row of a task. They are **assumed** to exist on the history
+table; there is no migration, and nothing here touches Chain's real tables:
 
 | File | Meaning |
 |---|---|
 | `task_state_history.csv` | task events: `STATUS_CHANGED`, and `BLOCKED` / `UNBLOCKED` when a task's blocking count crosses zero |
 | `dependency_history.csv` | edge events: `ADDED` / `REMOVED` (`task_id` depends on `depends_on_task_id`), plus `REJECTED` noise |
-| `ground_truth.csv` | **answer key**: per planted disease, one row per involved task and per involved edge, with `type`, `severity`, `tier`, `in_stage_a`, `window_start`, `window_end`, `ongoing_at_end` |
+| `ground_truth.csv` | **answer key**: per planted disease, one row per involved task and per involved edge, with `type`, `visible_in_data` / `visible_from` / `not_visible_because` (whether the data can already tell the pattern from healthy work; a pattern that starts close to the end may not yet, so evaluation can leave those out), `severity` (how strongly it was planted), `severity_score` and `severity_level` (how bad it actually is, see `docs/severity.md`), `tier`, `in_stage_a`, `window_start`, `window_end`, `ongoing_at_end` |
 | `ground_truth.json` | same key with parameters and what the disease actually looked like (`observed`), including how its root compares with its peers (`peer_group`, and `peer_chains` for a slow chain) |
 | `healthy_controls.csv` | **answer key**: the healthy control chains (same lengths, tiers and shape as the slow chain) with their end-to-end days |
 | `tasks.csv` | analysis input: per task `task_id`, `created_at`, `project_id` |
 | `task_meta.csv` | analysis input: per task `task_id` and `tier` (blank when unknown). Chain's tables have no tier column, so it lives here |
 | `answer_key_tasks.csv` | **answer key**: per task `true_tier`, project `archetype`, `kind` (`normal`, `slow_legit`, `control_chain`, ...), `disease_id`, `control_id` |
-| `manifest.json` | seed, config, counts, `as_of` (the "now" of the analysis), held-out types |
+| `manifest.json` | `generator_version`, seed, config, counts, `as_of` (the "now" of the analysis), held-out types |
 
 `ground_truth.*`, `healthy_controls.csv` and `answer_key_tasks.csv` are for evaluation only. The model's input is the two history tables plus `tasks.csv` and `task_meta.csv`.
 
@@ -61,11 +72,12 @@ It does not fill rows randomly. It plans a world (tasks, edges, planted patholog
 forward in time** with Chain's own counter rules and records what Chain would have written. That is
 what keeps the two tables consistent with each other: a task is `BLOCKED` exactly when its first
 open dependency appears, `UNBLOCKED` exactly when the last one is done or removed, and so on.
+This follows Chain's table (confirmed 2026-10-26): `BLOCKED` / `UNBLOCKED` are written only when a task goes from no blockers to some and back to none, not on every change of the count.
 `validate.py` replays the output from the rows alone and checks it against the tables' constraints
 and the counter rules; the generator refuses to write data that fails it.
 
 Code layout (`src/flow_health/generator/`): `config.py` (all knobs), `model.py` (tiers, task/edge specs),
-`planner.py` (healthy world), `controls.py` (healthy control chains), `peers.py` (peer groups), `diseases/` (one module per disease), `simulation.py`, `validate.py`,
+`planner.py` (healthy world), `attributes.py` (deadline and estimate), `controls.py` (healthy control chains), `peers.py` (peer groups), `severity.py` (severity score), `diseases/` (one module per disease), `simulation.py`, `validate.py`,
 `export.py`, `__main__.py`.
 
 **Healthy world**
@@ -81,7 +93,7 @@ Code layout (`src/flow_health/generator/`): `config.py` (all knobs), `model.py` 
   fan-in (integration tasks that wait on 4-7 earlier ones), diamonds. Edges also appear mid-period and are sometimes removed. No cycles.
 - **Healthy control chains:** linear chains of 4 / 7 / 12 tasks (operational and tactical, per team pace) at
   normal speed. They are the "chains of the same length and shape" a slow chain is judged against.
-- **Healthy lookalikes** (hard negatives, labelled in `answer_key_tasks.csv`): `slow_legit` (4-8x slower
+- **Healthy lookalikes** (hard negatives, labelled in `answer_key_tasks.csv`): `replanned_legit` (a dependency pulled out and put back, so the task is blocked 2 or 3 times in a few days; a rule that only counts blocks flags these too, and the blocker finishes instead of staying stuck), `slow_legit` (4-8x slower
   than its peers), `backlog` and `abandoned` (never finished, nothing depends on them).
 - **`REJECTED` rows:** about 1% of tasks get one in `dependency_history` (as Chain writes for a
   cross-tenant edge). They never become edges and must be ignored by the analysis.
@@ -93,7 +105,7 @@ When a group has too few peers the comparison widens step by step (the `level` f
 without a tier it drops the tier.
 
 **Diseases**, three severities each (`subtle`, `moderate`, `severe`), judged against the root's own
-tier (`peer_typical_days` in the ground truth). About a third of the hold-based ones are still **ongoing** when the history ends.
+tier (`peer_typical_days` in the ground truth). Each starts at a random point between 3% and 88% of the history, so patterns appear at the beginning, the middle and the end alike; one that cannot finish in time is still **ongoing** when the history ends (and a few of the hold-based ones are planted that way on purpose).
 
 | Type | What is planted | subtle / moderate / severe |
 |---|---|---|
@@ -113,6 +125,13 @@ Create `diseases/<name>.py` that defines `DISEASE = Disease(name, plant, nominal
 `plant(planter, severity)` builds tasks and edges through the planter (`task`, `depend`, `advance`, ...)
 and returns the root task and a params dict. It is discovered automatically; nothing else changes.
 `tests/test_generator.py` has a toy example.
+
+## Severity
+
+Each planted disease gets `severity_score` (0 to 100) and `severity_level` in the ground truth, from four parts: how
+unusual it is among its peers, how far it overran its estimate, how tight the deadlines it threatens are, and how
+much work it holds up. How each part is computed for each type is in [`docs/severity.md`](docs/severity.md).
+The older `severity` field (`subtle` / `moderate` / `severe`) only records how strongly the pattern was planted.
 
 ## Known simplifications
 

@@ -38,6 +38,8 @@ export const colorTokens = {
   red: { 50: '#fef2f2', 100: '#fee2e2', 500: '#ef4444', 600: '#dc2626', 700: '#b91c1c' },
   gray: { 50: '#f8fafc', 100: '#f1f5f9', 500: '#94a3b8', 600: '#64748b', 700: '#475569' },
   violet: { 50: '#f5f3ff', 500: '#8b5cf6' },
+  cyan: { 600: '#0891b2' },
+  sky: { 700: '#0369a1' },
   pink: { 500: '#ec4899' },
 } as const;
 
@@ -50,14 +52,30 @@ export const aiTokens = {
 } as const;
 
 /** Semantic status meaning used across the product (see the status legend in the manager dashboard design). */
+/**
+ * One color per task state in charts, in this order (stacks and legends
+ * follow it). Checked for color-blind separation and contrast on white -
+ * change them together, not one at a time.
+ */
+export const chartTokens = {
+  inProgress: colorTokens.brand[600],
+  snoozed: colorTokens.amber[600],
+  open: colorTokens.cyan[600],
+  done: colorTokens.green[600],
+} as const;
+
+/**
+ * `main` is used both as text on white and under white text, so it's the 700
+ * step: the 600 steps (and gray 500) are below the 4.5:1 contrast minimum.
+ */
 export const statusTokens = {
   healthy: {
-    main: colorTokens.green[600],
+    main: colorTokens.green[700],
     bg: colorTokens.green[50],
     text: colorTokens.green[700],
   },
   warning: {
-    main: colorTokens.amber[600],
+    main: colorTokens.amber[700],
     bg: colorTokens.amber[50],
     text: colorTokens.amber[700],
   },
@@ -67,7 +85,7 @@ export const statusTokens = {
     text: colorTokens.red[700],
   },
   neutral: {
-    main: colorTokens.gray[500],
+    main: colorTokens.gray[600],
     bg: colorTokens.gray[100],
     text: colorTokens.gray[700],
   },

@@ -13,9 +13,11 @@ import com.rnd.bridge.intake.parser.email.FixtureEmailSourceReader;
 import com.rnd.bridge.intake.parser.slack.FixtureSlackSourceReader;
 import com.rnd.bridge.intake.parser.whatsapp.FixtureWhatsAppSourceReader;
 import com.rnd.bridge.intake.lane.CalendarEventStateStore;
+import com.rnd.bridge.intake.lane.DriveFileStateStore;
 import com.rnd.bridge.intake.lane.GroupStateStore;
 import com.rnd.bridge.intake.service.CalendarEventStateReconciler;
 import com.rnd.bridge.intake.service.ChatGroupStateReconciler;
+import com.rnd.bridge.intake.service.DriveFileStateReconciler;
 import com.rnd.bridge.intake.service.ChatSessionGrouper;
 import com.rnd.bridge.intake.service.ChatSourceRecordMapper;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -39,7 +41,8 @@ class SourceRecordLoaderSanityTest {
 
     private final SourceRecordLoader loader = new SourceRecordLoader(
             new FixtureEmailSourceReader(objectMapper),
-            new FixtureDriveSourceReader(objectMapper),
+            new FixtureDriveSourceReader(objectMapper, new DriveFileStateReconciler(
+                    new DriveFileStateStore(noopStorageClient(), ControlPlaneStateStores.inMemory(), objectMapper))),
             new FixtureCalendarSourceReader(objectMapper, new CalendarEventStateReconciler(
                     new CalendarEventStateStore(noopStorageClient(), ControlPlaneStateStores.inMemory(), objectMapper))),
             new FixtureSlackSourceReader(objectMapper),
@@ -82,12 +85,20 @@ class SourceRecordLoaderSanityTest {
     @Test
     void loadsDriveWithNullDescriptionForImage() {
         List<SourceRecord> records = loader.load(RawSourceType.DRIVE, ReadCursor.full());
-        assertThat(records).hasSize(2);
+        assertThat(records).hasSize(3); // 2 live files + 1 trashed (del-7a8b9c)
         SourceRecord image = records.stream().filter(r -> r.naturalId().equals("9f8e7d6c5b")).findFirst().orElseThrow();
         assertThat(image.body()).isNull();
         assertThat(image.mimeType()).isEqualTo("image/jpeg");
         // Drive attachments aren't supported yet - every Drive record is attachment-free.
         assertThat(image.attachmentCount()).isZero();
+    }
+
+    @Test
+    void loadsDriveTrashedFileAsDeleteReview() {
+        List<SourceRecord> records = loader.load(RawSourceType.DRIVE, ReadCursor.full());
+        SourceRecord trashed = records.stream().filter(r -> r.naturalId().equals("del-7a8b9c")).findFirst().orElseThrow();
+        assertThat(trashed.changeType()).isEqualTo(com.rnd.bridge.raw.model.ChangeType.DELETE_REVIEW);
+        assertThat(trashed.sender()).isNull();
     }
 
     @Test

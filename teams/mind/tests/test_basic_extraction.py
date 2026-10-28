@@ -38,7 +38,13 @@ from mind.observability.tracking import (
     _reset_for_tests,
     get_recent_calls,
 )
-from tests.extraction.fakes import ScriptedProvider, answer_of, only
+from tests.extraction.fakes import (
+    DEADLINE_SETTINGS,
+    WRITTEN_AT,
+    ScriptedProvider,
+    answer_of,
+    only,
+)
 
 TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
 BRIDGE_ITEM = UUID("6f1c2e9a-3b4d-4c8e-9a1f-2d7e5b0c4a83")
@@ -97,7 +103,12 @@ def test_extraction_output_validates_against_the_contract() -> None:
     assert isinstance(result, ExtractionSuccess)
 
     [request] = to_task_creation_requested(
-        result, tenant_id=TENANT_ID, bridge_source_ref=None, bridge_correlation_id=BRIDGE_ITEM
+        result,
+        tenant_id=TENANT_ID,
+        bridge_source_ref=None,
+        bridge_correlation_id=BRIDGE_ITEM,
+        written_at=WRITTEN_AT,
+        deadline_settings=DEADLINE_SETTINGS,
     )
 
     assert isinstance(request, TaskCreationRequested)
@@ -257,7 +268,12 @@ def test_missing_source_ref_is_a_normal_outcome() -> None:
     # Inbox requires a source_ref, so the task carries Bridge's id for the
     # item instead (#353); nothing from the content is passed off as one.
     [request] = to_task_creation_requested(
-        result, tenant_id=TENANT_ID, bridge_source_ref=None, bridge_correlation_id=BRIDGE_ITEM
+        result,
+        tenant_id=TENANT_ID,
+        bridge_source_ref=None,
+        bridge_correlation_id=BRIDGE_ITEM,
+        written_at=WRITTEN_AT,
+        deadline_settings=DEADLINE_SETTINGS,
     )
     assert request.source_ref == f"bridge:{BRIDGE_ITEM}"
 

@@ -49,6 +49,15 @@ BLOCKED_CEILING = 0.25
 UNBLOCKED_FLOOR = 0.30
 
 
+def band(base: float, blocked: bool) -> float:
+    """Squeeze `base` into [0, BLOCKED_CEILING] if blocked, [UNBLOCKED_FLOOR, 1]
+    otherwise. Shared with `hierarchical_model.py`, which calls this on its own
+    already-normalized base (#474) rather than duplicating the formula."""
+    if blocked:
+        return BLOCKED_CEILING * base
+    return UNBLOCKED_FLOOR + (1.0 - UNBLOCKED_FLOOR) * base
+
+
 @dataclass(frozen=True)
 class TierRule:
     """One tier's yardstick: its sense of time, and what it weighs.
@@ -213,11 +222,7 @@ class SegmentedRankingModel:
             )
         evaluation = self._evaluate(task, context)
         base = evaluation.base
-
-        if task.blocked:
-            final = BLOCKED_CEILING * base
-        else:
-            final = UNBLOCKED_FLOOR + (1.0 - UNBLOCKED_FLOOR) * base
+        final = band(base, task.blocked)
 
         return ScoreResult(
             score=min(1.0, max(0.0, final)),

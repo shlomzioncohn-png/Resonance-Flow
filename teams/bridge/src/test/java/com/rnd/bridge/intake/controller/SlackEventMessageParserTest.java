@@ -1,6 +1,7 @@
 package com.rnd.bridge.intake.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -9,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.SlackApiProperties;
 import com.rnd.bridge.intake.model.ChatMessage;
 import com.rnd.bridge.intake.parser.slack.SlackUserNameResolver;
@@ -32,7 +34,8 @@ class SlackEventMessageParserTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final SlackUserNameResolver userNameResolver = mock(SlackUserNameResolver.class);
     private final SlackEventMessageParser parser = new SlackEventMessageParser(
-            new SlackApiProperties("xoxb-fake", "kamatech", List.of("C123"), "shh"), userNameResolver);
+            new SlackApiProperties("xoxb-fake", List.of("C123"), "shh"),
+            new BridgeTenantId("kamatech"), userNameResolver);
 
     SlackEventMessageParserTest() {
         when(userNameResolver.resolveUserName(any())).thenAnswer(invocation -> {
@@ -102,6 +105,223 @@ class SlackEventMessageParserTest {
                         + "\"previous_message\":{\"type\":\"message\",\"user\":\"U1\",\"ts\":\"1000.0\",\"text\":\"bye\"}}");
 
         assertThat(parser.parse(event)).isEmpty();
+    }
+
+    @Test
+    void messageChangedWithNestedTombstoneIsNotParsedAsAnEdit() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_changed\",\"channel\":\"C123\",\"ts\":\"1000.9\","
+                        + "\"message\":{\"type\":\"message\",\"subtype\":\"tombstone\",\"ts\":\"1000.0\","
+                        + "\"text\":\"This message was deleted.\"}}");
+
+        assertThat(parser.parse(event)).isEmpty();
+    }
+
+    @Test
+    void messageChangedWithNestedBotMessageIsIgnoredEntirely() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_changed\",\"channel\":\"C123\",\"ts\":\"1000.9\","
+                        + "\"message\":{\"type\":\"message\",\"subtype\":\"bot_message\",\"ts\":\"1000.0\","
+                        + "\"text\":\"unfurled link\"}}");
+
+        assertThat(parser.parse(event)).isEmpty();
+    }
+
+    @Test
+    void parseDeletionExtractsDeletedTsFromMessageDeleted() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_deleted\",\"channel\":\"C123\","
+                        + "\"ts\":\"1000.9\",\"deleted_ts\":\"1000.0\","
+                        + "\"previous_message\":{\"type\":\"message\",\"user\":\"U1\",\"ts\":\"1000.0\",\"text\":\"bye\"}}");
+
+        Optional<com.rnd.bridge.intake.model.SlackMessageDeletion> result = parser.parseDeletion(event);
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().chatId()).isEqualTo("C123");
+        assertThat(result.orElseThrow().messageId()).isEqualTo("1000.0");
+    }
+
+    @Test
+    void parseDeletionPrefersDeletedTsOverMismatchedPreviousMessageTs() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_deleted\",\"channel\":\"C123\","
+                        + "\"ts\":\"1000.9\",\"deleted_ts\":\"1000.0\","
+                        + "\"previous_message\":{\"type\":\"message\",\"user\":\"U1\",\"ts\":\"1000.1\",\"text\":\"bye\"}}");
+
+        Optional<com.rnd.bridge.intake.model.SlackMessageDeletion> result = parser.parseDeletion(event);
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().messageId()).isEqualTo("1000.0");
+    }
+
+    @Test
+    void parseDeletionDetectsATombstoneNestedInMessageChanged() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_changed\",\"channel\":\"C123\",\"ts\":\"1000.9\","
+                        + "\"message\":{\"type\":\"message\",\"subtype\":\"tombstone\",\"ts\":\"1000.0\","
+                        + "\"text\":\"This message was deleted.\"}}");
+
+        Optional<com.rnd.bridge.intake.model.SlackMessageDeletion> result = parser.parseDeletion(event);
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().chatId()).isEqualTo("C123");
+        assertThat(result.orElseThrow().messageId()).isEqualTo("1000.0");
+    }
+
+    @Test
+    void parseDeletionIgnoresABotMessageNestedInMessageChanged() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_changed\",\"channel\":\"C123\",\"ts\":\"1000.9\","
+                        + "\"message\":{\"type\":\"message\",\"subtype\":\"bot_message\",\"ts\":\"1000.0\","
+                        + "\"text\":\"unfurled link\"}}");
+
+        assertThat(parser.parseDeletion(event)).isEmpty();
+    }
+
+    @Test
+    void parseDeletionIgnoresAnOrdinaryEdit() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_changed\",\"channel\":\"C123\",\"ts\":\"1000.9\","
+                        + "\"message\":{\"type\":\"message\",\"user\":\"U1\",\"ts\":\"1000.0\",\"text\":\"edited\"}}");
+
+        assertThat(parser.parseDeletion(event)).isEmpty();
+    }
+
+    @Test
+    void topLevelFileShareWithNoFilesIsRoutedAsAPlainMessage() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"file_share\",\"channel\":\"C123\",\"user\":\"U1\","
+                        + "\"ts\":\"1000.100000\",\"text\":\"check this out\"}");
+
+        Optional<ChatMessage> result = parser.parse(event);
+
+        assertThat(result).isPresent();
+        ChatMessage message = result.orElseThrow();
+        assertThat(message.chatId()).isEqualTo("C123");
+        assertThat(message.sender()).isEqualTo("U1");
+        assertThat(message.text()).isEqualTo("check this out");
+        assertThat(message.id()).isEqualTo("1000.100000");
+        assertThat(message.threadId()).isNull();
+        assertThat(message.attachments()).isEmpty();
+    }
+
+    @Test
+    void topLevelFileShareThreadReplyIsRoutedWithItsThreadId() throws Exception {
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"file_share\",\"channel\":\"C123\",\"user\":\"U1\","
+                        + "\"ts\":\"1000.2\",\"thread_ts\":\"1000.0\",\"text\":\"here's the file\"}");
+
+        Optional<ChatMessage> result = parser.parse(event);
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().threadId()).isEqualTo("1000.0");
+    }
+
+    @Test
+    void topLevelFileShareWithEmptyTextIsRouted() throws Exception {
+        // Slack sends an empty "text" (not a missing field) when a file is shared with no
+        // accompanying comment.
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"file_share\",\"channel\":\"C123\",\"user\":\"U1\","
+                        + "\"ts\":\"1000.3\",\"text\":\"\"}");
+
+        Optional<ChatMessage> result = parser.parse(event);
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().text()).isEmpty();
+    }
+
+    @Test
+    void topLevelFileShareWithFilesArrayIsRoutedThroughAttachmentResolution() throws Exception {
+        // Verifies routing up to (but not through) the actual download: this parser has no
+        // injectable download seam (see this class's header javadoc), so a real "files" entry
+        // unavoidably reaches downloadFile's live HTTP call. Pointing url_private_download at
+        // 127.0.0.1:1 (a port nothing listens on) fails fast with "connection refused" - no DNS
+        // lookup, no real network dependency, no live Slack token - while still proving the
+        // event was accepted, parsed into a Message, and its file list reached resolveAttachments.
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"file_share\",\"channel\":\"C123\",\"user\":\"U1\","
+                        + "\"ts\":\"1000.4\",\"text\":\"check this out\",\"files\":[{\"id\":\"F1\","
+                        + "\"name\":\"doc.pdf\",\"mimetype\":\"application/pdf\","
+                        + "\"url_private_download\":\"http://127.0.0.1:1/doc.pdf\"}]}");
+
+        assertThatThrownBy(() -> parser.parse(event))
+                .isInstanceOf(java.io.UncheckedIOException.class);
+    }
+
+    @Test
+    void topLevelThreadBroadcastIsRoutedAsAnOrdinaryThreadReply() throws Exception {
+        // "Also send to channel" on a thread reply - still just a thread reply (threadId set),
+        // no channel-group handling here by design.
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"thread_broadcast\",\"channel\":\"C123\",\"user\":\"U1\","
+                        + "\"ts\":\"1000.5\",\"thread_ts\":\"1000.0\",\"text\":\"heads up everyone\"}");
+
+        Optional<ChatMessage> result = parser.parse(event);
+
+        assertThat(result).isPresent();
+        ChatMessage message = result.orElseThrow();
+        assertThat(message.text()).isEqualTo("heads up everyone");
+        assertThat(message.threadId()).isEqualTo("1000.0");
+    }
+
+    @Test
+    void messageChangedWithNestedThreadBroadcastSubtypeIsParsedAsAnOrdinaryEdit() throws Exception {
+        // A nested "thread_broadcast" subtype (editing a thread reply that broadcast to the
+        // channel) isn't special-cased either - falls straight through to parseMessageNode, same
+        // as an edit with no nested subtype. No code change was needed for this case; this test
+        // documents that it already worked.
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_changed\",\"channel\":\"C123\",\"ts\":\"1000.9\","
+                        + "\"message\":{\"type\":\"message\",\"subtype\":\"thread_broadcast\",\"user\":\"U1\","
+                        + "\"ts\":\"1000.0\",\"thread_ts\":\"999.0\",\"text\":\"edited broadcast reply\"}}");
+
+        Optional<ChatMessage> result = parser.parse(event);
+
+        assertThat(result).isPresent();
+        ChatMessage message = result.orElseThrow();
+        assertThat(message.id()).isEqualTo("1000.0");
+        assertThat(message.threadId()).isEqualTo("999.0");
+        assertThat(message.text()).isEqualTo("edited broadcast reply");
+    }
+
+    @Test
+    void messageDeletedWithThreadBroadcastPreviousMessageIsStillAThreadReplyDeletion() throws Exception {
+        // parseDeletion's message_deleted path never reads previous_message's own subtype or
+        // thread_ts at all - identity comes solely from the top-level deleted_ts/channel fields
+        // (see parseDeletion's javadoc) - so a thread_broadcast previous_message is handled
+        // exactly like any other message_deleted event. This test documents current (already
+        // correct) behavior; no code change was made to parseDeletion.
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_deleted\",\"channel\":\"C123\","
+                        + "\"ts\":\"1000.9\",\"deleted_ts\":\"1000.0\","
+                        + "\"previous_message\":{\"type\":\"message\",\"subtype\":\"thread_broadcast\",\"user\":\"U1\","
+                        + "\"ts\":\"1000.0\",\"thread_ts\":\"999.0\",\"text\":\"heads up everyone\"}}");
+
+        Optional<com.rnd.bridge.intake.model.SlackMessageDeletion> result = parser.parseDeletion(event);
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().chatId()).isEqualTo("C123");
+        assertThat(result.orElseThrow().messageId()).isEqualTo("1000.0");
+    }
+
+    @Test
+    void messageChangedWithNestedFileShareSubtypeIsParsedAsAnOrdinaryEdit() throws Exception {
+        // A nested "file_share" subtype (editing a message that has a file attached) isn't
+        // special-cased - only "tombstone" and "bot_message" are filtered above - so this falls
+        // straight through to parseMessageNode, same as an edit with no nested subtype at all.
+        // No code change was needed for this case; this test documents that it already worked.
+        JsonNode event = event(
+                "{\"type\":\"message\",\"subtype\":\"message_changed\",\"channel\":\"C123\",\"ts\":\"1000.9\","
+                        + "\"message\":{\"type\":\"message\",\"subtype\":\"file_share\",\"user\":\"U1\","
+                        + "\"ts\":\"1000.0\",\"text\":\"edited caption\"}}");
+
+        Optional<ChatMessage> result = parser.parse(event);
+
+        assertThat(result).isPresent();
+        ChatMessage message = result.orElseThrow();
+        assertThat(message.id()).isEqualTo("1000.0");
+        assertThat(message.text()).isEqualTo("edited caption");
     }
 
     @Test

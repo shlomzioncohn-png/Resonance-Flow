@@ -11,8 +11,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import com.rnd.gateway.auth.TokenService;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 
@@ -83,6 +85,8 @@ public class JwtConfig {
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withPublicKey(
                 (java.security.interfaces.RSAPublicKey) publicKey)
                 .build();
+        // Expiry (the default) plus the issuer: only tokens this Gateway issued
+        decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer(TokenService.ISSUER));
 
         log.info("JWT decoder initialized with public key from: {}", publicKeyLocation);
         return decoder;

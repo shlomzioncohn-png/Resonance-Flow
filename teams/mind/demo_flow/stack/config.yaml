@@ -1,0 +1,26 @@
+# #359: the config.yaml Mind's processes read during a demo run
+# ($CONFIG_FILE_PATH, set by demo_flow/run.py), in the shape the Helm chart
+# mounts in the cluster (mind/config_file.py, #481). Every host here is the
+# demo stack's (stack/docker-compose.yml). The secrets -- the vector-store
+# password and the LLM key -- go in secrets.yaml next to this file: copy
+# secrets.example.yaml, which is the only one of the two in Git.
+kafka:
+  bootstrap_servers: localhost:9092
+  schema_registry_url: http://localhost:8085/apis/ccompat/v6
+
+vector_store:
+  # The demo's own pgvector, on 5443 so a developer's on 5432 is left alone.
+  url: localhost:5443
+  user: mind
+  db: mind
+
+llm:
+  # Reachable from the dev network, where DeepSeek is not
+  # (extraction/providers/factory.py). secrets.yaml may choose another.
+  provider: gemini
+
+asr:
+  whisper_model: base.en
+
+service:
+  log_level: INFO

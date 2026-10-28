@@ -66,7 +66,7 @@ class MediaEventPublisherTest {
     @Test
     void invalidEventIsNeverSent() {
         RawObjectEvent noObjects = RawObjectEvent.create(
-                RawSourceType.SCANNED_DOC, "demo-tenant", Instant.now(), ScopeDecision.INCLUDED, null, null,
+                RawSourceType.SCANNED_DOC, "00000000-0000-0000-0000-000000000001", Instant.now(), ScopeDecision.INCLUDED, null, null,
                 "corr-1", 0, ChangeType.UPSERT, List.of());
 
         assertThatThrownBy(() -> publisher.publish(noObjects)).isInstanceOf(ValidationException.class);
@@ -77,7 +77,7 @@ class MediaEventPublisherTest {
         RawObjectRef body = new RawObjectRef(Role.BODY, "SCANNED_DOC/demo-tenant/2026-10-18/x.pdf",
                 "sha256:" + "a".repeat(64), "application/pdf", 10L, Modality.SCANNED_DOC);
         return RawObjectEvent.create(
-                RawSourceType.SCANNED_DOC, "demo-tenant", Instant.now(), ScopeDecision.INCLUDED, null, null,
+                RawSourceType.SCANNED_DOC, "00000000-0000-0000-0000-000000000001", Instant.now(), ScopeDecision.INCLUDED, null, null,
                 "corr-1", 0, ChangeType.UPSERT, List.of(body));
     }
 

@@ -1,19 +1,21 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import Box from '@mui/material/Box';
-import CircularProgress from '@mui/material/CircularProgress';
-import Typography from '@mui/material/Typography';
-import Alert from '@mui/material/Alert';
+import Button from '@mui/material/Button';
 import AdminProjectDetails from '@/components/layout/AdminProjectDetails/AdminProjectDetails';
-import { getErrorMessage } from '@/services/api';
+import LoadingState from '@/components/feedback/LoadingState';
+import ErrorState from '@/components/feedback/ErrorState';
+import EmptyState from '@/components/feedback/EmptyState';
+import PageContainer from '@/components/layout/PageContainer';
+import { ApiError, getErrorMessage } from '@/services/api';
 import {
   getProjectDetails,
   type AdminProjectDetails as AdminProjectDetailsType,
 } from '@/services/adminProjectsApi';
 
-type LoadState = 'loading' | 'loaded' | 'error';
+type LoadState = 'loading' | 'loaded' | 'not-found' | 'error';
 
 /**
  * Project Details Page
@@ -39,6 +41,11 @@ export default function AdminProjectDetailsPage() {
         setState('loaded');
       })
       .catch((err) => {
+        // Not every project on the Projects screen has details yet - a 404 isn't worth a retry
+        if (err instanceof ApiError && err.status === 404) {
+          setState('not-found');
+          return;
+        }
         setError(getErrorMessage(err));
         setState('error');
       });
@@ -56,57 +63,42 @@ export default function AdminProjectDetailsPage() {
     fetchProject();
   };
 
-  const handleEdit = () => {
-    console.log('Edit project:', projectId);
-    // TODO: Implement edit functionality
-  };
-
-  const handleArchive = () => {
-    console.log('Archive project:', projectId);
-    // TODO: Implement archive functionality
-  };
-
-  const handleDelete = () => {
-    if (window.confirm('Are you sure you want to delete this project?')) {
-      console.log('Delete project:', projectId);
-      // TODO: Implement delete functionality
-    }
-  };
-
   if (state === 'loading') {
-    return (
-      <Box
-        sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}
-      >
-        <CircularProgress />
-      </Box>
-    );
+    return <LoadingState message="Loading project…" />;
   }
 
   if (state === 'error') {
     return (
-      <Box sx={{ p: 3 }}>
-        <Alert severity="error" onClose={handleRetry}>
-          {error}
-        </Alert>
-      </Box>
+      <PageContainer title="Project">
+        <ErrorState description={error ?? undefined} onRetry={handleRetry} />
+      </PageContainer>
     );
   }
 
-  if (!project) {
+  if (state === 'not-found' || !project) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography color="textSecondary">Project not found</Typography>
-      </Box>
+      <PageContainer title="Project not found">
+        <EmptyState
+          title="No details for this project yet"
+          description="It may have been removed, or its details aren't available yet."
+          action={
+            <Button component={Link} href="/manager/projects" variant="outlined">
+              Back to Projects
+            </Button>
+          }
+        />
+      </PageContainer>
     );
   }
 
+  // Edit / Archive / Delete aren't passed: there's no API for them yet, so the
+  // buttons stay hidden instead of doing nothing.
   return (
     <AdminProjectDetails
       projectId={project.projectId}
       projectName={project.projectName}
       description={project.description}
-      status={project.status as 'healthy' | 'warning' | 'critical'}
+      status={project.status}
       startDate={project.startDate}
       endDate={project.endDate}
       totalTasks={project.totalTasks}
@@ -114,48 +106,13 @@ export default function AdminProjectDetailsPage() {
       blockedTasks={project.blockedTasks}
       completedTasks={project.completedTasks}
       progressPercentage={project.progressPercentage}
-      processStages={(project.processStages as Array<{ name: string; count: number }>).map(
-        (stage) => ({
-          ...stage,
-        }),
-      )}
-      team={(
-        project.team as Array<{
-          id: string;
-          name: string;
-          role: string;
-          avatar?: string;
-          activeTasks?: number;
-          workload?: 'Available' | 'At Capacity' | 'Overloaded';
-        }>
-      ).map((member) => ({
-        id: member.id,
-        name: member.name,
-        role: member.role,
-        avatar: member.avatar,
-        activeTasks: member.activeTasks,
-        workload: member.workload as 'Available' | 'At Capacity' | 'Overloaded' | undefined,
+      processStages={project.processStages ?? []}
+      team={project.team ?? []}
+      recentActivities={(project.recentActivities ?? []).map((activity) => ({
+        ...activity,
+        // The feed calls 'info' 'default' - an unknown type would crash it
+        type: activity.type === 'info' ? 'default' : activity.type,
       }))}
-      recentActivities={(
-        project.recentActivities as Array<{
-          id: string;
-          actor: { name: string; avatar?: string };
-          action: string;
-          description: string;
-          timestamp: string;
-          type?: 'success' | 'warning' | 'error' | 'info';
-        }>
-      ).map((activity) => ({
-        id: activity.id,
-        actor: activity.actor,
-        action: activity.action,
-        description: activity.description,
-        timestamp: activity.timestamp,
-        type: activity.type as 'default' | 'success' | 'warning' | 'error' | undefined,
-      }))}
-      onEdit={handleEdit}
-      onArchive={handleArchive}
-      onDelete={handleDelete}
     />
   );
 }

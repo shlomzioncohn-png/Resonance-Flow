@@ -3,12 +3,15 @@ package com.rnd.bridge.intake.controller;
 import com.rnd.bridge.core.IntakeResult;
 import com.rnd.bridge.core.KeyedLock;
 import com.rnd.bridge.core.ReadCursor;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.lane.CursorStore;
 import com.rnd.bridge.intake.lane.UnstructuredIntakeLane;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.parser.SourceRecordGrouper;
 import com.rnd.bridge.intake.parser.calendar.CalendarReadResult;
 import com.rnd.bridge.intake.parser.calendar.CalendarSourceReader;
+import com.rnd.bridge.intake.parser.drive.DriveReadResult;
+import com.rnd.bridge.intake.parser.drive.DriveSourceReader;
 import com.rnd.bridge.intake.parser.email.EmailReadResult;
 import com.rnd.bridge.intake.parser.email.EmailSourceReader;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -19,6 +22,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -28,25 +33,30 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/bridge/intake")
 public class UnstructuredIntakeController {
 
-    // Single-tenant today, like every other default in this lane (WhatsAppImportProperties,
-    // SlackApiProperties, ScopingProperties) - revisit if/when this lane serves more than one
-    // tenant.
-    private static final String TENANT_ID = "kamatech";
+    private static final Logger log = LoggerFactory.getLogger(UnstructuredIntakeController.class);
+
+    // Single-tenant today: bridge.tenant-id, the same value every reader in this lane sends -
+    // revisit if/when this lane serves more than one tenant.
+    private final String tenantId;
 
     private final Map<RawSourceType, UnstructuredIntakeLane> lanesBySource;
     private final CursorStore cursorStore;
     private final CalendarSourceReader calendarSourceReader;
     private final EmailSourceReader emailSourceReader;
+    private final DriveSourceReader driveSourceReader;
     private final KeyedLock tokenCursorLock;
 
     public UnstructuredIntakeController(
             List<UnstructuredIntakeLane> lanes, CursorStore cursorStore, CalendarSourceReader calendarSourceReader,
-            EmailSourceReader emailSourceReader, KeyedLock tokenCursorLock) {
+            EmailSourceReader emailSourceReader, DriveSourceReader driveSourceReader, KeyedLock tokenCursorLock,
+            BridgeTenantId tenantId) {
+        this.tenantId = tenantId.value();
         this.lanesBySource = lanes.stream()
                 .collect(Collectors.toMap(UnstructuredIntakeLane::sourceType, Function.identity()));
         this.cursorStore = cursorStore;
         this.calendarSourceReader = calendarSourceReader;
         this.emailSourceReader = emailSourceReader;
+        this.driveSourceReader = driveSourceReader;
         // One shared KeyedLock instance for every token-cursor source (Calendar, Email, and any
         // future one) - it's a per-key lock, and the key already includes the sourceType (see
         // cursorLockKey), so this one bean safely serializes each source's independent
@@ -66,8 +76,11 @@ public class UnstructuredIntakeController {
         if (sourceType == RawSourceType.EMAIL) {
             return runEmail(lane);
         }
+        if (sourceType == RawSourceType.DRIVE) {
+            return runDrive(lane);
+        }
 
-        ReadCursor cursor = cursorStore.load(sourceType, TENANT_ID);
+        ReadCursor cursor = cursorStore.load(sourceType, tenantId);
         Instant asOf = Instant.now();
         IntakeResult result = lane.run(cursor, asOf);
         // Only reached if run() returned normally (no uncaught exception) - see plan.md "Cursor
@@ -84,7 +97,7 @@ public class UnstructuredIntakeController {
         // other source has this confirmation mechanism, so freezing their cursor the same way
         // would just force a full, unconditional re-publish of the whole window on every retry.
         if (sourceType != RawSourceType.SLACK || result.rejected() == 0) {
-            cursorStore.save(sourceType, TENANT_ID, new ReadCursor(asOf));
+            cursorStore.save(sourceType, tenantId, new ReadCursor(asOf));
         }
         return result;
     }
@@ -97,10 +110,26 @@ public class UnstructuredIntakeController {
      * {@link #runEmail} both follow.
      */
     private IntakeResult runCalendar(UnstructuredIntakeLane lane) {
-        return runTokenBasedSource(RawSourceType.CALENDAR, cursorLockKey(RawSourceType.CALENDAR, TENANT_ID), lane,
+        return runTokenBasedSource(RawSourceType.CALENDAR, cursorLockKey(RawSourceType.CALENDAR, tenantId), lane,
                 cursor -> {
                     CalendarReadResult read = calendarSourceReader.read(cursor);
                     return new TokenRead(read.records(), read.nextSyncToken());
+                },
+                ReadCursor::new);
+    }
+
+    /**
+     * Drive's cursor is a changes.list startPageToken, not a timestamp - same reasoning as
+     * Calendar's syncToken (see {@link #runCalendar}'s javadoc), tied to the single
+     * driveSourceReader.read(cursor) call that returned it (see DriveReadResult/
+     * RealDriveSourceReader's javadoc). Shares tokenCursorLock with Calendar/Email - safe for
+     * the same reason given in the constructor's comment.
+     */
+    private IntakeResult runDrive(UnstructuredIntakeLane lane) {
+        return runTokenBasedSource(RawSourceType.DRIVE, cursorLockKey(RawSourceType.DRIVE, tenantId), lane,
+                cursor -> {
+                    DriveReadResult read = driveSourceReader.read(cursor);
+                    return new TokenRead(read.records(), read.nextToken());
                 },
                 ReadCursor::new);
     }
@@ -114,12 +143,12 @@ public class UnstructuredIntakeController {
      * contend on each other's key despite using the same KeyedLock instance.
      */
     private IntakeResult runEmail(UnstructuredIntakeLane lane) {
-        return runTokenBasedSource(RawSourceType.EMAIL, cursorLockKey(RawSourceType.EMAIL, TENANT_ID), lane,
+        return runTokenBasedSource(RawSourceType.EMAIL, cursorLockKey(RawSourceType.EMAIL, tenantId), lane,
                 cursor -> {
                     EmailReadResult read = emailSourceReader.read(cursor);
                     return new TokenRead(read.records(), read.nextHistoryId());
                 },
-                (asOf, historyId) -> new ReadCursor(asOf, null, historyId));
+                ReadCursor::new);
     }
 
     /**
@@ -142,7 +171,7 @@ public class UnstructuredIntakeController {
             Function<ReadCursor, TokenRead> reader, BiFunction<Instant, String, ReadCursor> buildCursor) {
         AtomicReference<IntakeResult> result = new AtomicReference<>();
         tokenCursorLock.run(lockKey, () -> {
-            ReadCursor cursor = cursorStore.load(sourceType, TENANT_ID);
+            ReadCursor cursor = cursorStore.load(sourceType, tenantId);
             Instant asOf = Instant.now();
             TokenRead read = reader.apply(cursor);
             IntakeResult r = lane.run(SourceRecordGrouper.groupByCorrelationId(read.records()).stream(), asOf);
@@ -150,7 +179,11 @@ public class UnstructuredIntakeController {
             // mode) - leave whatever's already stored untouched rather than overwriting a real
             // token with nothing.
             if (r.rejected() == 0 && read.token() != null) {
-                cursorStore.save(sourceType, TENANT_ID, buildCursor.apply(asOf, read.token()));
+                cursorStore.save(sourceType, tenantId, buildCursor.apply(asOf, read.token()));
+                log.info("{} cursor saved: tokenPresent=yes, rejected={}", sourceType, r.rejected());
+            } else {
+                log.info("{} cursor save skipped: rejected={}, tokenPresent={}",
+                        sourceType, r.rejected(), read.token() != null ? "yes" : "no");
             }
             result.set(r);
         });

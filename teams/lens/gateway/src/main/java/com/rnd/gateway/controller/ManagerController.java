@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -100,8 +101,13 @@ public class ManagerController {
                     .toUriString();
             logger.debug("Forwarding to BFF: {}", bffUrl);
 
+            // BFF counts the projects from the acting user's Inbox tasks. Mock
+            // identity, same as ManagerDashboardController (TODO Auth stage 2).
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-User-Id", "mgr_001");
+            headers.set("X-User-Role", "MANAGER");
             ResponseEntity<ManagerProjectDTO[]> bffResponse = restTemplate.exchange(
-                    bffUrl, HttpMethod.GET, new HttpEntity<>(null), ManagerProjectDTO[].class);
+                    bffUrl, HttpMethod.GET, new HttpEntity<>(headers), ManagerProjectDTO[].class);
 
             ManagerProjectDTO[] projects = bffResponse.getBody();
             if (projects == null) {

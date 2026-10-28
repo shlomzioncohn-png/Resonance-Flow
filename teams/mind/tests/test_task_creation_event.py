@@ -155,3 +155,31 @@ def test_a_blank_title_fails_here_rather_than_at_inbox(blank: str) -> None:
 
     with pytest.raises(ValueError, match="title"):
         to_creation_requested_event(blank_title, CORRELATION_ID)
+
+
+# --- the suggested owner (#132, Inbox #747: fields 20 and 21) --------------------
+
+OWNER = UUID("3c9d2b7e-5f1a-4e8c-9b6d-2a7f4e1c8d30")
+
+
+def test_a_suggested_owner_is_sent_as_its_id_and_confidence() -> None:
+    event = to_creation_requested_event(
+        _request(suggested_owner_user_id=OWNER, suggested_owner_confidence=0.7), CORRELATION_ID
+    )
+
+    assert event.suggested_owner_user_id == str(OWNER)
+    assert event.suggested_owner_confidence == 0.7
+
+
+def test_no_owner_leaves_both_unset() -> None:
+    event = to_creation_requested_event(_request(), CORRELATION_ID)
+
+    assert not event.HasField("suggested_owner_user_id")
+    assert not event.HasField("suggested_owner_confidence")
+
+
+def test_a_confidence_without_its_owner_fails_here_rather_than_at_inbox() -> None:
+    """Inbox rejects the whole task for a confidence with no user id."""
+
+    with pytest.raises(ValueError, match="suggested_owner_confidence"):
+        to_creation_requested_event(_request(suggested_owner_confidence=0.7), CORRELATION_ID)

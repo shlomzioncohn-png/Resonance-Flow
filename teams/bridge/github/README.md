@@ -65,6 +65,7 @@ All values are overridable through `application.yml`, command-line arguments or 
 | `GITHUB_SYNC_CRON_EXPRESSION` | `0 0 2 * * ?` | Cron expression for the scheduled sync (default: 02:00 daily). |
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka broker list. |
 | `bridge.structured-tasks-topic` | `bridge.structured.tasks` | Kafka topic used by the shared `KafkaPayloadPublisher`. |
+| `CRM_ORGANIZATION_ID` | empty | Inbox tenant UUID stamped onto every GitHub task's `organizationId` (via `bridge.organization-id`). Required under the `kafka` profile - Inbox's `tasks.tenant_id` is NOT NULL. Blank leaves it `null` (local `LoggingPayloadPublisher` runs only). |
 
 ## API Endpoints
 
@@ -80,9 +81,11 @@ All values are overridable through `application.yml`, command-line arguments or 
   {
     "owner": "KamaTechOrg",
     "repo": "Resonance-Flow",
+    "fetched": 15,
     "published": 12
   }
   ```
+  `fetched` is how many tasks the client pulled; `published` counts only records that were actually published - a record that fails validation/publish is logged and excluded, not counted.
 - **Error Response**: `500 Internal Server Error`
   ```json
   {

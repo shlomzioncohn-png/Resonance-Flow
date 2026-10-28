@@ -1,5 +1,6 @@
 package com.rnd.gateway.controller;
 
+import com.rnd.gateway.dto.TaskActivityDTO;
 import com.rnd.gateway.dto.TaskDTO;
 import com.rnd.gateway.dto.TaskListResponseDTO;
 import com.rnd.gateway.dto.TaskRecommendationDTO;
@@ -102,12 +103,14 @@ public class WorkspaceController {
 
     /**
      * Extract userId from JWT authentication.
-     * If no JWT found, returns 401 Unauthorized.
-     * 
+     * If no JWT found: the mock user in dev-mode (like the other workspace
+     * endpoints - while app.auth.enabled is off there is never a JWT here),
+     * otherwise 401 Unauthorized.
+     *
      * @return userId from JWT
-     * @throws ResponseStatusException with 401 if JWT not found
+     * @throws ResponseStatusException with 401 if JWT not found outside dev-mode
      */
-    private String getUserIdFromJwt() {
+    private String getUserIdFromJwt(String endpoint) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         
         if (auth != null && auth.getPrincipal() instanceof org.springframework.security.oauth2.jwt.Jwt) {
@@ -120,6 +123,10 @@ public class WorkspaceController {
             }
         }
         
+        if (devMode) {
+            return getMockUserId(endpoint);
+        }
+
         // No JWT found - return 401 Unauthorized
         logger.warn("No JWT token found in request");
         throw new ResponseStatusException(
@@ -293,7 +300,7 @@ public class WorkspaceController {
             @Parameter(description = "Page size (default 20, clamped to 1-100)")
             @RequestParam(required = false) Integer size) {
 
-        String userId = getUserIdFromJwt();
+        String userId = getUserIdFromJwt("workspace.tasks");
 
         logger.info("Task list request - userId: {}, filter: {}, search: {}, page: {}, size: {}",
                 userId, filter, search, page, size);
@@ -462,6 +469,59 @@ public class WorkspaceController {
 
         } catch (Exception e) {
             logger.error("Unexpected error fetching task details for taskId: {}", taskId, e);
+            throw new ServiceUnavailableException("bff", "Unexpected error communicating with BFF");
+        }
+    }
+
+    /**
+     * Task activity - the history behind the task page's Activity tab.
+     *
+     * Request: GET /api/workspace/tasks/{taskId}/activity
+     *
+     * Response: { items: [...newest first], statusHistoryUnavailable, dependencyHistoryUnavailable }
+     * BFF reads it from Chain with the user's own tenant; nothing about the
+     * tenant comes from the Frontend.
+     */
+    @Operation(summary = "Get task activity",
+            description = "Status, blocking and dependency changes from Chain, newest first. Read-only.")
+    @GetMapping("/tasks/{taskId}/activity")
+    public ResponseEntity<TaskActivityDTO> getTaskActivity(@PathVariable String taskId) {
+
+        String userId = getMockUserId("workspace.activity"); // TODO: extract from JWT
+
+        logger.info("Task activity request - userId: {}, taskId: {}", userId, taskId);
+
+        try {
+            String bffUrl = UriComponentsBuilder.fromHttpUrl(bffServiceUrl)
+                    .path(bffTasksPath + "/{taskId}/activity")
+                    .buildAndExpand(taskId)
+                    .toUriString();
+
+            ResponseEntity<TaskActivityDTO> bffResponse = restTemplate.exchange(
+                    bffUrl, HttpMethod.GET, new HttpEntity<>(buildHeaders(userId)), TaskActivityDTO.class);
+
+            TaskActivityDTO activity = bffResponse.getBody();
+            if (activity == null) {
+                throw new ServiceUnavailableException("bff", "BFF returned empty response");
+            }
+            return ResponseEntity.ok(activity);
+
+        } catch (ServiceUnavailableException | GatewayTimeoutException | ResponseStatusException e) {
+            throw e;
+        } catch (ResourceAccessException e) {
+            if (e.getCause() instanceof SocketTimeoutException) {
+                logger.error("BFF read timeout for activity of taskId: {}", taskId, e);
+                throw new GatewayTimeoutException("bff", bffReadTimeoutMs, "BFF did not respond in time");
+            }
+            logger.error("BFF unreachable for activity of taskId: {}", taskId, e);
+            throw new ServiceUnavailableException("bff", "BFF is currently unavailable");
+
+        } catch (HttpStatusCodeException e) {
+            logger.warn("BFF returned {} for activity of taskId: {}", e.getStatusCode(), taskId);
+            throw new ResponseStatusException(e.getStatusCode(), bffErrorReason(e));
+
+        } catch (Exception e) {
+            logger.error("Unexpected error fetching activity for taskId: {}", taskId, e);
             throw new ServiceUnavailableException("bff", "Unexpected error communicating with BFF");
         }
     }

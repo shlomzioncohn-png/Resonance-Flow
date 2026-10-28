@@ -9,6 +9,10 @@ dependencies = [
     # core
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
+    # The IANA zone database zoneinfo reads deadlines in (config.DeadlineSettings,
+    # #960). Windows and slim images have no system copy; it was only here
+    # before as some other package's dependency.
+    "tzdata",
     "fastapi",
     "uvicorn",
     # /metrics for Prometheus (src/mind/api/main.py)

@@ -20,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class JiraIssueMapperTest {
 
-    private final JiraIssueMapper mapper = new JiraIssueMapper(new EnrichmentProperties(), new NoOpTaskEnricher());
+    private final JiraIssueMapper mapper = new JiraIssueMapper(new EnrichmentProperties(), new NoOpTaskEnricher(), "");
 
     @Test
     void map_shouldConvertOpenIssueToNewTask() {

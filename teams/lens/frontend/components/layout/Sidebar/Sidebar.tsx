@@ -37,12 +37,8 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
   const sidebarDivider = theme.palette.sidebar.divider;
   const sidebarHover = theme.palette.sidebar.hover;
 
-  const visibleSections =
-    role === 'TENANT_ADMIN' || role === 'TEAM_LEAD'
-      ? navSections.filter((section) => section.label !== 'Employee')
-      : role === 'EMPLOYEE'
-        ? navSections.filter((section) => section.label === 'Employee')
-        : navSections;
+  // Signed out: nothing - AppShell is about to send the user to /login anyway
+  const visibleSections = role ? navSections.filter((section) => section.roles.includes(role)) : [];
 
   const content = (
     <Box

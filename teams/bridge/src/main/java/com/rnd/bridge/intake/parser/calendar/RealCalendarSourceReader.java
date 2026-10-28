@@ -12,6 +12,7 @@ import com.google.api.services.calendar.model.EventAttendee;
 import com.google.api.services.calendar.model.EventDateTime;
 import com.google.api.services.calendar.model.Events;
 import com.rnd.bridge.core.ReadCursor;
+import com.rnd.bridge.intake.config.BridgeTenantId;
 import com.rnd.bridge.intake.config.CalendarImportProperties;
 import com.rnd.bridge.intake.google.GoogleCredentialsProvider;
 import com.rnd.bridge.intake.model.CalendarEventState;
@@ -24,7 +25,10 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,6 +42,13 @@ import org.springframework.beans.factory.annotation.Autowired;
  * cursor.syncToken() switches events.list to incremental mode (only events created/updated/
  * deleted since the last sync, regardless of how old the event itself is - unlike Slack's
  * "oldest", which filters by original send time and would miss an old event edited today).
+ * listPage never sets orderBy - Google rejects combining it with syncToken, but a full
+ * (token-less) list request is where this actually bit: orderBy("startTime") being present
+ * unconditionally meant Google never returned a nextSyncToken from a full sync, so the cursor
+ * was never saved (UnstructuredIntakeController.runTokenBasedSource's rejected==0 &&
+ * token!=null save gate never fired) and every run fell back to a full, unbounded re-list.
+ * readPages sorts the accumulated records by occurredAt once, after paging completes, instead -
+ * the same ordering guarantee without the orderBy/syncToken conflict.
  * A 410 response means the token expired server-side; the only recovery is a full re-sync -
  * readPages(null) does exactly that, and its resulting nextSyncToken (a fresh baseline, not
  * a continuation of the expired one) is returned as part of that same CalendarReadResult.
@@ -60,17 +71,21 @@ import org.springframework.beans.factory.annotation.Autowired;
 @ConditionalOnProperty(prefix = "bridge.intake.calendar", name = "mode", havingValue = "real")
 public class RealCalendarSourceReader implements CalendarSourceReader {
 
+    private static final Logger log = LoggerFactory.getLogger(RealCalendarSourceReader.class);
+
     private final GoogleCredentialsProvider credentialsProvider;
     private final CalendarImportProperties properties;
+    private final BridgeTenantId tenantId;
     private final CalendarEventStateReconciler eventStateReconciler;
     private Calendar client;
 
     @Autowired
     public RealCalendarSourceReader(
             GoogleCredentialsProvider credentialsProvider, CalendarImportProperties properties,
-            CalendarEventStateReconciler eventStateReconciler) {
+            BridgeTenantId tenantId, CalendarEventStateReconciler eventStateReconciler) {
         this.credentialsProvider = credentialsProvider;
         this.properties = properties;
+        this.tenantId = tenantId;
         this.eventStateReconciler = eventStateReconciler;
     }
 
@@ -78,21 +93,28 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
      * client() would otherwise lazily build from live Google credentials. */
     RealCalendarSourceReader(
             GoogleCredentialsProvider credentialsProvider, CalendarImportProperties properties,
-            CalendarEventStateReconciler eventStateReconciler, Calendar client) {
-        this(credentialsProvider, properties, eventStateReconciler);
+            BridgeTenantId tenantId, CalendarEventStateReconciler eventStateReconciler, Calendar client) {
+        this(credentialsProvider, properties, tenantId, eventStateReconciler);
         this.client = client;
     }
 
     @Override
     public CalendarReadResult read(ReadCursor cursor) {
-        String syncToken = cursor == null ? null : cursor.syncToken();
+        String syncToken = cursor == null ? null : cursor.token();
+        log.info("Calendar read starting: storedToken={}", syncToken != null ? "present" : "absent");
         try {
-            return readPages(syncToken);
+            CalendarReadResult result = readPages(syncToken);
+            logResult(syncToken == null ? "full" : "incremental", result);
+            return result;
         } catch (GoogleJsonResponseException e) {
             if (e.getStatusCode() == 410 && syncToken != null) {
                 // Expired syncToken - the only way back is a full sync from scratch.
+                log.info("Calendar incremental read got 410 on stored syncToken - falling back to full resync");
+                log.warn("Calendar sync token expired (410) - falling back to full resync");
                 try {
-                    return readPages(null);
+                    CalendarReadResult result = readPages(null);
+                    logResult("full (post-410 fallback)", result);
+                    return result;
                 } catch (IOException retryFailure) {
                     throw new UncheckedIOException(
                             "Failed to list Calendar events for calendar " + properties.calendarId(), retryFailure);
@@ -104,6 +126,11 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
             throw new UncheckedIOException(
                     "Failed to list Calendar events for calendar " + properties.calendarId(), e);
         }
+    }
+
+    private void logResult(String path, CalendarReadResult result) {
+        log.info("Calendar read via {} path complete: records={}, nextToken={}",
+                path, result.records().size(), result.nextSyncToken() != null ? "present" : "null");
     }
 
     private CalendarReadResult readPages(String syncToken) throws IOException {
@@ -122,8 +149,18 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
             pageToken = page.getNextPageToken();
             if (pageToken == null) {
                 nextSyncToken = page.getNextSyncToken();
+                if (nextSyncToken == null) {
+                    // Known-silent case until now: a full list finishing with no nextSyncToken
+                    // leaves UnstructuredIntakeController's save gate (rejected==0 &&
+                    // token!=null) permanently unsatisfied, so the cursor is never persisted and
+                    // every subsequent run repeats this same full, unbounded list.
+                    log.warn("Calendar full list for calendar {} finished with no nextSyncToken - "
+                            + "the cursor will not be saved and the next run will be another full list",
+                            properties.calendarId());
+                }
             }
         } while (pageToken != null);
+        records.sort(Comparator.comparing(SourceRecord::occurredAt));
         // records/nextSyncToken are purely local to this call - returned together, never stashed
         // anywhere shared (see class javadoc).
         return new CalendarReadResult(records, nextSyncToken);
@@ -135,10 +172,9 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
                 .setPageToken(pageToken);
         if (syncToken != null) {
             // orderBy/timeMin/timeMax and a few others can't be combined with syncToken -
-            // Google rejects the request outright if they are.
+            // Google rejects the request outright if they are. orderBy is never set on either
+            // branch now (see class javadoc) - readPages sorts the accumulated records instead.
             request.setSyncToken(syncToken);
-        } else {
-            request.setOrderBy("startTime");
         }
         return request.execute();
     }
@@ -166,13 +202,14 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
         // every read - see CalendarEventStateReconciler for the first-seen/retry/updated
         // decision, keyed on event.getId() (stable) and event.getEtag() (Google's per-version
         // change marker).
-        CalendarEventState state = eventStateReconciler.resolve(properties.tenantId(), event.getId(), event.getEtag());
+        CalendarEventState state = eventStateReconciler.resolve(tenantId.value(), event.getId(), event.getEtag());
         // Calendar attachments are deferred until RealDriveSourceReader exists (see class
         // javadoc) - events land without them for now, so attachmentCount is always 0 here.
         return new SourceRecord(
-                RawSourceType.CALENDAR, properties.tenantId(), event.getId(), state.correlationId(),
+                RawSourceType.CALENDAR, tenantId.value(), event.getId(), state.correlationId(),
                 occurredAt, organizer, participants(event, organizer), event.getSummary(), event.getDescription(),
-                event.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), state.revision());
+                event.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), state.revision())
+                .withSourceRef(event.getId());
     }
 
     private static boolean isCancelled(Event event) {
@@ -193,15 +230,15 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
      * a normal edit (see class javadoc) - only changeType marks this as a cancellation.
      */
     private SourceRecord toCancelledSourceRecord(Event event) {
-        CalendarEventState state = eventStateReconciler.resolve(properties.tenantId(), event.getId(), event.getEtag());
+        CalendarEventState state = eventStateReconciler.resolve(tenantId.value(), event.getId(), event.getEtag());
         Instant occurredAt = event.getUpdated() != null
                 ? Instant.ofEpochMilli(event.getUpdated().getValue())
                 : Instant.now();
         return new SourceRecord(
-                RawSourceType.CALENDAR, properties.tenantId(), event.getId(), state.correlationId(),
+                RawSourceType.CALENDAR, tenantId.value(), event.getId(), state.correlationId(),
                 occurredAt, null, List.of(), null, null,
                 event.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), state.revision(),
-                ChangeType.DELETE_REVIEW);
+                ChangeType.DELETE_REVIEW).withSourceRef(event.getId());
     }
 
     /** Organizer plus every attendee - the Calendar equivalent of an email's To/Cc list. */

@@ -25,17 +25,31 @@ task.updated had already been sent: the older score goes out again until the
 next update.
 
 A score can also change without any Inbox event: R3's hierarchical propagation
-(#474) changes a parent, and so its children's scores. Her code calls
-`rescore(child_id)` for each child. That only queues the id, so it is safe from
-anywhere, including from inside the model's own `score()` while the lock is
-held. A separate worker (`run_rescores`) takes ids off the queue and scores each
-child again with this publisher's model on its newest state. A request for a
-task already waiting in the queue is dropped, and a re-score whose mind_score
-equals the last one published is not sent, so a cycle in the hierarchy, or
-repeated requests, cannot flood Chain. Propagation should still ask for a child
-only when its parent's score actually changed. Since the state lives in memory,
-a child no Inbox event has reached since start-up cannot be re-scored: it is
-logged and skipped until its next event.
+(#474) changes a parent, and so its children's scores. After a send, the
+caller runs `_cascade` outside the lock (a network call must not hold up
+every other task's scoring), which asks Chain for the task's direct
+children and calls `rescore(child_id)` for each -- but only when that send's
+`mind_score` differed from the last one published by at least
+`_CASCADE_CHANGE_TOLERANCE` -- never exact equality, since
+`mind_score` includes time pressure, which drifts every call just because
+real time passed. A fixed tolerance on the difference (not rounding, which
+would flip a tiny move across a bucket edge into "changed") absorbs that
+drift while still catching a real one, which is also what stops two tasks
+that are each other's ancestor from re-triggering each other forever.
+`rescore` only queues the id, so it is safe to call from anywhere. A
+separate worker (`run_rescores`) takes ids off the queue and re-scores each
+on its newest state; a request already queued is dropped. A child no
+Inbox event has reached since start-up cannot be re-scored, and a change
+stuck behind one is not guaranteed to reach anything past it -- a known
+limitation, not something this fixes.
+
+The other half of that integration is `cached_task(task_id)`: propagation
+re-scores an ancestor's own last-known state with the baseline, rather than
+reading another task's already-hierarchy-adjusted score (averaging does not
+compose recursively the way summing once did -- see hierarchical_model.py).
+The same in-memory limitation applies: an ancestor no Inbox event has
+reached since start-up returns None here, which propagation then leaves out
+of its average rather than counting as 0.
 
 Known limitation: a score is not re-sent just because time passes, although
 time pressure rises as a deadline nears. Chain keeps the last score sent.
@@ -54,8 +68,11 @@ Two kinds of error, handled differently:
   already requires propagation to fall back to the baseline score when Chain's
   traversal API is unavailable.
 
-Known limitation: the lock is held while the model scores, so a model that calls
-the network (#474's traversal of Chain) holds up the other topic meanwhile.
+Known limitation: the lock is still held while the model scores, so
+`ChainAncestorSource`'s one call to Chain per task (#474) holds up the other
+topic meanwhile -- a short, bounded timeout (`ChainHierarchySettings`), not
+eliminated. `_cascade`'s own call moved outside the lock (round-9 review):
+it no longer adds a second timeout window on top.
 """
 
 from __future__ import annotations
@@ -76,6 +93,7 @@ from mind.contracts.task_score_proposed import TaskScoreProposed
 from mind.evaluation.interfaces import ScoreContext, ScoreResult
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
+from mind.scoring.chain_hierarchy_client import ChainHierarchyClient
 from mind.scoring.inbox_task import InboxTask, to_scoring_task
 from mind.scoring.inputs import ScorableTask
 from mind.scoring.score_event import build_score_event
@@ -87,6 +105,13 @@ logger = logging.getLogger(__name__)
 # task.updated of the same moment.
 _CREATED = 0
 _UPDATED = 1
+
+#: mind_score tolerance for "did this actually change" -- coarse enough to
+#: absorb time-pressure's per-call drift, fine enough to catch a real change.
+#: A fixed tolerance on the difference, not rounding: rounding first would
+#: flip a tiny, meaningless move across a bucket edge (0.12349 -> 0.12351)
+#: into "changed", and could hide a real move that stays inside one bucket.
+_CASCADE_CHANGE_TOLERANCE = 0.0005
 
 # How long the rescore worker waits on an empty queue before checking whether
 # it was asked to stop: a shutdown waits at most this long for it.
@@ -149,13 +174,21 @@ class ScorePublisher:
         sink: ScoreSink,
         model: TaskScorer | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        children_client: ChainHierarchyClient | None = None,
     ) -> None:
         self._sink = sink
         self._model = model if model is not None else SegmentedRankingModel()
         self._clock = clock
+        # None in the harness (a one-shot run has nothing to cascade to) and
+        # in any test that doesn't care about #474's cascade.
+        self._children_client = children_client
         self._state: dict[str, _TaskState] = {}
         # One consumer thread per topic, and the rescore worker, share it.
-        self._lock = threading.Lock()
+        # Reentrant: scoring a task can call cached_task() for an ancestor
+        # (#474's ChainAncestorSource) from the same thread that already
+        # holds this lock in _publish_if_changed/_rescore_now -- a plain
+        # Lock would deadlock that thread against itself.
+        self._lock = threading.RLock()
         # Task ids waiting to be re-scored; see rescore. `_pending` holds the
         # same ids so a repeated request is dropped. It has its own lock, never
         # the one above: rescore may be called while that one is held.
@@ -215,7 +248,22 @@ class ScorePublisher:
             if state.published == inputs:
                 logger.debug("score_publisher: task %s unchanged, skipping", task.task_id)
                 return
-            self._score_and_send(state, inputs)
+            _sent, cascade_task_id = self._score_and_send(state, inputs)
+        # Outside the lock: the children lookup is a network call, and must
+        # not hold up every other task's scoring while it runs (round-9 review).
+        if cascade_task_id is not None:
+            self._cascade(cascade_task_id)
+
+    def cached_task(self, task_id: str) -> InboxTask | None:
+        """`task_id`'s last-known state, or None if Mind has not seen an
+        Inbox event for it since start-up. #474's `ChainAncestorSource`
+        re-scores an ancestor's state through this to get its own,
+        un-propagated value -- never Chain's own, unrelated `score`, and
+        never this task's own already-hierarchy-adjusted result.
+        """
+        with self._lock:
+            state = self._state.get(task_id)
+            return None if state is None else state.task
 
     def rescore(self, task_id: str) -> None:
         """Ask for a task to be scored again, with no Inbox event (#474).
@@ -289,7 +337,7 @@ class ScorePublisher:
                 return False
             inputs = _scoring_inputs_hash(state.task)
             try:
-                return self._score_and_send(state, inputs, only_if_changed=True)
+                sent, cascade_task_id = self._score_and_send(state, inputs, only_if_changed=True)
             except Exception:
                 # Only a send failure gets here: _score_and_send logs and skips
                 # a task that cannot be scored.
@@ -298,14 +346,23 @@ class ScorePublisher:
                 # so the worker picks it up when it runs again.
                 self.rescore(task_id)
                 raise
+        # Outside the lock -- see _publish_if_changed.
+        if cascade_task_id is not None:
+            self._cascade(cascade_task_id)
+        return sent
 
     def _score_and_send(
         self, state: _TaskState, inputs: bytes, *, only_if_changed: bool = False
-    ) -> bool:
+    ) -> tuple[bool, str | None]:
         """Score `state.task`, publish it, and record it. Caller holds the lock.
 
-        Returns False, having sent nothing, when the task cannot be scored, or,
-        with `only_if_changed`, when its mind_score equals the last one sent.
+        Returns `(sent, cascade_task_id)`. `sent` is False, having sent
+        nothing, when the task cannot be scored, or, with `only_if_changed`,
+        when its mind_score is unchanged within `_CASCADE_CHANGE_TOLERANCE`.
+        `cascade_task_id` is this task's id when `_cascade` should run for
+        it, or None -- returned rather than called here, so the caller can
+        run it after releasing the lock (a network call must not hold up
+        every other task's scoring).
         """
         task_id = state.task.task_id
         # Aware, in UTC, like the deadlines the conversion builds.
@@ -318,15 +375,42 @@ class ScorePublisher:
             # base_score, a score outside 0..1, a model bug for this task):
             # skipped, so one broken task does not stop all scoring.
             logger.exception("score_publisher: task %s cannot be scored, skipping", task_id)
-            return False
-        if only_if_changed and payload.mind_score == state.last_score:
+            return False, None
+        previous_score = state.last_score
+        changed = previous_score is None or (
+            abs(payload.mind_score - previous_score) >= _CASCADE_CHANGE_TOLERANCE
+        )
+        if only_if_changed and not changed:
             # Nothing for Chain to learn; also what ends a cycle of re-scores.
             logger.debug("score_publisher: task %s re-scored unchanged, not sent", task_id)
-            return False
+            return False, None
         # Outside the try: a Kafka error is transient, so it propagates and the
         # message is retried.
         self._sink.send(payload)
         # Recorded only after a successful send, so a failed one is retried.
         state.published = inputs
         state.last_score = payload.mind_score
-        return True
+        return True, (task_id if changed else None)
+
+    def _cascade(self, task_id: str) -> None:
+        """#474: tell each direct child its ancestor's share of the score may
+        have moved, so it gets a chance to recompute its own mean. Only
+        called after a send whose mind_score genuinely differed (see
+        `_score_and_send`), outside the lock -- never unconditionally, and
+        never from inside the model's own `score()`.
+
+        Never raises: unlike `ChainHierarchyClient`'s own timeouts/HTTP
+        errors (already degraded to []), anything else -- a bad URL
+        setting, a bug -- would otherwise escape uncaught here on the
+        rescore worker thread, which `BackgroundThreads` would then retry
+        from scratch rather than just skip this one cascade.
+        """
+        if self._children_client is None:
+            return
+        try:
+            children = self._children_client.get_direct_children(task_id)
+        except Exception:
+            logger.exception("score_publisher: could not fetch children of %s, skipping", task_id)
+            return
+        for child_id in children:
+            self.rescore(child_id)
