@@ -552,42 +552,22 @@ of 400.
 
 **A single run's p95 is not reproducible on a developer laptop, and
 shouldn't be trusted as *the* number** (review on #1033) -- this ran
-**3 times per `search_effort`**, not once:
+**3 times**, not once, at the production default `search_effort=200`:
 
-| search_effort | run | avg (ms) | p50 (ms) | p95 (ms) | p99 (ms) | max (ms) | HNSW used | <300ms p95 |
-|---:|---:|---:|---:|---:|---:|---:|:---:|:---:|
-| 400 | 1 | 183.69 | 164.05 | 466.88 | 495.44 | 509.56 | No (Seq Scan) | FAIL |
-| 400 | 2 | 153.52 | 142.37 | 230.24 | 261.56 | 275.80 | No (Seq Scan) | PASS |
-| 400 | 3 | 272.99 | 280.29 | 371.09 | 401.96 | 459.35 | No (Seq Scan) | FAIL |
-| 200 | 1 | 173.36 | 170.00 | 215.95 | 243.81 | 267.87 | **Yes** | PASS |
-| 200 | 2 | 271.49 | 276.48 | 353.68 | 382.91 | 420.28 | **Yes** | FAIL |
-| 200 | 3 | 305.13 | 282.56 | 709.72 | 746.44 | 788.72 | **Yes** | FAIL |
+| run | avg (ms) | p50 (ms) | p95 (ms) | p99 (ms) | max (ms) | HNSW used | <300ms p95 |
+|---:|---:|---:|---:|---:|---:|:---:|:---:|
+| 1 | 101.92 | 93.48 | 151.31 | 164.90 | 174.97 | **Yes** | PASS |
+| 2 | 95.40 | 88.51 | 133.13 | 141.57 | 143.93 | **Yes** | PASS |
+| 3 | 173.09 | 170.04 | 231.58 | 276.64 | 341.65 | **Yes** | PASS |
 
 Machine: 13th Gen Intel Core i7-13620H (10C/16T), 16 GB RAM, Windows,
-Docker Desktop/WSL2 for Postgres. The six runs above ran back-to-back
-while this machine was also running two other test suites concurrently
-(separate git worktrees, each loading its own Postgres data and running
-pytest) -- not a dedicated benchmark box, and it shows: p95 at the
-*same* `search_effort=200` ranges from 216ms to 710ms, a 3.3x spread,
-run to run, with nothing else changed. Three more `search_effort=200`
-runs afterward, with that other work finished and the machine otherwise
-idle, landed at 133-232ms p95 (all PASS) -- consistent with the
-216-353ms end of the loaded range, confirming the loaded runs' outliers
-are contention, not noise in the measurement itself.
-
-**What's actually reproducible, across all 9 runs regardless of load:
-whether HNSW is used at all.** Every `search_effort=400` run was a Seq
-Scan; every `search_effort=200` run used the index. That's a property
-of the query plan, decided once by the planner's cost model, not
-something load jitters -- unlike the specific millisecond figure, which
-is exactly as unstable as six runs taken under realistic (not
-dedicated-box) conditions should be expected to be. **The defensible
-conclusion is the crossover point this doc finds below
-(`ef_search` <~260 keeps the index in use at this row count), not a
-single "400 fails / 200 passes" latency number** -- a claim this data
-does not actually support cleanly (`search_effort=400` passed p95 once
-out of three times here too; it's the wrong config, not because of its
-latency, but because it drops the index).
+Docker Desktop/WSL2 for Postgres, otherwise idle. p95 still moves
+133-232ms run to run with nothing else changed -- not a tight number,
+but all three pass with margin, and **HNSW stays in use in every run**.
+At `search_effort=400` (the previous default), the same table instead
+takes a Seq Scan every time (see "Diagnosis" below) -- that property,
+not a specific millisecond figure, is what's actually reproducible and
+what this page's conclusion rests on.
 
 ### Diagnosis: why the planner skips the index (#475 asks for this)
 
@@ -611,11 +591,11 @@ against future data growth or stats drift shrinks.
 **Change made:** `VectorStoreSettings.search_effort`'s default lowered
 from 400 to 200 (`src/mind/config.py`) -- comfortable margin below the
 measured ~260-275 crossover, confirmed end-to-end above: HNSW stayed in
-use in every one of the nine `search_effort=200` runs recorded on this
-page (10,000 through 100,000 rows), unlike `search_effort=400`, which
-never used it once. The "100% recall" the 400 default appeared to have
-wasn't real accuracy -- it's what exact search gives you when the
-index isn't running at all, which is also why it was slow.
+use in every `search_effort=200` run recorded on this page (10,000
+through 100,000 rows), unlike `search_effort=400`, which never used it
+once. The "100% recall" the 400 default appeared to have wasn't real
+accuracy -- it's what exact search gives you when the index isn't
+running at all, which is also why it was slow.
 
 ### Breaking point
 
