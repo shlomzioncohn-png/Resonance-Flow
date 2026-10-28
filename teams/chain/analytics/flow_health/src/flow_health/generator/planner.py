@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 from .config import GeneratorConfig
+from .attributes import plan_task_attributes
 from .controls import plant_control_chains
 from .diseases import plant_diseases
 from .model import (DEAD_END_KINDS, TIER_DEP_WEIGHTS, TIER_PROFILES, TIERS, EdgeBatch, Project, TaskSpec,
@@ -33,6 +34,7 @@ def plan_world(cfg: GeneratorConfig) -> World:
     tasks = list(normal)
     diseases = plant_diseases(cfg, projects, normal, tasks, edges)
     controls = plant_control_chains(cfg, projects, normal, tasks, edges)
+    plan_task_attributes(cfg, projects, tasks)
     tasks.sort(key=lambda t: t.created_at)  # stable: ties keep planning order
     edges.sort(key=lambda e: e.at)
     _assert_acyclic_by_rank(tasks, edges)
@@ -138,13 +140,40 @@ def _plan_normal(cfg: GeneratorConfig, rng: random.Random) -> tuple[list[TaskSpe
         if (a.id, b.id) not in added_at and at < cutoff:
             edges.append(EdgeBatch(at, "REJECTED", a.id, (b.id,), "MIND"))
 
+    removed_edges = set()
     for (a_id, b_id), at in sorted(added_at.items(), key=lambda kv: kv[1]):
         if rng.random() >= cfg.removal_rate:
             continue
         removed = snap_to_work_time(at + timedelta(days=rng.lognormvariate(math.log(3.0), 0.8)), rng)
         if removed < cutoff:
             edges.append(EdgeBatch(removed, "REMOVED", a_id, (b_id,), rng.choice(("USER", "MIND"))))
+            removed_edges.add((a_id, b_id))
+    _plan_replanning(cfg, rng, tasks, edges, added_at, removed_edges, cutoff)
     return tasks, edges
+
+
+REPLAN_GAP_DAYS = (0.5, 2.5)  # about as quick as a recurring blocker's toggles, so tempo alone cannot tell them apart
+
+
+def _plan_replanning(cfg: GeneratorConfig, rng: random.Random, tasks: list[TaskSpec], edges: list[EdgeBatch],
+                     added_at: dict, removed_edges: set, cutoff: datetime) -> None:
+    """Healthy look-alikes of a recurring blocker: a dependency is taken out and put back once or twice, so the
+    task is blocked 2 or 3 times in a few days. What differs from the disease is that the blocker then finishes
+    instead of staying stuck, so a rule that only counts blocks also flags these healthy tasks."""
+    by_id = {t.id: t for t in tasks}
+    eligible = [(a, b) for (a, b) in added_at if (a, b) not in removed_edges and by_id[a].kind == "normal"
+                and (by_id[b].kind == "slow_legit" or by_id[b].tier in ("tactical", "strategic"))]  # long-lived targets
+    for a_id, b_id in rng.sample(eligible, min(int(cfg.replan_rate * len(tasks)), len(eligible))):
+        at = added_at[(a_id, b_id)]
+        for _ in range(rng.choice((1, 2))):  # extra blocks: 2 or 3 blocks in total
+            out = snap_to_work_time(at + timedelta(days=rng.uniform(*REPLAN_GAP_DAYS)), rng)  # while the target is still open
+            back = snap_to_work_time(out + timedelta(days=rng.uniform(*REPLAN_GAP_DAYS)), rng)
+            if back >= cutoff:
+                break
+            edges.append(EdgeBatch(out, "REMOVED", a_id, (b_id,), rng.choice(("USER", "MIND"))))
+            edges.append(EdgeBatch(back, "ADDED", a_id, (b_id,), pick_source(rng)))
+            at = back
+        by_id[a_id].kind = "replanned_legit"
 
 
 def _pick_targets(rng: random.Random, spec: TaskSpec, k: int, window: int, pools: _Pools) -> list[TaskSpec]:

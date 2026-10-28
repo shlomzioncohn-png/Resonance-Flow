@@ -1,9 +1,18 @@
 # Team Bridge - Service
 
-Foundation module for Team Bridge (source adapters & communication ingestion).
+Team Bridge's service: source adapters and communication ingestion for Resonance-Flow.
 
-This is a minimal Spring Boot skeleton. No business logic or real APIs are implemented yet - the
-goal of this stage is a clean, working Maven/Spring Boot project that later work can build on.
+Bridge has two paths into the system:
+
+- **Structured** (GitHub, Jira, HubSpot/Salesforce CRM): each item is mapped to the canonical
+  Task and published as a Protobuf `StructuredTaskEvent` to `bridge.structured.tasks`, which
+  Inbox consumes.
+- **Unstructured** (Gmail, Drive, Slack, WhatsApp, Calendar, Zoom/BigBlueButton recordings,
+  scanned documents): the raw content is landed in MinIO and a pointer `RawObjectEvent` is
+  published to `bridge.raw.landed`. Bridge never builds a Task here - Mind does.
+
+Publishing to Kafka needs the `kafka` Spring profile; without it every lane falls back to
+`LoggingPayloadPublisher`, which only logs.
 
 ## Sub-roles (4 developers)
 
@@ -20,26 +29,32 @@ goal of this stage is a clean, working Maven/Spring Boot project that later work
 - Spring Boot 3.3.13 (Maven)
 - Docker / Docker Compose
 
-The Unstructured-intake and meeting/doc/audio lanes (below) now run against real local MinIO +
-Redpanda via Docker Compose, sharing the same MinIO bucket/Kafka topic. The other 2 lanes
-(GitHub, CRM) haven't wired their infra yet.
+Locally, the Unstructured-intake and meeting/doc/audio lanes (below) run against MinIO +
+Redpanda via Docker Compose, sharing the same MinIO bucket/Kafka topic. In the cluster every lane
+runs through the shared Helm chart (`components.bridge` in
+`teams/relay/helm/resonance-flow/values.yaml`), which also sets the tenant settings
+`CRM_ORGANIZATION_ID` and `BRIDGE_TENANT_ID` - keep those two equal.
 
 ## Project structure
 
 ```
 src/main/java/com/rnd/bridge/
 ├── BridgeApplication.java   # Spring Boot entry point
-├── controller/               # shared/cross-lane (currently empty)
-├── service/                  # shared/cross-lane (currently empty)
-├── repository/
-├── dto/
-├── config/
-├── core/                      # shared pipeline contract (SourceReader/PayloadMapper/…)
+├── core/                      # shared pipeline: AbstractIntakeLane, SourceReader/PayloadMapper/…, SyncJob scheduling
+├── publish/                   # PayloadPublisher implementations (Kafka, or logging without the kafka profile)
+├── task/                      # canonical Task model, StructuredTaskEvent mapping, enrichment
+├── github/                    # Hadas's GitHub lane
+├── jira/                      # Hadas's Jira lane
+├── crm/                       # Ruth's CRM lane (HubSpot, Salesforce)
+├── intake/                    # Malki's lane — see "Unstructured-intake lane" below
+├── media/                     # Esther's lane — see "Meeting/doc/audio hand-off" below
 ├── raw/                       # shared RawObjectEvent model + validator (both unstructured lanes)
 ├── storage/                   # shared MinIO client (both unstructured lanes)
 ├── scoping/                   # shared scoping filter (Malki's lane; media lane skips it)
-├── intake/                    # Malki's lane — see "Unstructured-intake lane" below
-└── media/                     # Esther's lane — see "Meeting/doc/audio hand-off" below
+├── shared/                    # Kafka topic config shared by the unstructured lanes
+├── ai/                        # shared LLM client infrastructure (see its README.md)
+├── enrichment/                # dependency/severity/due-date suggestion types
+└── runner/                    # ManualSyncRunner
 src/main/resources/application.yml
 src/main/resources/fixtures/unstructured/   # synthetic Gmail/Drive/Slack/WhatsApp/Calendar data
 src/test/java/com/rnd/bridge/
@@ -89,8 +104,13 @@ docker compose down
 Gmail · Drive · Slack · WhatsApp · Calendar → scoping decision → land tagged raw object in
 MinIO → publish a pointer event to Kafka topic `bridge.raw.landed`. This lane never builds a
 `Task` — Mind consumes the pointer later and extracts the eventual Task from the landed object.
-No live source credentials are used yet; static fixtures under
-`src/main/resources/fixtures/unstructured/` stand in for the 5 real sources.
+Each source has a fixture reader and a real one, picked by `bridge.intake.<source>.mode`
+(`fixture` by default, `real` for the live API). Fixture mode reads the static data under
+`src/main/resources/fixtures/unstructured/`; real mode needs that source's credentials (see the
+comments next to each `mode` in `application.yml`).
+
+Real Gmail skips drafts, spam and trash; the user's own sent mail is ingested too, since it
+matters for task detection (`RealEmailSourceReader`).
 
 ### Running it locally
 
@@ -152,20 +172,26 @@ consecutive messages with no gap larger than `bridge.intake.chat.session-gap-min
 
 ### Scoping
 
-`ScopingFilterService` exists as its own class (a deliberate seam) but currently always returns
+`AllowlistScopingFilter` exists as its own class (a deliberate seam) but currently always returns
 `INCLUDED` — per direct instruction, no work-related-only filtering runs yet. Swapping in real
 filtering logic later should only touch this one class.
 
 ### RawObjectEvent schema
 
-`RawObjectEvent` matches the official JSON Schema exactly (`schemaVersion`, `objectKey`,
-`sourceType`, `tenantId`, `ingestedAt`, `scopeDecision`, `dedupKey`, `modality`, `traceId`,
-plus optional `contentType`/`sizeBytes`/`sourceTimestamp`; `language` is omitted — real
-language detection is out of scope for this skeleton). Two fields worth knowing:
-- `dedupKey` is a real `sha256:<64 hex>` digest of `sourceType + tenantId + naturalId` —
-  deterministic, so a retried publish produces the same key.
-- `traceId` is one UUID per intake run (one `POST .../run` call), shared by every event that
-  call produces — not one per individual event.
+`RawObjectEvent` (`raw/model/RawObjectEvent.java`, wire format
+`shared/proto/raw-object-event.proto`) describes one logical item - an email, a chat session,
+a recording - not one file: `schema_version`, `source_type`, `tenant_id`, `ingested_at`,
+`scope_decision`, `participants`, `source_timestamp`, `correlation_id`, `revision`,
+`change_type`, `change_significance_score`, `objects[]`, `source_ref` and an optional
+`classification`. Each file of the item is one entry in `objects[]` (its object key, content
+hash, content type, size, modality and `role`: `BODY`, `ATTACHMENT`, `SOURCE_METADATA`, …).
+Fields worth knowing:
+- `correlation_id` is deterministic per item (e.g. email: derived from tenant + Gmail message
+  id), so re-reading the same item never looks new.
+- `revision` goes up when the source item is edited; the dedup key is
+  `correlation_id:revision`, so an edit is a new event and a retry of the same revision is not.
+- `source_ref` is the platform's own id for the item (e.g. the email's `Message-ID`), or `null`
+  when there is none.
 
 ## Meeting/doc/audio hand-off (Esther)
 
@@ -215,6 +241,28 @@ Same local MinIO + Redpanda as the Unstructured-intake lane above (`docker compo
 redpanda`), no separate infra to start. Drop files into your own local folders (paths configured
 via `.env` - see `BRIDGE_MEDIA_*` in `.env.example`), then hit the endpoint:
 
+Before the first publish after the registry container (re)starts, register the schema - the
+local Apicurio registry is in-memory, and the producer never auto-registers. Register the
+**canonicalized** file, as Relay does in the cluster; registering the raw `shared/proto` file
+fails every publish with `40403`:
+
+```bash
+# from the repo root
+(cd teams/relay/schema-canonicalize && mvn -q package)
+java -jar teams/relay/schema-canonicalize/target/canonicalize.jar shared/proto raw-object-event.proto > /tmp/raw-object-event.proto
+SCHEMA_REGISTRY_URL=http://localhost:8085/apis/ccompat/v6 \
+  bash teams/relay/ci/register-schema.sh /tmp/raw-object-event.proto bridge.raw.landed-value
+```
+
+Every event carries `tenant_id` from `BRIDGE_TENANT_ID` (default `00000000-0000-0000-0000-000000000001`,
+Inbox's System tenant). It must be a UUID of a tenant that exists in Inbox - Mind passes it
+through to Inbox, and `RawObjectValidator` refuses to publish a non-UUID one.
+
+If the model call fails with `PKIX path building failed` while `curl` to Google works, the JVM
+doesn't trust a certificate your machine's HTTPS inspection inserts. Run with
+`mvn spring-boot:run -Dspring-boot.run.jvmArguments=-Djavax.net.ssl.trustStoreType=Windows-ROOT`
+(Windows) so Java uses the OS certificate store.
+
 ```bash
 curl -X POST http://localhost:8080/api/bridge/media/run
 ```
@@ -228,10 +276,11 @@ curl -X POST http://localhost:8080/api/bridge/media/run
 Each platform has its own folder and its own `source_type`; both share the same meeting handling
 (transcript and metadata sidecars, meeting categories).
 
-To have the folders polled automatically instead, set `BRIDGE_MEDIA_SCHEDULE_ENABLED=true`
-(interval `BRIDGE_MEDIA_SCHEDULE_INTERVAL`, default `PT2M`): `MediaIntakeScheduler` runs the same
-intake on a fixed delay, so a file dropped into a folder lands within one interval. A manual run
-and a scheduled run never overlap - the second one waits.
+To have the folders polled automatically instead, set `BRIDGE_MEDIA_SYNC_CRON_ENABLED=true`
+(schedule `BRIDGE_MEDIA_SYNC_CRON_EXPRESSION`, default `0 */5 * * * ?`, every 5 minutes):
+`MediaSyncJob` runs the same intake through the shared `SyncJob` mechanism (`SyncJobScheduler`),
+like the CRM and Email/Calendar/Drive syncs, so a file dropped into a folder lands within one
+interval. A manual run and a scheduled run never overlap - the second one waits.
 
 Each successfully uploaded file is moved into an `uploaded/` subfolder of wherever it came from,
 so re-triggering the endpoint only picks up genuinely new files instead of re-landing (and
@@ -316,14 +365,25 @@ item's `scope_decision` and attaches the optional `classification` object it was
 a whole; it never extracts tasks, people, dates or priority - that stays with Mind.
 
 1. **Rules first** (free, deterministic, `decided_by: RULE`): a meeting shorter than
-   `min-meeting-duration` → `TEST`; a document whose pages were *all* checked and are all
+   `min-meeting-duration` (default 30s) → `TEST`; a meeting with a single participant (distinct
+   people, so rejoins count once; unknown counts never trigger it) → `TEST`; a meeting under 3 minutes whose transcript has
+   1–14 words → `TEST`; a document whose pages were *all* checked and are all
    blank → `BLANK`. An empty transcript is deliberately *not* a rule - it means transcription
    failed, not that the meeting was empty.
 2. **Model second**, only for what the rules didn't settle (`decided_by: MODEL`): a meeting is
-   judged from its topic + transcript excerpt (never the audio, never participant names). A
-   meeting with no spoken transcript text is never sent - it stays unclassified and `INCLUDED`.
-   Any OpenAI-compatible endpoint works - Gemini by default; switching provider is a change to
-   `bridge.media.classification.model.*` only.
+   judged from its topic, duration (in seconds under 2 minutes), distinct headcount and a
+   transcript excerpt - never the audio, never participant names. A transcript longer than
+   `transcript-excerpt-chars` is sent as its opening plus a slice from its middle, half each:
+   the opening alone is often greetings and mic checks. A meeting with no spoken transcript
+   text is never sent - it stays unclassified and `INCLUDED`. Any OpenAI-compatible endpoint
+   works - Gemini by default; switching provider is a change to `bridge.ai.*` only.
+
+   The prompts (`prompt-version` `v6`) tell the model that transcripts and scans may be Hebrew,
+   English or both; give `TEST` concrete cues (mic checks, silence, background noise only); keep
+   category separate from quality (noise alone is `TEST` + `POOR`, a noisy real meeting keeps
+   its category); define each document category in one line; and ask for 0.8+ confidence before
+   `TEST`, `SOCIAL` or `ADVERTISEMENT`, since those are excluded. Bump `prompt-version` on every
+   prompt change so results stay comparable.
 
 **Scanned documents** are examined once by `media/classification/document/DocumentScanner`, and
 both steps above work from that one scan:
@@ -358,6 +418,21 @@ BRIDGE_MEDIA_CLASSIFIER_API_KEY=<your Gemini key>   # omit to run the rules only
 Each decision is logged (`MediaClassificationService`: category, confidence, reason), and shows up
 in the published event's `scope_decision`/`classification` and in the landed objects'
 `scope_decision` MinIO tag.
+
+Live check of rules `v4` / prompt `v6` against Gemini (2026-10-26, synthetic recordings with
+hand-written transcripts and Zoom sidecars, real scans):
+
+| Item | Verdict |
+|---|---|
+| 2-minute meeting, 7 transcribed words | `EXCLUDED` by RULE - `TEST` |
+| 20-minute meeting, one participant | `EXCLUDED` by RULE - `TEST` |
+| 6-minute mic check ("אחת, אחת", background noise), two participants | `EXCLUDED` by MODEL - `TEST` (0.98) |
+| Sprint planning that opens with "שומעים אותי?" | `INCLUDED` - `PLANNING` (0.95) |
+| Vendor invoice / internal memo | `INVOICE` (1.0) / `MEMO` (0.98) |
+| Kids' activity page / e-ticket | `OTHER` (0.95) / `OTHER` (0.85) - not `ADVERTISEMENT` |
+
+Every model call counts against the free tier's daily quota (20 requests/day for Gemini), so keep
+live test runs small.
 
 ### `SOURCE_METADATA` format (for consumers)
 

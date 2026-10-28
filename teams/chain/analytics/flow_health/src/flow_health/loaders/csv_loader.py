@@ -19,6 +19,8 @@ _COLUMNS = {
     "task_state_history": ["id", "task_id", "event_type", "from_status", "to_status", "blocking_count_before",
                            "blocking_count_after", "created_at", "sequence"],
 }
+# Inbox attributes carried on task_state_history; optional so a file without them still loads (they come in as NA)
+_OPTIONAL_COLUMNS = {"task_state_history": ["deadline", "effort_estimate_minutes"]}
 _EDGE_ACTIONS = {"ADDED", "REMOVED"}
 
 
@@ -53,10 +55,19 @@ class CsvLoader:
         path = self.data_dir / f"{name}.csv"
         if not path.is_file():
             raise FileNotFoundError(f"{path} is missing")
-        df = pd.read_csv(path, usecols=_COLUMNS[name], dtype=str, keep_default_na=False)
-        df = df[_COLUMNS[name]].replace("", pd.NA)  # blank = NULL
+        present = set(pd.read_csv(path, nrows=0).columns)
+        columns = _COLUMNS[name] + [c for c in _OPTIONAL_COLUMNS.get(name, []) if c in present]
+        df = pd.read_csv(path, usecols=columns, dtype=str, keep_default_na=False)
+        df = df[columns].replace("", pd.NA)  # blank = NULL
+        for col in _OPTIONAL_COLUMNS.get(name, []):
+            if col not in df:
+                df[col] = pd.NA
         if "created_at" in df:
             df["created_at"] = pd.to_datetime(df["created_at"], utc=True)
+        if "deadline" in df:
+            df["deadline"] = pd.to_datetime(df["deadline"], utc=True)
+        if "effort_estimate_minutes" in df:
+            df["effort_estimate_minutes"] = df["effort_estimate_minutes"].astype("Int64")
         if "sequence" in df:
             df["sequence"] = df["sequence"].astype("int64")
         if "project_id" in df:

@@ -2,6 +2,7 @@ package com.rnd.bridge.media.meeting;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Meeting-level details plus the participant list, parsed from a source platform's
@@ -41,6 +42,31 @@ public record MeetingMetadata(String meetingId, String topic, String hostEmail, 
      */
     public String sourceRef() {
         return uuid != null ? uuid : recordId;
+    }
+
+    /**
+     * Distinct people, not join sessions: Zoom lists a participant once per join, so someone who
+     * dropped and rejoined appears twice. Falls back to the platform's own count, and is empty when
+     * neither is known (BBB's sidecar has no participant data) - callers must never read empty as one.
+     */
+    public Optional<Integer> distinctParticipantCount() {
+        if (participants != null && !participants.isEmpty()) {
+            return Optional.of((int) participants.stream()
+                    .map(MeetingMetadata::identityOf)
+                    .distinct()
+                    .count());
+        }
+        return Optional.ofNullable(participantsCount);
+    }
+
+    private static String identityOf(ParticipantActivity participant) {
+        if (participant.userId() != null) {
+            return "user:" + participant.userId();
+        }
+        if (participant.id() != null) {
+            return "id:" + participant.id();
+        }
+        return "name:" + participant.name();
     }
 
     /** A single key/value pair - shared shape for Zoom's custom_keys and tracking_fields arrays. */

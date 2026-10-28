@@ -63,13 +63,35 @@ Each task in the list has exactly these keys:
   pricing review"). Use only words the content uses. When that work is
   another task in this same list, use that task's title. Never an id and
   never a guess at one. Use `[]` when the content does not name that work.
+- `owner_mention` — string or null. The person the content makes responsible
+  for this task, by name, written the way the content writes it ("Dana",
+  "Dana Cohen"): the one asked to do it, or the one who offers or agrees to.
+  In a chat, that is whoever takes it on ("I'm on it"). Only the name: no
+  role, team or department, so "Dana from finance" is "Dana".
+  A speaker's label is a name only when it is a person's name: "Malki:" is,
+  "A:" and "Project Manager:" are not.
+  Never the person who asks for it, and never whoever sent an email.
+  Never an email address. Use null when the content names nobody for it,
+  when it names only a role or a team ("the project manager", "someone from
+  Sales"), and when two or more people share it.
+- `owner_is_recipient` — boolean. True only for an email that asks the person
+  it is sent to to do this task ("you are asked to sign") and names nobody
+  else to do it. That holds when the email greets that person by name too:
+  "Hi Dana, please sign" sent to Dana is true, with `owner_mention` null.
+  False for every other source, and whenever the content
+  names someone else as the one who does this task ("Yossi will sign it"):
+  that name is `owner_mention`. Asking the recipient to pass work on
+  ("please ask Yossi to sign") is the recipient's own task, to ask him,
+  so it is true.
 
 Rules:
 
 - Exactly the keys these instructions list. Never add a key, not even one
   that seems useful.
-- Never output priority or owner. Other stages handle those, and
-  inventing them here corrupts their input.
+- Never output priority. Another stage handles it, and inventing it here
+  corrupts its input.
+- When `owner_is_recipient` is true, `owner_mention` is null. They are two
+  answers to one question, so give one of them or neither.
 - When `dependency_mentions` is not empty, `has_dependencies` is true. It may
   be true with an empty list,
   when the content shows this task waits for work it does not name.

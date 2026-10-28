@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.google.api.client.googleapis.json.GoogleJsonError;
 import com.google.api.client.googleapis.json.GoogleJsonResponseException;
 import com.google.api.client.http.HttpHeaders;
 import com.google.api.client.http.HttpResponseException;
@@ -158,7 +159,156 @@ class RealDriveSourceReaderTest {
 
         assertThat(result.records()).hasSize(1);
         assertThat(result.records().get(0).rawContent()).isEqualTo(expectedBytes);
+        assertThat(result.records().get(0).mimeType()).isEqualTo("text/plain");
         verify(files, Mockito.never()).get("doc1");
+    }
+
+    private GoogleJsonResponseException fileNotExportableException() {
+        HttpResponseException.Builder builder = new HttpResponseException.Builder(403, "Forbidden", new HttpHeaders());
+        GoogleJsonError.ErrorInfo errorInfo = new GoogleJsonError.ErrorInfo();
+        errorInfo.setReason("fileNotExportable");
+        GoogleJsonError jsonError = new GoogleJsonError();
+        jsonError.setErrors(List.of(errorInfo));
+        return new GoogleJsonResponseException(builder, jsonError);
+    }
+
+    @Test
+    void folderIsSkippedWithoutCallingExport() throws IOException {
+        Drive.Files.List request = mockListRequest();
+        when(files.list()).thenReturn(request);
+        when(request.execute())
+                .thenReturn(new FileList().setFiles(List.of(file("folder1", "application/vnd.google-apps.folder"))));
+        stubStartPageToken("start-1");
+
+        DriveReadResult result = reader().read(ReadCursor.full());
+
+        assertThat(result.records()).isEmpty();
+        verify(files, Mockito.never()).export(anyString(), anyString());
+        verify(files, Mockito.never()).get(anyString());
+    }
+
+    @Test
+    void shortcutIsSkippedWithoutCallingExport() throws IOException {
+        Drive.Files.List request = mockListRequest();
+        when(files.list()).thenReturn(request);
+        when(request.execute())
+                .thenReturn(new FileList().setFiles(List.of(file("sc1", "application/vnd.google-apps.shortcut"))));
+        stubStartPageToken("start-1");
+
+        DriveReadResult result = reader().read(ReadCursor.full());
+
+        assertThat(result.records()).isEmpty();
+        verify(files, Mockito.never()).export(anyString(), anyString());
+        verify(files, Mockito.never()).get(anyString());
+    }
+
+    @Test
+    void exportFileNotExportable403IsSkippedButRestOfBatchStillReturns() throws IOException {
+        Drive.Files.List request = mockListRequest();
+        when(files.list()).thenReturn(request);
+        when(request.execute()).thenReturn(new FileList().setFiles(List.of(
+                file("doc1", "application/vnd.google-apps.document"),
+                file("doc2", "application/vnd.google-apps.document"))));
+        stubStartPageToken("start-1");
+
+        Drive.Files.Export failingExport = mock(Drive.Files.Export.class);
+        when(files.export("doc1", "text/plain")).thenReturn(failingExport);
+        when(failingExport.executeMediaAsInputStream()).thenThrow(fileNotExportableException());
+
+        Drive.Files.Export okExport = mock(Drive.Files.Export.class);
+        when(files.export("doc2", "text/plain")).thenReturn(okExport);
+        byte[] expectedBytes = "exported text".getBytes(StandardCharsets.UTF_8);
+        when(okExport.executeMediaAsInputStream()).thenReturn(new ByteArrayInputStream(expectedBytes));
+
+        DriveReadResult result = reader().read(ReadCursor.full());
+
+        assertThat(result.records()).hasSize(1);
+        assertThat(result.records().get(0).sourceRef()).isEqualTo("doc2");
+    }
+
+    private GoogleJsonResponseException statusException(int statusCode) {
+        HttpResponseException.Builder builder = new HttpResponseException.Builder(statusCode, "status", new HttpHeaders());
+        return new GoogleJsonResponseException(builder, null);
+    }
+
+    @Test
+    void fileGone404OnGetIsSkippedButRestOfBatchStillReturns() throws IOException {
+        Drive.Files.List request = mockListRequest();
+        when(files.list()).thenReturn(request);
+        when(request.execute()).thenReturn(new FileList().setFiles(List.of(
+                file("gone1", "application/pdf"),
+                file("f2", "application/pdf"))));
+        stubStartPageToken("start-1");
+
+        Drive.Files.Get failingGet = mock(Drive.Files.Get.class);
+        when(files.get("gone1")).thenReturn(failingGet);
+        when(failingGet.executeMediaAsInputStream()).thenThrow(statusException(404));
+
+        Drive.Files.Get okGet = mock(Drive.Files.Get.class);
+        when(files.get("f2")).thenReturn(okGet);
+        when(okGet.executeMediaAsInputStream())
+                .thenReturn(new ByteArrayInputStream("bytes".getBytes(StandardCharsets.UTF_8)));
+
+        DriveReadResult result = reader().read(ReadCursor.full());
+
+        assertThat(result.records()).hasSize(1);
+        assertThat(result.records().get(0).sourceRef()).isEqualTo("f2");
+    }
+
+    @Test
+    void fileGone410OnExportIsSkippedButRestOfBatchStillReturns() throws IOException {
+        Drive.Files.List request = mockListRequest();
+        when(files.list()).thenReturn(request);
+        when(request.execute()).thenReturn(new FileList().setFiles(List.of(
+                file("doc1", "application/vnd.google-apps.document"),
+                file("doc2", "application/vnd.google-apps.document"))));
+        stubStartPageToken("start-1");
+
+        Drive.Files.Export failingExport = mock(Drive.Files.Export.class);
+        when(files.export("doc1", "text/plain")).thenReturn(failingExport);
+        when(failingExport.executeMediaAsInputStream()).thenThrow(statusException(410));
+
+        Drive.Files.Export okExport = mock(Drive.Files.Export.class);
+        when(files.export("doc2", "text/plain")).thenReturn(okExport);
+        byte[] expectedBytes = "exported text".getBytes(StandardCharsets.UTF_8);
+        when(okExport.executeMediaAsInputStream()).thenReturn(new ByteArrayInputStream(expectedBytes));
+
+        DriveReadResult result = reader().read(ReadCursor.full());
+
+        assertThat(result.records()).hasSize(1);
+        assertThat(result.records().get(0).sourceRef()).isEqualTo("doc2");
+    }
+
+    @Test
+    void genericServerErrorOnGetStillPropagatesNotSkipped() throws IOException {
+        Drive.Files.List request = mockListRequest();
+        when(files.list()).thenReturn(request);
+        when(request.execute())
+                .thenReturn(new FileList().setFiles(List.of(file("f1", "application/pdf"))));
+        stubStartPageToken("start-1");
+
+        Drive.Files.Get getRequest = mock(Drive.Files.Get.class);
+        when(files.get("f1")).thenReturn(getRequest);
+        when(getRequest.executeMediaAsInputStream()).thenThrow(statusException(500));
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                java.io.UncheckedIOException.class, () -> reader().read(ReadCursor.full()));
+    }
+
+    @Test
+    void otherExportErrorsStillPropagate() throws IOException {
+        Drive.Files.List request = mockListRequest();
+        when(files.list()).thenReturn(request);
+        when(request.execute())
+                .thenReturn(new FileList().setFiles(List.of(file("doc1", "application/vnd.google-apps.document"))));
+        stubStartPageToken("start-1");
+
+        Drive.Files.Export exportRequest = mock(Drive.Files.Export.class);
+        when(files.export("doc1", "text/plain")).thenReturn(exportRequest);
+        when(exportRequest.executeMediaAsInputStream()).thenThrow(new IOException("boom"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                java.io.UncheckedIOException.class, () -> reader().read(ReadCursor.full()));
     }
 
     @Test

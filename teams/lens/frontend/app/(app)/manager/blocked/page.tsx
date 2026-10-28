@@ -1,15 +1,17 @@
 import PageContainer from '@/components/layout/PageContainer';
-import EmptyState from '@/components/feedback/EmptyState';
+import ManagerTaskTable from '../ManagerTaskTable';
 
 export default function ManagerBlockedPage() {
   return (
     <PageContainer
       title="Blocked & delayed work"
-      description="Work items blocked or at risk, driven by Chain's blocker data."
+      description="Open tasks that are blocked by other work or past their deadline, soonest deadline first."
     >
-      <EmptyState
-        title="No blocked work reported"
-        description="This view will surface blocked and delayed tasks once connected to Chain's blocker data."
+      <ManagerTaskTable
+        view="blocked-delayed"
+        ariaLabel="Blocked and delayed tasks"
+        emptyTitle="Nothing blocked or delayed"
+        emptyDescription="Every open task is unblocked and on time."
       />
     </PageContainer>
   );

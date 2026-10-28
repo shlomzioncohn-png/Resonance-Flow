@@ -30,3 +30,8 @@ export function login(credentials: LoginRequest): Promise<LoginResponse> {
   return api.post<LoginResponse>('/auth/login', credentials);
 }
 
+/** Asks the Gateway to clear the token cookie. */
+export function logout(): Promise<void> {
+  return api.post<void>('/auth/logout');
+}
+
