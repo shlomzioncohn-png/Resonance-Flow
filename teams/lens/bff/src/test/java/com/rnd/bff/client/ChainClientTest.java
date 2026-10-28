@@ -38,7 +38,8 @@ class ChainClientTest {
     @BeforeEach
     void setUp() {
         RestTemplate restTemplate = new RestTemplate();
-        chain = MockRestServiceServer.bindTo(restTemplate).build();
+        // Constraint calls run in parallel, so they may arrive in any order.
+        chain = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
         client = new ChainClient(restTemplate);
         ReflectionTestUtils.setField(client, "chainServiceUrl", CHAIN);
     }
@@ -158,6 +159,14 @@ class ChainClientTest {
         assertThat(result.get(TASK).getConstraints()).isEmpty();
         assertThat(result.get(other).getConstraints()).extracting(ConstraintDTO::getConstraintId).containsExactly("c9");
         assertThat(result.get(missing).getConstraints()).isEmpty();
+    }
+
+    @Test
+    void feasibilityWithoutATenantMakesNoCallsAndShowsNoConstraints() {
+        Map<String, TaskDependenciesDTO> result = client.getFeasibility("emp_001", null, List.of(TASK));
+
+        chain.verify(); // no expectations -> fails if any request was made
+        assertThat(result.get(TASK).getConstraints()).isEmpty();
     }
 
     @Test

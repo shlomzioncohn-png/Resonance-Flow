@@ -2,6 +2,7 @@ package com.rnd.bff.client;
 
 import com.rnd.bff.dto.ConstraintDTO;
 import com.rnd.bff.dto.TaskDependenciesDTO;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,6 +19,9 @@ import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Client for Chain — owns dependency/blocker data and feasibility (see
@@ -41,7 +45,16 @@ public class ChainClient {
     /** The task spec's page size for both histories; Chain allows up to 100. */
     static final int HISTORY_PAGE_SIZE = 50;
 
+    /** How many constraint calls to Chain may be in flight at once for one BFF instance. */
+    static final int CONSTRAINT_CALLS_IN_PARALLEL = 8;
+
     private final RestTemplate restTemplate;
+
+    private final ExecutorService constraintCalls = Executors.newFixedThreadPool(CONSTRAINT_CALLS_IN_PARALLEL, task -> {
+        Thread thread = new Thread(task, "chain-constraints");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     @Value("${chain.service.url:http://chain-service:8081}")
     private String chainServiceUrl;
@@ -62,10 +75,27 @@ public class ChainClient {
      */
     public Map<String, TaskDependenciesDTO> getFeasibility(String userId, String tenantId, List<String> taskIds) {
         Map<String, TaskDependenciesDTO> result = new LinkedHashMap<>();
-        for (String taskId : taskIds) {
-            result.put(taskId, new TaskDependenciesDTO(List.of(), getConstraintsOrEmpty(userId, tenantId, taskId)));
+        if (tenantId == null || tenantId.isBlank()) {
+            // Chain answers 400 to every call without a tenant - don't make them.
+            logger.warn("No tenant known - showing no Chain constraints for {} task(s)", taskIds.size());
+            taskIds.forEach(id -> result.put(id, new TaskDependenciesDTO(List.of(), List.of())));
+            return result;
         }
+        // A page of My Tasks is up to 100 tasks: the calls run side by side
+        // (at most CONSTRAINT_CALLS_IN_PARALLEL at once), not one after another.
+        Map<String, CompletableFuture<List<ConstraintDTO>>> calls = new LinkedHashMap<>();
+        for (String taskId : taskIds) {
+            calls.computeIfAbsent(taskId, id -> CompletableFuture.supplyAsync(
+                    () -> getConstraintsOrEmpty(userId, tenantId, id), constraintCalls));
+        }
+        // getConstraintsOrEmpty never throws, so join() doesn't either.
+        calls.forEach((id, call) -> result.put(id, new TaskDependenciesDTO(List.of(), call.join())));
         return result;
+    }
+
+    @PreDestroy
+    void shutdown() {
+        constraintCalls.shutdownNow();
     }
 
     private List<ConstraintDTO> getConstraintsOrEmpty(String userId, String tenantId, String taskId) {

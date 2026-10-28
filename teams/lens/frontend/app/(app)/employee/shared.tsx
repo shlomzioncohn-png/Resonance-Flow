@@ -3,7 +3,7 @@ import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
-import BlockOutlinedIcon from '@mui/icons-material/BlockOutlined';
+import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import { alpha, type Theme } from '@mui/material/styles';
 import { radiusTokens } from '@/theme';
 
@@ -85,7 +85,7 @@ export function PriorityChip({ priority, bold = false }: { priority?: string; bo
 }
 
 /**
- * A blocked-icon chip with the count ("N") next to a task that has open (PENDING) constraints. Nothing when there
+ * A lock-icon chip with the count ("🔒 N") next to a task that has open (PENDING) constraints. Nothing when there
  * are none, or when the count is unknown (Chain not consulted for this task).
  */
 export function OpenConstraintsChip({ count }: { count?: number | null }) {
@@ -95,7 +95,7 @@ export function OpenConstraintsChip({ count }: { count?: number | null }) {
     <Tooltip title={label}>
       <Chip
         size="small"
-        icon={<BlockOutlinedIcon />}
+        icon={<LockOutlinedIcon />}
         label={count}
         aria-label={label}
         sx={[softToneSx('warning'), { fontWeight: 600 }]}

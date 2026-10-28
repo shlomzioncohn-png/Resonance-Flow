@@ -230,8 +230,80 @@ class WorkspaceServiceTest {
         assertThat(result.getFitsInTime()).isTrue();
         assertThat(result.getIsHighPriority()).isTrue();
         assertThat(result.getConfidenceScore()).isEqualTo(82);
-        // Inbox picked it - the BFF's own ranking (Chain/Mind) isn't used
-        verifyNoInteractions(chainClient, mindClient);
+        // Inbox picked it - the BFF's own ranking (Mind) isn't used; Chain is
+        // asked only for the picked task's constraints.
+        verifyNoInteractions(mindClient);
+        verify(chainClient).getFeasibility("emp_001", null, List.of("t1"));
+    }
+
+    // -------------------------------------------------------------------------
+    // Constraints on My Tasks / task page - real Inbox only
+    // -------------------------------------------------------------------------
+
+    private static List<ConstraintDTO> pendingAndSatisfied() {
+        return List.of(
+                ConstraintDTO.builder().constraintId("c1").type("APPROVAL_NEEDED").status("PENDING").build(),
+                ConstraintDTO.builder().constraintId("c2").type("DATE_WINDOW").status("SATISFIED").build());
+    }
+
+    @Test
+    void listTasks_realInbox_attachesChainConstraintsWithTheTasksTenant() {
+        when(inboxClient.isMockEnabled()).thenReturn(false);
+        TaskDTO withConstraints = task("t1", "HIGH", 30);
+        withConstraints.setTenantId("tenant-1");
+        TaskDTO without = task("t2", "LOW", 30);
+        without.setTenantId("tenant-1");
+        when(inboxClient.listTasks(anyString(), any(), any(), anyInt(), anyInt())).thenReturn(
+                TaskListResponseDTO.builder().items(List.of(withConstraints, without)).total(2).page(0).size(20).build());
+        when(chainClient.getFeasibility("emp_001", "tenant-1", List.of("t1", "t2"))).thenReturn(Map.of(
+                "t1", new TaskDependenciesDTO(List.of(), pendingAndSatisfied()),
+                "t2", new TaskDependenciesDTO(List.of(), List.of())));
+
+        TaskListResponseDTO result = workspaceService.listTasks("emp_001", null, null, 0, 20);
+
+        assertThat(result.getItems().get(0).getConstraints()).hasSize(2);
+        assertThat(result.getItems().get(0).getOpenConstraintCount()).isEqualTo(1);
+        assertThat(result.getItems().get(1).getConstraints()).isEmpty();
+        assertThat(result.getItems().get(1).getOpenConstraintCount()).isZero();
+    }
+
+    @Test
+    void listTasks_mockInbox_keepsMockConstraintsAndDoesNotCallChain() {
+        when(inboxClient.listTasks(anyString(), any(), any(), anyInt(), anyInt()))
+                .thenReturn(TaskListResponseDTO.builder().items(List.of(task("task_001", "HIGH", 30)))
+                        .total(1).page(0).size(20).build());
+
+        workspaceService.listTasks("emp_001", null, null, 0, 20);
+
+        verifyNoInteractions(chainClient);
+    }
+
+    @Test
+    void getTask_realInbox_attachesChainConstraints() {
+        when(inboxClient.isMockEnabled()).thenReturn(false);
+        TaskDTO task = task("t1", "HIGH", 30);
+        task.setTenantId("tenant-1");
+        when(inboxClient.getTaskById("emp_001", "t1")).thenReturn(task);
+        when(chainClient.getFeasibility("emp_001", "tenant-1", List.of("t1")))
+                .thenReturn(Map.of("t1", new TaskDependenciesDTO(List.of(), pendingAndSatisfied())));
+
+        TaskDTO result = workspaceService.getTask("emp_001", "t1");
+
+        assertThat(result.getConstraints()).extracting(ConstraintDTO::getConstraintId).containsExactly("c1", "c2");
+        assertThat(result.getOpenConstraintCount()).isEqualTo(1);
+    }
+
+    @Test
+    void getTask_realInbox_chainThrows_stillReturnsTheTaskWithConstraintsUnknown() {
+        when(inboxClient.isMockEnabled()).thenReturn(false);
+        when(inboxClient.getTaskById("emp_001", "t1")).thenReturn(task("t1", "HIGH", 30));
+        when(chainClient.getFeasibility(anyString(), any(), anyList())).thenThrow(new RuntimeException("boom"));
+
+        TaskDTO result = workspaceService.getTask("emp_001", "t1");
+
+        assertThat(result.getId()).isEqualTo("t1");
+        assertThat(result.getConstraints()).isNull();
+        assertThat(result.getOpenConstraintCount()).isNull();
     }
 
     @Test
