@@ -87,7 +87,7 @@ public class WorkspaceService {
         Map<String, TaskDependenciesDTO> feasibilityByTaskId;
         boolean chainAvailable = true;
         try {
-            feasibilityByTaskId = chainClient.getFeasibility(userId, tenantOf(candidates), candidateIds);
+            feasibilityByTaskId = chainClient.getFeasibility(tenantOf(candidates), candidateIds);
         } catch (RuntimeException ex) {
             // Chain is down: a recommendation is still possible, just without
             // dependency data. Treat every task's dependency status as unknown
@@ -317,8 +317,8 @@ public class WorkspaceService {
 
     /**
      * Fills constraints + openConstraintCount from Chain, for real Inbox tasks.
-     * The mock already carries sample constraints (and its ids aren't Chain's),
-     * so mock mode is left as-is. Never fails the request: if Chain can't
+     * Chain is the only source of constraints. Mock tasks' ids aren't Chain's,
+     * so mock mode doesn't call it (those tasks show no constraints). Never fails the request: if Chain can't
      * answer, the fields stay unknown (null) and the screen still loads.
      */
     private void attachConstraints(String userId, List<TaskDTO> tasks) {
@@ -327,7 +327,7 @@ public class WorkspaceService {
         }
         Map<String, TaskDependenciesDTO> byTaskId;
         try {
-            byTaskId = chainClient.getFeasibility(userId, tenantOf(tasks), tasks.stream().map(TaskDTO::getId).toList());
+            byTaskId = chainClient.getFeasibility(tenantOf(tasks), tasks.stream().map(TaskDTO::getId).toList());
         } catch (RuntimeException ex) {
             logger.warn("Chain constraints unavailable - userId: {}", userId, ex);
             return;

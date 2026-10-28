@@ -40,8 +40,8 @@ public class ChainClient {
 
     private static final Logger logger = LoggerFactory.getLogger(ChainClient.class);
 
+    /** The only header Chain reads - it has no notion of an acting user. */
     static final String TENANT_HEADER = "X-Tenant-Id";
-    static final String ACTOR_HEADER = "X-Actor-Id";
     /** The task spec's page size for both histories; Chain allows up to 100. */
     static final int HISTORY_PAGE_SIZE = 50;
 
@@ -73,7 +73,7 @@ public class ChainClient {
      *
      * @param tenantId the signed-in user's tenant (from Inbox, never from the frontend)
      */
-    public Map<String, TaskDependenciesDTO> getFeasibility(String userId, String tenantId, List<String> taskIds) {
+    public Map<String, TaskDependenciesDTO> getFeasibility(String tenantId, List<String> taskIds) {
         Map<String, TaskDependenciesDTO> result = new LinkedHashMap<>();
         if (tenantId == null || tenantId.isBlank()) {
             // Chain answers 400 to every call without a tenant - don't make them.
@@ -86,7 +86,7 @@ public class ChainClient {
         Map<String, CompletableFuture<List<ConstraintDTO>>> calls = new LinkedHashMap<>();
         for (String taskId : taskIds) {
             calls.computeIfAbsent(taskId, id -> CompletableFuture.supplyAsync(
-                    () -> getConstraintsOrEmpty(userId, tenantId, id), constraintCalls));
+                    () -> getConstraintsOrEmpty(tenantId, id), constraintCalls));
         }
         // getConstraintsOrEmpty never throws, so join() doesn't either.
         calls.forEach((id, call) -> result.put(id, new TaskDependenciesDTO(List.of(), call.join())));
@@ -98,7 +98,7 @@ public class ChainClient {
         constraintCalls.shutdownNow();
     }
 
-    private List<ConstraintDTO> getConstraintsOrEmpty(String userId, String tenantId, String taskId) {
+    private List<ConstraintDTO> getConstraintsOrEmpty(String tenantId, String taskId) {
         URI uri = UriComponentsBuilder.fromHttpUrl(chainServiceUrl)
                 .path("/tasks/{taskId}/constraints")
                 .buildAndExpand(taskId)
@@ -106,7 +106,7 @@ public class ChainClient {
                 .toUri();
         try {
             List<ConstraintDTO> constraints = restTemplate.exchange(
-                    uri, HttpMethod.GET, new HttpEntity<>(headers(userId, tenantId)),
+                    uri, HttpMethod.GET, new HttpEntity<>(tenantHeaders(tenantId)),
                     new ParameterizedTypeReference<List<ConstraintDTO>>() { })
                     .getBody();
             return constraints == null ? List.of() : constraints;
@@ -116,15 +116,10 @@ public class ChainClient {
         }
     }
 
-    /** X-Tenant-Id (Chain requires it), plus X-Actor-Id as InboxClient sends it. */
-    private static HttpHeaders headers(String userId, String tenantId) {
+    /** X-Tenant-Id only - Chain requires it and reads no other identity header. */
+    private static HttpHeaders tenantHeaders(String tenantId) {
         HttpHeaders headers = new HttpHeaders();
-        if (tenantId != null) {
-            headers.set(TENANT_HEADER, tenantId);
-        }
-        if (userId != null && !userId.isBlank()) {
-            headers.set(ACTOR_HEADER, userId);
-        }
+        headers.set(TENANT_HEADER, tenantId);
         return headers;
     }
 

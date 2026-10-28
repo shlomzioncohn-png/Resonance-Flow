@@ -3,6 +3,7 @@ package com.rnd.bff.client;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withBadRequest;
@@ -111,11 +112,12 @@ class ChainClientTest {
     }
 
     @Test
-    void feasibilityFetchesConstraintsPerTaskWithTenantAndActorHeaders() {
+    void feasibilityFetchesConstraintsPerTaskWithOnlyTheTenantHeader() {
         chain.expect(requestTo(CHAIN + "/tasks/" + TASK + "/constraints"))
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(header("X-Tenant-Id", TENANT))
-                .andExpect(header("X-Actor-Id", "emp_001"))
+                // Chain reads no identity header besides the tenant
+                .andExpect(headerDoesNotExist("X-Actor-Id"))
                 .andRespond(withSuccess("""
                         [
                           {"constraintId":"c1","taskId":"%s","type":"APPROVAL_NEEDED","status":"PENDING",
@@ -126,7 +128,7 @@ class ChainClientTest {
                         ]
                         """.formatted(TASK, TASK), MediaType.APPLICATION_JSON));
 
-        Map<String, TaskDependenciesDTO> result = client.getFeasibility("emp_001", TENANT, List.of(TASK));
+        Map<String, TaskDependenciesDTO> result = client.getFeasibility(TENANT, List.of(TASK));
 
         chain.verify();
         TaskDependenciesDTO feasibility = result.get(TASK);
@@ -152,7 +154,7 @@ class ChainClientTest {
         chain.expect(requestTo(CHAIN + "/tasks/" + missing + "/constraints")).andRespond(withResourceNotFound());
 
         Map<String, TaskDependenciesDTO> result =
-                client.getFeasibility("emp_001", TENANT, List.of(TASK, other, missing));
+                client.getFeasibility(TENANT, List.of(TASK, other, missing));
 
         chain.verify();
         assertThat(result).containsOnlyKeys(TASK, other, missing);
@@ -167,7 +169,7 @@ class ChainClientTest {
                 .andExpect(header("X-Tenant-Id", TENANT))
                 .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
 
-        Map<String, TaskDependenciesDTO> result = client.getFeasibility("emp_001", TENANT, List.of(TASK));
+        Map<String, TaskDependenciesDTO> result = client.getFeasibility(TENANT, List.of(TASK));
 
         chain.verify();
         assertThat(result.get(TASK).getConstraints()).isNotNull().isEmpty();
@@ -178,7 +180,7 @@ class ChainClientTest {
     void feasibilityWithChainFailingGivesAnEmptyListInsteadOfThrowing() {
         chain.expect(requestTo(CHAIN + "/tasks/" + TASK + "/constraints")).andRespond(withBadRequest());
 
-        Map<String, TaskDependenciesDTO> result = client.getFeasibility("emp_001", TENANT, List.of(TASK));
+        Map<String, TaskDependenciesDTO> result = client.getFeasibility(TENANT, List.of(TASK));
 
         chain.verify();
         assertThat(result.get(TASK).getConstraints()).isEmpty();
@@ -186,7 +188,7 @@ class ChainClientTest {
 
     @Test
     void feasibilityWithoutATenantMakesNoCallsAndShowsNoConstraints() {
-        Map<String, TaskDependenciesDTO> result = client.getFeasibility("emp_001", null, List.of(TASK));
+        Map<String, TaskDependenciesDTO> result = client.getFeasibility(null, List.of(TASK));
 
         chain.verify(); // no expectations -> fails if any request was made
         assertThat(result.get(TASK).getConstraints()).isEmpty();

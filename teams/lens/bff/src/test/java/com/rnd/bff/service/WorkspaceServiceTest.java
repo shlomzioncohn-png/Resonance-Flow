@@ -76,7 +76,7 @@ class WorkspaceServiceTest {
         when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(task));
         // Chain returns a map with no entry for task_001 - a partial response,
         // not a missing/erroring call.
-        when(chainClient.getFeasibility(anyString(), any(), anyList())).thenReturn(Map.of());
+        when(chainClient.getFeasibility(any(), anyList())).thenReturn(Map.of());
         when(mindClient.getScores(anyString(), anyList(), any())).thenReturn(Map.of("task_001", 85));
 
         TaskRecommendationDTO result =
@@ -90,7 +90,7 @@ class WorkspaceServiceTest {
     void recommend_taskWithNullEffortEstimate_reportsDoesNotFitInsteadOfThrowing() {
         TaskDTO task = task("task_001", "HIGH", null);
         when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(task));
-        when(chainClient.getFeasibility(anyString(), any(), anyList()))
+        when(chainClient.getFeasibility(any(), anyList()))
                 .thenReturn(Map.of("task_001", new TaskDependenciesDTO(List.of(), List.of())));
         when(mindClient.getScores(anyString(), anyList(), any())).thenReturn(Map.of("task_001", 85));
 
@@ -110,7 +110,7 @@ class WorkspaceServiceTest {
                 ConstraintDTO.builder().constraintId("c2").type("DATE_WINDOW").status("SATISFIED").build(),
                 ConstraintDTO.builder().constraintId("c3").type("BLOCKED_BY_INFO").status("PENDING").build(),
                 ConstraintDTO.builder().constraintId("c4").type("APPROVAL_NEEDED").status("WAIVED").build());
-        when(chainClient.getFeasibility("emp_001", "tenant-1", List.of("task_001")))
+        when(chainClient.getFeasibility("tenant-1", List.of("task_001")))
                 .thenReturn(Map.of("task_001", new TaskDependenciesDTO(List.of(), constraints)));
         when(mindClient.getScores(anyString(), anyList(), any())).thenReturn(Map.of("task_001", 85));
 
@@ -136,7 +136,7 @@ class WorkspaceServiceTest {
     void recommend_chainThrows_degradesInsteadOfFailing() {
         TaskDTO task = task("task_001", "HIGH", 30);
         when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(task));
-        when(chainClient.getFeasibility(anyString(), any(), anyList()))
+        when(chainClient.getFeasibility(any(), anyList()))
                 .thenThrow(new RuntimeException("connection refused"));
         when(mindClient.getScores(anyString(), anyList(), any())).thenReturn(Map.of("task_001", 85));
 
@@ -152,7 +152,7 @@ class WorkspaceServiceTest {
     void recommend_mindThrows_degradesToDefaultOrderWithZeroScore() {
         TaskDTO task = task("task_001", "HIGH", 30);
         when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(task));
-        when(chainClient.getFeasibility(anyString(), any(), anyList()))
+        when(chainClient.getFeasibility(any(), anyList()))
                 .thenReturn(Map.of("task_001", new TaskDependenciesDTO(List.of(), List.of())));
         when(mindClient.getScores(anyString(), anyList(), any()))
                 .thenThrow(new RuntimeException("connection refused"));
@@ -175,7 +175,7 @@ class WorkspaceServiceTest {
         blocked.setIsAvailable(false);
         TaskDTO workable = task("workable", "LOW", 30);
         when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(done, snoozed, blocked, workable));
-        when(chainClient.getFeasibility(anyString(), any(), anyList())).thenReturn(Map.of());
+        when(chainClient.getFeasibility(any(), anyList())).thenReturn(Map.of());
         when(mindClient.getScores(anyString(), anyList(), any())).thenReturn(Map.of("workable", 85));
 
         TaskRecommendationDTO result =
@@ -194,7 +194,7 @@ class WorkspaceServiceTest {
         TaskDTO fitsHigh = task("fits_high", "HIGH", 30);
         fitsHigh.setPriorityScore(8.0);
         when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(tooLong, fitsLow, fitsHigh));
-        when(chainClient.getFeasibility(anyString(), any(), anyList())).thenReturn(Map.of());
+        when(chainClient.getFeasibility(any(), anyList())).thenReturn(Map.of());
         // Same score for every task - like Mind's mock
         when(mindClient.getScores(anyString(), anyList(), any()))
                 .thenReturn(Map.of("too_long", 85, "fits_low", 85, "fits_high", 85));
@@ -233,7 +233,7 @@ class WorkspaceServiceTest {
         // Inbox picked it - the BFF's own ranking (Mind) isn't used; Chain is
         // asked only for the picked task's constraints.
         verifyNoInteractions(mindClient);
-        verify(chainClient).getFeasibility("emp_001", null, List.of("t1"));
+        verify(chainClient).getFeasibility(null, List.of("t1"));
     }
 
     // -------------------------------------------------------------------------
@@ -255,7 +255,7 @@ class WorkspaceServiceTest {
         without.setTenantId("tenant-1");
         when(inboxClient.listTasks(anyString(), any(), any(), anyInt(), anyInt())).thenReturn(
                 TaskListResponseDTO.builder().items(List.of(withConstraints, without)).total(2).page(0).size(20).build());
-        when(chainClient.getFeasibility("emp_001", "tenant-1", List.of("t1", "t2"))).thenReturn(Map.of(
+        when(chainClient.getFeasibility("tenant-1", List.of("t1", "t2"))).thenReturn(Map.of(
                 "t1", new TaskDependenciesDTO(List.of(), pendingAndSatisfied()),
                 "t2", new TaskDependenciesDTO(List.of(), List.of())));
 
@@ -272,7 +272,7 @@ class WorkspaceServiceTest {
         when(inboxClient.isMockEnabled()).thenReturn(false);
         when(inboxClient.listTasks(anyString(), any(), any(), anyInt(), anyInt())).thenReturn(
                 TaskListResponseDTO.builder().items(List.of(task("t1", "HIGH", 30))).total(1).page(0).size(20).build());
-        when(chainClient.getFeasibility(anyString(), any(), anyList())).thenThrow(new RuntimeException("Chain down"));
+        when(chainClient.getFeasibility(any(), anyList())).thenThrow(new RuntimeException("Chain down"));
 
         TaskListResponseDTO result = workspaceService.listTasks("emp_001", null, null, 0, 20);
 
@@ -298,7 +298,7 @@ class WorkspaceServiceTest {
         TaskDTO task = task("t1", "HIGH", 30);
         task.setTenantId("tenant-1");
         when(inboxClient.getTaskById("emp_001", "t1")).thenReturn(task);
-        when(chainClient.getFeasibility("emp_001", "tenant-1", List.of("t1")))
+        when(chainClient.getFeasibility("tenant-1", List.of("t1")))
                 .thenReturn(Map.of("t1", new TaskDependenciesDTO(List.of(), pendingAndSatisfied())));
 
         TaskDTO result = workspaceService.getTask("emp_001", "t1");
@@ -311,7 +311,7 @@ class WorkspaceServiceTest {
     void getTask_realInbox_chainThrows_stillReturnsTheTaskWithConstraintsUnknown() {
         when(inboxClient.isMockEnabled()).thenReturn(false);
         when(inboxClient.getTaskById("emp_001", "t1")).thenReturn(task("t1", "HIGH", 30));
-        when(chainClient.getFeasibility(anyString(), any(), anyList())).thenThrow(new RuntimeException("boom"));
+        when(chainClient.getFeasibility(any(), anyList())).thenThrow(new RuntimeException("boom"));
 
         TaskDTO result = workspaceService.getTask("emp_001", "t1");
 
@@ -341,7 +341,7 @@ class WorkspaceServiceTest {
         when(inboxClient.isMockEnabled()).thenReturn(false);
         when(inboxClient.selectTasks(anyString(), anyInt())).thenThrow(new RuntimeException("Inbox 500"));
         when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(task("task_001", "HIGH", 30)));
-        when(chainClient.getFeasibility(anyString(), any(), anyList())).thenReturn(Map.of());
+        when(chainClient.getFeasibility(any(), anyList())).thenReturn(Map.of());
         when(mindClient.getScores(anyString(), anyList(), any())).thenReturn(Map.of("task_001", 85));
 
         TaskRecommendationDTO result =
