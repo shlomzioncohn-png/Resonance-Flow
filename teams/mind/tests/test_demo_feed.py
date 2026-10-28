@@ -144,7 +144,9 @@ def test_every_event_carries_bridges_constants_and_matches_its_objects(name):
         100,
     )
     assert event.scope_decision == pb.SCOPE_DECISION_INCLUDED
-    assert not event.HasField("classification")  # Bridge's classifier is off by default
+    # Synthetic content: not sensitive, so Mind's logs may quote a task's title.
+    assert event.classification.sensitivity.value == pb.SENSITIVITY_NONE
+    assert event.classification.decided_by == pb.DECIDED_BY_RULE
     assert item.kafka_key == f"{event.correlation_id}:0"
     for ref, obj in zip(event.objects, item.objects, strict=True):
         assert _KEY.fullmatch(ref.object_key)

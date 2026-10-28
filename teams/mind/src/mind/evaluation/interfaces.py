@@ -346,6 +346,14 @@ class ScoreResult(BaseModel):
         ),
     )
 
+    def base_score_or_score(self) -> float:
+        """`factors.base_score` when present, `score` otherwise -- the
+        pre-blocked-adjustment value a model layered on top of this one
+        should compose with, not the clamped, blocked-aware `score`."""
+        if self.factors is not None and self.factors.base_score is not None:
+            return self.factors.base_score
+        return self.score
+
 
 class ScoreContext(BaseModel):
     """The only situational information a ranking model gets alongside a task.

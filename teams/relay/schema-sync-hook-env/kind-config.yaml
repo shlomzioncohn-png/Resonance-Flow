@@ -1,8 +1,0 @@
-# Self-contained kind cluster for the schema-sync-hook environment.
-# No port mappings: everything is reached via `kubectl port-forward` / the
-# `argocd` CLI / `kubectl exec`.
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-name: schema-sync-hook-env
-nodes:
-  - role: control-plane

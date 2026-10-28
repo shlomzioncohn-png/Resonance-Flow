@@ -29,7 +29,8 @@ import java.util.UUID;
 public class TokenService {
 
     private static final Logger log = LoggerFactory.getLogger(TokenService.class);
-    private static final String ISSUER = "lens-gateway";
+    /** The "iss" of every token the Gateway issues - JwtConfig accepts only this one. */
+    public static final String ISSUER = "lens-gateway";
 
     private final JwtEncoder jwtEncoder;
     private final long tokenTtlSeconds;

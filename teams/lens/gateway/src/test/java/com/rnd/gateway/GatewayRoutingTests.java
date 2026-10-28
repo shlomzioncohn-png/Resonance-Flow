@@ -261,6 +261,8 @@ class GatewayRoutingTests {
         RecordedRequest recorded = takeRequest();
         assertThat(recorded.getPath()).isEqualTo("/manager/projects");
         assertThat(recorded.getMethod()).isEqualTo("GET");
+        // BFF counts the projects from this user's Inbox tasks
+        assertThat(recorded.getHeader("X-User-Id")).isEqualTo("mgr_001");
     }
 
     // -------------------------------------------------------------------------

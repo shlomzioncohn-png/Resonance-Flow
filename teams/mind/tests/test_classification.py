@@ -19,7 +19,13 @@ from mind.extraction.config import ExtractionConfig
 from mind.extraction.extractor import BasicExtractor, ExtractionSuccess
 from mind.extraction.models import EffortBasis
 from mind.extraction.prompts import repair_prompt, system_prompt
-from tests.extraction.fakes import ScriptedProvider, answer_of, only
+from tests.extraction.fakes import (
+    DEADLINE_SETTINGS,
+    WRITTEN_AT,
+    ScriptedProvider,
+    answer_of,
+    only,
+)
 
 SOURCE_TEXT = (
     "The board meets Thursday and still has no decision on whether we are "
@@ -128,7 +134,12 @@ def _proposal(answer: str, classify: bool) -> TaskCreationRequested:
     )
     assert isinstance(outcome, ExtractionSuccess)
     [proposal] = to_task_creation_requested(
-        outcome, tenant_id=uuid4(), bridge_source_ref=None, bridge_correlation_id=uuid4()
+        outcome,
+        tenant_id=uuid4(),
+        bridge_source_ref=None,
+        bridge_correlation_id=uuid4(),
+        written_at=WRITTEN_AT,
+        deadline_settings=DEADLINE_SETTINGS,
     )
     return proposal
 

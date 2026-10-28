@@ -8,6 +8,7 @@ import com.rnd.bridge.core.SourceReader;
 import com.rnd.bridge.core.error.LaneException;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.service.IntakeLandingService;
+import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -95,6 +96,11 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<List<Source
     @Override
     protected void afterMap(List<SourceRecord> group, RawObjectEvent payload, Instant asOf) {
         try {
+            // DELETE_REVIEW always has an empty objects list now (see UnstructuredPayloadMapper)
+            // - nothing to land for a logical item that no longer exists.
+            if (payload.changeType() == ChangeType.DELETE_REVIEW) {
+                return;
+            }
             List<RawObjectRef> objects = payload.objects();
             for (int i = 0; i < group.size(); i++) {
                 if (group.get(i).precomputedRef() != null) {
@@ -117,6 +123,20 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<List<Source
      * IllegalStateException), not LaneException, so they're wrapped here the same way afterMap
      * wraps landingService failures: run() only catches LaneException, and only counts this
      * group as published once afterPublish returns successfully.
+     * Also records each newly-landed attachment in this group onto GroupState (see
+     * GroupStateStore.recordLandedAttachment) - the threaded Slack path's own counterpart to
+     * SlackEventsController.landAttachments, which only ever runs for the non-thread path. A
+     * threaded reply's attachment used to never get this recorded at all, so a later reply in
+     * the same thread (with no attachment of its own) would rebuild the group's objects list
+     * without it - ChatSourceRecordMapper.toSourceRecords(GroupState, List) re-attaches an
+     * earlier message's attachment only from its persisted MessageSnapshot.landedAttachments(),
+     * which was always empty for a thread. payload.objects() is positionally aligned with group
+     * (see afterMap above) and reflects exactly the ref each record was actually landed under in
+     * THIS afterMap call - reusing it here (never recomputing a ref) is what keeps the
+     * re-attached reference pointing at the same MinIO object on a later revision. Runs only
+     * after payloadPublisher().publish(payload) has already returned successfully (see
+     * AbstractIntakeLane.run()), so a failed/retried publish never records a ref for content
+     * that was never actually confirmed published.
      */
     @Override
     protected void afterPublish(List<SourceRecord> group, RawObjectEvent payload, Instant asOf) {
@@ -125,12 +145,29 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<List<Source
             if (primary.groupId() != null) {
                 groupStateStore.confirmPublished(
                         primary.sourceType(), primary.tenantId(), primary.groupId(), primary.revision());
+                recordNewlyLandedAttachments(group, payload);
             }
         } catch (RuntimeException e) {
             throw new LaneException(
                     "Failed to confirm chat group publish for correlationId=" + payload.correlationId(), e);
         }
         confirmCalendarEventPublish(primary);
+    }
+
+    private void recordNewlyLandedAttachments(List<SourceRecord> group, RawObjectEvent payload) {
+        for (int i = 0; i < group.size(); i++) {
+            SourceRecord record = group.get(i);
+            if (record.attachmentIndex() == 0 || record.precomputedRef() != null) {
+                continue;
+            }
+            String messageId = record.sourceMessageIds().isEmpty() ? null : record.sourceMessageIds().get(0);
+            if (messageId == null) {
+                continue;
+            }
+            groupStateStore.recordLandedAttachment(
+                    record.sourceType(), record.tenantId(), record.groupId(), messageId,
+                    record.attachmentFileId(), payload.objects().get(i));
+        }
     }
 
     /**

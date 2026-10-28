@@ -1,4 +1,4 @@
-.PHONY: install dev test lint fmt run run-local run-index-consumer run-landed-consumer eval eval-ci schema migrate migrate-local docker-build docker-up proto
+.PHONY: install dev test lint fmt run run-local run-index-consumer run-landed-consumer eval eval-ci schema migrate migrate-local docker-build docker-up proto demo-artifacts demo-check-media demo-feed demo-feed-slack-first demo-flow demo-flow-slack-first
 
 install:
 	pip install -e .
@@ -109,6 +109,15 @@ demo-feed: proto
 
 demo-feed-slack-first: proto
 	python -m demo_flow.feed --order slack-first $(ARGS)
+
+# The whole flow, one command: stack, Mind, feed, result (demo_flow/run.py).
+# Needs Docker and demo_flow/stack/secrets.yaml. On Windows, without make:
+# python -m demo_flow.run [--order slack-first]
+demo-flow: proto
+	python -m demo_flow.run --order natural $(ARGS)
+
+demo-flow-slack-first: proto
+	python -m demo_flow.run --order slack-first $(ARGS)
 
 docker-build:
 	docker compose build

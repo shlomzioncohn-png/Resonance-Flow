@@ -9,6 +9,7 @@ import com.rnd.bridge.task.model.SourceType;
 import com.rnd.bridge.task.model.TaskStatus;
 import com.rnd.bridge.task.model.Tier;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -16,8 +17,21 @@ import java.time.Instant;
 @Component
 public class GitHubIssueMapper extends AbstractTaskMapper<GitHubIssue> {
 
-    public GitHubIssueMapper(EnrichmentProperties enrichmentProperties, TaskEnricher taskEnricher) {
+    // Inbox's tasks.tenant_id is NOT NULL; GitHub issues carry no tenant, so a configured
+    // deployment-wide value (bridge.organization-id, fed from CRM_ORGANIZATION_ID) stands in.
+    // Blank means "not configured" and maps to null, preserving the local-run contract gap
+    // documented in AbstractTaskMapper.organizationId().
+    private final String organizationId;
+
+    public GitHubIssueMapper(EnrichmentProperties enrichmentProperties, TaskEnricher taskEnricher,
+            @Value("${bridge.organization-id:}") String organizationId) {
         super(enrichmentProperties, taskEnricher);
+        this.organizationId = organizationId;
+    }
+
+    @Override
+    protected String organizationId() {
+        return organizationId.isBlank() ? null : organizationId;
     }
 
     @Override

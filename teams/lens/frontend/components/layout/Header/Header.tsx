@@ -9,26 +9,47 @@ import Stack from '@mui/material/Stack';
 import Toolbar from '@mui/material/Toolbar';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
-import Link from 'next/link';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { useRouter } from 'next/navigation';
+import LogoutIcon from '@mui/icons-material/Logout';
 import MenuIcon from '@mui/icons-material/Menu';
 import NotificationsNoneOutlinedIcon from '@mui/icons-material/NotificationsNoneOutlined';
 import SearchIcon from '@mui/icons-material/Search';
+import { logout } from '@/services/authApi';
 import { useRole } from '../RoleProvider';
 
 export interface HeaderProps {
   onMenuClick: () => void;
 }
 
-const ROLE_DISPLAY = {
-  TENANT_ADMIN: { initials: 'TA', title: 'Tenant Admin' },
-  TEAM_LEAD: { initials: 'TL', title: 'Team Lead' },
-  EMPLOYEE: { initials: 'EM', title: 'Employee' },
+const ROLE_TITLE = {
+  TENANT_ADMIN: 'Tenant Admin',
+  TEAM_LEAD: 'Team Lead',
+  EMPLOYEE: 'Employee',
 } as const;
 
+/** "Maya Manager" -> "MM" */
+function initialsOf(name: string): string {
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join('');
+}
+
 export default function Header({ onMenuClick }: HeaderProps) {
-  const { role } = useRole();
-  const display = role ? ROLE_DISPLAY[role] : { initials: 'LN', title: 'Guest user' };
+  const { user, signOut } = useRole();
+  const router = useRouter();
+
+  const handleSignOut = async () => {
+    try {
+      await logout();
+    } catch {
+      // Sign out here anyway - the cookie is also gone when it expires
+    }
+    signOut();
+    router.replace('/login');
+  };
 
   return (
     <AppBar position="sticky" elevation={0}>
@@ -73,31 +94,26 @@ export default function Header({ onMenuClick }: HeaderProps) {
           </IconButton>
         </Tooltip>
 
-        <Tooltip title="Switch role — authentication is not implemented yet">
-          <Stack
-            component={Link}
-            href="/login"
-            direction="row"
-            spacing={1}
-            sx={{ alignItems: 'center', pl: 0.5, textDecoration: 'none', color: 'inherit' }}
-          >
+        {user && (
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', pl: 0.5 }}>
             <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: 14 }}>
-              {display.initials}
+              {initialsOf(user.displayName)}
             </Avatar>
             <Box sx={{ display: { xs: 'none', sm: 'block' } }}>
               <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
-                {display.title}
+                {user.displayName}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                {role ? 'Switch role' : 'No role assigned'}
+                {ROLE_TITLE[user.role]}
               </Typography>
             </Box>
-            <ExpandMoreIcon
-              fontSize="small"
-              sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'block' } }}
-            />
+            <Tooltip title="Sign out">
+              <IconButton aria-label="Sign out" onClick={handleSignOut}>
+                <LogoutIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </Stack>
-        </Tooltip>
+        )}
       </Toolbar>
     </AppBar>
   );

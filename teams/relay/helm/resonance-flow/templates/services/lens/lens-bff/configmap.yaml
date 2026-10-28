@@ -16,5 +16,7 @@ data:
     notificationDelivery:
       service:
         url: {{ $cfg.notificationDelivery.service.url | quote }}
+    server:
+      port: {{ $cfg.server.port }}
 {{- end }}
 {{- end }}

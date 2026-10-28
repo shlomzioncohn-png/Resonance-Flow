@@ -57,7 +57,21 @@ def _check_schema(dep_rows: Iterable[DependencyRow], state_rows: Iterable[StateR
             ok = False
         if not ok:
             errors.append(f"{where}: {r.event_type} violates the table's shape check")
+        if r.effort_estimate_minutes is not None and r.effort_estimate_minutes <= 0:
+            errors.append(f"{where}: effort_estimate_minutes must be positive")
+    errors += _check_task_attributes(state_rows)
     return errors
+
+
+def _check_task_attributes(state_rows: Iterable[StateRow]) -> list[str]:
+    """A task's deadline and estimate are fixed: every one of its rows carries the same values."""
+    seen: dict = {}
+    errors = []
+    for r in state_rows:
+        pair = (r.deadline, r.effort_estimate_minutes)
+        if seen.setdefault(r.task_id, pair) != pair:
+            errors.append(f"task_state_history seq {r.sequence}: deadline/estimate differ from the task's other rows")
+    return errors[:5]
 
 
 def _replay(dep_rows: list[DependencyRow], state_rows: list[StateRow]) -> list[str]:

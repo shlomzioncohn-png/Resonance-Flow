@@ -16,8 +16,8 @@ import java.time.Instant;
 import java.util.UUID;
 
 /** JPA mapping for {@code task_state_history}. {@code sequence} is DB-generated (BIGSERIAL),
- * read-only from JPA's side - used only as the same-millisecond ordering tiebreak, never exposed
- * on {@link com.rnd.chain.dto.TaskStateHistoryEntry}. */
+ * read-only from JPA's side - the ordering tiebreak and cursor key, never part of
+ * {@link com.rnd.chain.dto.TaskStateHistoryEntry}. */
 @Entity
 @Table(name = "task_state_history")
 @Getter
@@ -51,7 +51,6 @@ public class TaskStateHistoryEntity {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
-    @Getter(AccessLevel.NONE)
     @Column(insertable = false, updatable = false)
     private Long sequence;
 }

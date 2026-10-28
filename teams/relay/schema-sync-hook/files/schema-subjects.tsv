@@ -27,9 +27,12 @@ task-creation-requested-event.proto	task-creation-requested-event.proto
 task-created-event.proto	task.created-value
 task-updated-event.proto	task.updated-value
 task-completed-event.proto	task.completed-value
+# reset: bridge.raw.landed-value
 raw-object-event.proto	bridge.raw.landed-value
-github-task.proto	bridge.github.tasks-value
 task-creation-requested-event.proto	task.creation.requested-value
+structured-task-event.proto	bridge.structured.tasks-value
 task-dependencies-proposed-event.proto	task.dependencies.proposed-value
 task-score-proposed-event.proto	task.score.proposed-value
 scheduling-updated-event.proto	task.scheduling.updated-value
+task-notification.proto	resonance.task-events-notifications-value
+task-notification.proto	resonance.task-notifications-value

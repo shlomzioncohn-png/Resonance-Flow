@@ -164,6 +164,8 @@ Ancestors has no `/transitive` variant - the ancestor chain already is the trans
 | GET | `/tasks/{taskId}/dependencies/transitive` | All (transitive) dependencies |
 | GET | `/tasks/{taskId}/dependencies/history` | Dependency change history |
 | GET | `/tasks/{taskId}/state-history` | Status / blocking history, filterable by time range |
+| GET | `/tasks/state-history` | Tenant-wide state history, `from`/`to` required (max 90 days), cursor-paged oldest first |
+| GET | `/tasks/blocked-since` | Currently blocked tasks of the tenant with `blockedSince`, optional `taskIds` |
 | GET | `/tasks/{taskId}/constraints/history` | Constraint history, filterable by time range |
 | GET | `/tasks/{taskId}/dependents` | Direct dependents |
 | GET | `/tasks/{taskId}/dependents/transitive` | All (transitive) dependents |
@@ -1147,12 +1149,41 @@ placeholder in that tenant (`updatedAt` = epoch) inside the graph lock, and the 
 recorded right away. An existing task is never overwritten, and one in a different tenant rejects the
 whole event (no retry, nothing created). A later `task.updated` replaces the placeholder's state.
 
+**Scheduling publish after `task.dependencies.proposed`.** Inbox creates a `has_dependencies` task with
+`is_available=false`, and only Chain flips it. The handler therefore also creates the event's own task as a
+placeholder up front (so an empty dependency list still has a row), and after processing the edges reads its
+readiness from `task_readiness`: if ready, it queues `task.scheduling.updated` after commit for that task
+only (never for a `dependsOnTaskId`); if blocked, nothing is published. This runs on every non-duplicate
+event, including when a `DuplicateDependencyException` was swallowed. A redelivered `event_id` is still
+blocked by `ChainEventProcessingTemplate`.
+
 Tests: `TaskEligibilityServiceTest` (same/different/null-tenant `addDependency`/`addDependencies`,
 `onTaskStatusChangedIfNewer` backfill/match/reject incl. the stale-redelivery case),
 `TaskDependencyServiceTest`/`DependencyProposedEventHandlerTest` (REJECTED history on rejection,
 REST and Mind paths respectively), `TaskUpdatedEventHandlerTest` (tenant mismatch ->
 `NonRetryableEventException`, not retried), `TaskRepositoryContractTest` (`tenantId` round-trips
 through `save`/`findById` for both the in-memory and Postgres implementations).
+
+## Tenant context and task ownership (Issue #956)
+
+Every `/tasks/**` request must carry `X-Tenant-Id` (a UUID). `TenantInterceptor` (registered in
+`WebConfig`) rejects a missing or malformed value with 400 in the `ApiError` format, before any
+controller runs; validation lives only in `TenantContext`.
+
+- **Exempt paths:** `WebConfig.TENANT_EXEMPT_PATHS`, currently **empty** - fail-closed, so a new
+  endpoint under `/tasks` requires the header by default. The only known caller is lens-bff. Add a
+  path only for a concrete internal caller, documented here with the caller and reason. The list
+  is path-only: the first exemption must also add a method check to the interceptor. An exempt
+  path has no tenant, so it cannot check task ownership.
+- **Ownership:** each `/tasks/{taskId}/...` controller calls
+  `TaskOwnershipService.requireTaskInTenant(taskId, tenantId)` first. A task of another tenant, or
+  one whose `tenant_id` is still null, fails with the same 404 as a missing task. The interceptor
+  only guarantees the header; a new endpoint must still call the ownership check itself.
+- **Not covered:** the second task id of `POST`/`DELETE /tasks/{taskId}/dependencies` is not
+  checked against the tenant (tracked separately), nor is `GET /tenants/{tenantId}/dependency-graph`,
+  which takes the tenant from its path.
+
+Tests: `TenantContextTest`, `TenantInterceptorTest`, `TaskOwnershipServiceTest`.
 
 ## Transactional graph lock
 

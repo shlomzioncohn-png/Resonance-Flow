@@ -32,7 +32,13 @@ import xml.etree.ElementTree as ET
 from pydantic import BaseModel
 
 from benchmarks.aligned_metrics import normalize as _normalize
-from benchmarks.asr_benchmark import BEAM_SIZE, Meeting, load_meetings, word_diff
+from benchmarks.asr_benchmark import (
+    BEAM_SIZE,
+    SIZE_BENCHMARK_MEETINGS,
+    Meeting,
+    load_meetings,
+    word_diff,
+)
 from benchmarks.common import sample_current_process
 
 VARIANTS = ["full", "fixed60", "production"]
@@ -122,7 +128,7 @@ def run_one(variant: str, meeting: Meeting, run: int) -> ChunkingRow:
 
 
 def run_chunking_benchmark() -> list[ChunkingRow]:
-    meetings = load_meetings()
+    meetings = load_meetings(SIZE_BENCHMARK_MEETINGS)
     spawn = multiprocessing.get_context("spawn")
     rows: list[ChunkingRow] = []
     for run in range(1, RUNS + 1):

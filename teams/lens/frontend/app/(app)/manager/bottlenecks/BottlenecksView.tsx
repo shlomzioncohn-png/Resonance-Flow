@@ -10,7 +10,7 @@ import DependencyGraph from '@/components/ui/DependencyGraph';
 import FilterChip from '@/components/ui/FilterChip';
 import KpiTile from '@/components/ui/KpiTile';
 import { useDependencyGraph } from '@/hooks/useDependencyGraph';
-import { getErrorMessage } from '@/services/api';
+import { graphErrorMessage } from '@/services/bottlenecksApi';
 import { getProjects } from '@/services/projectsApi';
 import { projectKeys } from '@/services/queryKeys';
 import { MANAGER_TREND_REFRESH_MS } from '@/constants';
@@ -78,7 +78,7 @@ export default function BottlenecksView() {
       {graphQuery.isPending && <LoadingState message="Loading dependency graph…" />}
 
       {graphQuery.isError && (
-        <ErrorState description={getErrorMessage(graphQuery.error)} onRetry={() => graphQuery.refetch()} />
+        <ErrorState description={graphErrorMessage(graphQuery.error)} onRetry={() => graphQuery.refetch()} />
       )}
 
       {graph && graph.edges.length === 0 && (

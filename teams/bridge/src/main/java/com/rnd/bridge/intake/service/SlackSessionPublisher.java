@@ -73,21 +73,27 @@ public class SlackSessionPublisher {
         SourceRecord transcript = transcriptOnly.get(0);
 
         ScopeDecision scopeDecision = scopingFilter.decide(transcript);
-        RawObjectRef transcriptRef = refMapper.toRef(transcript, asOf);
-        landingService.land(transcriptRef.objectKey(), transcript, scopeDecision, asOf);
-
+        // DELETE_REVIEW (a deletion emptied this group - see ChatSourceRecordMapper's empty-
+        // GroupState branch) must carry an empty objects list per RawObjectEvent's own contract
+        // (same rule UnstructuredPayloadMapper already enforces for the batch/lane path) - never
+        // land or ref the sparse DELETE_REVIEW record's own filler content, and never include any
+        // attachment this (now-empty) group's messages might still list as landed.
         List<RawObjectRef> objects = new ArrayList<>();
-        objects.add(transcriptRef);
-        for (MessageSnapshot message : state.messages()) {
-            for (LandedAttachment landed : message.landedAttachments()) {
-                objects.add(landed.ref());
+        if (transcript.changeType() != com.rnd.bridge.raw.model.ChangeType.DELETE_REVIEW) {
+            RawObjectRef transcriptRef = refMapper.toRef(transcript, asOf);
+            landingService.land(transcriptRef.objectKey(), transcript, scopeDecision, asOf);
+            objects.add(transcriptRef);
+            for (MessageSnapshot message : state.messages()) {
+                for (LandedAttachment landed : message.landedAttachments()) {
+                    objects.add(landed.ref());
+                }
             }
         }
 
         RawObjectEvent event = RawObjectEvent.create(
                 transcript.sourceType(), transcript.tenantId(), asOf, scopeDecision, transcript.participants(),
                 transcript.occurredAt(), transcript.correlationId(), transcript.revision(), transcript.changeType(),
-                objects);
+                objects).withSourceRef(transcript.sourceRef());
 
         validator.validate(event);
         publisher.publish(event);
