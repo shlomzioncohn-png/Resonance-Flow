@@ -24,6 +24,7 @@ import { getErrorMessage } from '@/services/api';
 import { useTaskActivity } from '@/hooks/useTaskActivity';
 import { useTaskDetails } from '@/hooks/useTaskDetails';
 import TaskActivity from './TaskActivity';
+import TaskConstraints from './TaskConstraints';
 
 type TabValue = 'overview' | 'activity';
 
@@ -185,10 +186,9 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
                     value={task.effortEstimate != null ? `${task.effortEstimate} min` : '—'}
                   />
                   <DetailRow label="Project" value={task.project ?? '—'} />
-                  {(task.constraints ?? []).length > 0 && (
-                    <DetailRow label="Constraints" value={(task.constraints ?? []).join(', ')} />
-                  )}
                 </Box>
+
+                <TaskConstraints constraints={task.constraints} />
               </>
             </CardContent>
           </Card>

@@ -38,6 +38,7 @@ import {
   softToneSx,
   statusTone,
 } from './shared';
+import TaskConstraints from './tasks/[taskId]/TaskConstraints';
 import { ApiError, getErrorMessage } from '@/services/api';
 import {
   INVALID_TASK_STATUS_TRANSITION,
@@ -398,9 +399,7 @@ export default function EmployeeWorkspacePage() {
                     value={task.effortEstimate != null ? `${task.effortEstimate} min` : '—'}
                   />
                   <DetailRow label="Project" value={task.project ?? '—'} />
-                  {(task.constraints ?? []).length > 0 && (
-                    <DetailRow label="Constraints" value={(task.constraints ?? []).join(', ')} />
-                  )}
+                  <TaskConstraints constraints={task.constraints} />
                 </Stack>
               </CardContent>
             </Card>

@@ -15,7 +15,7 @@ import DataTable, { type Column } from '@/components/ui/DataTable';
 import WorkInsights from '@/components/ui/WorkInsights';
 import { getErrorMessage } from '@/services/api';
 import { listTasks, type ApiTask, type TaskListFilter } from '@/services/workspaceApi';
-import { PriorityChip, softToneSx, statusTone } from '../shared';
+import { OpenConstraintsChip, PriorityChip, softToneSx, statusTone } from '../shared';
 
 type LoadState = 'loading' | 'loaded' | 'error';
 
@@ -25,16 +25,19 @@ const columns: Column<ApiTask>[] = [
     header: 'Task',
     render: (task) => (
       <Stack spacing={0.25}>
-        <MuiLink
-          component={Link}
-          href={`/employee/tasks/${task.id}`}
-          variant="body2"
-          underline="hover"
-          color="text.primary"
-          sx={{ fontWeight: 600 }}
-        >
-          {task.title}
-        </MuiLink>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+          <MuiLink
+            component={Link}
+            href={`/employee/tasks/${task.id}`}
+            variant="body2"
+            underline="hover"
+            color="text.primary"
+            sx={{ fontWeight: 600 }}
+          >
+            {task.title}
+          </MuiLink>
+          <OpenConstraintsChip count={task.openConstraintCount} />
+        </Stack>
         {task.project && (
           <Typography variant="caption" color="text.secondary">
             {task.project}
