@@ -5,7 +5,7 @@ Vectors, semantic search, duplicate/related-task detection.
 ## Decisions (closed)
 
 - **Vector store: pgvector** — see [`vector-store-comparison.md`](../../../benchmarks/vector-store-comparison.md).
-- **Embedding model: `BAAI/bge-small-en-v1.5`**, 384-dim, CPU-only, English-only. Asymmetric -- queries need `is_query=True`. Local weights optional via `MODEL_CACHE_DIR`.
+- **Embedding model: `BAAI/bge-small-en-v1.5`**, 384-dim, CPU-only, English-only. Asymmetric -- queries need `is_query=True`. Baked into the image (`EMBEDDING_MODELS_DIR`, see the Dockerfile); locally, weights optional via `MODEL_CACHE_DIR`.
 - **Load target** (week 8, provisional): 10,000+ records, <300ms p95.
 
 ## What's here

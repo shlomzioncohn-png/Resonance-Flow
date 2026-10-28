@@ -5,9 +5,11 @@ Local model weights. **Gitignored — never committed.**
 ## `bge-small-en-v1.5/`
 
 The embedding model used by `src/mind/embeddings` (`BAAI/bge-small-en-v1.5`
--- see that module's README for why). If `MODEL_CACHE_DIR` points here
-(`.env.example`), loading needs no network call; otherwise it downloads
-from the Hugging Face Hub on first use.
+-- see that module's README for why). In the image the weights are baked in at
+build time (`/opt/models/embeddings/`, pinned revision and sha256, see the
+Dockerfile), and that copy is loaded first, so this folder is for local dev only.
+If `MODEL_CACHE_DIR` points here (`.env.example`), loading needs no network call;
+otherwise it downloads from the Hugging Face Hub on first use.
 
 To populate it locally: download the model folder (e.g. via
 `huggingface-cli download BAAI/bge-small-en-v1.5 --local-dir models/bge-small-en-v1.5`,

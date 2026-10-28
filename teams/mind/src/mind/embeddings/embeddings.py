@@ -25,14 +25,23 @@ MAX_SEQ_LENGTH = 512
 
 BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
 
+
+def _local_dir(settings: EmbeddingModelSettings) -> Path | None:
+    """The first local copy of the model that exists, or None to download it from HF Hub.
+
+    1. ``EMBEDDING_MODELS_DIR/<model>/``: the copy baked into the image (Dockerfile).
+    2. ``MODEL_CACHE_DIR/<model>/``: local dev, placed by hand (models/README.md).
+    """
+    dirname = settings.name.rsplit("/", 1)[-1]
+    for base in (settings.models_dir, settings.model_cache_dir):
+        if base and (Path(base) / dirname).is_dir():
+            return Path(base) / dirname
+    return None
+
+
 _embedding_model_settings = EmbeddingModelSettings()
 EMBEDDING_MODEL_NAME = _embedding_model_settings.name
-# None = download from HF Hub (no local MODEL_CACHE_DIR set).
-EMBEDDING_MODEL_LOCAL_DIR: Path | None = (
-    Path(_embedding_model_settings.model_cache_dir) / EMBEDDING_MODEL_NAME.rsplit("/", 1)[-1]
-    if _embedding_model_settings.model_cache_dir
-    else None
-)
+EMBEDDING_MODEL_LOCAL_DIR: Path | None = _local_dir(_embedding_model_settings)
 
 _model: SentenceTransformer | None = None
 _model_lock = threading.Lock()
