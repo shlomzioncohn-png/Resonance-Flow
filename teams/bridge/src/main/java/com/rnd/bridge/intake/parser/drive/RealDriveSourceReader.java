@@ -208,6 +208,9 @@ public class RealDriveSourceReader implements DriveSourceReader {
             log.warn("Skipping Drive file - export rejected as not exportable: fileId={}, mimeType={}",
                     file.getId(), file.getMimeType());
             return null;
+        } catch (DriveFileGoneException e) {
+            log.warn("Skipping Drive file - no longer available: fileId={}", file.getId());
+            return null;
         }
         // SourceRecord.mimeType must describe content, not the original file - a native Google
         // file's content bytes are the EXPORT_MIME_TYPE export, never file.getMimeType() itself.
@@ -258,6 +261,9 @@ public class RealDriveSourceReader implements DriveSourceReader {
             if (isFileNotExportable(e)) {
                 throw new DriveFileNotExportableException(e);
             }
+            if (e.getStatusCode() == 404 || e.getStatusCode() == 410) {
+                throw new DriveFileGoneException(e);
+            }
             throw new UncheckedIOException("Failed to fetch Drive file content for " + file.getId(), e);
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to fetch Drive file content for " + file.getId(), e);
@@ -285,6 +291,15 @@ public class RealDriveSourceReader implements DriveSourceReader {
 
     private static final class DriveFileNotExportableException extends RuntimeException {
         DriveFileNotExportableException(GoogleJsonResponseException cause) {
+            super(cause);
+        }
+    }
+
+    /** The file's bytes are gone (404) or its revision pointer expired (410) between being
+     * listed and being fetched - distinct from DriveFileNotExportableException (file exists,
+     * export is just rejected). */
+    private static final class DriveFileGoneException extends RuntimeException {
+        DriveFileGoneException(GoogleJsonResponseException cause) {
             super(cause);
         }
     }
