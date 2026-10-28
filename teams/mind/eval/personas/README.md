@@ -169,8 +169,8 @@ the per-role and total maximum, see `MAX_SCENARIOS_PER_ROLE` / `MAX_TOTAL_SCENAR
 split into `same_tier/` (20), `cross_tier/` (16) and `hierarchy_decides/` (6). The
 first 30 are the 2026-09-06 rebuild; the next 6 are the "hard scenarios" round
 described below; the last 6, one per role, are the hierarchy group (#507, raised
-from 36 / 6 per role with the mentor's agreement). The 12 newest are still
-`team_lead_approved: false`. All load cleanly through `load_personas`;
+from 36 / 6 per role with the mentor's agreement). All 42 are
+`team_lead_approved`; the 12 newest were approved on 2026-10-27. All load cleanly through `load_personas`;
 `validate_personas` reports no errors and no role-coverage / count warnings.
 
 Each role's first five scenarios (the 2026-09 rebuild) test five *different* tradeoffs,
@@ -535,6 +535,9 @@ report if 100% isn't reached by the Foundation Gate.)*
 **Team-lead review (PR #198):**
 - **Update 2026-10:** the set is now 36. The 30 below were approved as described;
   the six hard scenarios added in PR #535 are still `team_lead_approved: false`.
+- **Update 2026-10-27:** the set is now 42 (#507 added `hierarchy_decides/`). The
+  team lead approved the 12 that were still `false` (#535's six and the six
+  hierarchy scenarios), so 42 / 42 are `team_lead_approved`.
 - **Reviewed by:** estherora-tem, team lead. (The mentor is a different person
   and has not reviewed this set yet — that is a separate, still-pending gate;
   `mentor_approved` stayed `false` on all 30 until it was removed in 2026-10.)

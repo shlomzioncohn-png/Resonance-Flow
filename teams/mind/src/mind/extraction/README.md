@@ -82,7 +82,7 @@ llm:
     base_url: https://api.deepseek.com
     model: deepseek-chat
     timeout_seconds: 60
-    max_output_tokens: 1024
+    max_output_tokens: 2700
 # secrets.yaml -> components.mind.secret
 llm:
   deepseek:
@@ -156,7 +156,9 @@ DeepSeek.
 that filters `api.deepseek.com` it is the only one that can actually be run. It
 is not `deepseek.py` with the URL swapped — Gemini takes the system prompt as
 its own `system_instruction` field, returns the answer as a list of parts, and
-puts its retry hint in the error body instead of a header.
+puts its retry hint in the error body instead of a header. Thinking tokens
+count against `maxOutputTokens`: a model that ignores `thinkingBudget: 0`
+spends part of the cap a full list of tasks needs.
 
 ```yaml
 llm:
@@ -284,13 +286,15 @@ dollars per model and holds LLM calls to their duration and cost limits.
 Both outcomes carry `item_key`, and the log names it:
 
 ```
-giving up on tenant-7/email/4471-body.eml (EMAIL) after 3 attempt(s): ...
+giving up on 6f1c1f9e-0000-4000-8000-000000000001 (EMAIL) after 3 attempt(s): ...
 ```
 
-It is the intake event's `object_key`, not its `correlation_id` — a source
-body shares a correlation id with its attachments, so it cannot say *which* of
-them failed. `extract_many` takes `ExtractionItem` values for the same reason:
-a three-tuple of `(str, SourceType, str | None)` reads as a puzzle.
+It is whatever the caller calls the text. For a Bridge item it is the
+arrival's `correlation_id`: the item's files, an email body and its
+attachments, are joined into one text (#349, `ingestion/README.md`), so a
+failure names the item, not which of its files caused it. The eval passes the
+meeting id. `extract_many` takes `ExtractionItem` values so a call site never
+reads as the puzzle a three-tuple of `(str, SourceType, str | None)` would be.
 
 ### A pointer the content never contained
 
@@ -685,3 +689,387 @@ Caveats, all load-bearing:
   by someone else.
 - it says nothing about the confidence values. Whether `INFERRED` estimates
   land near the truth is the persona calibration above, and that is R1's run.
+
+## Several tasks per text (#690)
+
+Until #690 the model was asked for one object, so every text yielded exactly
+one task and a meeting with eight action items lost seven. The answer is now
+one object holding a list:
+
+```json
+{"tasks": [{"title": "...", "has_dependencies": false, "dependency_mentions": []}]}
+```
+
+| Decision | Where |
+|---|---|
+| An empty list is a valid answer: a text with no task is the normal case | `ExtractedTasks`, `system.md` |
+| At most `MAX_TASKS_PER_TEXT` (15) tasks; more is rejected and repaired, never cut short | `models.py`; the prompt's number is filled in from the constant, not written twice |
+| One invalid task fails the whole answer; the message names it by place (`tasks.1.title`) | `parse_response` |
+| A bare list without the object is formatting, like a code fence: wrapped, not repaired | `parsing._read_payload` |
+| Grounding and confidence run per task; `item_key`, model and attempts stay on the answer | `ExtractedTask`, `ExtractionSuccess.tasks` |
+| One `TaskCreationRequested` per task, in order; none for an empty list | `assembly.to_task_creation_requested` |
+
+**One call per text, so all or nothing per call.** Every task of an item
+comes from one answer. A provider failure — the output cap, a safety block,
+a timeout after its retries — loses all of them together, where per-task calls
+would have lost one. Chosen because one call is cheaper and the model sees the
+whole context (a recap names what was asked earlier). What guards it: the
+output cap sized for a full list (`TOKENS_PER_TASK`, `DEFAULT_MAX_OUTPUT_TOKENS`
+2400), descriptions held to about 300 characters by the prompt and dropped past
+`MAX_DESCRIPTION_LENGTH` (600), and at most 10 mentions of a title's length. An
+empty meeting with an `ExtractionFailure` is this, not a parsing bug.
+
+`system.md` now also says what a task is: work someone is asked to do, offers
+to do, or agrees to do — not a topic only discussed, not work already done.
+Until #690 that never needed saying. It opens with that, before the format:
+most content holds no task, and a model that first reads "return a list of
+tasks" goes looking for something to put in it. Live, a newsletter, a deploy
+status and small talk each came back as `{"tasks": []}`.
+
+It also says the content can come in parts under headings (`[Body]`,
+`[Attachment: form.jpg, scanned]`): a Bridge item's files are joined into one
+text (#349). The parts are one item, so a task may take its details from
+several of them, a task two parts raise is listed once, and a heading is never
+a task, a title or a `source_ref` (a file name is not a pointer). A text of
+one file comes without headings.
+
+### Which tasks pay for a repair round
+
+A repair round re-asks for the whole list, so a shared attempt count charged
+every task for one sibling's `"N/A"`: in a meeting of eight, seven valid tasks
+lost 20% each. Instead, `read_rejected_answer` reads each task of a rejected
+answer on its own, and a final task **equal in every field** to one of those is
+charged only the rounds up to that one (`extractor._rounds_needed`). Matching is
+by content, not by place, because the model may reorder, merge or drop tasks
+between rounds. The rejected tasks are used for this comparison only; nothing
+from a rejected answer reaches the output.
+
+One rejection earns no credit at all: **more than 15 tasks**. A model listing
+past the cap is listing non-tasks, so none of what it listed counts as right
+the first time. Its rejection says so in its own words ("keep only the real
+tasks ... and leave out the rest"), and `repair_user.md` allows removing tasks
+when the rejection asks: told only to "return every task again, unchanged", a
+model resent the same over-long list until the item failed. An extra key beside `tasks` is formatting and keeps the credit.
+
+This narrows the problem; it does not close it. A valid task the model
+*rewords* during repair cannot be told apart from a new one, and is charged.
+`repair_user.md` asks for the untouched tasks back unchanged, and every success
+after a repair logs the comparison with the **last** rejected answer only —
+`the rejected answer had N task(s), V of them valid; the repaired answer has R,
+and U of the valid ones came back unchanged` — so how often this happens is
+measured, not guessed.
+
+**A dropped task is a warning.** The model can break #690's third decision by
+answering the repair with fewer tasks, and nothing raises. When the repaired
+answer is shorter *and* a valid task did not come back unchanged, it logs `a
+valid task may have been dropped`. Dropping only the invalid one stays quiet:
+the title message tells the model to leave a non-task out of the list.
+
+### Proposed: partial repair
+
+The exact fix is to send back only the failed tasks and freeze the valid ones,
+so nothing has to be matched. Envelope failures — broken JSON, more than 15
+tasks — would still re-ask for everything, and there every task is charged. Not built here: it changes the repair flow, needs a guard
+against the model resending the frozen tasks as duplicates, and departs from
+#690's third decision as worded ("one invalid task sends the whole answer to
+repair"), so it is that decision's owner's call. Worth building if the logged
+rewording count turns out to be high.
+
+### `dependency_mentions` (moved here from #842)
+
+**One direction.** A mention, and `has_dependencies`, mean "this task waits
+for that work" — never "that work waits for this task". #834 sends each
+resolved mention to Chain as this task's `depends_on_task_id`, so a mention of
+the work a task *blocks* would arrive as an edge pointing backwards, and two
+tasks naming each other as a cycle. The relation is not lost: the waiting task
+names its blocker. This narrows `has_dependencies` from #350's "depends on, is
+blocked by, or blocks": a task others wait for is now `false`. It is Inbox's
+field, so the change is called out in the PR.
+
+Each task names the work it depends on or is blocked by, in the content's own words
+("the DB upgrade"), so that #834's resolver can look up the real `task_id`.
+It is defined in `system.md`, beside `has_dependencies`, because it is a field
+of every task, with the switch on or off.
+
+Three steps, in this order, and the order is the point:
+
+1. **Cleaned, in the model** (`only_usable_mentions_survive`): blanks,
+   placeholders and repeats (case-blind) are dropped, non-strings and phrases
+   longer than a title (200) are dropped and logged, at most
+   `MAX_MENTIONS_PER_TASK` (10) are kept, and a bare string becomes a
+   one-item list. One empty mention used to stall #834's listener; none
+   leaves here.
+2. **Grounded, against the content** (`grounding.ground_dependency_mentions`):
+   a mention stays only if every one of its content words is in the text the
+   model was sent, except that one may be missing from a mention of three
+   words or more (`MIN_WORDS_TO_MISS_ONE`). Not a share: in a long meeting
+   "review" or "budget" is said somewhere, and half of a two-word mention
+   would ground almost anything. "the security review" in a text that never
+   says "security" is dropped. Closeness is not checked: the two words may
+   be far apart. A mention equal to another task's title in the same answer
+   is grounded by that task — the prompt asks for exactly that, and a title
+   is the model's own summary, whose words need not all have been said.
+3. **The rule:** a non-empty list after grounding means `has_dependencies` is
+   true. A `false` beside a grounded mention is corrected and logged, not
+   repaired: the mention is the evidence, the `false` the slip. `true` with an
+   empty list is allowed — the content may show other work without naming it.
+
+The rule lives at grounding, not in the model, because the model never sees
+the content: applied there, an invented mention had already turned a `false`
+into a `true` before anything could tell it was invented, and
+`has_dependencies` is a contract field. So the guarantee holds on
+`ExtractionSuccess`, what `extract` returns, and not on a bare
+`ExtractedFields` parsed or built anywhere else.
+
+**What a mention says.** Enough to be found: the work as the content names
+it, with whose it is or what it is for when the content says so, and, for
+another task in the same list, that task's title. More words do not make a
+mention easier to keep — each one must be in the content — so made-up
+context costs the whole mention. One gap is #834's, not this stage's: when
+the other task comes from the same text, it is created at the same moment,
+and may not be in the index yet when its mention is resolved.
+- **Not in the contract.** `TaskCreationRequested` carries only
+  `has_dependencies`. The mentions stay on `ExtractedTask.fields` and travel
+  separately, through `flow.send(..., dependency_mentions=...)` in #359.
+- **`repair_user.md` names no keys.** It refers to "the keys the instructions
+  list". Naming fields there once dropped three of them from every repaired
+  answer (#587), so a new field is never added to it.
+
+### Known gaps, left for follow-ups
+
+- **Only a runaway item is truncated.** `MAX_CONTENT_CHARS` (100,000, about
+  25k tokens) is one cap for every source, a safety net rather than a saving:
+  a cut loses what comes last, which in a meeting is the closing recap with
+  its action items (on AMI, cut at 8000 the two meetings found 0/4 and 0/8
+  gold items, sent whole 4/4 and 4/8). A Bridge item's parts share the cap
+  before they reach extraction, the longest cut first, so the attachment
+  after a long body is not the part lost (#968, `ingestion/README.md`).
+  The price: the quoted history at the end of a long
+  email thread is now sent too (not measured live), and an item near the cap
+  costs ~$0.019 a call, twice that from 2027 and again on each repair round,
+  past the monitoring's $0.02 limit, which was set for the 8000 cap. Any cut
+  is logged as a warning with how much was not sent, and grounding reads only
+  the text that was sent. A repair round shows the model its own rejected
+  answer under the same cap, so a long list of tasks is not cut either.
+- **AMI was measured by hand, once.** The transcripts (from #784's loader)
+  are not in the repository, as the corpus is gitignored; the run and its
+  numbers are in the PR. A repeatable AMI eval belongs to R1's extraction
+  eval (#178), which can now read `ExtractionSuccess.tasks`.
+- **Urgency has no reference date.** `source_timestamp` is not in the prompt,
+  so the model cannot tell how near "by Friday" is when it judges urgency.
+  The deadline itself is placed in time, by code (#960, below).
+- **With classification switched off the model sees no examples at all**,
+  including the multi-task and dependency ones. The switch defaults to on.
+
+## Deadline (#960)
+
+`TaskCreationRequested.deadline` was on the contract and on Inbox's proto from
+the start, and extraction never filled it: every task went out with none, so
+ranking's strongest feature, `deadline_proximity`, read every task as undated.
+It is now asked for in the same call and under the same `classify` switch as
+the estimate.
+
+| piece | where |
+|---|---|
+| what the model reports | `StatedDeadline` on `ClassificationFields` (`models.py`) |
+| the instructions | `classification.md`: the key, its rules, the examples |
+| the phrase checked against the content | `grounding.ground_deadline` |
+| turning it into a moment | `deadline.py`, called by `assembly.resolve_deadline` |
+| the locale it is read in | `config.DeadlineSettings` (`MIND_DEADLINE__*`) |
+| when the text was written | `ingestion/creation_pipeline.py`: `source_timestamp`, else `ingested_at` |
+
+### The model reports, the code counts
+
+The model does no date arithmetic. It writes down what the content says, in one
+of four shapes, and our code works out the moment against when the text was
+written. Counting from Monday to "Friday", or from October 22 to "October 20",
+is where models slip; here it is plain code a test can pin. Only the resolved
+moment reaches Inbox, in UTC: ranking compares `deadline` with its own "now"
+on every run, so an offset like "in 3 days" would be right for one moment only.
+
+| `kind` | keys | the content says |
+|---|---|---|
+| `DATE` | `month`, `day`, `year` only when written | "by November 3" |
+| `OFFSET` | `amount`, `unit`: `MINUTES` `HOURS` `DAYS` `WEEKS` `WORKING_DAYS` | "within 72 hours", "tomorrow" (1 `DAYS`) |
+| `WEEKDAY` | `weekday`, `next_week` | "by Friday", "next Tuesday" |
+| `PERIOD_END` | `period`: `DAY` `WEEK` `NEXT_WEEK` `MONTH` | "today", "end of the month", "by 12:30" (`DAY` + time) |
+
+Every shape carries `phrase`, the content's own words for it, and any shape that
+lands on a day may carry `time_of_day` ("14:00") when the content names a time.
+The model writes the units the content uses: "two weeks" is 2 `WEEKS`, never 14
+`DAYS`, so it never multiplies either.
+
+### The rules it is resolved by
+
+Each was a decision taken on the issue; the reasoning is there. The one that
+runs through most of them: when a reading is uncertain, prefer the earlier
+moment. A deadline read too early lifts the task where a person sees it; one
+read too late, or dropped, buries it, which is the failure ranking exists to
+prevent.
+
+| the content | resolved to |
+|---|---|
+| a date with no year | passed if at most 60 days back (`MAX_DAYS_PASSED`), otherwise ahead |
+| a day with no time | 17:00 local (`end_of_day`); on the day of writing after 17:00, 23:59 |
+| minutes, hours | exactly that long after, in real elapsed time (across a clock change too) |
+| days, weeks | that many calendar days on, at the end of the working day |
+| working days | only when the content says working or business days |
+| a weekday | the nearest one, today included; `next_week` adds a week |
+| the end of the week | its last working day; once that has passed (a Friday in Israel), next week's |
+| next week | the end of the coming week |
+| the end of the month | its last working day; once that has passed, the month's last day |
+| a named time | replaces 17:00; midnight is 23:59; on a minutes or hours offset it adds nothing |
+| a named time already gone today | the next occurrence for a weekday or a week's end, the month's last day for a month's end; a time today or an explicit date stays missed |
+| "ideally by Friday" | Friday: polite wording is how real deadlines are written |
+| "no rush", "whenever", "no deadline" | `null` |
+
+The locale is one setting for all of Mind, `DeadlineSettings`: the IANA zone
+(`Asia/Jerusalem`), the end of the working day (17:00) and the working week
+(Sunday to Thursday), Israel's because the only tenant and the demo are. Event
+times are UTC and say nothing about the writer, and Inbox's `Tenant.timezone`
+does not reach Mind yet. A zone that does not exist, or a working week with no
+working day, no day off or a gap in it, fails when the settings are loaded,
+not on the first deadline. `tzdata` is a declared dependency: Windows and slim
+images have no zone database of their own.
+
+### An unusable deadline becomes null, never a repair round
+
+The same line as the classification fields and the estimate: the deadline is
+optional, so an answer that cannot be used is dropped and logged, and never
+costs a repair round or the rest of the task. That covers a kind that is not
+one of the four, a kind missing what it needs (the commonest: a `DATE` with no
+month or day), a date no calendar has (February 30), a year outside 2000-2200
+and an offset landing more than twenty years ahead (`MAX_DEADLINE_DAYS_AHEAD`).
+The two bounds are not about plausibility: without them a year of 10**10 or
+"within 100000000 days" raised `OverflowError` out of assembly, and the item's
+message came back for ever.
+
+A `time_of_day` that cannot be read ("5pm", a number, a time with a zone) costs
+only the time: the day the model read is still right, so it keeps the end of
+the working day. A number is refused on purpose, since pydantic reads 17 as
+seventeen seconds past midnight.
+
+The logs name locations and error types, never the content's words.
+
+### A phrase the content never said
+
+`ground_deadline` keeps a deadline only if its `phrase` is in the content: its
+words under the same rule as a dependency mention (`MIN_WORDS_TO_MISS_ONE`),
+and every number in it, matched whole and by value ("72" is not in "720";
+"9:00" is "09:00"). The numbers are checked apart because the word check drops
+anything shorter than three characters, which is most of a deadline, and the
+number is the answer. A phrase with nothing to check ("by then") is dropped.
+
+It catches an invented deadline, not a misattributed one: the "March" of an
+offsite the content mentions is really there and passes. Against that stand
+the prompt's rules and examples.
+
+### The traps
+
+The prompt names them, and its examples carry them:
+
+- **a duration**: "it takes about two hours" says how long, not by when;
+- **time already passed**: "down for 40 minutes", "waiting since Monday";
+- **another event's date**: "the board meeting is on the 12th" is not this
+  task's deadline unless the content says the work is due by it;
+- **an explicit "no rush"**: null, unlike a softly worded date.
+
+`system.md` used to say "never output priority, owner or deadline"; it now says
+priority only, since the owner is asked for too (#132, "Owner" below). With the
+switch off the deadline key is still never listed, so it is still never asked
+for.
+
+### What was measured, and what was not
+
+Live, `gemini-3.6-flash`:
+
+- **The #359 demo**, its three items as Bridge lands them (ASR and OCR faked,
+  everything else real): 4 of 4 deadlines on the right day: the cost sheet on
+  Wednesday, the quote on Thursday (meeting and Slack), the form on Friday.
+- **The 62 DEV persona tasks**, title and description as an email, the
+  scenario's `current_datetime` as the time of writing, read as Israel local
+  time with a Monday-to-Friday week, since the set is written as such a
+  workplace. One run each, so no noise floor:
+
+| | first run | after the time fix |
+|---|---|---|
+| found, of the 37 with a gold deadline | 29 | 34 |
+| on the right date | 28 | 33 |
+| at the exact time | 14 | 24 |
+| a deadline where the gold has none, of 25 | 0 | 0 |
+
+The first run's misses were nearly all one gap: a time with no day ("by 12:30")
+had no shape to go in, so the model sent a `DATE` without a date. Now it is
+`PERIOD_END DAY` with a time, and every shape that lands on a day may carry one.
+
+What the exact-time row cannot show: the nine remaining differences are all
+texts that name no time ("due today", "by the end of the week"), where the
+authors picked one (23:00, 20:00, 09:00) and the rule above says 17:00. Of the
+three misses, one is defensible (a statement that "was meant to go out with
+yesterday's launch"), one is the measurement (the model split the text in two
+and the deadline went to the second task, while only the first is compared),
+and one did not repeat when re-run.
+
+The deadline costs output: 136 tokens a task on average and 215 at most, over
+the old `TOKENS_PER_TASK` of 120. It became 160, and `DEFAULT_MAX_OUTPUT_TOKENS`
+2400, so a full list still fit. The owner's two keys (#132) took it to 180 and
+2700: see "Owner" below.
+
+### Known gaps, left for follow-ups
+
+- **One zone for every tenant.** The tenant's own time zone is in Inbox
+  (`Tenant.timezone`) and needs a contract change to reach Mind.
+- **A soft deadline is not marked.** "Ideally by Friday" counts the same as
+  "the agreement lapses Friday". Down-weighting it is a ranking decision, and
+  needs a soft/hard field on the wire.
+- **The persona measurement is by hand and compares the first task only.** A
+  repeatable one belongs to R1's extraction eval (#178).
+
+## Owner (#132)
+
+Two keys of every task, in both modes, answer one question: who is this task
+for. `owner_mention` is a person's name, the way the content writes it
+("Malki", "Dana Cohen"), never a role, a team, an address or whoever asked.
+`owner_is_recipient` says an email asks the person it is sent to ("you are
+asked to sign", "Hi Dana, please sign" sent to Dana). The model never writes
+the recipient's address: the code takes it from the email record
+(`ingestion/email_body.py`), so it cannot copy the sender's instead. What
+happens next, from the lookup in Inbox's directory to the confidence, is in
+`task_creation/README.md`, "The owner".
+
+- **Optional, never a repair round** (`models.py`). An unusable value is no
+  owner and is logged without the name: not a string, several different names
+  (Inbox takes one suggested owner), an address, a placeholder, longer than
+  `MAX_OWNER_MENTION_LENGTH`, single letters (a speaker's label), a word for
+  nobody in particular ("someone", "everyone", "you"). The same name twice is
+  one owner. A recipient flag that is not a yes or a no is false.
+- **Both answers are kept here.** Which one wins needs the item's recipients,
+  which this stage does not see: a chat has none, and a stray flag must not
+  cost it a grounded name. `task_creation/owner.what_to_look_up` settles it
+  (see "The owner" there). "Dana, please ask Yossi" asks Dana, so it is hers.
+- **Grounded more strictly than a mention** (`grounding.ground_owner_mention`).
+  A name is not a paraphrase: no word may be missing, and the words must stand
+  side by side, in either order ("Cohen, Dana" writes "Dana Cohen"; "Dana Levi
+  and Moshe Cohen" do not). Short words count ("Li Wu", "Dana C."). Words
+  inside an email address do not: "Dana" is not written by
+  `dana.cohen@acme.test`. Not grounded, it is no owner.
+- **What grounding does not close: the sender.** A sender who signs "Thanks,
+  Avi" has written the name. The prompt keeps senders out; the code drops a
+  name made of the sender's own (`task_creation/owner.is_the_sender`).
+
+Measured live (gemini-3.6-flash, 2026-10-26): recipient, chat taker, chat
+asked by name, a meeting's "Dana Cohen from finance" (as "Dana Cohen"), a
+team, nobody: all as meant. Output with the two keys: 101 to 169 tokens a task
+on AMI IS1008b, IB4003 and the design meeting, over `TOKENS_PER_TASK`'s 160,
+so it is now 180 and `DEFAULT_MAX_OUTPUT_TOKENS` 2700.
+
+Those runs also gave AMI's speaker letters ("A", "C") and the design meeting's
+roles ("Project Manager") as owners. A name of single letters is now no owner
+(`models.py`), and the prompt says a speaker's label is a name only when it is
+a person's name. Run again three times each: no letter came back, and IB4003
+gave the names its speakers call each other ("Andre", "Susan") in two runs of
+three; IS1008b gave "Christine", "Agnes" and "Ed" in all three. The design
+meeting still gave its roles in one run of three: a role matches only a user
+or team of that very name in #131's directory, so it is rarely sent, but the
+prompt alone does not hold it. A list of role words was considered and left
+out: it is never complete, and could rule out a real name.

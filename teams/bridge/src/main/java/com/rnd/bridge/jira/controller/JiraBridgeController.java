@@ -45,8 +45,8 @@ public class JiraBridgeController {
 
         return jiraClient.fetchIssues(targetProject)
                 .collectList()
-                .doOnNext(this::publishTasks)
-                .map(fetched -> ResponseEntity.ok(Map.<String, Object>of("project", targetProject, "published", fetched.size())))
+                .map(fetched -> ResponseEntity.ok(Map.<String, Object>of("project", targetProject,
+                        "fetched", fetched.size(), "published", publishTasks(fetched))))
                 .doOnError(error -> log.error("Failed to sync Jira tasks for project {}", targetProject, error))
                 .onErrorResume(error -> Mono.just(ResponseEntity.internalServerError()
                         .body(Map.<String, Object>of("error", error.getMessage(), "project", targetProject))));
@@ -56,13 +56,16 @@ public class JiraBridgeController {
      * publish() blocks and fails the record - so each task gets its own attempt:
      * one invalid/unpublishable record must not kill the rest of the batch.
      */
-    private void publishTasks(List<Task> tasks) {
+    private int publishTasks(List<Task> tasks) {
+        int published = 0;
         for (Task task : tasks) {
             try {
                 taskPublisher.publish(task);
+                published++;
             } catch (PublishException | ValidationException e) {
                 log.error("Failed to publish Jira task {}", task.sourceRef(), e);
             }
         }
+        return published;
     }
 }

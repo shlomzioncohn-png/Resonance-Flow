@@ -4,17 +4,12 @@ import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
 import com.nimbusds.jose.crypto.RSASSASigner;
-import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
+import com.rnd.gateway.auth.TokenService;
 import com.rnd.gateway.dto.TaskListResponseDTO;
-import okhttp3.mockwebserver.Dispatcher;
-import okhttp3.mockwebserver.MockResponse;
-import okhttp3.mockwebserver.MockWebServer;
-import okhttp3.mockwebserver.RecordedRequest;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -27,13 +22,10 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.web.client.RestTemplate;
 
-import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
@@ -58,9 +50,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * Unlike the other test classes (which use spring-security-test's jwt()
  * post-processor and skip real decoding), this class exercises the real
- * validation path: a MockWebServer stands in for Keycloak's JWKS endpoint,
- * and tokens are actually RS256-signed, so signature, expiry and issuer are
- * checked exactly as they are against Keycloak.
+ * validation path: tokens are actually RS256-signed with the Gateway's own
+ * key (generated for the test run, see TestJwtKeys), so signature, expiry and
+ * issuer are checked exactly as they are for real logins.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
@@ -68,51 +60,25 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DisplayName("Gateway JWT validation")
 class SecurityJwtValidationTests {
 
-    private static final String ISSUER = "http://keycloak.test/realms/lens";
-    private static final String KEY_ID = "lens-signing-key";
+    private static final String ISSUER = TokenService.ISSUER;
     private static final String TASKS_URL = "/api/workspace/tasks";
 
-    /** The realm's real signing key — its public half is served by the JWKS stub. */
-    private static RSAKey realmKey;
-    /** An attacker's key, published nowhere, reusing the realm key's kid. */
+    /** The Gateway's own signing key - the one it validates with (TestJwtKeys). */
+    private static RSAKey gatewayKey;
+    /** An attacker's key the Gateway doesn't know. */
     private static RSAKey attackerKey;
-    private static MockWebServer jwksServer;
 
     @Autowired
     private MockMvc mockMvc;
 
-    /** Stands in for the BFF — lets each test assert whether a request got through. */
+    /** Stands in for the BFF - lets each test assert whether a request got through. */
     @MockBean
     private RestTemplate restTemplate;
 
     @BeforeAll
-    static void startJwksServer() throws IOException, JOSEException {
-        realmKey = new RSAKeyGenerator(2048).keyID(KEY_ID).generate();
-        attackerKey = new RSAKeyGenerator(2048).keyID(KEY_ID).generate();
-
-        String jwks = new JWKSet(realmKey.toPublicJWK()).toString();
-        jwksServer = new MockWebServer();
-        jwksServer.setDispatcher(new Dispatcher() {
-            @Override
-            public MockResponse dispatch(RecordedRequest request) {
-                return new MockResponse()
-                        .setHeader("Content-Type", "application/json")
-                        .setBody(jwks);
-            }
-        });
-        jwksServer.start();
-    }
-
-    @AfterAll
-    static void stopJwksServer() throws IOException {
-        jwksServer.shutdown();
-    }
-
-    @DynamicPropertySource
-    static void registerJwtConfig(DynamicPropertyRegistry registry) {
-        registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", () -> ISSUER);
-        registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri",
-                () -> "http://localhost:" + jwksServer.getPort() + "/realms/lens/protocol/openid-connect/certs");
+    static void createKeys() throws JOSEException {
+        gatewayKey = TestJwtKeys.rsaKey();
+        attackerKey = new RSAKeyGenerator(2048).keyID(gatewayKey.getKeyID()).generate();
     }
 
     @BeforeEach
@@ -139,7 +105,7 @@ class SecurityJwtValidationTests {
     }
 
     private static String validToken() throws JOSEException {
-        return signToken(realmKey, ISSUER, Instant.now().plus(Duration.ofMinutes(5)));
+        return signToken(gatewayKey, ISSUER, Instant.now().plus(Duration.ofMinutes(5)));
     }
 
     private ResultActions getTasks(String authorizationHeader) throws Exception {
@@ -190,12 +156,12 @@ class SecurityJwtValidationTests {
     @Test
     @DisplayName("Expired token → 401")
     void expiredTokenIsRejected() throws Exception {
-        String expired = signToken(realmKey, ISSUER, Instant.now().minus(Duration.ofMinutes(10)));
+        String expired = signToken(gatewayKey, ISSUER, Instant.now().minus(Duration.ofMinutes(10)));
         assertRejected(getTasks("Bearer " + expired));
     }
 
     @Test
-    @DisplayName("Forged token (signed with a key Keycloak doesn't publish) → 401")
+    @DisplayName("Forged token (signed with a key the Gateway doesn't know) → 401")
     void forgedSignatureIsRejected() throws Exception {
         String forged = signToken(attackerKey, ISSUER, Instant.now().plus(Duration.ofMinutes(5)));
         assertRejected(getTasks("Bearer " + forged));
@@ -214,7 +180,7 @@ class SecurityJwtValidationTests {
     @Test
     @DisplayName("Token from another issuer → 401")
     void wrongIssuerIsRejected() throws Exception {
-        String otherRealm = signToken(realmKey, "http://keycloak.test/realms/other",
+        String otherRealm = signToken(gatewayKey, "someone-else",
                 Instant.now().plus(Duration.ofMinutes(5)));
         assertRejected(getTasks("Bearer " + otherRealm));
     }

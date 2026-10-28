@@ -98,11 +98,11 @@ class TenantDependencyGraphServiceTest {
         when(taskReadinessRepository.findByIds(taskIds))
                 .thenReturn(Map.of(
                         taskAId,
-                        new TaskReadinessSnapshot(taskAId, 1, 0),
+                        new TaskReadinessSnapshot(taskAId, tenantId, 1, 0),
                         taskBId,
-                        new TaskReadinessSnapshot(taskBId, 1, 0),
+                        new TaskReadinessSnapshot(taskBId, tenantId, 1, 0),
                         taskCId,
-                        new TaskReadinessSnapshot(taskCId, 0, 0)));
+                        new TaskReadinessSnapshot(taskCId, tenantId, 0, 0)));
 
         when(taskStateHistoryRepository
                 .findLatestBlockedSinceByTaskIds(taskIds))
@@ -170,11 +170,11 @@ class TenantDependencyGraphServiceTest {
         when(taskReadinessRepository.findByIds(taskIds))
                 .thenReturn(Map.of(
                         taskAId,
-                        new TaskReadinessSnapshot(taskAId, 1, 0),
+                        new TaskReadinessSnapshot(taskAId, tenantId, 1, 0),
                         taskBId,
-                        new TaskReadinessSnapshot(taskBId, 1, 0),
+                        new TaskReadinessSnapshot(taskBId, tenantId, 1, 0),
                         taskCId,
-                        new TaskReadinessSnapshot(taskCId, 0, 0)));
+                        new TaskReadinessSnapshot(taskCId, tenantId, 0, 0)));
 
         when(taskStateHistoryRepository
                 .findLatestBlockedSinceByTaskIds(taskIds))
@@ -351,22 +351,18 @@ class TenantDependencyGraphServiceTest {
                 taskCount - 1,
                 highestImpact.transitiveDependentsCount());
     }
-
     private Task task(
-            UUID taskId,
-            UUID tenantId) {
+        UUID taskId,
+        UUID tenantId) {
 
         return Task.builder()
-                .id(taskId)
-                .tenantId(tenantId)
-                .status(TaskStatus.ACTIVE)
-                .isReady(true)
-                .blockingCount(0)
-                .openConstraintCount(0)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .build();
-    }
+            .id(taskId)
+            .tenantId(tenantId)
+            .status(TaskStatus.ACTIVE)
+            .createdAt(LocalDateTime.now())
+            .updatedAt(LocalDateTime.now())
+            .build();
+    }   
 
     private Map<UUID, TaskReadinessSnapshot> readiness(
             List<Task> tasks) {
@@ -379,6 +375,7 @@ class TenantDependencyGraphServiceTest {
                     task.getId(),
                     new TaskReadinessSnapshot(
                             task.getId(),
+                            task.getTenantId(),
                             0,
                             0));
         }

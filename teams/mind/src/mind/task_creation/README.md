@@ -158,21 +158,32 @@ A Postgres store gets the same guarantees from single statements
 
 ## Running it
 
-The pipeline that calls `send` is #349's, and does not exist yet, so nothing
-here starts on its own. Whoever builds it composes one `TaskCreationFlow` and
-runs the listener and the timer beside it, **in the same process**:
+`ingestion/landed_consumer_runner.py` (#919) is the process that does this:
+the #349 pipeline calls `send`, and it composes one `TaskCreationFlow` and
+runs the listener and the timer beside it, **in the same process**. The
+composition, in short:
 
 ```python
-listener_loop = asyncio.new_event_loop()
+loop = asyncio.new_event_loop()      # the listener calls run_until_complete on this, per message
 index = PgVectorStore(get_settings().vector_store)
-listener_loop.run_until_complete(index.open())   # on the loop that will use it
+loop.run_until_complete(index.open())   # on the loop that will use it
 
+producer = ProtobufProducer()
 pending = PendingRequests()          # one store, shared by everything below
+
+# #355: resolves dependency_mentions and publishes task.dependencies.proposed,
+# once, when task.created confirms the task exists. No retry -- see
+# dependencies/README.md. Shares this same producer and index -- no second
+# store or connection needed.
+sink = KafkaDependencySink(producer)
+publisher = DependencyPublisher(store=index, sink=sink)
+adapter = DependencyAdapter(publisher)
+
 flow = TaskCreationFlow(
-    producer=ProtobufProducer(),
+    producer=producer,
     index=index,
     pending=pending,
-    on_matched=publish_dependencies,  # #355: hears of each real task id, maybe twice
+    on_matched=adapter.on_task_created,        # #355: hears of each real task id, maybe twice
 )
 
 # A listener that has given up must take the process with it, so it is
@@ -180,21 +191,30 @@ flow = TaskCreationFlow(
 threading.excepthook = lambda args: os._exit(1)
 
 stop = threading.Event()
-threading.Thread(target=run_task_created_listener, args=(flow, listener_loop)).start()
+threading.Thread(target=run_task_created_listener, args=(flow, loop)).start()
 threading.Thread(target=run_overdue_timer, args=(flow, stop)).start()
 
 # ... and in the #349 pipeline, for each task extracted from a Bridge item:
 await flow.send(proposal, bridge_correlation_id=event.correlation_id, revision=event.revision)
 ```
 
+- **The listener and the timer each have their own loop and thread,
+  entirely independent of each other.** They do share `pending`
+  (`PendingRequests`), from two threads -- but that's `PendingRequests`'
+  own job: every method takes its own lock (see "Three threads, one
+  store" above), so this was already safe before either of them had a
+  loop of its own. Neither's *async* work depends on the other's anymore,
+  so neither can delay the other's handling. `on_task_created`
+  (`adapter.on_task_created`, via `on_matched`) does all of #355's work
+  inline, synchronously, as part of handling that one message — nothing is
+  scheduled to run afterward, so the listener's loop never needs to keep
+  running between messages; `loop.run_until_complete` per message is all it
+  takes.
 - **The listener has its own consumer group** (`mind-task-creation`). R3's
   index consumer reads `task.created` too, and within one group each message
   reaches one member — so sharing R3's group would split the messages between
   them, in silence: replies unmatched here, other teams' tasks never indexed
   there.
-- **The timer runs on its own thread and loop.** Requests go overdue when
-  Inbox is down, which is exactly when no `task.created` arrives, so the check
-  cannot ride on the listener.
 - **A failure in the listener is retried, then fatal.** `ProtobufConsumer.run`
   closes the consumer on an error, so the listener reconnects itself — waits
   doubling from 1 s to 60 s — and Kafka hands the uncommitted message to the
@@ -223,13 +243,92 @@ await flow.send(proposal, bridge_correlation_id=event.correlation_id, revision=e
   delivery result in its own call; the serializer cache can at worst build
   one twice.
 
+## The owner
+
+Mind suggests an owner; it never assigns one (#132). What reaches Inbox is
+`suggested_owner_user_id` with its confidence, or neither.
+
+- **Extraction gives a name or "the recipient", never an address.**
+  `owner_mention` is a name the content writes; `owner_is_recipient` says an
+  email asks the person it is sent to. That person's address is taken from
+  the email record, and only when there is one recipient: a model copying it
+  off the To line could as well copy the From line's. `owner.what_to_look_up`
+  turns the two into the one string the directory is asked for, or none.
+  Each recipient keeps its display name beside the address ("Dana Cohen
+  <dana@…>"); the directory is asked by the address alone.
+- **The recipient and a name must be one person.** Given both, the name must
+  be spelled from the recipient's display name or the address before its "@"
+  ("Hi Dana, please sign" sent to Dana): then the address is surer than a
+  first name. If they are two people ("Yossi Levi will sign it" sent to Dana)
+  one answer is wrong, and the address would send it at 1.0, an exact match:
+  no owner, logged. Without one recipient (a chat, several) the name is looked
+  up instead, and so it is when the one recipient is the sender (an email to
+  oneself). An address is found only once #131 matches addresses exactly, as
+  agreed with its author; #131's draft matches words, and an address matches
+  nobody there.
+- **A directory that fails costs only the owner.** #131 promises never to
+  raise; if it does, the task goes with no owner, rather than the message
+  failing and coming back for ever. The error is logged by its type only, as
+  its message may hold the name asked for; the trace is at DEBUG.
+- **The sender is never the owner.** The prompt says so, but a sender who signs
+  "Thanks, Avi" has written the name, so grounding keeps it, and a live run
+  returned it. `owner.is_the_sender` drops a name whose every word is the
+  sender's: the display name and the address before its "@", never the
+  domain ("Avi" for `avi.katz@…`). One way only, so another person with the
+  sender's first name ("Dana Levi" for `dana@…`) is kept. A heuristic: `ak@`
+  for Avraham is missed, and so is "Lisa Grant" for a sender the record knows
+  only as "Lisa"; a name with a word of its own ("Avi Levi") is someone else.
+
+### Choosing one user (`owner.choose_owner`)
+
+The name or address is looked up in Inbox's directory (#131,
+`find_candidates`), which gives users and teams with a similarity score from 0
+to 1, best first. The score says how alike two names are, not how sure Mind is,
+so the rule that turns it into `suggested_owner_confidence` is this one:
+
+1. **Teams are left out.** Inbox has no field for a suggested team, so a team
+   neither wins nor stands in a user's way: a team and a user with the same
+   name give the user. A name that matches only a team ("someone from Sales")
+   gives no owner, logged.
+2. **The best user needs `MIN_OWNER_SCORE` (0.70)**, which a first name alone
+   reaches. A higher bar would leave chats with almost no owner, since a
+   speaker is labelled by first name ("Malki"). Below it no owner, logged.
+3. **A second user within `TIE_MARGIN` (0.05) is a tie, and a tie is no
+   owner,** logged, even when that second user is under the minimum.
+4. **The confidence is the winner's score.**
+
+What that gives, with #131's scores:
+
+| The text says | Inbox has | Sent |
+|---|---|---|
+| `Dana Cohen`, or her address | one Dana Cohen | her, 1.0 |
+| `Dana C.` | Dana Cohen | her, 0.95 |
+| `Dena Cohen` (a typo) | Dana Cohen | her, 0.88 |
+| `Dana` | one Dana | her, 0.70 |
+| `Dana` | two Danas | nobody: a tie |
+| `Dana Cohen` | Dana Cohen and Dana Levi | Dana Cohen, 1.0 (Levi is 0.70) |
+| `Dan`, `Dani`, `Dena` | a Dana, a Daniel | nobody: 0.52 to 0.60 |
+| `Sales` | the team Sales | nobody: a team |
+
+Known limit: `Dana` when the Dana meant is from outside and Inbox has one
+Dana of its own suggests the wrong person, at 0.70. The low confidence is the
+warning to whoever approves it in Inbox.
+
+Not yet measured on real names: the numbers rest on #131's scores, not on a
+labelled set. Revisit them when one exists.
+
 ## Not yet in
 
-- **Three suggestion fields** — `effort_estimate_confidence`,
-  `suggested_owner_user_id`, `suggested_owner_confidence`. Inbox accepts them
-  (#747, fields 19–21), but only in its own copy of the proto on the
-  `inbox-team` branch. Mind generates from `shared/proto` on `main`, so they
-  join once they reach it.
+- **No directory in the runner yet** (#132). `CreationPipeline` looks the
+  owner up when it is given a directory, and `event.py` sends fields 20 and
+  21, but #131's `InboxDirectory` is not on `main`, so the landed runner
+  passes none and no owner is sent.
+- **Real Gmail messages have no sender or recipients yet.** Bridge lands the
+  Gmail API message, not the record (`ingestion/email_body.py`), so its text
+  goes as it is: an email's recipient is never looked up, and its sender is
+  not ruled out, until Bridge lands the plain record.
+- **`effort_estimate_confidence`** (Inbox #747, field 19) is in `shared/proto`
+  now but not mapped here yet.
 - **ZOOM and BIGBLUEBUTTON** as task source types (Inbox #749) — same reason.
   Until then intake maps both to `MEETING`. A test fails if a value is added to
   Mind's `SourceType` before it reaches `shared/proto`.

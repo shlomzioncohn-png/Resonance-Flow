@@ -37,7 +37,7 @@ class SchedulingUpdateServiceTest {
     /** Makes the view report {@code taskId} as having the given blocker counts. */
     private void viewReports(UUID taskId, int blockingCount, int openConstraintCount) {
         when(readinessRepository.findByIds(List.of(taskId)))
-                .thenReturn(Map.of(taskId, new TaskReadinessSnapshot(taskId, blockingCount, openConstraintCount)));
+                .thenReturn(Map.of(taskId, new TaskReadinessSnapshot(taskId, TaskTestFixtures.DEFAULT_TENANT_ID, blockingCount, openConstraintCount)));
     }
 
     @BeforeEach
@@ -46,7 +46,7 @@ class SchedulingUpdateServiceTest {
         // Default: every task the view is asked about is ready.
         when(readinessRepository.findByIds(anyList())).thenAnswer(invocation -> {
             List<UUID> ids = invocation.getArgument(0);
-            return Map.of(ids.get(0), new TaskReadinessSnapshot(ids.get(0), 0, 0));
+            return Map.of(ids.get(0), new TaskReadinessSnapshot(ids.get(0), TaskTestFixtures.DEFAULT_TENANT_ID, 0, 0));
         });
     }
 

@@ -42,8 +42,8 @@ class PriorityScoreServiceRecomputeTest {
     private static final PriorityScoreService PURE = new PriorityScoreService(null, null, null, null, null);
 
     private final UUID taskId = UUID.randomUUID();
-    private final TaskReadinessSnapshot ready = new TaskReadinessSnapshot(taskId, 0, 0);
-    private final TaskReadinessSnapshot blocked = new TaskReadinessSnapshot(taskId, 1, 0);
+    private final TaskReadinessSnapshot ready = new TaskReadinessSnapshot(taskId, TaskTestFixtures.DEFAULT_TENANT_ID, 0, 0);
+    private final TaskReadinessSnapshot blocked = new TaskReadinessSnapshot(taskId, TaskTestFixtures.DEFAULT_TENANT_ID, 1, 0);
 
     private TaskRepository taskRepository;
     private TaskDependencyRepository dependencyRepository;
@@ -147,7 +147,7 @@ class PriorityScoreServiceRecomputeTest {
 
     @Test
     void recompute_availabilityFlipWithUnchangedPriority_requestsPublish() {
-        TaskReadinessSnapshot afterConstraintOpened = new TaskReadinessSnapshot(taskId, 0, 1);
+        TaskReadinessSnapshot afterConstraintOpened = new TaskReadinessSnapshot(taskId, TaskTestFixtures.DEFAULT_TENANT_ID, 0, 1);
         Double expected = PURE.compute(0.8, 1.0, 0, 1, 0);
         Task current = task(taskId).score(0.8).confidence(1.0).priorityScore(expected).build();
         noEdges();
@@ -185,7 +185,7 @@ class PriorityScoreServiceRecomputeTest {
         Task current = task(taskId).score(0.8).confidence(1.0).build();
         storedTaskIs(current);
         noEdges();
-        TaskReadinessSnapshot twoOpen = new TaskReadinessSnapshot(taskId, 0, 2);
+        TaskReadinessSnapshot twoOpen = new TaskReadinessSnapshot(taskId, TaskTestFixtures.DEFAULT_TENANT_ID, 0, 2);
 
         Task result = service.recomputePriorityScoreAndPublish(taskId, current, current, twoOpen, twoOpen);
 
@@ -240,7 +240,7 @@ class PriorityScoreServiceRecomputeTest {
         storedTaskIs(current);
         noEdges();
         when(readinessRepository.findByIds(List.of(taskId)))
-                .thenReturn(Map.of(taskId, new TaskReadinessSnapshot(taskId, 0, 3)));
+                .thenReturn(Map.of(taskId, new TaskReadinessSnapshot(taskId, TaskTestFixtures.DEFAULT_TENANT_ID, 0, 3)));
 
         Task result = service.recomputePriorityScoreAndPublish(taskId, current, current);
 

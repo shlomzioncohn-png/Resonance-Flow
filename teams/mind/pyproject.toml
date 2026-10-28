@@ -9,10 +9,17 @@ dependencies = [
     # core
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
+    # The IANA zone database zoneinfo reads deadlines in (config.DeadlineSettings,
+    # #960). Windows and slim images have no system copy; it was only here
+    # before as some other package's dependency.
+    "tzdata",
     "fastapi",
     "uvicorn",
     # embeddings (src/mind/embeddings)
     "psycopg[binary,pool]>=3.1",
+    # psycopg[pool] extra has no version floor of its own -- pin separately.
+    # >=3.2 for AsyncConnectionPool's check= param (pgvector_store.py).
+    "psycopg-pool>=3.2",
     "sentence-transformers>=3.0",
     # migrations (migrations/) -- runs at deploy time, inside the image,
     # not just in dev, so this belongs here and not in [dev].

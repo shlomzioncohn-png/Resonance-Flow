@@ -55,15 +55,20 @@ export const palette: PaletteOptions = {
     light: colorTokens.red[500],
     dark: colorTokens.red[700],
   },
+  // warning / success / info: the 700 step, for 4.5:1 contrast as text on
+  // white and under white text (the 600 steps are about 3:1).
   warning: {
-    main: colorTokens.amber[600],
-    light: colorTokens.amber[500],
+    main: colorTokens.amber[700],
+    light: colorTokens.amber[600],
     dark: colorTokens.amber[700],
   },
   success: {
-    main: colorTokens.green[600],
-    light: colorTokens.green[500],
+    main: colorTokens.green[700],
+    light: colorTokens.green[600],
     dark: colorTokens.green[700],
+  },
+  info: {
+    main: colorTokens.sky[700],
   },
   grey: colorTokens.slate,
   background: {
@@ -72,7 +77,7 @@ export const palette: PaletteOptions = {
   },
   text: {
     primary: colorTokens.slate[900],
-    secondary: colorTokens.slate[500],
+    secondary: colorTokens.slate[600],
     disabled: colorTokens.slate[400],
   },
   divider: 'rgba(15, 23, 42, 0.08)',

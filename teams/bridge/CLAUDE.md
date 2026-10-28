@@ -65,9 +65,15 @@ conform to the contract (§6). Anything Kafka-bound goes through the shared
 
 `organizationId` on `Task` is `null` by default from `AbstractTaskMapper` (no lane has a general
 tenant-id source) — a subclass overrides `AbstractTaskMapper.organizationId()` only once it has
-an actual value, never a made-up one. `DealToTaskMapper` is the only override today, backed by
-`${bridge.crm.organization-id}` / `CRM_ORGANIZATION_ID` — one static value standing in for one
-account until Inbox supports resolving it per deal from `Deal.crmAccountSlug()`.
+an actual value, never a made-up one. Two configured values exist today, both fed by the same
+`CRM_ORGANIZATION_ID` env var (one deployment = one Inbox tenant):
+
+- `${bridge.crm.organization-id}` → `DealToTaskMapper` (CRM only — one static value standing in
+  for one account until Inbox supports resolving it per deal from `Deal.crmAccountSlug()`).
+- `${bridge.organization-id}` → `GitHubIssueMapper`, `GitHubPullRequestMapper`, `JiraIssueMapper`
+  (sources carry no tenant; the deployment-wide value stands in). Blank means "not configured"
+  and maps to `null`, preserving the contract gap for local `LoggingPayloadPublisher` runs — set
+  `CRM_ORGANIZATION_ID` before running any lane under the `kafka` profile.
 
 `DealToTaskMapper.toUrgency` also adds +1 (before the 1..5 clamp) for a deal in an open stage
 (`PROSPECT`/`QUALIFIED`/`PROPOSAL`/`NEGOTIATION`) that's sat in that stage at least
@@ -191,10 +197,19 @@ being active together — that check existed and is gone.
   `` `C:\Program Files\JetBrains\IntelliJ IDEA <version>\plugins\maven\lib\maven3\bin\mvn.cmd` ``
   (find the exact `<version>` dir under `C:\Program Files\JetBrains\` — it changes with IDE
   updates).
-- **Default JDK breaks Mockito.** `.jdks\openjdk-26.0.1` (found via `$env:USERPROFILE\.jdks`) is
-  too new for this Spring Boot/Mockito version — `@Spy` fields fail to initialize. Use JDK 23 at
-  `C:\Program Files\Java\jdk-23` instead (`$env:JAVA_HOME` + prepend `bin` to `$env:PATH`); it
-  compiles the pom's `java.version=21` target fine and Mockito works normally under it.
+- **Default JDK breaks Mockito.** Whatever JDK `$env:USERPROFILE\.jdks` currently resolves to as
+  "default" has repeatedly turned out to be too new for this Spring Boot/Mockito version —
+  `@Spy`/inline-mock initialization fails (`Could not modify all classes ...`), seen first against
+  `openjdk-26.0.1`, then again against `openjdk-24` once that became the `.jdks` default (2026-10-18)
+  — this is a recurring pattern with "whatever's newest," not a one-time fact about build 26
+  specifically. **`C:\Program Files\Java\jdk-23` no longer exists on this machine** (checked
+  2026-10-18) — the JDK that actually works today is **JDK 21** at
+  `C:\Program Files\Eclipse Adoptium\jdk-21.0.12.8-hotspot` (`$env:JAVA_HOME` + prepend `bin` to
+  `$env:PATH`); it compiles the pom's `java.version=21` target fine and Mockito works normally
+  under it. **Don't trust a hardcoded path here going forward** — if this one also stops existing,
+  find a JDK 21 via `Get-ChildItem "C:\Program Files" -Recurse -Filter java.exe -ErrorAction
+  SilentlyContinue` (or the Bash/`find` equivalent) rather than assuming the last-known-good path
+  is still there; this is the second time it's moved.
 - **`protobuf-maven-plugin`'s `protoc.exe` fails on a non-ASCII checkout path.** If the repo sits
   under a path containing non-ASCII characters (this machine's checkout is under a Hebrew-named
   folder), `mvn compile`/`test` fails with `PROTOC FAILED: ...: warning: directory does not

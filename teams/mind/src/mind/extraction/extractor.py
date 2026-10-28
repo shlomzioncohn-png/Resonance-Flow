@@ -19,10 +19,27 @@ from dataclasses import dataclass
 from mind.contracts.base_enums import SourceType
 from mind.extraction.confidence import ConfidenceBreakdown, score_confidence
 from mind.extraction.config import ExtractionConfig
-from mind.extraction.grounding import ground_source_ref
-from mind.extraction.models import ExtractedFields, response_model
-from mind.extraction.parsing import MalformedOutput, parse_response
-from mind.extraction.prompts import extraction_prompt, repair_prompt, system_prompt
+from mind.extraction.grounding import (
+    Said,
+    ground_deadline,
+    ground_dependency_mentions,
+    ground_owner_mention,
+    ground_source_ref,
+    said_in,
+)
+from mind.extraction.models import MAX_TASKS_PER_TEXT, ExtractedFields, response_model
+from mind.extraction.parsing import (
+    MalformedOutput,
+    RejectedAnswer,
+    parse_response,
+    read_rejected_answer,
+)
+from mind.extraction.prompts import (
+    MAX_CONTENT_CHARS,
+    extraction_prompt,
+    repair_prompt,
+    system_prompt,
+)
 from mind.extraction.providers.base import (
     LLMError,
     LLMProvider,
@@ -52,21 +69,44 @@ class ExtractionItem:
     text: str
     source_type: SourceType
 
-    # The intake event's `object_key`: the one stored object this text came
-    # from. Deliberately not `correlation_id`, which a source body shares
-    # with its attachments and so cannot say *which* of them failed.
+    # What the caller calls this text, handed back on both outcomes. For a
+    # Bridge item it is the arrival's `correlation_id`: its files are joined
+    # into this one text (#349), so a failure names the item, not which of
+    # its files caused it. The eval passes the meeting id.
     item_key: str | None = None
+
+    # Who an email is from and to, from its record (#132): the owner may be
+    # its one recipient, and is never its sender. Empty for other sources.
+    sender: str | None = None
+    recipients: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ExtractedTask:
+    """One task from the answer: its fields and how far to trust them.
+
+    The basic fields, plus the classification and the effort estimate
+    (#351, #352) when the switch asked for them. Grounded and scored on its
+    own, so a pointer one task invented costs that task alone.
+    """
+
+    fields: ExtractedFields
+    confidence: ConfidenceBreakdown
 
 
 @dataclass(frozen=True)
 class ExtractionSuccess:
-    """A validated proposal: the basic fields, plus the classification and the
-    effort estimate (#351, #352) when the switch asked for them."""
+    """A validated answer: every task the text describes (#690), possibly none.
 
-    fields: ExtractedFields
+    What belongs to the answer rather than to one task stays out here: the
+    item it came from, the model, and the rounds spent. Which tasks paid for
+    a repair round is decided per task (`_rounds_needed`), so the rounds here
+    and the penalty on a task can differ.
+    """
+
+    tasks: tuple[ExtractedTask, ...]
     source_type: SourceType
     item_key: str | None
-    confidence: ConfidenceBreakdown
     model: str
 
     # Rounds spent getting the schema right, and total calls made. They
@@ -87,11 +127,126 @@ class ExtractionFailure:
     schema_attempts: int
     provider_calls: int
 
+    # Whether the cause is the environment rather than the item: the provider
+    # down past its retries, rate limits, the key or the credit. The pipeline
+    # stops on it and comes back to the item (#919); an item-caused failure
+    # -- an answer that never fit the schema, a refused body -- is skipped.
+    environmental: bool
+
     # The last thing the model said, kept for whoever debugs this later.
     last_output: str | None = None
 
 
 ExtractionOutcome = ExtractionSuccess | ExtractionFailure
+
+
+def _rounds_needed(
+    fields: ExtractedFields,
+    earlier_valid: list[tuple[ExtractedFields, int]],
+    schema_attempts: int,
+) -> int:
+    """The rounds this task took: the first in which it was valid unchanged.
+
+    A repair round re-asks for the whole list, so a task that was already
+    valid comes back again. When it comes back equal in every field, the
+    repair was not for it and it is not charged. A task the model rewrote is
+    charged in full: it cannot be told apart from a new one. Partial repair
+    — sending back only the failed tasks — would close that gap; see the
+    README.
+    """
+
+    for task, round_number in earlier_valid:
+        if task == fields:
+            return round_number
+    return schema_attempts
+
+
+def _log_repair_outcome(rejected: RejectedAnswer | None, answer: list[ExtractedFields]) -> None:
+    """Compare the repaired answer with the last rejected one, and say how.
+
+    Only the last round: a task valid in two rejected rounds is one task, not
+    two. How often valid tasks come back reworded decides whether partial
+    repair is worth building, so it is logged rather than guessed.
+
+    A warning when a valid task may have gone missing: #690's third decision
+    is that a bad task is never dropped beside a good one, and a model that
+    answers the repair with fewer tasks can break it with nothing raising.
+    Dropping the *invalid* task is expected, since the title message tells
+    the model to leave a non-task out, so that alone stays quiet.
+    """
+
+    if rejected is None:
+        return
+    if not rejected.readable:
+        logger.info(
+            "extraction: the rejected answer could not be read; the repaired answer has %d",
+            len(answer),
+        )
+        return
+    if rejected.task_count > MAX_TASKS_PER_TEXT:
+        logger.info(
+            "extraction: the rejected answer had %d task(s), over the cap of %d; "
+            "the repaired answer has %d",
+            rejected.task_count,
+            MAX_TASKS_PER_TEXT,
+            len(answer),
+        )
+        return
+
+    unchanged = sum(1 for task in rejected.valid if task in answer)
+    logger.info(
+        "extraction: the rejected answer had %d task(s), %d of them valid; the repaired "
+        "answer has %d, and %d of the valid ones came back unchanged",
+        rejected.task_count,
+        len(rejected.valid),
+        len(answer),
+        unchanged,
+    )
+
+    fewer = rejected.task_count - len(answer)
+    not_back = len(rejected.valid) - unchanged
+    if fewer > 0 and not_back > 0:
+        logger.warning(
+            "extraction: the repaired answer has %d task(s) fewer, and %d valid task(s) did "
+            "not come back unchanged; a valid task may have been dropped",
+            fewer,
+            not_back,
+        )
+
+
+def _ground_and_score(
+    fields: ExtractedFields,
+    source_type: SourceType,
+    text: str,
+    attempts: int,
+    sibling_titles: list[str],
+    said: Said,
+) -> ExtractedTask:
+    """Check one task's pointer, mentions and deadline against the content, then score it.
+
+    The content is untrusted, so a pointer or a mention it did not contain
+    does not travel. Done here because this is the one place holding both
+    the answer and the text it was supposed to come from.
+
+    `text` is what the model was sent, not the whole item: past the cut it
+    could not have read anything, so a match there is luck, not evidence.
+    `said` is that text's words and numbers, read once for all its tasks.
+    """
+
+    fields, invented_ref = ground_source_ref(fields, text)
+    fields = ground_dependency_mentions(fields, text, sibling_titles, said)
+    fields = ground_owner_mention(fields, text, said)
+    fields = ground_deadline(fields, text, said)
+    return ExtractedTask(
+        fields=fields,
+        confidence=score_confidence(
+            fields,
+            source_type,
+            text,
+            attempts=attempts,
+            invented_source_ref=invented_ref,
+        ),
+    )
 
 
 class BasicExtractor:
@@ -126,6 +281,8 @@ class BasicExtractor:
         # from one place: a prompt asking for the classification and a
         # schema without it would fail every answer it received.
         system = system_prompt(self._config.classify)
+        # What the model can see, and so all that grounding may accept.
+        seen = text[:MAX_CONTENT_CHARS]
         schema = response_model(self._config.classify)
         user = extraction_prompt(source_type, text)
 
@@ -133,6 +290,10 @@ class BasicExtractor:
         provider_calls = 0
         transient_retries = 0
         last_output: str | None = None
+        # Each task that passed on its own in a rejected round, with that
+        # round's number: what lets a repair round be charged per task.
+        earlier_valid: list[tuple[ExtractedFields, int]] = []
+        last_rejected: RejectedAnswer | None = None
 
         while True:
             provider_calls += 1
@@ -151,6 +312,7 @@ class BasicExtractor:
                         schema_attempts=schema_attempts,
                         provider_calls=provider_calls,
                         last_output=last_output,
+                        environmental=exc.environmental,
                     )
 
                 logger.warning("extraction: transient provider failure, retrying: %s", detail)
@@ -162,7 +324,7 @@ class BasicExtractor:
             last_output = response.text
 
             try:
-                fields = parse_response(response.text, schema)
+                answer = parse_response(response.text, schema)
             except MalformedOutput as exc:
                 detail = str(exc)
 
@@ -175,28 +337,34 @@ class BasicExtractor:
                         schema_attempts=schema_attempts,
                         provider_calls=provider_calls,
                         last_output=last_output,
+                        environmental=False,
                     )
 
+                last_rejected = read_rejected_answer(response.text, schema)
+                # Over the cap, the model was listing non-tasks, so none of
+                # what it listed counts as right the first time.
+                if last_rejected.task_count <= MAX_TASKS_PER_TEXT:
+                    earlier_valid += [(task, schema_attempts) for task in last_rejected.valid]
                 logger.info("extraction: invalid output, repairing (%s)", detail)
                 user = repair_prompt(source_type, text, response.text, detail)
                 continue
 
-            # The content is untrusted, so a pointer it did not contain does
-            # not travel. Done here because this is the one place holding
-            # both the answer and the text it was supposed to come from.
-            fields, invented_ref = ground_source_ref(fields, text)
-
+            _log_repair_outcome(last_rejected, answer)
+            said = said_in(seen)
             return ExtractionSuccess(
-                fields=fields,
+                tasks=tuple(
+                    _ground_and_score(
+                        fields,
+                        source_type,
+                        seen,
+                        _rounds_needed(fields, earlier_valid, schema_attempts),
+                        [other.title for other in answer if other is not fields],
+                        said,
+                    )
+                    for fields in answer
+                ),
                 source_type=source_type,
                 item_key=item_key,
-                confidence=score_confidence(
-                    fields,
-                    source_type,
-                    text,
-                    attempts=schema_attempts,
-                    invented_source_ref=invented_ref,
-                ),
                 model=response.model,
                 schema_attempts=schema_attempts,
                 provider_calls=provider_calls,
@@ -282,6 +450,7 @@ class BasicExtractor:
         schema_attempts: int,
         provider_calls: int,
         last_output: str | None,
+        environmental: bool,
     ) -> ExtractionFailure:
         """Record a failed item and hand it back so the caller can move on."""
 
@@ -300,5 +469,6 @@ class BasicExtractor:
             detail=detail,
             schema_attempts=schema_attempts,
             provider_calls=provider_calls,
+            environmental=environmental,
             last_output=last_output,
         )

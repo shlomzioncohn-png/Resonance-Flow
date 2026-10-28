@@ -39,6 +39,17 @@ export interface ApiTask {
   constraints?: string[];
   /** Whether the task is available (no blockers) - computed by Chain */
   isAvailable?: boolean;
+  /** operational / tactical / strategic (lowercase, from Inbox) */
+  tier?: string;
+  /** 1 (low) - 5 (high), from Inbox */
+  urgency?: number;
+  /** Where Inbox got the task from, e.g. "email", "jira" (lowercase) */
+  sourceType?: string;
+  /** Already formatted by Inbox, Israel time, e.g. "12/10/2026 09:00" - shown as-is */
+  createdAt?: string;
+  updatedAt?: string;
+  /** When a SNOOZED task wakes up again - same format as createdAt */
+  snoozedUntil?: string;
 }
 
 // ── Recommendation response ────────────────────────────────────────────────
@@ -62,6 +73,46 @@ export function recommendTask(request: WorkspaceRequest): Promise<TaskRecommenda
 
 export function getTask(taskId: string): Promise<ApiTask> {
   return api.get<ApiTask>(`/api/workspace/tasks/${taskId}`);
+}
+
+/** Kinds of task history event. The first three come from Chain's state history, the rest from its dependency history. */
+export type TaskActivityType =
+  'STATUS_CHANGED' | 'BLOCKED' | 'UNBLOCKED' | 'DEPENDENCY_ADDED' | 'DEPENDENCY_REMOVED';
+
+/**
+ * One history event. Only the fields for its type are sent. There's no actor:
+ * Chain doesn't record who made a change.
+ */
+export type TaskActivityItem = {
+  id: string;
+  type: TaskActivityType;
+  /** ISO-8601 */
+  createdAt: string;
+  /** STATUS_CHANGED: Chain status PENDING / ACTIVE / DONE */
+  fromStatus?: string;
+  toStatus?: string;
+  /** BLOCKED / UNBLOCKED: how many tasks block this one after the change */
+  blockingCount?: number;
+  /** DEPENDENCY_*: the task this one depends on, by title (from Inbox) */
+  dependsOnTaskId?: string;
+  dependsOnTitle?: string;
+  /** DEPENDENCY_*: MIND, USER or SYSTEM */
+  source?: string;
+};
+
+/**
+ * A task's history from Chain, merged by the BFF, newest first. If one of
+ * Chain's two histories couldn't be loaded, the other is still here and its
+ * flag says what's missing.
+ */
+export type TaskActivity = {
+  items: TaskActivityItem[];
+  statusHistoryUnavailable: boolean;
+  dependencyHistoryUnavailable: boolean;
+};
+
+export function getTaskActivity(taskId: string): Promise<TaskActivity> {
+  return api.get<TaskActivity>(`/api/workspace/tasks/${encodeURIComponent(taskId)}/activity`);
 }
 
 // ── Task selection ("which tasks fit in N minutes?") ─────────────────────
@@ -90,10 +141,7 @@ export interface TaskSelection {
   reason?: string;
 }
 
-/** Largest window the API accepts (Inbox's limit). */
-export const MAX_SELECTION_MINUTES = 480;
-
-/** The tasks that fit `availableMinutes` (1-480) together, picked by Inbox. */
+/** The tasks that fit `availableMinutes` (1-480, Inbox's limit) together, picked by Inbox. */
 export function selectTasks(availableMinutes: number): Promise<TaskSelection> {
   return api.get<TaskSelection>(
     `/api/workspace/tasks/selection?availableMinutes=${availableMinutes}`,
@@ -168,12 +216,3 @@ export function updateTaskStatus(
 
 /** Error code the backend returns when a status change is not allowed (e.g. moving a DONE task). */
 export const INVALID_TASK_STATUS_TRANSITION = 'INVALID_TASK_STATUS_TRANSITION';
-
-/**
- * A finished task can't move to any other status. Inbox calls it DONE, the BFF DTO
- * documents COMPLETED — accept both until the name is settled.
- */
-export function isFinalStatus(status: string): boolean {
-  const normalised = status.toUpperCase();
-  return normalised === 'DONE' || normalised === 'COMPLETED';
-}

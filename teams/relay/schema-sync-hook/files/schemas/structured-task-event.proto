@@ -1,0 +1,28 @@
+syntax = "proto3";
+package com.rnd.inbox.event;
+
+import "google/protobuf/timestamp.proto";
+import "task-created-event.proto";
+import "task-creation-requested-event.proto";
+
+option java_package = "com.rnd.inbox.event";
+option java_multiple_files = true;
+
+message StructuredTaskEvent {
+  optional string event_id = 1;
+  string tenant_id = 2;
+  optional string project_id = 3;
+  string title = 4;
+  optional string description = 5;
+  SourceType source_type = 6;
+  string source_ref = 7;
+  optional TaskTier tier = 8;
+  optional TaskRoleContext role_context = 9;
+  optional int32 urgency = 10;
+  optional int32 effort_estimate_minutes = 11;
+  optional google.protobuf.Timestamp deadline = 12;
+  optional TaskStatus status = 13;
+  optional double confidence = 14;
+  optional string created_by_user_id = 15;
+  repeated Assignee assignees = 16;
+}

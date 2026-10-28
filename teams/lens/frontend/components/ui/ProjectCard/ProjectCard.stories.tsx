@@ -32,7 +32,7 @@ export const Healthy: Story = {
     inProgressCount: 22,
     blockedCount: 3,
     lastUpdatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    href: '/projects/apollo',
+    href: '/manager/projects/apollo',
   },
 };
 
@@ -48,7 +48,7 @@ export const AtRisk: Story = {
     totalCount: 71,
     inProgressCount: 20,
     blockedCount: 7,
-    href: '/projects/orbit',
+    href: '/manager/projects/orbit',
   },
 };
 
@@ -64,7 +64,7 @@ export const Critical: Story = {
     totalCount: 74,
     inProgressCount: 18,
     blockedCount: 21,
-    href: '/projects/zeus',
+    href: '/manager/projects/zeus',
   },
 };
 
@@ -82,6 +82,6 @@ export const NoData: Story = {
     inProgressCount: 2,
     blockedCount: 0,
     lastUpdatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    href: '/projects/iris',
+    href: '/manager/projects/iris',
   },
 };

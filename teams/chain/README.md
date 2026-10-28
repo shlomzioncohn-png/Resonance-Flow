@@ -164,6 +164,8 @@ Ancestors has no `/transitive` variant - the ancestor chain already is the trans
 | GET | `/tasks/{taskId}/dependencies/transitive` | All (transitive) dependencies |
 | GET | `/tasks/{taskId}/dependencies/history` | Dependency change history |
 | GET | `/tasks/{taskId}/state-history` | Status / blocking history, filterable by time range |
+| GET | `/tasks/state-history` | Tenant-wide state history, `from`/`to` required (max 90 days), cursor-paged oldest first |
+| GET | `/tasks/blocked-since` | Currently blocked tasks of the tenant with `blockedSince`, optional `taskIds` |
 | GET | `/tasks/{taskId}/constraints/history` | Constraint history, filterable by time range |
 | GET | `/tasks/{taskId}/dependents` | Direct dependents |
 | GET | `/tasks/{taskId}/dependents/transitive` | All (transitive) dependents |
@@ -252,8 +254,7 @@ created from `task.updated` and when it already exists. A tier-only change write
 reads as "leave the stored value unchanged". `KafkaEventPublisher` (flat JSON, no envelope) was removed under #543 - it had no production caller.
 
 **Schemas**: the `.proto` sources come from the repo's [`shared/proto/`](../../shared/proto)
-(`chain-task-updated-event` - a self-contained copy of `task-updated-event` -,
-`chain-task-score-proposed-event` - a copy of `task-score-proposed-event` that reuses its `TaskTier` -,
+(`task-updated-event` and `task-score-proposed-event`, with the enums they import from `task-created-event`, and
 `task-dependencies-proposed-event`,
 `scheduling-updated-event`). Messages are
 validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock registry
@@ -290,10 +291,9 @@ Computed by `PriorityScoreService.compute` (a pure function, no repository acces
 `is_available` changes; `DependencyEdgeService` and `TaskEligibilityService` call it.
 
 Readiness (`blocking_count`, `open_constraint_count`, `is_ready`) is no longer stored on `Task`/`TaskEntity`
-(#917 PR 2); the `task_readiness` view is the only source. `SchedulingUpdateService.requestPublishAfterCommit`
+(#917 PR 2) and the columns were dropped from the `task` table by V16 (#917 PR 3); the `task_readiness` view is the only source. `SchedulingUpdateService.requestPublishAfterCommit`
 reads `is_available` from the view inside the transaction and hands it to the after-commit publish; a task
-with no view row throws `IllegalStateException`. The old `task` columns remain in the schema until the
-follow-up migration drops them. API responses read the same view.
+with no view row throws `IllegalStateException`. API responses read the same view.
 
 ### Formula
 
@@ -1011,13 +1011,14 @@ Same parameters, defaults and `400` cases as the state-history endpoint above (`
 - Not run yet (no local Postgres): `mvn test -Ppostgres-integration -Dtest=PostgresConstraintHistoryRepositoryTest`
   and the two new `getTaskEligibility_returnsReadinessView_*` tests in `TaskEligibilityServiceTest`.
 
-## Dependency-flow health analytics (`analytics/health/`)
+## Dependency-flow health analytics (`analytics/flow_health/`)
 
 A separate Python project next to the Java service (not part of the Maven build or the Docker image)
 that will flag unhealthy dependency patterns from `dependency_history` and `task_state_history`.
-Stage 1 only: a synthetic history generator that writes rows shaped like those two tables plus a
-ground-truth key of planted diseases. No model, no endpoint, nothing written to Postgres yet. See
-`analytics/health/README.md`.
+Today: a synthetic history generator (rows shaped like those two tables plus a ground-truth key of planted
+diseases), and from its CSV files a feature step (task, edge and chain features) with one KMeans clustering of the tasks,
+the "normal behaviour" the detectors will compare against. No detectors, no model, no endpoint, nothing written to
+Postgres yet. See `analytics/flow_health/README.md`.
 
 ## Constraint persistence (Issue #378)
 
@@ -1148,12 +1149,41 @@ placeholder in that tenant (`updatedAt` = epoch) inside the graph lock, and the 
 recorded right away. An existing task is never overwritten, and one in a different tenant rejects the
 whole event (no retry, nothing created). A later `task.updated` replaces the placeholder's state.
 
+**Scheduling publish after `task.dependencies.proposed`.** Inbox creates a `has_dependencies` task with
+`is_available=false`, and only Chain flips it. The handler therefore also creates the event's own task as a
+placeholder up front (so an empty dependency list still has a row), and after processing the edges reads its
+readiness from `task_readiness`: if ready, it queues `task.scheduling.updated` after commit for that task
+only (never for a `dependsOnTaskId`); if blocked, nothing is published. This runs on every non-duplicate
+event, including when a `DuplicateDependencyException` was swallowed. A redelivered `event_id` is still
+blocked by `ChainEventProcessingTemplate`.
+
 Tests: `TaskEligibilityServiceTest` (same/different/null-tenant `addDependency`/`addDependencies`,
 `onTaskStatusChangedIfNewer` backfill/match/reject incl. the stale-redelivery case),
 `TaskDependencyServiceTest`/`DependencyProposedEventHandlerTest` (REJECTED history on rejection,
 REST and Mind paths respectively), `TaskUpdatedEventHandlerTest` (tenant mismatch ->
 `NonRetryableEventException`, not retried), `TaskRepositoryContractTest` (`tenantId` round-trips
 through `save`/`findById` for both the in-memory and Postgres implementations).
+
+## Tenant context and task ownership (Issue #956)
+
+Every `/tasks/**` request must carry `X-Tenant-Id` (a UUID). `TenantInterceptor` (registered in
+`WebConfig`) rejects a missing or malformed value with 400 in the `ApiError` format, before any
+controller runs; validation lives only in `TenantContext`.
+
+- **Exempt paths:** `WebConfig.TENANT_EXEMPT_PATHS`, currently **empty** - fail-closed, so a new
+  endpoint under `/tasks` requires the header by default. The only known caller is lens-bff. Add a
+  path only for a concrete internal caller, documented here with the caller and reason. The list
+  is path-only: the first exemption must also add a method check to the interceptor. An exempt
+  path has no tenant, so it cannot check task ownership.
+- **Ownership:** each `/tasks/{taskId}/...` controller calls
+  `TaskOwnershipService.requireTaskInTenant(taskId, tenantId)` first. A task of another tenant, or
+  one whose `tenant_id` is still null, fails with the same 404 as a missing task. The interceptor
+  only guarantees the header; a new endpoint must still call the ownership check itself.
+- **Not covered:** the second task id of `POST`/`DELETE /tasks/{taskId}/dependencies` is not
+  checked against the tenant (tracked separately), nor is `GET /tenants/{tenantId}/dependency-graph`,
+  which takes the tenant from its path.
+
+Tests: `TenantContextTest`, `TenantInterceptorTest`, `TaskOwnershipServiceTest`.
 
 ## Transactional graph lock
 

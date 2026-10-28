@@ -8,5 +8,5 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  */
 @ConfigurationProperties(prefix = "bridge.intake.calendar")
 public record CalendarImportProperties(
-        @DefaultValue("primary") String calendarId, @DefaultValue("kamatech") String tenantId) {
+        @DefaultValue("primary") String calendarId) {
 }

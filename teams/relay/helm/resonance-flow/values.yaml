@@ -109,7 +109,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/mind"
       pullPolicy: IfNotPresent
-      tag: "22a8e01"
+      tag: "29aaca0"
     containerPort: 8000
     service: *defaultService
     resources: *defaultResources
@@ -137,6 +137,9 @@ components:
       - name: mind-llm-credentials
         mountPath: /etc/resonance-flow/secrets/llm
         readOnly: true
+      - name: kafka-sasl-credentials
+        mountPath: /etc/resonance-flow/secrets/kafka-sasl
+        readOnly: true
     dependencySecretVolumes:
       - name: object-storage-credentials
         dependencyName: object-storage
@@ -150,6 +153,9 @@ components:
         secret:
           secretName: resonance-flow-mind-llm
           optional: true
+      - name: kafka-sasl-credentials
+        secret:
+          secretName: resonance-flow-kafka-sasl-credentials
     # Mounted as config.yaml at /etc/resonance-flow/config/ - keys are what MIND reads.
     config:
       vector_store:
@@ -181,7 +187,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-bff"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "9474270"
     containerPort: 8082
     service: *defaultService
     resources: *defaultResources
@@ -191,6 +197,8 @@ components:
       - name: notification-delivery
         port: 80
     config:
+      server:
+        port: 8082
       inbox:
         service:
           url: http://resonance-flow-inbox:80
@@ -211,12 +219,39 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/bridge"
       pullPolicy: IfNotPresent
-      tag: "94c3259"
+      tag: "3d539c2"
     containerPort: 8080
     service: *defaultService
     resources: *defaultResources
     <<: *defaultHealthProbes
-    env: {}
+    # Bridge only calls out (source APIs, Kafka, Postgres, MinIO); no component calls its
+    # HTTP API, and its manual /sync and /run endpoints have no auth. An empty allowFrom
+    # denies all in-cluster ingress - see templates/networkpolicy.yaml. Probes and the CD
+    # smoke test's port-forward are unaffected. Add a component here (or Traefik, for
+    # Slack's /api/bridge/slack/events) once something needs to reach Bridge.
+    networkPolicy:
+      allowFrom: []
+    env:
+      # Required so BridgeTaskKafkaConfig's Protobuf producer (and the
+      # KafkaPayloadPublisher bean) activate - without it everything falls
+      # back to LoggingPayloadPublisher and nothing reaches Inbox.
+      SPRING_PROFILES_ACTIVE: "kafka"
+      # Bridge reads its Inbox tenant UUID from two separate settings:
+      #   CRM_ORGANIZATION_ID -> structured lanes (CRM, GitHub, Jira), via
+      #                          bridge.crm.organization-id and bridge.organization-id
+      #   BRIDGE_TENANT_ID    -> unstructured lanes (Email, Slack, WhatsApp, Drive,
+      #                          Calendar, Media), via bridge.tenant-id
+      # Keep them equal. If they differ, one source's tasks land in one tenant and
+      # another's in a different one: users of one tenant miss the other's tasks, and
+      # Mind's per-tenant duplicate detection can't match across them.
+      # Both default to Inbox's built-in "System" tenant (V15__add_system_admin.sql),
+      # which exists in every environment. To use a real tenant, override BOTH, e.g.
+      # in environments/shared.yaml.
+      # CRM_ORGANIZATION_ID must not be blank: with the kafka profile active,
+      # CrmLaneConfig fails startup on a blank value by design, which crashed the
+      # CD smoke test and blocked every Bridge deploy since #996.
+      CRM_ORGANIZATION_ID: "00000000-0000-0000-0000-000000000001"
+      BRIDGE_TENANT_ID: "00000000-0000-0000-0000-000000000001"
     objectStorage:
       bucket: "bridge-raw"
     config:
@@ -227,9 +262,6 @@ components:
             - "configtree:/etc/resonance-flow/secrets/kafka/"
             - "configtree:/etc/resonance-flow/secrets/bridge-db/"
         kafka:
-          # GitHub currently publishes to bridge.github.tasks.
-          # Issue #275 will decide whether to use the shared topic instead.
-          topic: "bridge.github.tasks"
           properties:
             security.protocol: "SASL_PLAINTEXT"
             sasl.mechanism: "PLAIN"
@@ -290,7 +322,7 @@ components:
           zoom-recordings-dir: "${BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR:}"
           bbb-recordings-dir: "${BRIDGE_MEDIA_BBB_RECORDINGS_DIR:}"
           scanned-docs-dir: "${BRIDGE_MEDIA_SCANNED_DOCS_DIR:}"
-          tenant-id: "${BRIDGE_MEDIA_TENANT_ID:kamatech}"
+          tenant-id: "${BRIDGE_TENANT_ID:00000000-0000-0000-0000-000000000001}"
           min-file-size-bytes: "${BRIDGE_MEDIA_MIN_FILE_SIZE_BYTES:1}"
     volumeMounts:
       - name: object-storage-credentials
@@ -302,10 +334,6 @@ components:
       - name: bridge-db-credentials
         mountPath: /etc/resonance-flow/secrets/bridge-db
         readOnly: true
-    volumes:
-      - name: bridge-db-credentials
-        secret:
-          secretName: resonance-flow-bridge-db-credentials
     dependencySecretVolumes:
       - name: object-storage-credentials
         dependencyName: object-storage
@@ -314,14 +342,21 @@ components:
             path: minio.access-key
           - key: root-password
             path: minio.secret-key
+    volumes:
+      - name: bridge-db-credentials
+        secret:
+          secretName: resonance-flow-bridge-db-credentials
       - name: kafka-credentials
-        dependencyName: kafka-user-passwords
-        items:
-          - key: client-passwords
-            path: kafka.password
+        secret:
+          secretName: resonance-flow-kafka-sasl-credentials
+          items:
+            - key: client-passwords
+              path: kafka.password
     dependencies:
       - name: object-storage
         port: 9000
+      - name: schema-registry
+        port: 8080
       - name: postgresql
         port: 5432
   lens-frontend:
@@ -330,7 +365,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-frontend"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "9474270"
     containerPort: 3000
     service: *defaultService
     resources:
@@ -366,7 +401,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-storybook"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "9474270"
     containerPort: 8080
     service: *defaultService
     resources:
@@ -400,24 +435,30 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/chain"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "012846e"
     containerPort: 8081
     service: *defaultService
     resources: *defaultResources
     <<: *defaultHealthProbes
     # Password comes from the chain-db-credentials Secret, mounted as a file below -
     # not a literal here, not an env var; created once by the chain db-credentials
-    # hook Job, not rendered as a chart resource. secretName must match the fullname-prefixed name
-    # templates/services/chain/configmap.yaml renders (fullname resolves to the
-    # fixed "resonance-flow" release name this chart is always installed as).
+    # hook Job, not rendered as a chart resource. secretName must match the
+    # "<fullname>-chain-db-credentials" name that hook creates (_db-credentials-hook.tpl;
+    # fullname is the fixed "resonance-flow").
     volumeMounts:
       - name: chain-db-credentials
         mountPath: /etc/resonance-flow/secrets/chain-db
+        readOnly: true
+      - name: kafka-sasl-credentials
+        mountPath: /etc/resonance-flow/secrets/kafka-sasl
         readOnly: true
     volumes:
       - name: chain-db-credentials
         secret:
           secretName: resonance-flow-chain-db-credentials
+      - name: kafka-sasl-credentials
+        secret:
+          secretName: resonance-flow-kafka-sasl-credentials
     dependencies:
       - name: postgresql
         port: 5432
@@ -433,11 +474,11 @@ components:
           consumerGroupId: chain-service
           topics:
             taskSchedulingUpdated: task.scheduling.updated # produced, consumed by Inbox
-            # Consumed, Protobuf (#467): task.created/updated from Inbox, proposals from Mind.
-            taskCreated: task.created
+            # Consumed, Protobuf (#467): task.updated/completed from Inbox, proposals from Mind.
             taskUpdated: task.updated
             taskCompleted: task.completed
             dependenciesProposed: task.dependencies.proposed
+            scoreProposed: task.score.proposed
             # taskDependenciesRemoved intentionally omitted: Chain confirmed (#385 follow-up)
             # removeDependency is REST-only (Lens BFF -> Chain), no Kafka topic behind it today -
             # task.dependencies.removed was proposed but is not active. May return once #133
@@ -449,7 +490,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/inbox"
       pullPolicy: IfNotPresent
-      tag: "085a2e7"
+      tag: "4142843"
     containerPort: 8080
     service: *defaultService
     resources: *defaultResources
@@ -478,10 +519,16 @@ components:
       - name: inbox-db-credentials
         mountPath: /etc/resonance-flow/secrets/inbox-db
         readOnly: true
+      - name: kafka-sasl-credentials
+        mountPath: /etc/resonance-flow/secrets/kafka-sasl
+        readOnly: true
     volumes:
       - name: inbox-db-credentials
         secret:
           secretName: resonance-flow-inbox-db-credentials
+      - name: kafka-sasl-credentials
+        secret:
+          secretName: resonance-flow-kafka-sasl-credentials
     dependencies:
       - name: postgresql
         port: 5432
@@ -504,7 +551,9 @@ components:
     enabled: true
     replicaCount: 1
     image:
-      # In-memory Apicurio registry - not durable, fine for dev/CI only.
+      # In-memory Apicurio registry - not durable, fine for dev/CI only. Any restart (e.g. a
+      # liveness kill under load) drops every schema: rerun schema-sync-hook, then restart the
+      # producers - Confluent clients cache the latest version they looked up.
       repository: "apicurio/apicurio-registry-mem"
       pullPolicy: IfNotPresent
       tag: "2.5.11.Final"
@@ -548,20 +597,19 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-gateway"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "5b08464"
     containerPort: 8080
     service: *defaultService
     resources: *defaultResources
     <<: *defaultHealthProbes
     env: {}
-
   notification-delivery:
     enabled: true
     replicaCount: 1
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/notification-delivery"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "4142843"
     containerPort: 8082
     service:
       type: ClusterIP
@@ -598,6 +646,14 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
+    volumeMounts:
+      - name: kafka-sasl-credentials
+        mountPath: /etc/resonance-flow/secrets/kafka-sasl
+        readOnly: true
+    volumes:
+      - name: kafka-sasl-credentials
+        secret:
+          secretName: resonance-flow-kafka-sasl-credentials
     dependencies:
       - name: schema-registry
         port: 8080
@@ -627,15 +683,12 @@ kafka:
   # The client listener defaults to SASL_PLAINTEXT (chart-level, not something we chose here),
   # but nothing was ever configured to authenticate against it - every consuming service's
   # client silently failed the handshake and retried forever without ever actually connecting
-  # or crashing (verified locally). Pinning explicit client credentials here (instead of the
-  # chart's own randomly-generated ones) so every component's mounted config can reference the
-  # same known username/password - see resonance-flow.kafkaSaslJaasConfig in _helpers.tpl.
+  # or crashing (verified locally).
   sasl:
     client:
       users:
         - inbox
-      passwords:
-        - "resonance-flow-dev-sasl"
+    existingSecret: resonance-flow-kafka-sasl-credentials
   # Single combined controller+broker node (controller.replicaCount: 1, broker.replicaCount: 0
   # below) - Kafka's built-in defaults for these three (3, 3, 2) can never be satisfied with
   # only one broker, so __consumer_offsets/__transaction_state auto-creation retries forever
@@ -649,6 +702,9 @@ kafka:
   controller:
     replicaCount: 1
     controllerOnly: false
+    # Bitnami's default heap is 75% of the limit (576Mi of 768Mi), leaving too little for
+    # Kafka's off-heap memory - it got OOMKilled under load. Kafka leans on the page cache.
+    heapOpts: -XX:InitialRAMPercentage=50 -XX:MaxRAMPercentage=50
     resources:
       # 192Mi was OOMKilling the JVM before it finished KRaft storage formatting on
       # startup (verified locally - combined broker+controller needs more headroom).
@@ -664,8 +720,9 @@ minio:
   enabled: true
   mode: standalone
   defaultBuckets: bridge-raw
- # Bitnami moved the MinIO images to bitnamilegacy/*.
-# This chart uses the new image location.
+  # Bitnami moved the MinIO images to bitnamilegacy/*.
+
+  # This chart uses the new image location.
   image:
     registry: docker.io
     repository: bitnamilegacy/minio
@@ -680,7 +737,9 @@ minio:
       cpu: 100m
       memory: 128Mi
     limits:
-      cpu: 150m
+      # Bitnami's setup script gives each `mc` call a fixed 5s timeout; at 150m they took
+      # 4-7s, so it misread MinIO as stopped and crashed on "port already in use".
+      cpu: 300m
       memory: 192Mi
 postgresql:
   enabled: true
@@ -688,7 +747,9 @@ postgresql:
   # Pinned: the subchart otherwise generates a random password and only creates the
   # default "postgres" database. Only CI's test step uses auth.database - no pod does.
   auth:
-    postgresPassword: postgres
+    existingSecret: resonance-flow-postgres-db-credentials
+    secretKeys:
+      adminPasswordKey: password
     database: resonance_flow
   # Pinned: the pgvector overlay below is built for PG 18 and must match its major.
   # From bitnami/postgresql:latest, built 2026-09-20 (PG 18.6, pgvector 0.8.6).

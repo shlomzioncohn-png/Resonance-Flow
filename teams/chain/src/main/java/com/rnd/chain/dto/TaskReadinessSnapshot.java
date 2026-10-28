@@ -4,6 +4,7 @@ import java.util.UUID;
 
 public record TaskReadinessSnapshot(
         UUID taskId,
+        UUID tenantId,
         int blockingCount,
         int openConstraintCount
 ) {

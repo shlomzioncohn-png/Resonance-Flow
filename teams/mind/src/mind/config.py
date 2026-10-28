@@ -11,11 +11,13 @@ is read from env vars/`.env`, under the `MIND_` prefix (`__` for nesting).
 """
 
 import os
+from datetime import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Self
 from urllib.parse import quote
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
     AnyHttpUrl,
@@ -32,6 +34,7 @@ from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from mind import config_file
+from mind.extraction.deadline import Weekday
 
 # Absolute -- relative resolves against cwd, which breaks outside teams/mind/.
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
@@ -186,8 +189,9 @@ class ObjectStorageSettings(BaseSettings):
 
 
 class LandedConsumerSettings(BaseSettings):
-    """Standalone -- the bridge.raw.landed runner (#349) needs no database, so it
-    does not read `Settings`, which requires the vector-store DSN.
+    """Standalone -- the bridge.raw.landed runner's own knobs. The runner also
+    reads `Settings` (#919: the index, for duplicates and for task.created),
+    but these do not depend on it, so they load without the vector-store DSN.
 
     Read from the environment and .env like every other MIND_* setting, so an
     override set next to the MinIO keys in .env is not silently ignored.
@@ -197,10 +201,10 @@ class LandedConsumerSettings(BaseSettings):
         env_prefix="MIND_LANDED_CONSUMER__", env_file=_ENV_FILE, extra="ignore"
     )
 
-    # Its own group, not the one in ProtobufConsumer's docstring example. Until
-    # extraction is wired, a run marks items processed and commits their
-    # offsets with nothing extracted: a test run against the shared topic sets
-    # MIND_LANDED_CONSUMER__GROUP_ID to a group of its own.
+    # Its own group, not the one in ProtobufConsumer's docstring example. A run
+    # commits the offsets it read, and sends Inbox real creation requests: a
+    # test run against the shared topic sets MIND_LANDED_CONSUMER__GROUP_ID to
+    # a group of its own.
     group_id: str = "mind-landed-consumer"
     # The same variable `Settings.log_level` reads.
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
@@ -351,6 +355,76 @@ class InboxDirectorySettings(BaseSettings):
             dotenv_settings,
             file_secret_settings,
         )
+
+
+class DeadlineSettings(BaseSettings):
+    """Standalone -- resolving a deadline (#960) needs no database.
+
+    The locale "by Friday" and "in 3 working days" are read in. Event times are
+    UTC and say nothing about the writer's zone, and Inbox's Tenant.timezone
+    does not reach Mind, so one zone serves every tenant until it does. The
+    defaults are Israel's, where the only tenant and the demo are. A value that
+    would break resolution fails here, on load, rather than on the first
+    deadline of a run.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="MIND_DEADLINE__", env_file=_ENV_FILE, extra="ignore"
+    )
+
+    # An IANA name, not an offset: Israel changes its clocks twice a year, and
+    # a deadline across the change must come out right.
+    timezone: str = "Asia/Jerusalem"
+    # When "by Friday" ends on Friday.
+    end_of_day: time = time(17, 0)
+    # By name, in the env as a JSON list: Python numbers its weekdays from
+    # Monday = 0, which nobody reading a settings file should have to know.
+    working_days: frozenset[Weekday] = frozenset(
+        {Weekday.SUNDAY, Weekday.MONDAY, Weekday.TUESDAY, Weekday.WEDNESDAY, Weekday.THURSDAY}
+    )
+
+    @field_validator("timezone")
+    @classmethod
+    def zone_must_exist(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            raise ValueError(f"unknown time zone {value!r}") from error
+        return value
+
+    @field_validator("working_days", mode="before")
+    @classmethod
+    def day_names_in_any_case(cls, value: Any) -> Any:
+        if isinstance(value, list | tuple | set | frozenset):
+            return [day.upper() if isinstance(day, str) else day for day in value]
+        return value
+
+    @field_validator("working_days")
+    @classmethod
+    def week_must_have_work_and_rest(cls, value: frozenset[Weekday]) -> frozenset[Weekday]:
+        # No working day leaves nothing to count; no day off means no week
+        # ever ends. Resolution refuses both too, but that would be mid-run.
+        if not value or len(value) == len(Weekday):
+            raise ValueError("needs at least one working day and one day off")
+        # One unbroken run of days, which may wrap past Sunday (Sunday to
+        # Thursday is one): a week ends on the working day before a day off,
+        # so with gaps (Monday, Wednesday, Friday) "the end of the week" would
+        # be Monday.
+        numbers = {day.number for day in value}
+        starts = [n for n in numbers if (n - 1) % 7 not in numbers]
+        if len(starts) != 1:
+            raise ValueError("working days must be consecutive, e.g. SUNDAY to THURSDAY")
+        return value
+
+    @property
+    def zone(self) -> ZoneInfo:
+        return ZoneInfo(self.timezone)
+
+    @property
+    def weekday_numbers(self) -> frozenset[int]:
+        """What the resolution functions in extraction/deadline.py take."""
+
+        return frozenset(day.number for day in self.working_days)
 
 
 class VectorStoreSettings(BaseModel):

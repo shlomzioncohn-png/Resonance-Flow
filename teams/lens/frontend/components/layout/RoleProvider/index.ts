@@ -1,2 +1,1 @@
-export { RoleProvider, useRole } from './RoleProvider';
-export type { Role } from './RoleProvider';
+export { RoleProvider, useRole, USER_STORAGE_KEY } from './RoleProvider';

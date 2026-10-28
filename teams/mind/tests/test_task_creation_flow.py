@@ -8,12 +8,16 @@ issue are the tests below, one each.
 
 import logging
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
 
 from mind.contracts.base_enums import SourceType
 from mind.contracts.task_creation_requested import TaskCreationRequested
+from mind.dependencies.adapter import DependencyAdapter
+from mind.dependencies.publisher import DependencyPublisher
+from mind.embeddings.base import SearchResult
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.task_creation.flow import TaskCreationFlow
 from mind.task_creation.pending import PendingRequests
@@ -23,6 +27,7 @@ from tests.test_index_consumer import TENANT, FakeTenantStore, FakeVectorIndex
 
 ITEM = UUID("6f1c2e9a-3b4d-4c8e-9a1f-2d7e5b0c4a83")
 TASK_ID = "4d0c6f2a-8b1e-4c3d-9a7f-1e2b3c4d5e6f"  # what Inbox hands out
+DEPENDS_ON_TASK_ID = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"  # the resolved dependency target
 
 
 @pytest.fixture(autouse=True)
@@ -66,7 +71,7 @@ class FailingOnceStore(FakeTenantStore):
 
 def _proposal() -> TaskCreationRequested:
     return TaskCreationRequested(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+        tenant_id=TENANT,
         title="Send the Q3 revenue report",
         description="Finance needs it before Friday's close.",
         source_type=SourceType.SLACK,
@@ -294,3 +299,132 @@ async def test_an_unreadable_correlation_header_is_a_warning_not_silence(
 
     assert matched is None
     assert "not-a-uuid" in caplog.text
+
+
+async def test_an_unreadable_tenant_id_is_a_warning_not_lost_dependencies(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Can't confirm event.tenant_id against what Mind requested -- logged,
+    but `on_matched` still fires under Mind's own tenant_id (never Inbox's
+    unreadable one), so dependency publishing is not lost over this."""
+
+    heard: list[MatchedReply] = []
+
+    async def on_matched(matched: MatchedReply) -> None:
+        heard.append(matched)
+
+    pending, store = PendingRequests(), FakeVectorIndex()
+    correlation_id = await _send(pending)
+    event, headers = _reply(correlation_id)
+    event.tenant_id = "not-a-uuid"
+
+    with caplog.at_level(logging.WARNING, logger="mind.task_creation"):
+        matched = await handle_task_created_reply(store, pending, event, headers, on_matched)
+
+    assert "not-a-uuid" in caplog.text
+    assert matched is not None and matched.tenant_id == TENANT
+    # #841: indexing itself is gated on a parseable event.tenant_id, so an
+    # unreadable one means the row is never written -- only dependency
+    # publishing (on_matched, below) survives it.
+    assert TASK_ID not in store.rows
+    assert heard == [matched]
+    assert await pending.get(correlation_id) is None
+
+
+async def test_a_tenant_id_mismatch_is_a_warning_not_lost_dependencies(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Inbox echoing back a different tenant_id than Mind requested should
+    never happen, but if it does, it's logged as a signal something else is
+    wrong -- `on_matched` still fires under Mind's own (never Inbox's
+    mismatched) tenant_id, so dependency publishing is not lost over this."""
+
+    heard: list[MatchedReply] = []
+
+    async def on_matched(matched: MatchedReply) -> None:
+        heard.append(matched)
+
+    pending, store = PendingRequests(), FakeVectorIndex()
+    correlation_id = await _send(pending)
+    event, headers = _reply(correlation_id)
+    other_tenant = UUID("22222222-2222-2222-2222-222222222222")
+    event.tenant_id = str(other_tenant)
+
+    with caplog.at_level(logging.WARNING, logger="mind.task_creation"):
+        matched = await handle_task_created_reply(store, pending, event, headers, on_matched)
+
+    assert str(other_tenant) in caplog.text
+    assert matched is not None and matched.tenant_id == TENANT
+    assert TASK_ID in store.rows
+    assert heard == [matched]
+    assert await pending.get(correlation_id) is None
+
+
+# --- wired to DependencyAdapter, end to end (#355) ---------------------------
+
+
+class ListSink:
+    def __init__(self) -> None:
+        self.sent: list[object] = []
+
+    def send(self, payload: object) -> None:
+        self.sent.append(payload)
+
+
+async def test_sending_a_request_publishes_no_dependencies_before_the_reply_arrives() -> None:
+    """Publishing only ever happens from on_matched, which only fires on a
+    reply -- send() alone must trigger nothing."""
+
+    sink = ListSink()
+    publisher = DependencyPublisher(index=FakeVectorIndex(), sink=sink)  # type: ignore[arg-type]
+    adapter = DependencyAdapter(publisher)
+    flow = TaskCreationFlow(
+        producer=FakeProducer(),
+        index=FakeVectorIndex(),
+        pending=PendingRequests(),
+        on_matched=adapter.on_task_created,
+    )
+
+    await flow.send(
+        _proposal(), bridge_correlation_id=ITEM, revision=0, dependency_mentions=("the DB upgrade",)
+    )
+
+    assert sink.sent == []
+
+
+async def test_the_full_round_trip_from_send_to_a_published_dependency() -> None:
+    """send() -> task.created reply -> DependencyAdapter -> publish_dependencies
+    -> Kafka, carrying the real task_id, the tenant_id, and the mentions through."""
+
+    sink = ListSink()
+    publisher = DependencyPublisher(index=FakeVectorIndex(), sink=sink)  # type: ignore[arg-type]
+    adapter = DependencyAdapter(publisher)
+    flow = TaskCreationFlow(
+        producer=FakeProducer(),
+        index=FakeVectorIndex(),
+        pending=PendingRequests(),
+        on_matched=adapter.on_task_created,
+    )
+    proposal = _proposal()
+
+    correlation_id = await flow.send(
+        proposal, bridge_correlation_id=ITEM, revision=0, dependency_mentions=("the DB upgrade",)
+    )
+
+    with patch(
+        "mind.dependencies.publisher.resolve_dependency_targets",
+        AsyncMock(return_value=[[SearchResult(task_id=DEPENDS_ON_TASK_ID, similarity=0.9)]]),
+    ) as mock_resolve:
+        await flow.on_task_created(*_reply(correlation_id))
+
+    # The store passed is index.for_tenant(tenant_id), a fresh FakeTenantStore
+    # each call -- check its scope, not its identity against publisher._index.
+    call_args = mock_resolve.await_args
+    assert isinstance(call_args.args[0], FakeTenantStore)
+    assert call_args.args[0].tenant_id == proposal.tenant_id
+    assert call_args.args[1:] == (["the DB upgrade"],)
+    assert call_args.kwargs == {"k": 1, "exclude_task_id": TASK_ID}
+    [event] = sink.sent
+    assert str(event.task_id) == TASK_ID
+    assert event.tenant_id == proposal.tenant_id
+    assert event.dependencies[0].depends_on_task_id == UUID(DEPENDS_ON_TASK_ID)

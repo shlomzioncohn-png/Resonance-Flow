@@ -9,7 +9,6 @@ neither invents an estimate nor loses one. Whether a real model answers null
 on text with no signal is a question for a live run, not for this file.
 """
 
-import json
 from uuid import uuid4
 
 import pytest
@@ -20,13 +19,13 @@ from mind.extraction.assembly import to_task_creation_requested
 from mind.extraction.confidence import effort_confidence
 from mind.extraction.extractor import BasicExtractor, ExtractionSuccess
 from mind.extraction.models import EffortBasis
-from tests.extraction.fakes import ScriptedProvider
+from tests.extraction.fakes import DEADLINE_SETTINGS, WRITTEN_AT, ScriptedProvider, answer_of
 
 SOURCE_TEXT = "Could you update the onboarding checklist? Should take about an hour."
 
 
 def _answer(minutes: object, basis: object) -> str:
-    return json.dumps(
+    return answer_of(
         {
             "title": "Update the onboarding checklist",
             "description": None,
@@ -48,8 +47,13 @@ def _proposal(answer: str) -> tuple[TaskCreationRequested, ScriptedProvider]:
         SOURCE_TEXT, SourceType.EMAIL
     )
     assert isinstance(outcome, ExtractionSuccess)
-    proposal = to_task_creation_requested(
-        outcome, tenant_id=uuid4(), bridge_source_ref=None, bridge_correlation_id=uuid4()
+    [proposal] = to_task_creation_requested(
+        outcome,
+        tenant_id=uuid4(),
+        bridge_source_ref=None,
+        bridge_correlation_id=uuid4(),
+        written_at=WRITTEN_AT,
+        deadline_settings=DEADLINE_SETTINGS,
     )
     return proposal, provider
 

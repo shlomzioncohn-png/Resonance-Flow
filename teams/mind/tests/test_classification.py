@@ -6,7 +6,6 @@ accepting them are the same decision, and that turning it off really does
 turn it off rather than merely leaving the fields empty.
 """
 
-import json
 from uuid import uuid4
 
 import pytest
@@ -20,26 +19,31 @@ from mind.extraction.config import ExtractionConfig
 from mind.extraction.extractor import BasicExtractor, ExtractionSuccess
 from mind.extraction.models import EffortBasis
 from mind.extraction.prompts import repair_prompt, system_prompt
-from tests.extraction.fakes import ScriptedProvider
+from tests.extraction.fakes import (
+    DEADLINE_SETTINGS,
+    WRITTEN_AT,
+    ScriptedProvider,
+    answer_of,
+    only,
+)
 
 SOURCE_TEXT = (
     "The board meets Thursday and still has no decision on whether we are "
     "entering the German market. I need the recommendation written before then."
 )
 
-CLASSIFIED_ANSWER = json.dumps(
-    {
-        "title": "Write the German market entry recommendation",
-        "description": "The board needs it before Thursday's meeting.",
-        "source_ref": None,
-        "has_dependencies": False,
-        "tier": "STRATEGIC",
-        "urgency": 4,
-        "role_context": "CEO",
-    }
-)
+CLASSIFIED = {
+    "title": "Write the German market entry recommendation",
+    "description": "The board needs it before Thursday's meeting.",
+    "source_ref": None,
+    "has_dependencies": False,
+    "tier": "STRATEGIC",
+    "urgency": 4,
+    "role_context": "CEO",
+}
+CLASSIFIED_ANSWER = answer_of(CLASSIFIED)
 
-BASIC_ANSWER = json.dumps(
+BASIC_ANSWER = answer_of(
     {
         "title": "Write the German market entry recommendation",
         "description": "The board needs it before Thursday's meeting.",
@@ -62,9 +66,9 @@ def test_with_the_switch_on_the_three_fields_arrive() -> None:
     outcome, _ = _extract(CLASSIFIED_ANSWER, classify=True)
 
     assert isinstance(outcome, ExtractionSuccess)
-    assert outcome.fields.tier is TaskTier.STRATEGIC
-    assert outcome.fields.role_context is RoleContext.CEO
-    assert outcome.fields.urgency == 4
+    assert only(outcome).fields.tier is TaskTier.STRATEGIC
+    assert only(outcome).fields.role_context is RoleContext.CEO
+    assert only(outcome).fields.urgency == 4
 
 
 def test_with_the_switch_on_the_model_is_told_about_them() -> None:
@@ -115,8 +119,8 @@ def test_the_four_basic_fields_are_unaffected_either_way() -> None:
     off, _ = _extract(BASIC_ANSWER, classify=False)
 
     assert isinstance(on, ExtractionSuccess) and isinstance(off, ExtractionSuccess)
-    assert on.fields.title == off.fields.title
-    assert on.fields.has_dependencies == off.fields.has_dependencies
+    assert only(on).fields.title == only(off).fields.title
+    assert only(on).fields.has_dependencies == only(off).fields.has_dependencies
 
 
 # --- reaching the contract ------------------------------------------------
@@ -129,9 +133,15 @@ def _proposal(answer: str, classify: bool) -> TaskCreationRequested:
         SOURCE_TEXT, SourceType.EMAIL
     )
     assert isinstance(outcome, ExtractionSuccess)
-    return to_task_creation_requested(
-        outcome, tenant_id=uuid4(), bridge_source_ref=None, bridge_correlation_id=uuid4()
+    [proposal] = to_task_creation_requested(
+        outcome,
+        tenant_id=uuid4(),
+        bridge_source_ref=None,
+        bridge_correlation_id=uuid4(),
+        written_at=WRITTEN_AT,
+        deadline_settings=DEADLINE_SETTINGS,
     )
+    return proposal
 
 
 def test_the_three_fields_reach_the_contract() -> None:
@@ -155,7 +165,7 @@ def test_with_the_switch_off_the_contract_simply_gets_nulls() -> None:
 def test_a_model_that_declined_to_guess_looks_the_same_as_not_asking() -> None:
     """Both are an empty field, and Inbox is meant to read them the same."""
 
-    declined = json.dumps(
+    declined = answer_of(
         {
             "title": "Write the German market entry recommendation",
             "description": None,
@@ -170,9 +180,9 @@ def test_a_model_that_declined_to_guess_looks_the_same_as_not_asking() -> None:
     assert _proposal(declined, classify=True).role_context is None
 
 
-ESTIMATED_ANSWER = json.dumps(
+ESTIMATED_ANSWER = answer_of(
     {
-        **json.loads(CLASSIFIED_ANSWER),
+        **CLASSIFIED,
         "effort_estimate_minutes": 60,
         "effort_estimate_basis": "STATED",
     }
@@ -215,7 +225,7 @@ def test_a_repair_round_does_not_quietly_drop_the_classification() -> None:
     until it needed one repair round.
     """
 
-    bad_title = json.dumps({"title": "N/A", "has_dependencies": False})
+    bad_title = answer_of({"title": "N/A", "has_dependencies": False})
     provider = ScriptedProvider(bad_title, CLASSIFIED_ANSWER)
 
     outcome = BasicExtractor(provider, sleep=lambda _: None).extract(
@@ -256,7 +266,7 @@ def test_a_wrong_shaped_tier_does_not_end_the_run(wrong_shape: object) -> None:
     whole run.
     """
 
-    answer = json.dumps(
+    answer = answer_of(
         {
             "title": "Write the German market entry recommendation",
             "description": None,
@@ -273,11 +283,11 @@ def test_a_wrong_shaped_tier_does_not_end_the_run(wrong_shape: object) -> None:
     )
 
     assert isinstance(outcome, ExtractionSuccess)
-    assert outcome.fields.tier is None
+    assert only(outcome).fields.tier is None
     # The rest of the answer survives, which is the point of nulling rather
     # than failing.
-    assert outcome.fields.role_context is RoleContext.CEO
-    assert outcome.fields.urgency == 4
+    assert only(outcome).fields.role_context is RoleContext.CEO
+    assert only(outcome).fields.urgency == 4
 
 
 @pytest.mark.parametrize("unreadable", ["--3", "²"])
@@ -290,7 +300,7 @@ def test_an_unreadable_urgency_costs_one_call_and_keeps_the_title(unreadable: st
     An optional field promised the opposite: a null, a log line, nothing more.
     """
 
-    answer = json.dumps({**json.loads(CLASSIFIED_ANSWER), "urgency": unreadable})
+    answer = answer_of({**CLASSIFIED, "urgency": unreadable})
     # Three answers queued, so a repair round would be counted, not crash.
     provider = ScriptedProvider(answer, answer, answer)
 
@@ -300,5 +310,5 @@ def test_an_unreadable_urgency_costs_one_call_and_keeps_the_title(unreadable: st
 
     assert provider.call_count == 1
     assert isinstance(outcome, ExtractionSuccess)
-    assert outcome.fields.title == "Write the German market entry recommendation"
-    assert outcome.fields.urgency is None
+    assert only(outcome).fields.title == "Write the German market entry recommendation"
+    assert only(outcome).fields.urgency is None

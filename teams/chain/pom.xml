@@ -174,10 +174,11 @@
                     <!-- Registered cross-team schemas, owned by Relay - see shared/proto/README.md. -->
                     <protoSourceRoot>${proto.root}</protoSourceRoot>
                     <includes>
-                        <include>chain-task-updated-event.proto</include>
+                        <include>task-created-event.proto</include>
+                        <include>task-updated-event.proto</include>
                         <include>task-completed-event.proto</include>
                         <include>task-dependencies-proposed-event.proto</include>
-                        <include>chain-task-score-proposed-event.proto</include>
+                        <include>task-score-proposed-event.proto</include>
                         <include>scheduling-updated-event.proto</include>
                     </includes>
                 </configuration>
@@ -233,6 +234,12 @@
     <profiles>
         <profile>
             <id>postgres-integration</id>
+            <!-- Active whenever CI exports a Postgres (setup-service-infra sets TEST_DATABASE_URL); also by -Ppostgres-integration. -->
+            <activation>
+                <property>
+                    <name>env.TEST_DATABASE_URL</name>
+                </property>
+            </activation>
             <properties>
                 <surefire.excludedGroups/>
             </properties>

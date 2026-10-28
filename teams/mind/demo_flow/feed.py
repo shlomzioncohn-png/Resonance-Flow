@@ -130,6 +130,19 @@ def _shift_instant(value: str, shift: timedelta) -> str:
     return _instant(datetime.fromisoformat(value) + shift)
 
 
+#: The demo's content is synthetic and names no real person, so it is
+#: classified as Bridge's rules would classify it: not sensitive. Mind reads
+#: this only to decide whether a log line may quote a task's title
+#: (creation_pipeline._loggable_title), and the demo's checker needs that
+#: title to tell which task a duplicate line is about (verify.py).
+DEMO_CLASSIFICATION = pb.Classification(
+    decided_by=pb.DECIDED_BY_RULE,
+    sensitivity=pb.SensitivityLabel(value=pb.SENSITIVITY_NONE, confidence=1.0),
+    reason="synthetic demo content (#359)",
+    classifier=pb.ClassifierInfo(model="rules", prompt_version="demo-359"),
+)
+
+
 def _event(
     source_type: pb.SourceType,
     tenant_id: str,
@@ -168,6 +181,7 @@ def _event(
         event.source_timestamp.FromDatetime(source_timestamp)
     if source_ref is not None:
         event.source_ref = source_ref
+    event.classification.CopyFrom(DEMO_CLASSIFICATION)
     return event
 
 
@@ -372,6 +386,11 @@ def mind_view(event: pb.RawObjectEvent) -> dict[str, Any]:
     for ref in data["objects"]:
         for field, prefix in _REF_ENUM_PREFIXES.items():
             ref[field] = ref[field].removeprefix(prefix)
+    classification = data.get("classification")
+    if classification:
+        classification["decided_by"] = classification["decided_by"].removeprefix("DECIDED_BY_")
+        sensitivity = classification["sensitivity"]
+        sensitivity["value"] = sensitivity["value"].removeprefix("SENSITIVITY_")
     return data
 
 
@@ -544,6 +563,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--dry-run", action="store_true", help="build and validate only")
     parser.add_argument(
+        "--run-id",
+        help="name of the run and of its manifest, runs/<run-id>.json "
+        "(default: the UTC time and the order; demo_flow.run passes its own)",
+    )
+    parser.add_argument(
         "--minio-endpoint", default=os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
     )
     parser.add_argument("--minio-bucket", default=os.environ.get("MINIO_BUCKET", "bridge-raw"))
@@ -562,7 +586,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     anchor = _parse_anchor(args.anchor)
     gap_s = args.gap if args.gap is not None else DEFAULT_GAP_S[args.order]
-    run_id = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{args.order}"
+    run_id = args.run_id or f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{args.order}"
 
     items = load_items(args.order, anchor, args.tenant_id)
     logger.info(

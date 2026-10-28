@@ -1,11 +1,14 @@
 """Tests for prompt loading and filling."""
 
 import json
+import logging
 
 import pytest
 
 from mind.contracts.base_enums import SourceType
-from mind.extraction.models import response_model
+from mind.extraction.deadline import OffsetUnit, PeriodEnd, Weekday
+from mind.extraction.models import MAX_TASKS_PER_TEXT, DeadlineKind, response_model
+from mind.extraction.parsing import parse_response
 from mind.extraction.prompts import (
     MAX_CONTENT_CHARS,
     TRUNCATION_MARKER,
@@ -60,6 +63,21 @@ def test_long_content_is_truncated_with_a_visible_marker() -> None:
     assert len(truncated) == MAX_CONTENT_CHARS + len(TRUNCATION_MARKER)
 
 
+def test_truncation_is_logged_with_how_much_was_cut(caplog: pytest.LogCaptureFixture) -> None:
+    """A meeting's action items sit at its end, so a cut must not be silent (#690)."""
+
+    content = "x" * (MAX_CONTENT_CHARS + 500)
+
+    with caplog.at_level(logging.WARNING, logger="mind.extraction"):
+        extraction_prompt(SourceType.EMAIL, content)
+        repair_prompt(SourceType.EMAIL, content, "{}", "error")
+
+    # Once, from the first prompt: a repair round re-sends the same content.
+    assert caplog.text.count("truncated") == 1
+    assert f"EMAIL content of {MAX_CONTENT_CHARS + 500} characters" in caplog.text
+    assert "the last 500 are not sent" in caplog.text
+
+
 def test_short_content_is_left_alone() -> None:
     assert truncate("send the report") == "send the report"
 
@@ -83,7 +101,7 @@ def test_the_switch_off_prompt_never_mentions_classification() -> None:
 
     prompt = system_prompt()
 
-    for word in ("tier", "urgency", "role_context", "STRATEGIC", "effort"):
+    for word in ("tier", "urgency", "role_context", "STRATEGIC", "effort", "deadline"):
         assert word not in prompt
 
 
@@ -179,16 +197,17 @@ def test_every_example_is_an_answer_the_parser_accepts() -> None:
     examples = _examples()
     shape = response_model(classify=True)
 
-    assert len(examples) == 6
+    assert len(examples) == 12
     for example in examples:
-        assert set(example) == set(shape.model_fields)
-        shape.model_validate(example)
+        for task in parse_response(json.dumps(example), shape):
+            assert task.model_fields_set == set(shape.model_fields)
 
 
 def test_the_examples_include_one_whose_answer_is_null() -> None:
     """An example of declining to answer is the one most worth giving."""
 
-    assert any(example["role_context"] is None for example in _examples())
+    tasks = [task for example in _examples() for task in example["tasks"]]
+    assert any(task["role_context"] is None for task in tasks)
     assert "Null there is the right answer" in system_prompt(classify=True)
 
 
@@ -206,6 +225,26 @@ def test_the_switch_on_prompt_asks_for_the_estimate_and_its_basis() -> None:
 
     for word in ("effort_estimate_minutes", "effort_estimate_basis", "STATED", "INFERRED"):
         assert word in prompt
+
+
+def test_the_switch_on_prompt_spells_out_every_deadline_value() -> None:
+    """Read from the enums, so a kind or unit added later fails here until the
+    prompt shows it: otherwise the model invents a neighbouring word (#960)."""
+
+    prompt = system_prompt(classify=True)
+
+    assert "deadline" in prompt
+    for vocabulary in (DeadlineKind, OffsetUnit, PeriodEnd, Weekday):
+        for member in vocabulary:
+            assert f'"{member.value}"' in prompt
+
+
+def test_the_examples_show_every_kind_of_deadline_and_one_declined() -> None:
+    tasks = [task for example in _examples() for task in example["tasks"]]
+    kinds = {task["deadline"]["kind"] for task in tasks if task["deadline"]}
+
+    assert kinds == {kind.value for kind in DeadlineKind}
+    assert any(task["deadline"] is None for task in tasks)
 
 
 def test_the_classification_block_does_not_count_its_keys() -> None:
@@ -242,7 +281,9 @@ def test_the_examples_show_every_kind_of_estimate() -> None:
     the words rather than from the work.
     """
 
-    bases = {example["effort_estimate_basis"] for example in _examples()}
+    bases = {
+        task["effort_estimate_basis"] for example in _examples() for task in example["tasks"]
+    }
 
     assert bases == {"STATED", "INFERRED", None}
 
@@ -292,3 +333,301 @@ def test_a_unit_whose_length_is_assumed_makes_the_estimate_inferred() -> None:
     # stating a duration is STATED.
     assert "a unit whose length you would have to assume" in prompt
     assert prompt.count("two sprints") == 1
+
+
+# --- the answer is a list of tasks (#690) ---------------------------------
+
+
+@pytest.mark.parametrize("classify", [False, True])
+def test_the_prompt_asks_for_the_list_and_allows_it_to_be_empty(classify: bool) -> None:
+    prompt = system_prompt(classify)
+
+    assert '{"tasks": [' in prompt
+    assert '{"tasks": []}' in prompt
+
+
+@pytest.mark.parametrize("classify", [False, True])
+def test_the_cap_the_prompt_states_is_the_one_the_model_enforces(classify: bool) -> None:
+    """Filled from MAX_TASKS_PER_TEXT, not written in: a fact in two files drifts."""
+
+    prompt = system_prompt(classify)
+
+    assert f"at most {MAX_TASKS_PER_TEXT} tasks" in prompt
+    assert "{{" not in prompt
+
+
+def test_the_examples_show_a_text_with_several_tasks() -> None:
+    assert any(len(example["tasks"]) > 1 for example in _examples())
+
+
+def test_a_repair_asks_for_every_task_again_and_unchanged() -> None:
+    """Without it a model may return only the task it fixed, and a valid
+    answer would silently lose the others: decision 3 of #690, undone."""
+
+    prompt = repair_prompt(SourceType.EMAIL, "text", '{"tasks": []}', "tasks.1.title: ...")
+
+    assert "every task" in prompt
+    assert "unchanged" in prompt
+
+
+# --- dependency_mentions (#690, was #842) ---------------------------------
+
+
+@pytest.mark.parametrize("classify", [False, True])
+def test_the_mentions_are_defined_beside_has_dependencies_in_both_modes(classify: bool) -> None:
+    """A field of every task, so it cannot live in the block the switch removes."""
+
+    prompt = system_prompt(classify)
+
+    assert prompt.index("`has_dependencies`") < prompt.index("`dependency_mentions`")
+    assert "`dependency_mentions` is not empty, `has_dependencies` is true" in prompt
+
+
+def test_an_example_shows_one_task_naming_another_from_the_same_text() -> None:
+    """By its title: that is the task's name in Inbox, and what a search finds."""
+
+    linked = [example for example in _examples() if len(example["tasks"]) > 1]
+    pairs = [
+        (task, {other["title"] for other in example["tasks"] if other is not task})
+        for example in linked
+        for task in example["tasks"]
+        if task["dependency_mentions"]
+    ]
+
+    assert pairs
+    for task, sibling_titles in pairs:
+        assert task["has_dependencies"]
+        assert set(task["dependency_mentions"]) <= sibling_titles
+
+
+def test_a_mention_asks_for_context_from_the_content_only() -> None:
+    prompt = system_prompt()
+
+    assert "specific enough to tell it apart" in prompt
+    assert "Use only words the content uses" in prompt
+    assert "use that task's title" in prompt
+
+
+def test_the_repair_prompt_lists_no_keys_of_its_own() -> None:
+    """It points at the instructions instead. Listing keys here once dropped
+    three classification fields from every repaired answer (#587)."""
+
+    prompt = repair_prompt(SourceType.EMAIL, "text", "{}", "error")
+
+    for key in response_model(classify=True).model_fields:
+        assert key not in prompt
+
+
+def test_a_repair_may_drop_tasks_when_the_rejection_asks_for_it() -> None:
+    """"Return every task again, unchanged" would otherwise forbid obeying a
+    rejection for having too many."""
+
+    prompt = repair_prompt(SourceType.MEETING, "text", "{}", "tasks: there are 17")
+
+    assert "unless the rejection asks you to remove some" in prompt
+
+
+@pytest.mark.parametrize("classify", [False, True])
+def test_the_prompt_warns_first_that_most_content_holds_no_task(classify: bool) -> None:
+    """Said before the format, not after it: a model that reads "return a list
+    of tasks" first goes looking for something to put in it."""
+
+    prompt = system_prompt(classify)
+    warning = prompt.index("Most content holds no task")
+
+    assert warning < prompt.index("Return a single JSON object")
+    assert "even when none of the content is about work" in prompt
+    assert prompt.index("A task is work that someone is asked to do") < prompt.index(
+        "Return a single JSON object"
+    )
+
+
+def test_blocked_or_waiting_work_is_still_a_task() -> None:
+    """The DEV re-run: "the release is held until the platform team raises the
+    quota" came back as no task once the prompt warned against status text."""
+
+    assert "Work that is blocked, waiting on someone, or due later is still a task" in (
+        system_prompt()
+    )
+
+
+# --- one cap for every source (#690, #349) ---------------------------------
+
+
+def test_a_meeting_is_sent_whole() -> None:
+    """AMI, live: cut at 8000 the two meetings found 0/4 and 0/8 gold action
+    items, sent whole 4/4 and 4/8. A meeting's tasks sit in its closing recap."""
+
+    transcript = "Project Manager: so, to recap. " * 1000  # about 31k characters
+
+    assert transcript in extraction_prompt(SourceType.MEETING, transcript)
+
+
+def test_an_email_is_sent_whole_with_its_attachment() -> None:
+    """A Bridge item is one text, its files joined (#349). The attachment
+    comes after the body, so a cut there loses the attachment, not a tail."""
+
+    item = "[Body]\nPlease sign the form.\n\n[Attachment: form.jpg, scanned]\n" + "x" * 30_000
+
+    assert item in extraction_prompt(SourceType.EMAIL, item)
+
+
+@pytest.mark.parametrize("source_type", [SourceType.EMAIL, SourceType.MEETING])
+def test_past_the_cap_every_source_is_cut(source_type: SourceType) -> None:
+    too_long = "x" * (MAX_CONTENT_CHARS + 10)
+
+    assert TRUNCATION_MARKER in extraction_prompt(source_type, too_long)
+    assert TRUNCATION_MARKER in repair_prompt(source_type, too_long, "{}", "error")
+
+
+def test_the_parts_of_one_item_are_read_as_one() -> None:
+    """A Bridge item is one text, its files joined under headings (#349): the
+    deadline in the body and the work in the attached form make one task."""
+
+    prompt = system_prompt()
+
+    assert "Content can come in parts, each under a heading" in prompt
+    assert "a task may take its details from more than one part" in prompt
+    assert "a task that two parts raise is one task" in prompt
+    assert "never take a task, a title or a `source_ref` from the heading" in prompt
+
+
+def test_an_alert_someone_must_look_at_is_a_task_however_minor() -> None:
+    """The DEV re-run: a red staging dashboard came back as no task, read as a
+    notification. Whether it matters is the ranking's call, not extraction's."""
+
+    prompt = system_prompt()
+
+    assert "An alert or a failure that someone has to look at is a task" in prompt
+    # Not "goes in `urgency`": the switch-off prompt never names that field.
+    assert "how urgent it is decides how it ranks, not whether it is listed" in prompt
+
+
+def test_a_meetings_rejected_answer_goes_back_whole() -> None:
+    """Fifteen tasks with their classification run past 8000 characters, and
+    a repair told to return every task "unchanged" must be able to see them."""
+
+    long_answer = '{"tasks": [' + ", ".join(['{"title": "Book the lab"}'] * 400) + "]}"
+
+    prompt = repair_prompt(SourceType.MEETING, "the meeting", long_answer, "tasks.3.title: ...")
+
+    assert long_answer in prompt
+
+
+# --- one direction: this task waits for that work --------------------------
+
+
+def test_a_dependency_is_only_what_this_task_waits_for() -> None:
+    """#834 publishes each mention to Chain as `depends_on_task_id`. A task
+    naming the work *it* blocks would reach Chain as an edge pointing back."""
+
+    prompt = system_prompt()
+
+    assert "cannot be finished until that work is done" in prompt
+    assert "A task that others are waiting for does not depend on them by that alone" in prompt
+    assert "Never name the work that waits for this task" in prompt
+    assert "or blocks" not in prompt
+
+
+def test_no_two_example_tasks_name_each_other() -> None:
+    """Mutual mentions are a cycle in Chain's graph: each waits for the other."""
+
+    for example in _examples():
+        names = {task["title"]: set(task["dependency_mentions"]) for task in example["tasks"]}
+        for title, mentions in names.items():
+            for other in mentions:
+                assert title not in names.get(other, set()), (title, other)
+
+
+def test_the_rules_say_the_same_direction_as_the_field() -> None:
+    """A rule saying "other work is involved" allowed true for a blocker
+    again, beside a bullet that says a blocker is false."""
+
+    prompt = system_prompt()
+
+    assert "when the content shows this task waits for work it does not name" in prompt
+    assert "other work is involved" not in prompt
+
+
+def test_the_prompt_keeps_descriptions_short() -> None:
+    """The model check runs after the answer is written; only the prompt can
+    stop one long description from pushing a meeting past the output cap."""
+
+    prompt = system_prompt()
+
+    assert "at most about 300 characters" in prompt
+    assert "never quote the content at length" in prompt
+
+
+# --- the owner (#132) -----------------------------------------------------
+
+
+@pytest.mark.parametrize("classify", [False, True])
+def test_both_owner_fields_are_asked_for_in_both_modes(classify: bool) -> None:
+    """Fields of every task, so they cannot live in the block the switch removes."""
+
+    prompt = system_prompt(classify)
+
+    assert "`owner_mention`" in prompt
+    assert "`owner_is_recipient`" in prompt
+    assert "Never output priority or owner" not in prompt
+
+
+def test_the_owner_is_a_name_and_never_the_asker_or_an_address() -> None:
+    prompt = system_prompt()
+
+    assert "Only the name" in prompt
+    assert "Never the person who asks for it" in prompt
+    assert "Never an email address" in prompt
+
+
+def test_passing_work_on_is_the_recipients_own_task() -> None:
+    """ "Dana, please ask Yossi to sign" asks Dana, not Yossi: her task is to
+    ask him. Only someone named as doing this task is `owner_mention`."""
+
+    prompt = system_prompt()
+
+    assert "names someone else as the one who does this task" in prompt
+    assert "is the recipient's own task" in prompt
+
+
+def test_the_prompt_says_the_two_owner_fields_never_go_together() -> None:
+    assert "`owner_is_recipient` is true, `owner_mention` is null" in system_prompt()
+
+
+def test_the_examples_show_the_recipient_a_named_owner_and_no_owner() -> None:
+    tasks = [task for example in _examples() for task in example["tasks"]]
+
+    assert any(task["owner_is_recipient"] for task in tasks)
+    assert any(task["owner_mention"] for task in tasks)
+    assert any(not task["owner_is_recipient"] and task["owner_mention"] is None for task in tasks)
+    for task in tasks:
+        assert not (task["owner_is_recipient"] and task["owner_mention"])
+
+
+def test_every_named_owner_in_the_examples_is_written_in_the_prompt() -> None:
+    """The examples teach the grounding rule too: a name the model sees made
+    up in an example is one it learns to make up."""
+
+    prompt = system_prompt(classify=True)
+    prose = "\n".join(line for line in prompt.splitlines() if not line.strip().startswith("{"))
+    owners = [
+        task["owner_mention"]
+        for example in _examples()
+        for task in example["tasks"]
+        if task["owner_mention"]
+    ]
+
+    assert owners
+    for owner in owners:
+        assert owner in prose
+
+
+def test_a_speakers_label_is_an_owner_only_when_it_is_a_persons_name() -> None:
+    """Live on AMI and the design meeting: "A", "C" and "Project Manager" came
+    back as owners. Labels that are letters or roles name nobody."""
+
+    prompt = system_prompt()
+
+    assert "A speaker's label is a name only when it is a person's name" in prompt
+    assert '"A:" and "Project Manager:" are not' in prompt

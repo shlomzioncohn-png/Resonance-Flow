@@ -2,6 +2,8 @@ package com.rnd.bridge.raw;
 
 import com.rnd.bridge.core.PayloadValidator;
 import com.rnd.bridge.core.error.ValidationException;
+import com.rnd.bridge.crm.CrmTaskValidator;
+import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.Classification;
 import com.rnd.bridge.raw.model.ItemCategory;
 import com.rnd.bridge.raw.model.RawObjectEvent;
@@ -22,10 +24,20 @@ public final class RawObjectValidator implements PayloadValidator<RawObjectEvent
     public void validate(RawObjectEvent event) {
         requireNonNull(event.sourceType(), "sourceType");
         requireNonBlank(event.tenantId(), "tenantId");
+        // Mind passes tenant_id through to Inbox's tasks.tenant_id, a UUID - reject here, not there.
+        if (!CrmTaskValidator.isValidTenantId(event.tenantId())) {
+            throw new ValidationException("Invalid RawObjectEvent.tenantId = \"" + event.tenantId()
+                    + "\": must be a valid UUID");
+        }
         requireNonNull(event.ingestedAt(), "ingestedAt");
         requireNonNull(event.scopeDecision(), "scopeDecision");
         requireNonNull(event.correlationId(), "correlationId");
-        requireNonEmpty(event.objects(), "objects");
+        // DELETE_REVIEW's own contract (UnstructuredPayloadMapper/ChatSourceRecordMapper) is an
+        // EMPTY objects list - the logical item no longer exists, so there is nothing to land a
+        // ref for. Every other changeType still requires at least one object.
+        if (event.changeType() != ChangeType.DELETE_REVIEW) {
+            requireNonEmpty(event.objects(), "objects");
+        }
         for (int i = 0; i < event.objects().size(); i++) {
             validateRef(event.objects().get(i), i);
         }
