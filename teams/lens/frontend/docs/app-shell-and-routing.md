@@ -23,7 +23,6 @@ app/
 │   │   ├── page.tsx           "/manager"             Dashboard: KPIs, charts (sample data for now), top bottlenecks
 │   │   ├── projects/page.tsx  "/manager/projects"    all projects: filters, KPIs, project cards
 │   │   ├── projects/[projectId]/page.tsx "/manager/projects/:projectId" drill-down, not in nav
-│   │   ├── workload/page.tsx  "/manager/workload"    demo page (see below)
 │   │   ├── wip/page.tsx       "/manager/wip"
 │   │   ├── blocked/page.tsx   "/manager/blocked"
 │   │   ├── bottlenecks/page.tsx "/manager/bottlenecks" dependency graph; ?projectId= filter, ?taskId= open task
@@ -83,15 +82,6 @@ reusable building blocks for async UI. They take a title/description and, for
 currently renders `EmptyState` with "coming soon" copy — swap it for real content
 once a page has data.
 
-## Demo page: `/manager/workload`
-
-This page is the one required by the DoD to "demonstrate a page integrated with
-the Shell" end to end. It calls a mock adapter (`mocks/managerWorkload.ts`) that
-simulates a network delay and always resolves empty, so the page actually walks
-through **Loading → Empty**, and its "Simulate error state" button demonstrates
-**Error** (`Try again` re-triggers the fetch). This is the pattern future pages
-should follow once they call a real adapter instead of a mock.
-
 ## Adding a new page
 
 1. Pick the route group:
@@ -103,7 +93,7 @@ should follow once they call a real adapter instead of a mock.
 3. If the page fetches data, model it as `loading` / `empty` / `error` / (real
    content) and render `LoadingState` / `EmptyState` / `ErrorState` from
    `@/components/feedback/...` for the non-happy paths — see
-   `app/(app)/manager/workload/page.tsx` for the pattern.
+   `app/(app)/manager/bottlenecks/BottlenecksView.tsx` for the pattern.
 4. If the page should appear in the left navigation, add an entry to
    `components/layout/Sidebar/navConfig.tsx` (drill-down pages like
    `/team/:id` are intentionally left out of the nav — they're only reached by
