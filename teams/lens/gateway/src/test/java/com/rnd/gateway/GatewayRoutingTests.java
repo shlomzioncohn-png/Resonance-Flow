@@ -224,25 +224,33 @@ class GatewayRoutingTests {
     // -------------------------------------------------------------------------
 
     // -------------------------------------------------------------------------
-    // Manager Dashboard (workload + projects)
+    // Manager Dashboard (projects + bottlenecks graph)
     // -------------------------------------------------------------------------
 
     @Test
     @Order(16)
-    @DisplayName("GET /api/manager/workload routes to BFF /manager/workload")
-    void testManagerWorkloadRoutesToBff() throws Exception {
+    @DisplayName("GET /api/manager/bottlenecks/graph routes to BFF /manager/bottlenecks/graph")
+    void testBottlenecksGraphRoutesToBff() throws Exception {
         mockBff.enqueue(new MockResponse()
                 .setResponseCode(200)
                 .setHeader("Content-Type", "application/json")
-                .setBody("[]"));
+                .setBody("{\"nodes\":[{\"id\":\"t1\",\"title\":\"Set up CI\",\"status\":\"ACTIVE\","
+                        + "\"isBlocked\":true,\"blocksCount\":3}],"
+                        + "\"edges\":[{\"source\":\"t0\",\"target\":\"t1\",\"confidence\":0.8}]}"));
 
-        mockMvc.perform(get("/api/manager/workload").with(jwt()))
+        mockMvc.perform(get("/api/manager/bottlenecks/graph").param("projectId", "p 1").with(jwt()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.length()").value(0));
+            .andExpect(jsonPath("$.nodes[0].title").value("Set up CI"))
+            .andExpect(jsonPath("$.nodes[0].isBlocked").value(true))
+            .andExpect(jsonPath("$.nodes[0].blocksCount").value(3))
+            .andExpect(jsonPath("$.edges[0].source").value("t0"))
+            .andExpect(jsonPath("$.edges[0].confidence").value(0.8));
 
         RecordedRequest recorded = takeRequest();
-        assertThat(recorded.getPath()).isEqualTo("/manager/workload");
+        assertThat(recorded.getPath()).isEqualTo("/manager/bottlenecks/graph?projectId=p%201");
         assertThat(recorded.getMethod()).isEqualTo("GET");
+        // BFF reads this user's tenant from Inbox
+        assertThat(recorded.getHeader("X-User-Id")).isEqualTo("mgr_001");
     }
 
     @Test

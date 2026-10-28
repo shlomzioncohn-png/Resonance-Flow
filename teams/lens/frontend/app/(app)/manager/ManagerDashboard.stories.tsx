@@ -6,13 +6,14 @@ import { expect, screen, waitFor, within } from 'storybook/test';
 import { sampleGraph } from '@/mocks/dependencyGraphData';
 import {
   bottlenecksGraphEmptyHandler,
+  bottlenecksGraphHandler,
   projectTaskCountsEmptyHandler,
   projectTaskCountsHandler,
 } from '@/mocks/handlers';
 import ManagerDashboardPage from './page';
 
-// The graph comes from the shared MSW handlers (mocks/handlers.ts).
-// The KPIs and the charts are real in the app (BFF counts Inbox's tasks), so they're answered here, per story.
+// The KPIs, the charts and the graph are real in the app (BFF counts Inbox's tasks, and reads
+// Chain's graph), so they're answered here, per story.
 
 const KPIS_URL = `${process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080'}/api/manager/dashboard/kpis`;
 
@@ -33,6 +34,7 @@ const meta = {
         HttpResponse.json({ inProgress: 42, blocked: 9, delayed: 5, avgBlockedDays: null }),
       ),
       projectTaskCountsHandler,
+      bottlenecksGraphHandler,
     );
   },
   decorators: [

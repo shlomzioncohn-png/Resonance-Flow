@@ -24,9 +24,9 @@ type Story = StoryObj<typeof meta>;
 // A manager sees only the Manager section.
 export const ManagerRole: Story = {
   beforeEach: signedInAs('TEAM_LEAD'),
-  parameters: { nextjs: { navigation: { pathname: '/manager/workload' } } },
+  parameters: { nextjs: { navigation: { pathname: '/manager/projects' } } },
   play: async ({ canvas }) => {
-    await expect(await canvas.findByRole('link', { name: 'Workload' })).toBeVisible();
+    await expect(await canvas.findByRole('link', { name: 'Projects' })).toBeVisible();
     await expect(canvas.queryByRole('link', { name: 'My Workspace' })).not.toBeInTheDocument();
   },
 };
@@ -58,7 +58,7 @@ export const MobileDrawer: Story = {
   globals: { viewport: { value: 'mobile1', isRotated: false } },
   play: async ({ args }) => {
     const body = within(document.body);
-    await userEvent.click(await body.findByRole('link', { name: 'Workload' }));
+    await userEvent.click(await body.findByRole('link', { name: 'Projects' }));
     await expect(args.onClose).toHaveBeenCalled();
   },
 };

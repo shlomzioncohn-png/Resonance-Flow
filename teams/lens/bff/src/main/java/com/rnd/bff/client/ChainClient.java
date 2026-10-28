@@ -26,6 +26,8 @@ import java.util.stream.Collectors;
  *   GET /tasks/{taskId}/state-history and GET /tasks/{taskId}/dependencies/history.
  *   Every call carries X-Tenant-Id - Chain answers 400 without a valid one,
  *   and 404 for a task that isn't in that tenant (or doesn't exist).
+ * - Dependency graph (the manager's Bottlenecks screen): real call to
+ *   GET /tenants/{tenantId}/dependency-graph.
  */
 @Service
 public class ChainClient {
@@ -33,6 +35,8 @@ public class ChainClient {
     static final String TENANT_HEADER = "X-Tenant-Id";
     /** The task spec's page size for both histories; Chain allows up to 100. */
     static final int HISTORY_PAGE_SIZE = 50;
+    /** Chain's own default for the dependency graph. */
+    static final int GRAPH_LIMIT = 500;
 
     private final RestTemplate restTemplate;
 
@@ -59,6 +63,25 @@ public class ChainClient {
     public List<ChainDependencyHistoryEntry> getDependencyHistory(String taskId, String tenantId) {
         return getHistory(taskId, tenantId, "/tasks/{taskId}/dependencies/history",
                 new ParameterizedTypeReference<ChainPage<ChainDependencyHistoryEntry>>() { });
+    }
+
+    /**
+     * The tenant's dependency graph, at most GRAPH_LIMIT tasks (Chain keeps the ones that
+     * block the most). Chain takes the tenant from the path; the header is sent anyway, like
+     * every other Chain call.
+     */
+    public ChainDependencyGraph getDependencyGraph(String tenantId) {
+        URI uri = UriComponentsBuilder.fromHttpUrl(chainServiceUrl)
+                .path("/tenants/{tenantId}/dependency-graph")
+                .queryParam("limit", GRAPH_LIMIT)
+                .buildAndExpand(tenantId)
+                .encode()
+                .toUri();
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(TENANT_HEADER, tenantId);
+        ChainDependencyGraph graph = restTemplate.exchange(
+                uri, HttpMethod.GET, new HttpEntity<>(headers), ChainDependencyGraph.class).getBody();
+        return graph == null ? new ChainDependencyGraph(List.of(), List.of(), false) : graph;
     }
 
     private <T> List<T> getHistory(String taskId, String tenantId, String path,

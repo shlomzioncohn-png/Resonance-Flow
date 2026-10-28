@@ -37,8 +37,13 @@ still mocked inside the BFF.
     ranking over the user's tasks (Chain and Mind still mocked).
   - `GET /workspace/tasks/selection?availableMinutes=` — Inbox's task selection as-is
     (no fallback; 1-480 minutes)
-  - `GET /manager/workload`, `GET /manager/projects`,
-    `GET /admin/projects[/{id}]` — mocked inside the BFF
+  - `GET /admin/projects[/{id}]` — mocked inside the BFF
+  - `GET /manager/bottlenecks/graph?projectId=` — real: Chain's
+    `GET /tenants/{tenantId}/dependency-graph` for the user's tenant (read from their Inbox
+    record), with each task's title and project from the tenant's Inbox tasks. Chain doesn't
+    send an edge's confidence yet, so every edge is 1.0 for now. The stories answer it with
+    `bottlenecksGraphHandler` (sample data in `mocks/dependencyGraphData.ts`),
+    `bottlenecksGraphEmptyHandler` and `bottlenecksGraphErrorHandler`.
 - **Frontend**: every screen calls the Gateway through `services/*Api.ts`. MSW was
   removed on 2026-10-06, when the mock data moved into the BFF, and brought back on
   2026-10-14 for:
@@ -49,15 +54,10 @@ still mocked inside the BFF.
   - `POST /api/auth/login` — the Login screen (`services/authApi.ts`). Mock users match
     the Keycloak realm: `manager1`/`manager1` (manager) and `employee1`/`employee1`
     (employee). A wrong password gets the Gateway's 401 error body.
-  - `GET /api/manager/bottlenecks/graph?projectId=` — the Bottlenecks screen's dependency
-    graph (`services/bottlenecksApi.ts`), while the Gateway/BFF side is built in parallel to
-    the same contract. Sample data lives in `mocks/dependencyGraphData.ts`, shared with the
-    DependencyGraph stories. `bottlenecksGraphEmptyHandler` / `bottlenecksGraphErrorHandler`
-    give an empty graph and a 500.
 
   MSW runs only when `NEXT_PUBLIC_API_MOCKING=enabled`; every other call still goes to
   the Gateway. Without it, sign-in fails until the Gateway serves `/api/auth/login`.
-  Once the Gateway serves the login or the graph endpoint, delete its handler in
+  Once the Gateway serves the login, delete its handler in
   `mocks/handlers.ts` (the calling code stays as it is).
 
 ## Inbox Task API (branch `inbox-team`, commit `438c368`)

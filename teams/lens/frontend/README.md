@@ -65,7 +65,7 @@ raised/overlay`).
 - **`components/ui/StatusBadge`** — the one LENS-specific component created so
   far. It maps a workflow-health status to a colored label
   (`<StatusBadge status="critical" label="Blocked" />`), used in
-  `app/(app)/manager/workload/page.tsx`.
+  `app/(app)/manager/bottlenecks/BottlenecksView.tsx`.
 - **Accessibility baseline** — a visible `:focus-visible` ring on every
   interactive element, `prefers-reduced-motion` support, live regions on
   `LoadingState`/`ErrorState`, and a rule that status is never conveyed by
@@ -153,9 +153,9 @@ Two global constants control how often tiles refetch:
 
 - **`constants.ts#MANAGER_LIVE_REFRESH_MS = 15_000`** — live updates for tiles
   that change frequently: KPI (In progress, Blocked, Delayed), Support signals,
-  Bottlenecks, and Workload by team.
+  and Bottlenecks.
 - **`constants.ts#MANAGER_TREND_REFRESH_MS = 300_000`** — trend and historical
-  data that changes slowly: Flow over time, Workload by week.
+  data that changes slowly: Flow over time.
 
 ### Pattern for new manager dashboard tiles
 
@@ -163,11 +163,11 @@ Every manager dashboard tile must follow this pattern:
 
 1. **Create a hook in `hooks/`** — never fetch directly from a component:
    ```ts
-   // hooks/useManagerWorkload.ts
-   export function useManagerWorkload(filters?: ManagerFilters) {
+   // hooks/useDependencyGraph.ts
+   export function useDependencyGraph(projectId?: string) {
      return useQuery({
-       queryKey: workloadKeys.filtered(filters),
-       queryFn: getManagerWorkload,
+       queryKey: bottleneckKeys.graph(projectId),
+       queryFn: () => getDependencyGraph(projectId),
        refetchInterval: MANAGER_LIVE_REFRESH_MS,        // or MANAGER_TREND_REFRESH_MS for trends
        refetchIntervalInBackground: true,               // don't refetch if tab is hidden
      });
@@ -176,10 +176,10 @@ Every manager dashboard tile must follow this pattern:
 
 2. **Define the query key in `services/queryKeys.ts`** under the `['manager', ...]` prefix:
    ```ts
-   export const workloadKeys = {
-     all: ['manager', 'workload'] as const,
+   export const projectKeys = {
+     all: ['manager', 'projects'] as const,
      filtered: (filters?: ManagerFilters) =>
-       [...workloadKeys.all, filters ? { ...filters } : {}] as const,
+       [...projectKeys.all, filters ? { ...filters } : {}] as const,
    };
    ```
    Keys must include all filters (`period`, `team`, `project`) so that changing
@@ -188,7 +188,7 @@ Every manager dashboard tile must follow this pattern:
 3. **Use the hook in the page** — pass filters, don't create your own
    `useState` + `useEffect`:
    ```tsx
-   const { data = [], isPending, isError, error, refetch } = useManagerWorkload(filters);
+   const { data, isPending, isError, error, refetch } = useDependencyGraph(projectId);
 
    if (isPending) return <LoadingState />;
    if (isError) return <ErrorState onRetry={() => refetch()} />;

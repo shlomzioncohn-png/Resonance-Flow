@@ -16,8 +16,8 @@
  *   Inbox's users); the mock keeps the Login screen working without them, and
  *   backs its stories.
  * - GET /api/manager/bottlenecks/graph, the Bottlenecks screen's dependency
- *   graph, until the Gateway/BFF serve it. Once they do, delete its handler -
- *   services/bottlenecksApi.ts already has its final shape. The data lives in
+ *   graph - only as exported handlers for the stories. The app always gets
+ *   Chain's real graph from the Gateway. The sample data lives in
  *   mocks/dependencyGraphData.ts, shared with the DependencyGraph stories.
  * - GET /api/manager/dashboard/projects, the Dashboard's charts - only as
  *   exported handlers for the stories. The app always gets the real counts
@@ -155,6 +155,13 @@ export const projectTaskCountsEmptyHandler = http.get(PROJECT_TASK_COUNTS_URL, (
   HttpResponse.json<ProjectTaskCounts[]>([]),
 );
 
+/** The sample graph (?projectId= keeps one project's tasks) - for stories. */
+export const bottlenecksGraphHandler = http.get(BOTTLENECKS_GRAPH_URL, async ({ request }) => {
+  await delay(400);
+  const projectId = new URL(request.url).searchParams.get('projectId');
+  return HttpResponse.json<DependencyGraph>(projectId ? sampleGraphForProject(projectId) : sampleGraph);
+});
+
 export const bottlenecksGraphEmptyHandler = http.get(BOTTLENECKS_GRAPH_URL, async () => {
   await delay(300);
   return HttpResponse.json<DependencyGraph>(emptyGraph);
@@ -289,13 +296,4 @@ export const handlers = [
 
   // POST /auth/logout - the real Gateway clears the token cookie; the mock has none to clear.
   http.post(`${API_BASE_URL}/auth/logout`, () => new HttpResponse(null, { status: 204 })),
-
-  // GET /api/manager/bottlenecks/graph?projectId= - projectId is optional.
-  http.get(BOTTLENECKS_GRAPH_URL, async ({ request }) => {
-    await delay(400);
-    const projectId = new URL(request.url).searchParams.get('projectId');
-    return HttpResponse.json<DependencyGraph>(
-      projectId ? sampleGraphForProject(projectId) : sampleGraph,
-    );
-  }),
 ];
