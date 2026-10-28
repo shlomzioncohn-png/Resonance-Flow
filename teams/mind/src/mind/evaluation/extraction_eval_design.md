@@ -248,6 +248,14 @@ flips to `embedding`, and `lexical` stays available — for CI runs without the
 model loaded, and as a published comparison point. No harness change; only the
 default backend constant in `similarity.py`.
 
+**Revised 2026-10-28 (mentor's decision): the default does not flip.** On the
+#178 run neither backend was better (README, "Embedding backend"): embedding
+found more of the right pairs (7 of 16 against 5) and added more wrong ones
+(4 against 1). So the default stays `lexical`, and every report shows both
+backends side by side, each with its right and wrong matches, next to the hand
+review as the ground truth. `scripts/run_ami_extraction_eval.py --backend both`
+prints them together.
+
 ---
 
 ## 5. Hand sketch — TP / FP / FN on real meetings (issue step 5)

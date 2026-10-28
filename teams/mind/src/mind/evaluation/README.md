@@ -924,8 +924,8 @@ that file's docstring. The similarity the CLI uses is the lexical backend
 the same with it. The Jaccard `placeholder_similarity` stays for the unit tests,
 whose expected counts are worked out for it. The embedding backend
 (`similarity.embedding_similarity`, `EMBEDDING_THRESHOLD = 0.70`) is chosen with
-`scripts/run_ami_extraction_eval.py --backend embedding`; see "Embedding backend"
-below.
+`scripts/run_ami_extraction_eval.py --backend embedding`, and `--backend both`
+scores with both, as every report shows them; see "Embedding backend" below.
 `metrics.extraction_precision_recall` is a stricter placeholder still (exact
 string match); it is not this eval.
 
@@ -1037,16 +1037,25 @@ the matching criterion the lexical τ was held to, recorded in §6. Until a τ i
 frozen, the backend refuses to run.
 
 **The same recorded answers, re-scored** (no model call; `--from-outcomes ...
---backend embedding`, saved as `scores_embedding.json` next to `scores.json`):
+--backend both`; `scores.json` and `scores_embedding.json`).
 
-| | lexical, τ 0.60 | embedding, τ 0.70 |
-|---|---|---|
-| precision (micro) | 31.6% | 57.9% |
-| recall (micro) | 37.5% | 68.8% |
-| F1 (micro) | 34.3% | 62.9% |
-| matched pairs | 6 | 11 |
-| … right, by the hand review above | 5 | 7 |
-| … wrong | 1 | 4 |
+**How every report shows the result** (mentor's decision, 2026-10-28): both
+backends side by side, each with its right and wrong matches split by the hand
+review, next to the hand review itself as the ground truth. The default backend
+stays lexical (design §4.3).
+
+| gold items found (of 16) | lexical, τ 0.60 | embedding, τ 0.70 | hand review (ground truth) |
+|---|---|---|---|
+| **right matches** | **5 (31%)** | **7 (44%)** | **9 (56%)** |
+| wrong matches | 1 | 4 | — |
+| the backend's own recall (micro) | 37.5% | 68.8% | — |
+| the backend's own precision / F1 (micro) | 31.6% / 34.3% | 57.9% / 62.9% | — |
+
+31–44% is the range the two backends give; both sit **below** the hand review,
+because both miss right pairs the model did find (IS1008d's "convince
+management…" for the promotion plan, which neither backend matches). A
+backend's own recall counts its wrong matches as found, so it is not the
+extraction's quality: embedding's 68.8% includes four wrong ones.
 
 **Hand review of the 11 embedding matches**, against the review above:
 
@@ -1069,12 +1078,11 @@ All four wrong matches score 0.70–0.85, inside the band the run script flags
 for review by hand.
 
 **What it shows.** The embedding backend fixes the lexical one's misses on
-synonyms, but it over-matches on topic: the official recall (68.8%) counts
-7 right pairs out of 16 (44%), against 5 (31%) for lexical and 9 (56%) found by
-the model on the hand review. Neither number alone is the extraction quality;
-the gap between them is the matching rule's error. τ is not moved for this
-(§6): it was set on the §5 pairs before this run, and the review band is where
-these errors are caught.
+synonyms, but it over-matches on topic. Neither backend alone is the extraction
+quality, which is why both are reported with the hand review: lexical 31%,
+embedding 44%, the hand review 56%. On 16 items neither backend can be called
+better. τ is not moved for this (§6): it was set on the §5 pairs before this
+run, and the review band is where these errors are caught.
 
 ### Several tasks per text (#690, was a known limitation)
 

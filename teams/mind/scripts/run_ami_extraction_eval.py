@@ -26,6 +26,7 @@ Usage:
     ... python scripts/run_ami_extraction_eval.py                     # the whole v1 slice
     python scripts/run_ami_extraction_eval.py --from-outcomes extraction_outcomes.json
     python scripts/run_ami_extraction_eval.py --from-outcomes ... --backend embedding
+    python scripts/run_ami_extraction_eval.py --from-outcomes ... --backend both   # as reported
 """
 
 import argparse
@@ -37,7 +38,7 @@ from typing import Any
 from mind.contracts.base_enums import SourceType
 from mind.evaluation.extraction_eval import ExtractionSliceReport, evaluate_meetings
 from mind.evaluation.run_extraction_eval import slice_summary_lines
-from mind.evaluation.similarity import backend
+from mind.evaluation.similarity import Backend, backend
 from mind.extraction.confidence import ConfidenceBreakdown
 from mind.extraction.extractor import (
     BasicExtractor,
@@ -196,9 +197,10 @@ def main() -> int:
     )
     parser.add_argument(
         "--backend",
-        choices=["lexical", "embedding"],
+        choices=["lexical", "embedding", "both"],
         default="lexical",
-        help="similarity backend, at its frozen tau (default: lexical)",
+        help="similarity backend, at its frozen tau (default: lexical); 'both' scores "
+        "the same answers with each, side by side, as every report shows them",
     )
     parser.add_argument(
         "--os-trust-store",
@@ -206,9 +208,10 @@ def main() -> int:
         help="verify TLS against the OS trust store (see smoke_gemini.py)",
     )
     args = parser.parse_args()
+    names: list[Backend] = ["lexical", "embedding"] if args.backend == "both" else [args.backend]
     # Before any model call: an embedding run with no frozen tau stops here.
     try:
-        similarity, threshold = backend(args.backend)
+        backends = {name: backend(name) for name in names}
     except ValueError as e:
         print(e, file=sys.stderr)
         return 1
@@ -232,27 +235,37 @@ def main() -> int:
         print(f"model answers saved to {args.outcomes}")
 
     gold = {meeting_id: load_gold_actions(meeting_id) for meeting_id in meetings}
-    report = evaluate_meetings(outcomes, gold, similarity=similarity, threshold=threshold)
+    scored: dict[str, dict[str, Any]] = {}
+    for name, (similarity, threshold) in backends.items():
+        report = evaluate_meetings(outcomes, gold, similarity=similarity, threshold=threshold)
+        print(f"\n=== Extraction eval on AMI (human transcripts), model {model} ===")
+        print(f"similarity: {similarity.__name__}, threshold {threshold}")
+        print(slice_summary_lines(report))
+        _print_details(report, threshold)
+        scored[name] = {
+            "similarity_backend": similarity.__name__,
+            "threshold": threshold,
+            "report": report.model_dump(mode="json"),
+        }
 
-    print(f"\n=== Extraction eval on AMI (human transcripts), model {model} ===")
-    print(f"similarity: {similarity.__name__}, threshold {threshold}")
-    print(slice_summary_lines(report))
-    _print_details(report, threshold)
+    if len(scored) > 1:
+        # The matched pairs still need the hand review to split right from wrong:
+        # neither backend's count is the extraction's quality (README, #178).
+        print("\n=== side by side (matched pairs; split them by hand review) ===")
+        for name, entry in scored.items():
+            r = entry["report"]
+            matched = sum(m["true_positives"] for m in r["meetings"])
+            print(
+                f"{name:9} tau {entry['threshold']:.2f}  matched {matched:2}  "
+                f"P {r['micro_precision']:.1%}  R {r['micro_recall']:.1%}  F1 {r['micro_f1']:.1%}"
+            )
 
-    args.report.write_text(
-        json.dumps(
-            {
-                "model": model,
-                "transcripts": "AMI human transcripts (ami_transcripts.py)",
-                "similarity_backend": similarity.__name__,
-                "threshold": threshold,
-                "report": report.model_dump(mode="json"),
-            },
-            indent=2,
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
+    output: dict[str, Any] = {
+        "model": model,
+        "transcripts": "AMI human transcripts (ami_transcripts.py)",
+    }
+    output.update(scored[names[0]] if len(scored) == 1 else {"backends": scored})
+    args.report.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"\nscored report saved to {args.report}")
     return 0
 
