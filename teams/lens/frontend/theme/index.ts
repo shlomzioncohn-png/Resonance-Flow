@@ -26,6 +26,7 @@ export const theme = createTheme({
 });
 
 export {
+  chartTokens,
   colorTokens,
   statusTokens,
   fontTokens,

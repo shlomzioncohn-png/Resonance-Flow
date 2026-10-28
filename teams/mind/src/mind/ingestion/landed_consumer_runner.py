@@ -136,6 +136,8 @@ def main() -> None:
         # Read once at start: a bad zone or working week stops the runner here,
         # not on the first deadline (#960).
         deadline_settings=DeadlineSettings(),
+        # No `directory` yet: #131's InboxDirectory is not on main, so no
+        # suggested owner is sent (#132, task_creation/README.md).
     )
 
     def _on_items(event: RawObjectEvent, items: list[ExtractionItem]) -> None:

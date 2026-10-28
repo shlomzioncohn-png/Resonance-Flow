@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import json
 import logging
 from datetime import timedelta
 from pathlib import PurePosixPath
@@ -460,6 +461,33 @@ def test_only_an_emails_body_is_read_as_an_email_record() -> None:
     assert item.text == body
 
 
+def test_an_emails_sender_and_recipients_travel_with_its_item() -> None:
+    """For the owner (#132): the address of the one recipient asked, and the
+    sender, who is never the owner. The text alone would lose them."""
+
+    record = common.read_json(common.EMAIL)
+    feed_item = build_email(
+        record, {"supplier_form.jpg": common.FORM_IMAGE.read_bytes()}, TENANT, timedelta(0)
+    )
+    store = {o.key: o.content for o in feed_item.objects}
+
+    def ocr(content: bytes, *, filename: str = "") -> OCRResult:
+        return OCRResult(success=True, text="the form")
+
+    (item,) = extraction_items(
+        to_raw_object_event(feed_item.event), store.__getitem__, ocr=ocr, asr=_Trace({}).asr
+    )
+
+    assert item.sender == "lisa.grant@northwind.example"
+    assert item.recipients == ("dana@brightline.example",)
+
+
+def test_an_item_that_is_not_an_email_has_no_sender_or_recipients() -> None:
+    (item,) = _items(_landed(_ref("ATTACHMENT", SCAN_KEY)), _Trace(STORE))
+
+    assert (item.sender, item.recipients) == (None, ())
+
+
 def test_the_attachments_base64_inside_the_email_body_never_reaches_the_model() -> None:
     # The attachment arrives as its own file and is OCR'd there; its base64
     # copy inside the body's JSON is bytes, not text, and only fills the cap.
@@ -564,3 +592,25 @@ def test_an_attachment_whose_name_cleans_to_nothing_is_just_an_attachment() -> N
 def test_fit_to_budget_at_its_edges(lengths: list[int], budget: int, allowed: list[int]) -> None:
     assert fit_to_budget(lengths, budget) == allowed
     assert sum(fit_to_budget(lengths, budget)) <= budget
+
+
+def test_a_named_sender_and_a_string_of_recipients_reach_the_item() -> None:
+    """The record as a mail header writes it, not the demo's bare addresses."""
+
+    record = {
+        "from": {"name": "Avraham Katz", "email": "ak@acme.example"},
+        "to": "Dana Cohen <dana@acme.example>, omer@acme.example",
+        "body": "Please sign the contract.",
+    }
+    body = json.dumps(record)
+    ref = {
+        "role": "BODY",
+        "object_key": BODY_KEY,
+        "content_hash": "sha256:" + hashlib.sha256(body.encode()).hexdigest(),
+        "modality": "TEXT",
+    }
+
+    (item,) = _items(_landed(ref, source_type="EMAIL"), _Trace({BODY_KEY: body.encode()}))
+
+    assert item.sender == "Avraham Katz <ak@acme.example>"
+    assert item.recipients == ("Dana Cohen <dana@acme.example>", "omer@acme.example")

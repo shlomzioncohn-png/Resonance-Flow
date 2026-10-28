@@ -144,8 +144,6 @@ export default function AdminProjectDetails({
                   color="warning"
                   startIcon={<ArchiveIcon />}
                   onClick={onArchive}
-                  // warning.main text is too light on white (3.2:1); the dark shade reads.
-                  sx={{ color: 'warning.dark' }}
                 >
                   Archive
                 </Button>
@@ -227,7 +225,7 @@ export default function AdminProjectDetails({
                             </Typography>
                           </TableCell>
                           <TableCell align="center">
-                            <Typography variant="body2" sx={{ fontWeight: 500, color: theme.palette.status.warning.text }}>
+                            <Typography variant="body2" sx={{ fontWeight: 500, color: theme.palette.status.warning.main }}>
                               {member.activeTasks || 0}
                             </Typography>
                           </TableCell>
@@ -237,8 +235,6 @@ export default function AdminProjectDetails({
                               size="small"
                               color={getWorkloadColor(member.workload)}
                               variant="outlined"
-                              // The .main shades of success/warning fail contrast as text on white.
-                              sx={{ color: `${getWorkloadColor(member.workload)}.dark` }}
                             />
                           </TableCell>
                         </TableRow>

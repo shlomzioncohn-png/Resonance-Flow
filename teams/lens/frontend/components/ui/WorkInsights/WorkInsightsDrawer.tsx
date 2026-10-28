@@ -146,7 +146,6 @@ function LoadingView() {
 function NotEnoughDataView() {
   return (
     <Box sx={{ textAlign: 'center', py: 6 }}>
-      {/* Under the drawer's h2 title */}
       <Typography variant="h6" component="h3">
         Not enough data yet
       </Typography>

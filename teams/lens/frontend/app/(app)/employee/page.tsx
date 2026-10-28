@@ -25,10 +25,8 @@ import PersonOutlineIcon from '@mui/icons-material/PersonOutlined';
 import ScheduleOutlinedIcon from '@mui/icons-material/ScheduleOutlined';
 import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 import PageContainer from '@/components/layout/PageContainer';
-import TaskActions, {
-  BLOCK_REASON_LABELS,
-  REJECT_CATEGORY_LABELS,
-} from '@/components/ui/TaskActions';
+import TaskActions, { REJECT_CATEGORY_LABELS } from '@/components/ui/TaskActions';
+import { useMyProjects } from '@/hooks/useMyProjects';
 import { radiusTokens } from '@/theme';
 import {
   DetailRow,
@@ -49,6 +47,14 @@ import {
 
 const TIME_OPTIONS_MIN = [15, 30, 45, 60, 90];
 
+/** Tomorrow at 09:00, the user's local time - when a snoozed task comes back. */
+function tomorrowMorning(): Date {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  date.setHours(9, 0, 0, 0);
+  return date;
+}
+
 export default function EmployeeWorkspacePage() {
   const [minutes, setMinutes] = useState(45);
   const [projectFilter, setProjectFilter] = useState<string>('');
@@ -59,8 +65,12 @@ export default function EmployeeWorkspacePage() {
   // The minutes the shown recommendation was asked for - `minutes` can change after it arrives
   const [searchedMinutes, setSearchedMinutes] = useState(minutes);
   const [starting, setStarting] = useState(false);
-  // Phase 1 (design only): actions other than Start task aren't wired yet
+  // Design only: Reject isn't wired yet
   const [preview, setPreview] = useState<string | null>(null);
+  // Short confirmation after a status change, e.g. "Snoozed until tomorrow 09:00"
+  const [notice, setNotice] = useState<string | null>(null);
+  // The Project filter lists the projects of the employee's own tasks
+  const myProjects = useMyProjects();
 
   const findBestTask = async () => {
     // Validate input
@@ -87,11 +97,15 @@ export default function EmployeeWorkspacePage() {
     }
   };
 
-  const startTask = async () => {
+  // Start task -> IN_PROGRESS, Mark as done -> DONE, Can't do it now -> SNOOZED
+  const changeStatus = async (status: 'IN_PROGRESS' | 'DONE' | 'SNOOZED', snoozedUntil?: Date) => {
     if (!recommendation?.task) return;
+    setError(null); // an older error must not stay on screen after a successful change
     setStarting(true);
     try {
-      const updated = await updateTaskStatus(recommendation.task.id, 'IN_PROGRESS');
+      const updated = await updateTaskStatus(recommendation.task.id, status, snoozedUntil);
+      if (status === 'DONE') setNotice('Task marked as done.');
+      if (status === 'SNOOZED') setNotice('Snoozed until tomorrow 09:00.');
       // Reflect the new status in the displayed recommendation
       setRecommendation((prev) => (prev ? { ...prev, task: updated } : prev));
     } catch (err) {
@@ -146,8 +160,11 @@ export default function EmployeeWorkspacePage() {
                   data-testid="project-filter"
                 >
                   <MenuItem value="">All Projects</MenuItem>
-                  <MenuItem value="Platform Service">Platform Service</MenuItem>
-                  <MenuItem value="Design System">Design System</MenuItem>
+                  {(myProjects.data ?? []).map((name) => (
+                    <MenuItem key={name} value={name}>
+                      {name}
+                    </MenuItem>
+                  ))}
                 </TextField>
                 <TextField
                   select
@@ -302,11 +319,11 @@ export default function EmployeeWorkspacePage() {
                       detailsHref={`/employee/tasks/${task.id}`}
                       linkComponent={Link}
                       busy={starting || loading}
-                      onStart={startTask}
-                      onDone={() => setPreview('Mark as done')}
-                      onBlock={(details) =>
-                        setPreview(`Can't do this now: ${BLOCK_REASON_LABELS[details.reason]}`)
-                      }
+                      onStart={() => changeStatus('IN_PROGRESS')}
+                      onDone={() => changeStatus('DONE')}
+                      // Inbox has no "blocked" status or reason field - the task is
+                      // snoozed until tomorrow morning, and the reason isn't saved yet
+                      onBlock={() => changeStatus('SNOOZED', tomorrowMorning())}
                       onReject={(details) =>
                         setPreview(`Reject task: ${REJECT_CATEGORY_LABELS[details.category]}`)
                       }
@@ -414,6 +431,16 @@ export default function EmployeeWorkspacePage() {
       >
         <Alert severity="info" variant="filled" onClose={() => setPreview(null)}>
           Preview only - not saved yet. {preview}
+        </Alert>
+      </Snackbar>
+      <Snackbar
+        open={notice !== null}
+        autoHideDuration={4000}
+        onClose={() => setNotice(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity="success" variant="filled" onClose={() => setNotice(null)}>
+          {notice}
         </Alert>
       </Snackbar>
     </PageContainer>

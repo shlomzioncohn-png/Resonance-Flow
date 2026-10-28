@@ -1,11 +1,20 @@
 'use client';
 
 import PageContainer from '@/components/layout/PageContainer';
-import LoadingState from '@/components/feedback/LoadingState';
-import EmptyState from '@/components/feedback/EmptyState';
-import ErrorState from '@/components/feedback/ErrorState';
+import DataTable, { type Column } from '@/components/ui/DataTable';
 import { getErrorMessage } from '@/services/api';
+import type { WorkloadEntry } from '@/services/managerApi';
 import { useManagerWorkload } from '@/hooks/useManagerWorkload';
+
+const columns: Column<WorkloadEntry>[] = [
+  { id: 'employee', header: 'Employee', render: (entry) => entry.employeeName },
+  {
+    id: 'activeTasks',
+    header: 'Active tasks',
+    align: 'right',
+    render: (entry) => entry.activeTasks,
+  },
+];
 
 export default function ManagerWorkloadPage() {
   const { data, isPending, isError, error, refetch } = useManagerWorkload();
@@ -15,16 +24,17 @@ export default function ManagerWorkloadPage() {
       title="Team workload"
       description="Per-employee and per-project breakdown of active work."
     >
-      {isPending && <LoadingState message="Loading team workload…" />}
-
-      {data?.length === 0 && (
-        <EmptyState
-          title="No workload data yet"
-          description="Workload will appear here once Inbox and Chain provide it."
-        />
-      )}
-
-      {isError && <ErrorState description={getErrorMessage(error)} onRetry={() => refetch()} />}
+      <DataTable
+        ariaLabel="Team workload"
+        columns={columns}
+        rows={data ?? []}
+        getRowId={(entry) => entry.employeeId}
+        loading={isPending}
+        error={isError ? getErrorMessage(error) : null}
+        onRetry={() => refetch()}
+        emptyTitle="No workload data yet"
+        emptyDescription="Workload will appear here once Inbox and Chain provide it."
+      />
     </PageContainer>
   );
 }

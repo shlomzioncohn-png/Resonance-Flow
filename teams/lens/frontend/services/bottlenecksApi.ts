@@ -4,7 +4,7 @@
  * Gateway/BFF task (built in parallel): don't change a field here without
  * them. Until the Gateway serves it, MSW answers it (mocks/handlers.ts).
  */
-import { api } from './api';
+import { api, ApiError, getErrorMessage } from './api';
 
 /** Same values as Chain's TaskStatus. */
 export type GraphTaskStatus = 'PENDING' | 'ACTIVE' | 'DONE';
@@ -36,4 +36,16 @@ export type DependencyGraph = {
 export function getDependencyGraph(projectId?: string): Promise<DependencyGraph> {
   const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
   return api.get<DependencyGraph>(`/api/manager/bottlenecks/graph${query}`);
+}
+
+/**
+ * The message for a failed graph request. A 404 means the Gateway doesn't
+ * serve the graph yet (only MSW does) - the generic 404 text talks about
+ * "this task", which would be wrong here.
+ */
+export function graphErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.status === 404) {
+    return "The dependency graph isn't available yet.";
+  }
+  return getErrorMessage(error);
 }

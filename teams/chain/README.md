@@ -1149,6 +1149,14 @@ placeholder in that tenant (`updatedAt` = epoch) inside the graph lock, and the 
 recorded right away. An existing task is never overwritten, and one in a different tenant rejects the
 whole event (no retry, nothing created). A later `task.updated` replaces the placeholder's state.
 
+**Scheduling publish after `task.dependencies.proposed`.** Inbox creates a `has_dependencies` task with
+`is_available=false`, and only Chain flips it. The handler therefore also creates the event's own task as a
+placeholder up front (so an empty dependency list still has a row), and after processing the edges reads its
+readiness from `task_readiness`: if ready, it queues `task.scheduling.updated` after commit for that task
+only (never for a `dependsOnTaskId`); if blocked, nothing is published. This runs on every non-duplicate
+event, including when a `DuplicateDependencyException` was swallowed. A redelivered `event_id` is still
+blocked by `ChainEventProcessingTemplate`.
+
 Tests: `TaskEligibilityServiceTest` (same/different/null-tenant `addDependency`/`addDependencies`,
 `onTaskStatusChangedIfNewer` backfill/match/reject incl. the stale-redelivery case),
 `TaskDependencyServiceTest`/`DependencyProposedEventHandlerTest` (REJECTED history on rejection,

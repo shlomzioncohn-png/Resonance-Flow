@@ -22,3 +22,16 @@ resulting decision into the relevant README or an ADR.
   `models/whisper/` (see the doc's "ASR — setup").
 - `asr_benchmark.py` — the ASR half on its own (`python -m
   benchmarks.asr_benchmark`, ~25 min on a laptop CPU, most of it `small.en`).
+- `asr-ami-validation.md` — ASR validation against AMI (#480): a real WER
+  (jiwer, documented normalization) of the ASR pipeline on a fixed set of
+  AMI windows, per window and overall, for tiny.en/base.en/small.en; what
+  breaks (deletions concentrate in overlapping speech); measured facts,
+  hypotheses and pending decisions kept apart. Provisional until R2 confirms
+  the file set.
+- `asr_validation.py` — produces those WER tables through
+  `mind.multimodal.asr.transcribe()` (`python -m benchmarks.asr_validation
+  [--sizes ...]`, ~25 min for all three sizes); saves every transcript under
+  the gitignored `local-data/ami/asr-validation/`.
+- `asr_error_analysis.py` — the failure analysis on those saved transcripts
+  (`python -m benchmarks.asr_error_analysis`): deletion and substitution rates
+  in overlapped vs. other speech, deletion runs, and the worst 30 s stretches.

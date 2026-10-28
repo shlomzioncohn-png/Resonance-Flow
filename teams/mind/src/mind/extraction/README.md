@@ -82,7 +82,7 @@ llm:
     base_url: https://api.deepseek.com
     model: deepseek-chat
     timeout_seconds: 60
-    max_output_tokens: 2400
+    max_output_tokens: 2700
 # secrets.yaml -> components.mind.secret
 llm:
   deepseek:
@@ -975,8 +975,9 @@ The prompt names them, and its examples carry them:
 - **an explicit "no rush"**: null, unlike a softly worded date.
 
 `system.md` used to say "never output priority, owner or deadline"; it now says
-priority or owner. With the switch off the key is still never listed, so it is
-still never asked for.
+priority only, since the owner is asked for too (#132, "Owner" below). With the
+switch off the deadline key is still never listed, so it is still never asked
+for.
 
 ### What was measured, and what was not
 
@@ -1010,8 +1011,9 @@ and the deadline went to the second task, while only the first is compared),
 and one did not repeat when re-run.
 
 The deadline costs output: 136 tokens a task on average and 215 at most, over
-the old `TOKENS_PER_TASK` of 120. It is now 160, and `DEFAULT_MAX_OUTPUT_TOKENS`
-2400, so a full list still fits.
+the old `TOKENS_PER_TASK` of 120. It became 160, and `DEFAULT_MAX_OUTPUT_TOKENS`
+2400, so a full list still fit. The owner's two keys (#132) took it to 180 and
+2700: see "Owner" below.
 
 ### Known gaps, left for follow-ups
 
@@ -1022,3 +1024,52 @@ the old `TOKENS_PER_TASK` of 120. It is now 160, and `DEFAULT_MAX_OUTPUT_TOKENS`
   needs a soft/hard field on the wire.
 - **The persona measurement is by hand and compares the first task only.** A
   repeatable one belongs to R1's extraction eval (#178).
+
+## Owner (#132)
+
+Two keys of every task, in both modes, answer one question: who is this task
+for. `owner_mention` is a person's name, the way the content writes it
+("Malki", "Dana Cohen"), never a role, a team, an address or whoever asked.
+`owner_is_recipient` says an email asks the person it is sent to ("you are
+asked to sign", "Hi Dana, please sign" sent to Dana). The model never writes
+the recipient's address: the code takes it from the email record
+(`ingestion/email_body.py`), so it cannot copy the sender's instead. What
+happens next, from the lookup in Inbox's directory to the confidence, is in
+`task_creation/README.md`, "The owner".
+
+- **Optional, never a repair round** (`models.py`). An unusable value is no
+  owner and is logged without the name: not a string, several different names
+  (Inbox takes one suggested owner), an address, a placeholder, longer than
+  `MAX_OWNER_MENTION_LENGTH`, single letters (a speaker's label), a word for
+  nobody in particular ("someone", "everyone", "you"). The same name twice is
+  one owner. A recipient flag that is not a yes or a no is false.
+- **Both answers are kept here.** Which one wins needs the item's recipients,
+  which this stage does not see: a chat has none, and a stray flag must not
+  cost it a grounded name. `task_creation/owner.what_to_look_up` settles it
+  (see "The owner" there). "Dana, please ask Yossi" asks Dana, so it is hers.
+- **Grounded more strictly than a mention** (`grounding.ground_owner_mention`).
+  A name is not a paraphrase: no word may be missing, and the words must stand
+  side by side, in either order ("Cohen, Dana" writes "Dana Cohen"; "Dana Levi
+  and Moshe Cohen" do not). Short words count ("Li Wu", "Dana C."). Words
+  inside an email address do not: "Dana" is not written by
+  `dana.cohen@acme.test`. Not grounded, it is no owner.
+- **What grounding does not close: the sender.** A sender who signs "Thanks,
+  Avi" has written the name. The prompt keeps senders out; the code drops a
+  name made of the sender's own (`task_creation/owner.is_the_sender`).
+
+Measured live (gemini-3.6-flash, 2026-10-26): recipient, chat taker, chat
+asked by name, a meeting's "Dana Cohen from finance" (as "Dana Cohen"), a
+team, nobody: all as meant. Output with the two keys: 101 to 169 tokens a task
+on AMI IS1008b, IB4003 and the design meeting, over `TOKENS_PER_TASK`'s 160,
+so it is now 180 and `DEFAULT_MAX_OUTPUT_TOKENS` 2700.
+
+Those runs also gave AMI's speaker letters ("A", "C") and the design meeting's
+roles ("Project Manager") as owners. A name of single letters is now no owner
+(`models.py`), and the prompt says a speaker's label is a name only when it is
+a person's name. Run again three times each: no letter came back, and IB4003
+gave the names its speakers call each other ("Andre", "Susan") in two runs of
+three; IS1008b gave "Christine", "Agnes" and "Ed" in all three. The design
+meeting still gave its roles in one run of three: a role matches only a user
+or team of that very name in #131's directory, so it is rarely sent, but the
+prompt alone does not hold it. A list of role words was considered and left
+out: it is never complete, and could rule out a real name.

@@ -59,8 +59,9 @@ public class WorkspaceService {
         // scoring and "what fits together in N minutes"). If that call fails
         // for any reason other than Inbox refusing the request, fall back to
         // the BFF's own ranking below - same degrade-don't-fail approach as
-        // for Chain and Mind.
-        if (!inboxClient.isMockEnabled()) {
+        // for Chain and Mind. Inbox's selection can't filter by project, so
+        // with a project chosen the BFF's own ranking (which can) is used.
+        if (!inboxClient.isMockEnabled() && request.getProjectFilter() == null) {
             try {
                 return recommendFromInboxSelection(request, userId);
             } catch (InboxRejectedException ex) {

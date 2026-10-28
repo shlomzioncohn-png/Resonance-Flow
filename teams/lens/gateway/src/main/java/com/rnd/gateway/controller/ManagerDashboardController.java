@@ -3,6 +3,8 @@ package com.rnd.gateway.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.gateway.dto.ManagerKpisDTO;
+import com.rnd.gateway.dto.ProjectTaskCountsDTO;
+import com.rnd.gateway.dto.TaskDTO;
 import com.rnd.gateway.exception.GatewayTimeoutException;
 import com.rnd.gateway.exception.ServiceUnavailableException;
 import io.swagger.v3.oas.annotations.Operation;
@@ -26,10 +28,12 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.SocketTimeoutException;
+import java.util.List;
 import java.util.Optional;
 
 /**
- * Manager Dashboard (/manager) - routes GET /api/manager/dashboard/kpis to BFF.
+ * Manager screens - routes GET /api/manager/dashboard/kpis, /projects,
+ * /tasks/in-progress and /tasks/blocked-delayed to BFF.
  *
  * Identity is still mocked (Auth stage 2), same as ManagerUsersController:
  * X-User-Id is mgr_001 and BFF maps it to a real Inbox user. The tenant is
@@ -76,18 +80,52 @@ public class ManagerDashboardController {
                 .queryParamIfPresent("project", Optional.ofNullable(project))
                 .encode()
                 .toUriString();
+        return ResponseEntity.ok(getFromBff(url, ManagerKpisDTO.class));
+    }
 
+    @Operation(summary = "Task counts per project",
+            description = "The tenant's tasks per project by state (in progress, snoozed, open, done) plus how many are overdue, A-Z - for the Dashboard's charts.")
+    @GetMapping("/projects")
+    public ResponseEntity<List<ProjectTaskCountsDTO>> getProjectTaskCounts() {
+        logger.info("Manager project task counts request");
+        String url = UriComponentsBuilder.fromHttpUrl(bffServiceUrl)
+                .path("/manager/dashboard/projects")
+                .toUriString();
+        return ResponseEntity.ok(List.of(getFromBff(url, ProjectTaskCountsDTO[].class)));
+    }
+
+    @Operation(summary = "Tasks in progress",
+            description = "The tenant's IN_PROGRESS tasks, soonest deadline first - the Work in progress screen.")
+    @GetMapping("/tasks/in-progress")
+    public ResponseEntity<List<TaskDTO>> getTasksInProgress() {
+        logger.info("Manager tasks in progress request");
+        return ResponseEntity.ok(List.of(getFromBff(bffPath("/manager/dashboard/tasks/in-progress"), TaskDTO[].class)));
+    }
+
+    @Operation(summary = "Blocked and delayed tasks",
+            description = "The tenant's open tasks that are blocked or past their deadline, soonest deadline first - the Blocked & delayed screen.")
+    @GetMapping("/tasks/blocked-delayed")
+    public ResponseEntity<List<TaskDTO>> getTasksBlockedOrDelayed() {
+        logger.info("Manager blocked/delayed tasks request");
+        return ResponseEntity.ok(List.of(getFromBff(bffPath("/manager/dashboard/tasks/blocked-delayed"), TaskDTO[].class)));
+    }
+
+    private String bffPath(String path) {
+        return UriComponentsBuilder.fromHttpUrl(bffServiceUrl).path(path).toUriString();
+    }
+
+    /** GET from BFF with the mock identity; BFF's errors keep their status and message. */
+    private <T> T getFromBff(String url, Class<T> type) {
         HttpHeaders headers = new HttpHeaders();
         headers.set("X-User-Id", MOCK_USER_ID);
         headers.set("X-User-Role", MOCK_USER_ROLE);
 
         try {
-            ManagerKpisDTO kpis = restTemplate.exchange(
-                    url, HttpMethod.GET, new HttpEntity<>(headers), ManagerKpisDTO.class).getBody();
-            if (kpis == null) {
+            T body = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), type).getBody();
+            if (body == null) {
                 throw new ServiceUnavailableException("bff", "BFF returned empty response");
             }
-            return ResponseEntity.ok(kpis);
+            return body;
 
         } catch (ResourceAccessException e) {
             if (e.getCause() instanceof SocketTimeoutException) {

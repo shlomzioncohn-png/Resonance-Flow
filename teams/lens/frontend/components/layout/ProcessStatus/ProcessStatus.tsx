@@ -5,14 +5,8 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import Stack from '@mui/material/Stack';
-import { alpha, getContrastRatio, useTheme } from '@mui/material/styles';
-
-/** White or black - whichever reads better on `background` (WCAG contrast). */
-function readableOn(background: string): string {
-  return getContrastRatio('#ffffff', background) >= getContrastRatio('#000000', background)
-    ? '#ffffff'
-    : '#000000';
-}
+import { useTheme } from '@mui/material/styles';
+import { alpha } from '@mui/material/styles';
 
 export interface ProcessStage {
   name: string;
@@ -49,8 +43,8 @@ export default function ProcessStatus({ stages, title = 'Process Status' }: Proc
       { main: theme.palette.primary.main, bg: alpha(theme.palette.primary.main, 0.08), text: theme.palette.primary.main },
       // Review - warning/orange
       { main: theme.palette.status.warning.main, bg: theme.palette.status.warning.bg, text: theme.palette.status.warning.text },
-      // Testing - info/cyan. Text uses the dark shade: info.main fails contrast on its light tint.
-      { main: theme.palette.info.main, bg: alpha(theme.palette.info.main, 0.08), text: theme.palette.info.dark },
+      // Testing - info/cyan (fallback to primary if info not available)
+      { main: theme.palette.info?.main || theme.palette.primary.main, bg: alpha(theme.palette.info?.main || theme.palette.primary.main, 0.08), text: theme.palette.info?.main || theme.palette.primary.main },
       // Done - healthy/green
       { main: theme.palette.status.healthy.main, bg: theme.palette.status.healthy.bg, text: theme.palette.status.healthy.text },
     ];
@@ -69,14 +63,13 @@ export default function ProcessStatus({ stages, title = 'Process Status' }: Proc
           aria-label={title}
         >
           {stages.map((stage, index) => {
-            // A custom color is the accent (border, ACTIVE badge) on a light tint of itself.
-            // Text stays the theme's readable color: an arbitrary color can't be trusted to
-            // have enough contrast as text (or as a background behind text).
+            // Like the default stages: a light tint behind, the color itself for the text.
+            // (bg === text made the stage's name and count invisible.)
             const customColor = stage.color
-              ? { main: stage.color, bg: alpha(stage.color, 0.08), text: theme.palette.text.primary }
+              ? { main: stage.color, bg: alpha(stage.color, 0.08), text: stage.color }
               : null;
             const colors = customColor || getDefaultColor(index);
-            const mainColor = colors.main;
+            const mainColor = customColor?.main || colors.main;
             const bgColor = colors.bg;
             const textColor = colors.text;
 
@@ -116,7 +109,7 @@ export default function ProcessStatus({ stages, title = 'Process Status' }: Proc
                           px: 0.75,
                           py: 0.25,
                           bgcolor: mainColor,
-                          color: readableOn(mainColor),
+                          color: 'white',
                           borderRadius: 0.5,
                           fontSize: '0.65rem',
                           fontWeight: 700,

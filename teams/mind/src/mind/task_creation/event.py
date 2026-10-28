@@ -38,7 +38,13 @@ def to_creation_requested_event(
                 f"{field} is blank; Inbox would reject the request and no task would "
                 f"be created — build the proposal through to_task_creation_requested"
             )
+    if request.suggested_owner_confidence is not None and request.suggested_owner_user_id is None:
+        raise ValueError(
+            "suggested_owner_confidence is set without suggested_owner_user_id; Inbox "
+            "would reject the request and no task would be created"
+        )
 
+    owner = request.suggested_owner_user_id
     # Passed as None, a field stays unset: absent, not 0.
     event = TaskCreationRequestedEvent(
         correlation_id=str(correlation_id),
@@ -61,6 +67,8 @@ def to_creation_requested_event(
         effort_estimate_minutes=request.effort_estimate_minutes,
         confidence=request.confidence,
         has_dependencies=request.has_dependencies,
+        suggested_owner_user_id=str(owner) if owner is not None else None,
+        suggested_owner_confidence=request.suggested_owner_confidence,
     )
     if request.deadline is not None:
         event.deadline.FromDatetime(request.deadline)

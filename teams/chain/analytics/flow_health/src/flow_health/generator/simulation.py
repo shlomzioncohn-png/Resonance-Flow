@@ -41,6 +41,9 @@ class StateRow:
     blocking_count_after: int | None
     created_at: datetime
     sequence: int
+    # Inbox attributes of the task, repeated on each of its rows (assumed to be on the history table)
+    deadline: datetime | None = None
+    effort_estimate_minutes: int | None = None
 
 
 @dataclass
@@ -122,8 +125,10 @@ class _Simulator:
     def _emit_state(self, task_id: UUID, event_type: str, *, from_status=None, to_status=None,
                     before=None, after=None) -> None:
         seq = len(self.state_rows) + 1
+        spec = self.states[task_id].spec
         self.state_rows.append(StateRow(row_uuid(self.cfg.seed, "task_state_history", seq), task_id, event_type,
-                                        from_status, to_status, before, after, self.now, seq))
+                                        from_status, to_status, before, after, self.now, seq,
+                                        spec.deadline, spec.effort_estimate_minutes))
 
     def _set_status(self, st: _State, to: str) -> None:
         self._emit_state(st.spec.id, "STATUS_CHANGED", from_status=st.status, to_status=to)

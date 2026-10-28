@@ -23,6 +23,7 @@ from mind.extraction.grounding import (
     Said,
     ground_deadline,
     ground_dependency_mentions,
+    ground_owner_mention,
     ground_source_ref,
     said_in,
 )
@@ -73,6 +74,11 @@ class ExtractionItem:
     # into this one text (#349), so a failure names the item, not which of
     # its files caused it. The eval passes the meeting id.
     item_key: str | None = None
+
+    # Who an email is from and to, from its record (#132): the owner may be
+    # its one recipient, and is never its sender. Empty for other sources.
+    sender: str | None = None
+    recipients: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -229,6 +235,7 @@ def _ground_and_score(
 
     fields, invented_ref = ground_source_ref(fields, text)
     fields = ground_dependency_mentions(fields, text, sibling_titles, said)
+    fields = ground_owner_mention(fields, text, said)
     fields = ground_deadline(fields, text, said)
     return ExtractedTask(
         fields=fields,
