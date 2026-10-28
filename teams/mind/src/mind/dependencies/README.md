@@ -84,12 +84,16 @@ deduped by `event_id`). Two caveats, not glossed over:
 ## Confidence on a proposed edge (#476)
 
 `DependencyEdge.confidence` already existed (#244) before this issue --
-reviewed against #476's reasoning, not rebuilt. It used to be the
-mention's raw cosine similarity; now it's that similarity's distance
-above `Settings.dependency_match_threshold`, from the same
-`confidence_from_similarity()` the other two inferences (duplicate,
-related-task) use. See `embeddings/README.md`, "Confidence" for the
-mapping and why a raw similarity is the wrong thing to send.
+reviewed against #476's reasoning, not rebuilt. #476 replaced raw
+similarity with `confidence_from_similarity()` (similarity's distance
+above a threshold, see `embeddings/README.md`, "Confidence") for the
+other two inferences (duplicate, related-task), but **not here**: this
+edge's `confidence` is still raw similarity, unchanged. Chain's own
+README takes this field at face value as a 0..1 confidence and sums it
+into `blockingConfidenceSum`/`dependentConfidenceSum` -- switching what
+gets sent would silently change their `priority_score` with no
+coordination, so it stays as similarity until that's coordinated with
+Chain.
 
 ## Running the tests
 

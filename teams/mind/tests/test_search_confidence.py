@@ -6,6 +6,7 @@ import pytest
 
 from mind.embeddings.base import SearchResult
 from mind.embeddings.confidence import confidence_from_similarity
+from mind.embeddings.duplicate_detection import find_duplicate
 from mind.embeddings.related_tasks import find_related
 
 
@@ -63,3 +64,14 @@ async def test_a_returned_related_task_always_carries_a_confidence():
     [result] = await find_related(store, "task-1", threshold=0.711)
 
     assert result.confidence == pytest.approx(confidence_from_similarity(0.9, 0.711))
+
+
+async def test_a_duplicate_just_over_threshold_scores_low_confidence():
+    store = AsyncMock()
+    store.search.return_value = [SearchResult(task_id="task-existing", similarity=0.905)]
+
+    result = await find_duplicate(store, "Fix the login bug", "On the payments page", threshold=0.90)
+
+    assert result is not None
+    assert result.confidence == pytest.approx(confidence_from_similarity(0.905, 0.90))
+    assert result.confidence < 0.1

@@ -306,17 +306,25 @@ decision, not a side effect of adding confidence.
 once each has applied its own threshold; a raw, unfiltered
 `store.search()` hit stays a plain `SearchResult`, with no confidence to
 set yet. Exposed externally as `RelatedTask.confidence`
-(`GET /v1/tasks/{task_id}/related`) and `DependencyEdge.confidence`
-(`task.dependencies.proposed`, sent to Chain). `find_duplicate()`'s
+(`GET /v1/tasks/{task_id}/related`). `DependencyEdge.confidence`
+(`task.dependencies.proposed`, sent to Chain) is the one exception --
+see the note below, it still carries raw similarity, not this
+`ScoredResult.confidence`. `find_duplicate()`'s
 confidence has nowhere to go externally -- Inbox has no "possible
 duplicate" field (see `duplicate_detection.py`) -- so it's only ever
 logged, at the point `creation_pipeline.py` decides not to send a
 duplicate.
 
 **#244 already existed and was reviewed, not rebuilt:** `DependencyEdge.confidence`
-was already wired end to end before this issue -- the field existed, but
-`publisher.py` set it from the mention's raw `.similarity`, exactly the
-mistake above. Fixed to read `.confidence` (threshold-distance) instead.
+was already wired end to end before this issue, set from the mention's
+raw `.similarity` -- exactly the mistake above. **Not changed here**:
+Chain's README takes this field at face value as a 0..1 confidence
+(defaulting to 1.0 for edges not sourced from Mind) and sums it into
+`blockingConfidenceSum`/`dependentConfidenceSum` -- switching to
+`.confidence` (threshold-distance) would silently change their
+`priority_score` with no coordination, so `publisher.py` still sends
+raw `.similarity` until that's coordinated with Chain (see
+`dependencies/README.md`).
 
 **The empty case (#476 point 5):** `find_related()` returning `[]`, or
 `find_duplicate()` returning `None`, carries no confidence value at all --
