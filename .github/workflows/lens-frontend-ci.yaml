@@ -53,7 +53,7 @@ jobs:
       container_port: 8083
 
   playwright:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: ci
     if: always()
@@ -92,7 +92,7 @@ jobs:
           retention-days: 7
 
   storybook:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: ci
     if: always()

@@ -18,7 +18,7 @@ on:
 jobs:
   fix-labeled-issue:
     if: github.event_name == 'issues' && github.event.label.name == 'lens-auto-fix'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     permissions:
       pull-requests: write
       issues: write
@@ -42,7 +42,7 @@ jobs:
 
   fix-pr-review-feedback:
     if: github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     permissions:
       pull-requests: write
       issues: write
