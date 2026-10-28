@@ -36,9 +36,9 @@ import java.util.UUID;
  * docs/lens-architecture-design.md).
  *
  * Two modes, switched by inbox.mock-enabled (INBOX_MOCK_ENABLED):
- * - true (default): an in-memory mock task set, no network calls — so the
+ * - true: an in-memory mock task set, no network calls — so the
  *   team can keep working without running Inbox locally.
- * - false: real HTTP calls to Inbox's Task API (/api/v1/tasks, currently on
+ * - false (default): real HTTP calls to Inbox's Task API (/api/v1/tasks, currently on
  *   Inbox's inbox-team branch) at inbox.service.url. See
  *   lens/frontend/docs/api-integration-status.md for how to run Inbox locally.
  *
@@ -95,7 +95,7 @@ public class InboxClient {
     @Autowired
     public InboxClient(
             @Value("${inbox.service.url:http://inbox-service:8080}") String inboxServiceUrl,
-            @Value("${inbox.mock-enabled:true}") boolean mockEnabled,
+            @Value("${inbox.mock-enabled:false}") boolean mockEnabled,
             @Value("${inbox.dev-actor-id:}") String devActorId,
             @Value("${inbox.connect-timeout-ms:2000}") long connectTimeoutMs,
             @Value("${inbox.read-timeout-ms:10000}") long readTimeoutMs) {

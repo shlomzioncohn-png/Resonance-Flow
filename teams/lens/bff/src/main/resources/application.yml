@@ -7,7 +7,7 @@ spring:
 
 # Inbox (task data) - see InboxClient and lens/frontend/docs/api-integration-status.md
 inbox:
-  # true = in-memory mock tasks, no Inbox needed. Set false to call the real Inbox.
+  # false (default) = call the real Inbox. true = in-memory mock tasks, no Inbox needed.
   mock-enabled: ${INBOX_MOCK_ENABLED:false}
   # Inbox runs on Docker - use localhost when BFF runs locally
   service:
