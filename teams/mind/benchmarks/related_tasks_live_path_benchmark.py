@@ -65,6 +65,7 @@ from mind.config import VectorStoreSettings, get_settings
 from mind.embeddings import embed_batch, task_text
 from mind.embeddings.base import DEMO_TENANT_ID
 from mind.embeddings.pgvector_store import PgTenantStore, PgVectorStore
+from mind.embeddings.related_tasks import DEFAULT_K
 
 BENCHMARK_TABLE = "task_embeddings_benchmark_475"
 RESULTS_PATH = Path(__file__).resolve().parent / "related_tasks_live_path_benchmark_results.json"
@@ -160,7 +161,7 @@ async def _explain_hnsw_is_used(
         await cur.execute("SELECT set_config('hnsw.iterative_scan', 'strict_order', true);")
         await cur.execute(
             sql.SQL("EXPLAIN (ANALYZE, FORMAT TEXT) ") + query,
-            (sample_vector, tenant_store._tenant_id, sample_task_id, sample_vector, 5),
+            (sample_vector, tenant_store._tenant_id, sample_task_id, sample_vector, DEFAULT_K),
         )
         rows = await cur.fetchall()
         return "\n".join(r[0] for r in rows)
@@ -186,7 +187,10 @@ async def _run(n_vectors: int, ef_search: int) -> dict:
         assert sample_vector is not None
         plan = await _explain_hnsw_is_used(settings, tenant_store, ids[0], sample_vector)
         print(plan)
-        uses_hnsw = "Index Scan" in plan and "hnsw" in plan.lower()
+        # Exact index name (see pgvector_store.py's _ensure_schema()), matching
+        # test_vector_store.py's own EXPLAIN checks -- not a loose "hnsw" substring.
+        index_name = f"{settings.table}_embedding_hnsw_idx"
+        uses_hnsw = "Index Scan" in plan and index_name in plan
 
         print(f"Warming up ({N_WARMUP_QUERIES} queries, not measured)...")
         warmup_sem = asyncio.Semaphore(N_CONCURRENT)
