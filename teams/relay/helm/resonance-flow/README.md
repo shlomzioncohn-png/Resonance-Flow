@@ -436,6 +436,14 @@ from `dependencies`, so they follow the release and namespace:
 | `kafka.producer.task_creation_requested_topic` | `components.mind.config.kafka` | `task.creation.requested` |
 | `inbox.url` | `components.mind.config.inbox` | `http://resonance-flow-inbox:80` |
 
+MIND's Kafka consumers run as their own Deployments, from the same image:
+`components.mind-landed-consumer` (`bridge.raw.landed` → task creation) and
+`components.mind-index-consumer` (task events → the vector store). They have no HTTP, so no
+port, probes or Service. `shareFrom: mind` gives them mind's image, config, secret and
+volumes, so mind's tag bump updates them too; only `command`, `dependencies` and `resources`
+are their own. The landed consumer keeps pending requests in memory, so it stays at one
+replica with `Recreate`.
+
 ### MIND's DB and app credentials (`components.mind`)
 
 MIND's two Secrets are created by a pre-install/pre-upgrade hook Job
