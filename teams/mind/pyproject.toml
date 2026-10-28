@@ -82,6 +82,11 @@ dev = [
     # Here, not in a runtime dependency: the service never scores extractions,
     # and CI installs `.[dev]`, so the eval's tests can import it.
     "rapidfuzz>=3,<4",
+    # WER for the ASR validation (#480). In dev, not only [benchmark]: CI's
+    # tests/test_asr_validation.py and `mypy ... benchmarks` import it, and CI
+    # installs `.[dev]` only. Major version pinned so a re-measurement aligns
+    # words the same way.
+    "jiwer>=4,<5",
 ]
 # Not a runtime dependency of src/mind/ -- only benchmarks/ocr_asr_benchmark.py
 # needs these (psutil for peak-RSS sampling, PaddleOCR as the comparison
@@ -94,6 +99,7 @@ benchmark = [
     "psutil",  # cross-platform peak-RSS/CPU sampling; stdlib `resource` is Unix-only
     "paddleocr",
     "paddlepaddle",
+    "jiwer>=4,<5",  # benchmarks/asr_validation.py (#480); also in dev, see there
     # The ASR size benchmark (#135) also needs faster-whisper and av, now
     # runtime dependencies above (asr.py).
 ]
