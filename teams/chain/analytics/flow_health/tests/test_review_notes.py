@@ -153,8 +153,8 @@ def test_a_directory_without_a_seal_does_not_verify(tmp_path):
 
 # ---- the generator version ----
 
-GOLDEN_VERSION = "1.0.0"
-GOLDEN_DIGEST = "18cfda8c96a7880134f9a1bfecea9bcb35a4002e5b29f78a9b21d2121f697fa0"  # of the SMALL dataset below
+GOLDEN_VERSION = "1.0.1"
+GOLDEN_DIGEST = "2b67f3359e2c5b52b91ab73aa8035b99247b9b3fa21740cf21ee5d35c790bdb0"  # of the SMALL dataset below
 
 
 def test_manifest_and_seal_record_the_generator_version(tmp_path):
@@ -185,4 +185,4 @@ def test_verify_says_so_when_the_code_is_newer_than_the_seal(tmp_path, capsys, m
     write_dataset(tmp_path, SMALL, data.world, data.history)
     monkeypatch.setattr("flow_health.generator.__main__.GENERATOR_VERSION", "9.9.9")
     assert generate_cli(["--verify", str(tmp_path)]) == 0
-    assert "sealed with generator 1.0.0, this code is 9.9.9" in capsys.readouterr().out
+    assert "sealed with generator 1.0.1, this code is 9.9.9" in capsys.readouterr().out

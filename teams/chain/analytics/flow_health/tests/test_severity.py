@@ -103,7 +103,7 @@ def test_every_disease_has_a_score_a_level_and_its_basis(truth):
     for d in diseases:
         o = d["observed"]
         assert 0 <= o["severity_score"] <= 100
-        assert o["severity_level"] == sev.level_of(o["severity_score"])
+        assert o["severity_level"] == sev.level_of(o["severity_score"], FULL.severity_high_from, FULL.severity_medium_from)
         assert set(o["severity_basis"]) >= {"abnormality", "overrun", "deadline", "scale"}
     with (out / "ground_truth.csv").open(encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
@@ -143,8 +143,8 @@ def test_abnormality_scores_zero_at_the_median_and_one_at_the_extreme():
     assert sev.abnormality_from_blocks(2) == 0.0 and sev.abnormality_from_blocks(10) == 1.0
 
 
-def test_weights_sum_to_one():
-    assert abs(sum(sev.WEIGHTS.values()) - 1.0) < 1e-9
+def test_default_weights_sum_to_one():
+    assert abs(sum(GeneratorConfig().severity_weights) - 1.0) < 1e-9
 
 
 def test_each_stage_a_type_is_described_in_the_severity_document():
@@ -153,3 +153,59 @@ def test_each_stage_a_type_is_described_in_the_severity_document():
         assert name in text
     for term in ("deadline", "estimate", "abnormality", "overrun"):
         assert term in text.lower()
+
+
+# ---- the knobs live in GeneratorConfig ----
+
+SMALL = replace(GeneratorConfig(), n_normal_tasks=300, n_projects=6, instances_per_severity=1, excluded_diseases=())
+
+
+def test_deadline_and_estimate_rates_come_from_the_config():
+    everything = generate(replace(SMALL, has_deadline_rate=1.0, has_estimate_rate=0.0))
+    assert all(t.deadline for t in everything.world.tasks)
+    assert not any(t.effort_estimate_minutes for t in everything.world.tasks)
+
+
+def test_the_deadline_mix_comes_from_the_config():
+    far = generate(replace(SMALL, deadline_mix=(0.0, 0.0, 0.0, 1.0)))  # every deadline 30 to 90 days after creation
+    lags = [(t.deadline - t.created_at).total_seconds() / 86400 for t in far.world.tasks if t.deadline]
+    assert min(lags) >= 29.9 and max(lags) <= 90.1
+
+
+def test_the_estimate_noise_and_step_come_from_the_config():
+    exact = generate(replace(SMALL, has_estimate_rate=1.0, estimate_noise=0.0, estimate_step_minutes=60))
+    estimates = [t.effort_estimate_minutes for t in exact.world.tasks]
+    assert all(e % 60 == 0 and e >= 60 for e in estimates)
+
+
+def test_severity_weights_and_thresholds_come_from_the_config(tmp_path):
+    cfg = replace(SMALL, severity_weights=(1.0, 0.0, 0.0, 0.0), severity_high_from=10.0, severity_medium_from=5.0)
+    data = generate(cfg)
+    write_dataset(tmp_path, cfg, data.world, data.history)
+    for d in json.loads((tmp_path / "ground_truth.json").read_text(encoding="utf-8"))["diseases"]:
+        o = d["observed"]
+        assert o["severity_score"] == round(100 * o["severity_basis"]["abnormality"], 1)  # only abnormality counts
+        assert o["severity_level"] == sev.level_of(o["severity_score"], 10.0, 5.0)
+
+
+def test_the_manifest_records_these_knobs(tmp_path):
+    data = generate(SMALL)
+    write_dataset(tmp_path, SMALL, data.world, data.history)
+    config = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))["config"]
+    for name in ("has_deadline_rate", "has_estimate_rate", "estimate_noise", "deadline_mix", "severity_weights",
+                 "severity_high_from", "severity_medium_from"):
+        assert name in config
+    assert config["has_deadline_rate"] == 0.7 and config["severity_weights"] == [0.35, 0.30, 0.25, 0.10]
+
+
+@pytest.mark.parametrize("bad", [
+    {"has_deadline_rate": 1.5},
+    {"has_estimate_rate": -0.1},
+    {"estimate_step_minutes": 0},
+    {"deadline_mix": (0.5, 0.5, 0.5, 0.5)},
+    {"severity_weights": (0.5, 0.5, 0.5, 0.0)},
+    {"severity_high_from": 20.0, "severity_medium_from": 30.0},
+])
+def test_a_bad_value_for_these_knobs_is_rejected(bad):
+    with pytest.raises(ValueError):
+        replace(GeneratorConfig(), **bad)

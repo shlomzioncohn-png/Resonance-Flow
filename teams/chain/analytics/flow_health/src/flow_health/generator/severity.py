@@ -15,8 +15,7 @@ from .model import DiseaseInstance, World, typical_minutes
 from .peers import PeerIndex
 from .simulation import History
 
-WEIGHTS = {"abnormality": 0.35, "overrun": 0.30, "deadline": 0.25, "scale": 0.10}
-HIGH_FROM, MEDIUM_FROM = 66.0, 33.0  # score thresholds of the level
+PARTS = ("abnormality", "overrun", "deadline", "scale")  # the order of GeneratorConfig.severity_weights
 HEALTHY_MAX_BLOCKS = 3  # a healthy task is blocked at most this often (re-planned dependencies)
 FLAPPING_FULL = 10  # blocks at which the recurring-blocker abnormality is 1
 OVERRUN_FULL = 100.0  # actual/expected ratio at which the overrun is 1
@@ -50,12 +49,13 @@ def deadline_urgency(slack_days: float) -> float:
     return MISSED_BASE * _clamp(1.0 - slack_days / DEADLINE_WINDOW_DAYS)
 
 
-def level_of(score: float) -> str:
-    return "high" if score >= HIGH_FROM else "medium" if score >= MEDIUM_FROM else "low"
+def level_of(score: float, high_from: float, medium_from: float) -> str:
+    return "high" if score >= high_from else "medium" if score >= medium_from else "low"
 
 
 class SeverityScorer:
     def __init__(self, cfg: GeneratorConfig, world: World, history: History, peers: PeerIndex):
+        self.cfg = cfg
         self.tasks = {t.id: t for t in world.tasks}
         self.projects = world.projects
         self.peers = peers
@@ -115,10 +115,11 @@ class SeverityScorer:
             "deadline": pressure,
             "scale": _clamp(held_up / SCALE_FULL),
         }
-        total = round(100 * sum(WEIGHTS[k] * v for k, v in parts.items()), 1)
+        weights = dict(zip(PARTS, self.cfg.severity_weights))
+        total = round(100 * sum(weights[k] * v for k, v in parts.items()), 1)
         return {
             "severity_score": total,
-            "severity_level": level_of(total),
+            "severity_level": level_of(total, self.cfg.severity_high_from, self.cfg.severity_medium_from),
             "severity_basis": {**{k: round(v, 3) for k, v in parts.items()},
                                "overrun_ratio": round(ratio, 2),
                                "tightest_deadline_slack_days": None if slack is None else round(slack, 1),

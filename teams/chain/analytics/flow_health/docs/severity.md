@@ -26,8 +26,10 @@ level: high from 66, medium from 33, otherwise low
 | **deadline** | How much pressure do the deadlines of the tasks involved put on it? | no known deadline, or all a month or more away | a deadline already missed by a month or more |
 | **scale** | How much work is held up? | one task | 12 or more tasks |
 
-The weights, the 100x and 12-task limits and the level thresholds are constants at the top of
-`src/flow_health/generator/severity.py`. They are a first proposal to be reviewed, not measured values.
+The weights and the level thresholds are `GeneratorConfig` fields (`severity_weights`, `severity_high_from`,
+`severity_medium_from`), so they are recorded in `manifest.json` and can be changed without touching code. The 100x
+overrun limit, the 12-task scale limit and the other definitions below are constants in
+`src/flow_health/generator/severity.py`. All of them are a first proposal to be reviewed, not measured values.
 
 ### Deadline pressure
 
@@ -65,7 +67,9 @@ Both are Inbox's fields (`deadline`, `effort_estimate_minutes`), fixed per task 
 that task in `task_state_history.csv`. This is an assumption for the synthetic data: Chain's real history
 table has neither column today, and Chain does not store a deadline at all. Nothing here changes the real tables.
 
-- 70% of tasks have a deadline and 60% an estimate (Inbox's dataset design: 30% and 40% are empty).
+- 70% of tasks have a deadline and 60% an estimate (Inbox's dataset design: 30% and 40% are empty). These shares, the
+  estimate noise and step, and the deadline mix are `GeneratorConfig` fields (`has_deadline_rate`, `has_estimate_rate`,
+  `estimate_noise`, `estimate_step_minutes`, `deadline_mix`).
 - Estimates are multiples of 15 minutes, drawn around what a healthy task of that tier and team takes. A task
   that is slow because it was planted as a disease is estimated as a normal one, so its overrun shows. A task that
   is slow by nature (`slow_legit`) is estimated as slow, so it does not.
