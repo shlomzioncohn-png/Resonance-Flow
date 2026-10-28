@@ -765,19 +765,9 @@ kafka-exporter:
   sasl:
     enabled: true
     scram:
-      enabled: false
-  extraArgs:
-    - --sasl.username=$(KAFKA_SASL_USERNAME)
-    - --sasl.password=$(KAFKA_SASL_PASSWORD)
-    - --sasl.mechanism=plain
-  env:
-    - name: KAFKA_SASL_USERNAME
-      value: inbox
-    - name: KAFKA_SASL_PASSWORD
-      valueFrom:
-        secretKeyRef:
-          name: resonance-flow-kafka-sasl-credentials
-          key: client-passwords
+      enabled: true
+      mechanism: plain
+      secretName: resonance-flow-kafka-exporter-sasl
   # see README.md "Metrics scraping".
   prometheus:
     serviceMonitor:
