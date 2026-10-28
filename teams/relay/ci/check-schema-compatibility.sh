@@ -14,7 +14,10 @@ REGISTRY_URL="${SCHEMA_REGISTRY_URL:-http://localhost:8081/apis/ccompat/v6}"
 # Sets REFERENCES and BODY.
 source "$(dirname "${BASH_SOURCE[0]}")/_schema-references.sh"
 
-HTTP_STATUS=$(curl -s -o /tmp/compat-response.json -w "%{http_code}" \
+RESPONSE="$(mktemp)"
+trap 'rm -f "$RESPONSE"' EXIT
+
+HTTP_STATUS=$(curl -s -o "$RESPONSE" -w "%{http_code}" \
   -X POST "${REGISTRY_URL}/compatibility/subjects/${SUBJECT}/versions/latest" \
   -H "Content-Type: application/vnd.schemaregistry.v1+json" \
   -d "$BODY")
@@ -26,13 +29,13 @@ fi
 
 if [ "$HTTP_STATUS" -ge 400 ]; then
   echo "Registry request failed (HTTP $HTTP_STATUS):"
-  cat /tmp/compat-response.json
+  cat "$RESPONSE"
   exit 1
 fi
 
-if [ "$(jq -r '.is_compatible' /tmp/compat-response.json)" != "true" ]; then
+if [ "$(jq -r '.is_compatible' "$RESPONSE")" != "true" ]; then
   echo "Schema change for '${SUBJECT}' breaks compatibility:"
-  cat /tmp/compat-response.json
+  cat "$RESPONSE"
   exit 1
 fi
 

@@ -7,10 +7,11 @@
 
 data:
   config.yaml: |
-    jwt:
-      key_id: {{ $cfg.jwt.key_id | quote }}
-      private_key_location: {{ $cfg.jwt.private_key_location | quote }}
-      public_key_location: {{ $cfg.jwt.public_key_location | quote }}
+    lens:
+      jwt:
+        key-id: {{ $cfg.jwt.key_id | quote }}
+        private-key-location: {{ $cfg.jwt.private_key_location | quote }}
+        public-key-location: {{ $cfg.jwt.public_key_location | quote }}
     bff:
       service:
         url: {{ $cfg.bff.service.url | quote }}
