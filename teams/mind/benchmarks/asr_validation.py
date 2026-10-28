@@ -11,7 +11,8 @@ asr_benchmark.py, calls faster-whisper directly; it is left as it is, so its
 recorded numbers still reproduce.)
 
 The fixed set: three VALIDATION_WINDOW_S windows per meeting in
-eval/datasets/ami-audio.manifest.json, at VALIDATION_WINDOW_POSITIONS of its
+eval/datasets/ami-audio.manifest.json -- every meeting there, not only #135's
+SIZE_BENCHMARK_MEETINGS -- at VALIDATION_WINDOW_POSITIONS of its
 length (validation_windows()). Not whole meetings: transcribe() decodes at
 most MAX_DURATION_S of a recording and gives up after TRANSCRIBE_TIMEOUT_S,
 and a 30-minute meeting would hit both. A window the pipeline still cut short

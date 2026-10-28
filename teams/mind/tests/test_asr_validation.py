@@ -296,6 +296,7 @@ def test_the_fixed_set_is_pinned():
     assert labels == [
         "IS1008b@442-682s", "IS1008b@884-1124s", "IS1008b@1326-1566s",
         "IB4003@506-746s", "IB4003@1012-1252s", "IB4003@1517-1757s",
+        "IS1008d@370-610s", "IS1008d@740-980s", "IS1008d@1111-1351s",
     ]  # fmt: skip
 
 

@@ -45,8 +45,10 @@ pinned by `test_the_fixed_set_is_pinned`.
 |---|---|---|
 | IS1008b | `IS1008b.Mix-Headset.wav`, 1,768.5 s | 442–682, 884–1124, 1326–1566 |
 | IB4003 | `IB4003.Mix-Headset.wav`, 2,023.3 s | 506–746, 1012–1252, 1517–1757 |
+| IS1008d | `IS1008d.Mix-Headset.wav`, 1,480.8 s | 370–610, 740–980, 1111–1351 — **added for D1, not yet measured** |
 
-24 minutes of audio, 4,006 reference words after normalization. Reference: AMI's
+The numbers below cover the first two meetings: 24 minutes of audio, 4,006
+reference words after normalization. Reference: AMI's
 human transcript (`words/` layer of `ami_public_manual_1.6.2`), all four
 speakers interleaved by word start time. A word belongs to the window it
 *starts* in. CC BY 4.0, as in the manifest.
@@ -315,8 +317,9 @@ four in both runs):
 
 - **D1 — The final file set (R2).**
   - *Proposal:* the meetings of R2's real-data slice (`ami.manifest.json`):
-    IS1008b, IB4003, and IS1008d (its words files are local, its audio is
-    not yet), same window rule.
+    IS1008b, IB4003, and IS1008d, same window rule. IS1008d's audio is now
+    in `ami-audio.manifest.json` (2026-10-28), from the same AMI source as
+    the other two.
   - *R2 to confirm:* the set, and whether she wants windows placed on the
     stretches her extraction reads.
   - *After that:* rerun everything above; the numbers here are replaced, not

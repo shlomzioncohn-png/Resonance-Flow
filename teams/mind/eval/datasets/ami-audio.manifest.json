@@ -1,11 +1,12 @@
 {
   "dataset": "AMI Meeting Corpus",
   "dataset_version": "amicorpus signals (Mix-Headset) + ami_public_manual_1.6.2 words layer",
-  "purpose": "Whisper model-size benchmark for ASR (#135): audio to transcribe, plus AMI's human word-level transcript as the accuracy reference",
-  "split": "Mix-Headset audio stream for the two meetings already in the real-data slice (ami.manifest.json); reference transcript from the manual annotations' words/ layer",
+  "purpose": "Whisper model-size benchmark for ASR (#135) and the ASR validation's WER (#480): audio to transcribe, plus AMI's human word-level transcript as the accuracy reference",
+  "split": "Mix-Headset audio stream for the meetings of the real-data slice (ami.manifest.json): IS1008b and IB4003 since #135, IS1008d added for #480 (the #135 benchmark keeps to the first two); reference transcript from the manual annotations' words/ layer",
   "source_url": [
     "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/IS1008b/audio/IS1008b.Mix-Headset.wav",
     "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/IB4003/audio/IB4003.Mix-Headset.wav",
+    "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/IS1008d/audio/IS1008d.Mix-Headset.wav",
     "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip"
   ],
   "source_page": "https://groups.inf.ed.ac.uk/ami/download/",
@@ -26,6 +27,12 @@
         "file": "IB4003.Mix-Headset.wav",
         "bytes": 64744152,
         "duration_s": 2023.3,
+        "format": "WAV, 16-bit PCM, mono, 16 kHz"
+      },
+      {
+        "file": "IS1008d.Mix-Headset.wav",
+        "bytes": 47388093,
+        "duration_s": 1480.8,
         "format": "WAV, 16-bit PCM, mono, 16 kHz"
       }
     ],
@@ -56,6 +63,16 @@
         "local-data/ami/ami_public_manual_1.6.2/words/IB4003.B.words.xml",
         "local-data/ami/ami_public_manual_1.6.2/words/IB4003.C.words.xml",
         "local-data/ami/ami_public_manual_1.6.2/words/IB4003.D.words.xml"
+      ]
+    },
+    {
+      "id": "IS1008d",
+      "files": [
+        "local-data/ami/audio/IS1008d.Mix-Headset.wav",
+        "local-data/ami/ami_public_manual_1.6.2/words/IS1008d.A.words.xml",
+        "local-data/ami/ami_public_manual_1.6.2/words/IS1008d.B.words.xml",
+        "local-data/ami/ami_public_manual_1.6.2/words/IS1008d.C.words.xml",
+        "local-data/ami/ami_public_manual_1.6.2/words/IS1008d.D.words.xml"
       ]
     }
   ]
