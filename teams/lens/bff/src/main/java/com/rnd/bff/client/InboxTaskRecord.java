@@ -1,5 +1,6 @@
 package com.rnd.bff.client;
 
+import com.rnd.bff.dto.ConstraintDTO;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -106,5 +107,7 @@ public class InboxTaskRecord {
     private String project;
 
     private List<String> dependencies;
-    private List<String> constraints;
+
+    /** Mock-only sample of Chain's constraints (Inbox doesn't own them), so mock mode has something to show. */
+    private List<ConstraintDTO> constraints;
 }

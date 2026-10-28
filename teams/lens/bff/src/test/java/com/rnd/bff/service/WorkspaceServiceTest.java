@@ -16,6 +16,7 @@ import com.rnd.bff.client.ChainClient;
 import com.rnd.bff.client.InboxClient;
 import com.rnd.bff.client.InboxSelectionResponse;
 import com.rnd.bff.client.MindClient;
+import com.rnd.bff.dto.ConstraintDTO;
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskDependenciesDTO;
 import com.rnd.bff.dto.TaskListResponseDTO;
@@ -75,7 +76,7 @@ class WorkspaceServiceTest {
         when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(task));
         // Chain returns a map with no entry for task_001 - a partial response,
         // not a missing/erroring call.
-        when(chainClient.getFeasibility(anyString(), anyList())).thenReturn(Map.of());
+        when(chainClient.getFeasibility(anyString(), any(), anyList())).thenReturn(Map.of());
         when(mindClient.getScores(anyString(), anyList(), any())).thenReturn(Map.of("task_001", 85));
 
         TaskRecommendationDTO result =
@@ -89,7 +90,7 @@ class WorkspaceServiceTest {
     void recommend_taskWithNullEffortEstimate_reportsDoesNotFitInsteadOfThrowing() {
         TaskDTO task = task("task_001", "HIGH", null);
         when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(task));
-        when(chainClient.getFeasibility(anyString(), anyList()))
+        when(chainClient.getFeasibility(anyString(), any(), anyList()))
                 .thenReturn(Map.of("task_001", new TaskDependenciesDTO(List.of(), List.of())));
         when(mindClient.getScores(anyString(), anyList(), any())).thenReturn(Map.of("task_001", 85));
 
@@ -97,6 +98,27 @@ class WorkspaceServiceTest {
                 workspaceService.recommend(new WorkspaceRequestDTO(60, null, null), "emp_001");
 
         assertThat(result.getFitsInTime()).isFalse();
+    }
+
+    @Test
+    void recommend_setsConstraintsAndCountsOnlyPendingAsOpen_usingTheTasksTenant() {
+        TaskDTO task = task("task_001", "HIGH", 30);
+        task.setTenantId("tenant-1");
+        when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(task));
+        List<ConstraintDTO> constraints = List.of(
+                ConstraintDTO.builder().constraintId("c1").type("APPROVAL_NEEDED").status("PENDING").build(),
+                ConstraintDTO.builder().constraintId("c2").type("DATE_WINDOW").status("SATISFIED").build(),
+                ConstraintDTO.builder().constraintId("c3").type("BLOCKED_BY_INFO").status("PENDING").build(),
+                ConstraintDTO.builder().constraintId("c4").type("APPROVAL_NEEDED").status("WAIVED").build());
+        when(chainClient.getFeasibility("emp_001", "tenant-1", List.of("task_001")))
+                .thenReturn(Map.of("task_001", new TaskDependenciesDTO(List.of(), constraints)));
+        when(mindClient.getScores(anyString(), anyList(), any())).thenReturn(Map.of("task_001", 85));
+
+        TaskRecommendationDTO result =
+                workspaceService.recommend(new WorkspaceRequestDTO(60, null, null), "emp_001");
+
+        assertThat(result.getTask().getConstraints()).isEqualTo(constraints);
+        assertThat(result.getTask().getOpenConstraintCount()).isEqualTo(2);
     }
 
     @Test
@@ -114,7 +136,7 @@ class WorkspaceServiceTest {
     void recommend_chainThrows_degradesInsteadOfFailing() {
         TaskDTO task = task("task_001", "HIGH", 30);
         when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(task));
-        when(chainClient.getFeasibility(anyString(), anyList()))
+        when(chainClient.getFeasibility(anyString(), any(), anyList()))
                 .thenThrow(new RuntimeException("connection refused"));
         when(mindClient.getScores(anyString(), anyList(), any())).thenReturn(Map.of("task_001", 85));
 
@@ -130,7 +152,7 @@ class WorkspaceServiceTest {
     void recommend_mindThrows_degradesToDefaultOrderWithZeroScore() {
         TaskDTO task = task("task_001", "HIGH", 30);
         when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(task));
-        when(chainClient.getFeasibility(anyString(), anyList()))
+        when(chainClient.getFeasibility(anyString(), any(), anyList()))
                 .thenReturn(Map.of("task_001", new TaskDependenciesDTO(List.of(), List.of())));
         when(mindClient.getScores(anyString(), anyList(), any()))
                 .thenThrow(new RuntimeException("connection refused"));
@@ -153,7 +175,7 @@ class WorkspaceServiceTest {
         blocked.setIsAvailable(false);
         TaskDTO workable = task("workable", "LOW", 30);
         when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(done, snoozed, blocked, workable));
-        when(chainClient.getFeasibility(anyString(), anyList())).thenReturn(Map.of());
+        when(chainClient.getFeasibility(anyString(), any(), anyList())).thenReturn(Map.of());
         when(mindClient.getScores(anyString(), anyList(), any())).thenReturn(Map.of("workable", 85));
 
         TaskRecommendationDTO result =
@@ -172,7 +194,7 @@ class WorkspaceServiceTest {
         TaskDTO fitsHigh = task("fits_high", "HIGH", 30);
         fitsHigh.setPriorityScore(8.0);
         when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(tooLong, fitsLow, fitsHigh));
-        when(chainClient.getFeasibility(anyString(), anyList())).thenReturn(Map.of());
+        when(chainClient.getFeasibility(anyString(), any(), anyList())).thenReturn(Map.of());
         // Same score for every task - like Mind's mock
         when(mindClient.getScores(anyString(), anyList(), any()))
                 .thenReturn(Map.of("too_long", 85, "fits_low", 85, "fits_high", 85));
@@ -233,7 +255,7 @@ class WorkspaceServiceTest {
         when(inboxClient.isMockEnabled()).thenReturn(false);
         when(inboxClient.selectTasks(anyString(), anyInt())).thenThrow(new RuntimeException("Inbox 500"));
         when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(task("task_001", "HIGH", 30)));
-        when(chainClient.getFeasibility(anyString(), anyList())).thenReturn(Map.of());
+        when(chainClient.getFeasibility(anyString(), any(), anyList())).thenReturn(Map.of());
         when(mindClient.getScores(anyString(), anyList(), any())).thenReturn(Map.of("task_001", 85));
 
         TaskRecommendationDTO result =

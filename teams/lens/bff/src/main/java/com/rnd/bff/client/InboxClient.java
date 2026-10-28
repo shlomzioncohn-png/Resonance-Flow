@@ -1,5 +1,6 @@
 package com.rnd.bff.client;
 
+import com.rnd.bff.dto.ConstraintDTO;
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskListResponseDTO;
 import com.rnd.bff.exception.InboxRejectedException;
@@ -177,7 +178,8 @@ public class InboxClient {
                 .updatedAt(LocalDateTime.of(2026, 8, 25, 14, 0))
                 .owner("Alex Morgan")
                 .project("Customer Success")
-                .constraints(List.of("approval_needed"))
+                .constraints(List.of(mockConstraint("c_002_1", "APPROVAL_NEEDED", "PENDING",
+                        "Legal must sign off on the redlines", "2026-08-20T10:05:00")))
                 .build());
         // task_003: APPROVED status, snoozed/unavailable with deadline
         seed(InboxTaskRecord.builder()
@@ -206,7 +208,11 @@ public class InboxClient {
                 .updatedAt(LocalDateTime.of(2026, 8, 27, 16, 0))
                 .owner("Alex Morgan")
                 .project("Customer Success")
-                .constraints(List.of("waiting_for_customer"))
+                .constraints(List.of(
+                        mockConstraint("c_003_1", "BLOCKED_BY_INFO", "PENDING",
+                                "Waiting for the customer's renewal terms", "2026-08-22T11:10:00"),
+                        mockConstraint("c_003_2", "APPROVAL_NEEDED", "SATISFIED",
+                                "Pricing approved by finance", "2026-08-23T09:00:00")))
                 .build());
         // task_004: IN_PROGRESS status, available
         seed(InboxTaskRecord.builder()
@@ -311,7 +317,8 @@ public class InboxClient {
                 .updatedAt(LocalDateTime.of(2026, 9, 8, 11, 30))
                 .owner("Alex Morgan")
                 .project("Platform Service")
-                .constraints(List.of("out_of_scope"))
+                .constraints(List.of(mockConstraint("c_007_1", "DATE_WINDOW", "WAIVED",
+                        "Out of scope for this quarter", "2026-08-15T14:30:00")))
                 .build());
         // task_008: CANCELLED status (cancelled before completion), unavailable
         seed(InboxTaskRecord.builder()
@@ -340,6 +347,16 @@ public class InboxClient {
 
     private void seed(InboxTaskRecord task) {
         tasksById.put(task.getId(), task);
+    }
+
+    private static ConstraintDTO mockConstraint(String id, String type, String status, String note, String createdAt) {
+        return ConstraintDTO.builder()
+                .constraintId(id)
+                .type(type)
+                .status(status)
+                .reason(Map.of("note", note))
+                .createdAt(createdAt)
+                .build();
     }
 
     /**
@@ -687,6 +704,8 @@ public class InboxClient {
                 .project(record.getProject())
                 .dependencies(record.getDependencies())
                 .constraints(record.getConstraints())
+                .openConstraintCount(record.getConstraints() == null
+                        ? null : ConstraintDTO.countOpen(record.getConstraints()))
                 // Real schema fields, surfaced as-is alongside their derived
                 // equivalents above - see TaskDTO's javadoc.
                 .tenantId(record.getTenantId())

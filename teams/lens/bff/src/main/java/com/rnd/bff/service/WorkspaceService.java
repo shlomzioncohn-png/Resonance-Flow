@@ -4,6 +4,7 @@ import com.rnd.bff.client.ChainClient;
 import com.rnd.bff.client.InboxClient;
 import com.rnd.bff.client.InboxSelectionResponse;
 import com.rnd.bff.client.MindClient;
+import com.rnd.bff.dto.ConstraintDTO;
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskDependenciesDTO;
 import com.rnd.bff.dto.TaskListResponseDTO;
@@ -81,11 +82,18 @@ public class WorkspaceService {
             throw new ServiceUnavailableException("Inbox", "Inbox is unavailable", ex);
         }
         List<String> candidateIds = candidates.stream().map(TaskDTO::getId).toList();
+        // Inbox only returns tasks of the acting user's own tenant, so every
+        // candidate carries the same tenant - it comes from Inbox, never the request.
+        String tenantId = candidates.stream()
+                .map(TaskDTO::getTenantId)
+                .filter(id -> id != null && !id.isBlank())
+                .findFirst()
+                .orElse(null);
 
         Map<String, TaskDependenciesDTO> feasibilityByTaskId;
         boolean chainAvailable = true;
         try {
-            feasibilityByTaskId = chainClient.getFeasibility(userId, candidateIds);
+            feasibilityByTaskId = chainClient.getFeasibility(userId, tenantId, candidateIds);
         } catch (RuntimeException ex) {
             // Chain is down: a recommendation is still possible, just without
             // dependency data. Treat every task's dependency status as unknown
@@ -115,6 +123,7 @@ public class WorkspaceService {
             if (feasibility != null) {
                 task.setDependencies(feasibility.getDependencies());
                 task.setConstraints(feasibility.getConstraints());
+                task.setOpenConstraintCount(ConstraintDTO.countOpen(feasibility.getConstraints()));
             }
         }
 
