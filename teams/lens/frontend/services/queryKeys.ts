@@ -6,7 +6,7 @@
  * All manager queries include relevant filters (period, team, project) in their keys,
  * so that changing filters triggers a refetch with new data.
  */
-import type { ManagerKpiFilters } from './managerApi';
+import type { ManagerKpiFilters, ManagerTaskView } from './managerApi';
 import type { WorkspaceRequest } from './workspaceApi';
 
 export const taskKeys = {
@@ -15,6 +15,8 @@ export const taskKeys = {
   activity: (taskId: string) => [...taskKeys.all, 'activity', taskId] as const,
   recommendation: (request: WorkspaceRequest) =>
     [...taskKeys.all, 'recommendation', request] as const,
+  /** The projects of the signed-in employee's own tasks (My Workspace's Project filter). */
+  myProjects: () => [...taskKeys.all, 'my-projects'] as const,
 };
 
 export interface ManagerFilters {
@@ -32,6 +34,10 @@ export const workloadKeys = {
 export const kpiKeys = {
   all: ['manager', 'kpis'] as const,
   list: (filters: ManagerKpiFilters) => [...kpiKeys.all, filters] as const,
+  /** The Dashboard's charts: task counts per project */
+  projects: () => [...kpiKeys.all, 'projects'] as const,
+  /** Work in progress / Blocked & delayed */
+  tasks: (view: ManagerTaskView) => [...kpiKeys.all, 'tasks', view] as const,
 };
 
 export const projectKeys = {

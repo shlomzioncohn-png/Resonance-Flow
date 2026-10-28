@@ -1,0 +1,2 @@
+# Gives every test context a generated Gateway signing key - see TestJwtKeys.
+org.springframework.context.ApplicationContextInitializer=com.rnd.gateway.TestJwtKeys
