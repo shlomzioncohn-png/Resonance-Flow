@@ -932,9 +932,10 @@ string match); it is not this eval.
 ### Current status
 
 **Run once on real AMI meetings through main's real extraction (#178, 2026-10-25);
-re-scored with the embedding backend (2026-10-28).**
+re-scored with the embedding backend, and run on ASR transcripts of two of the
+meetings (2026-10-28).**
 Tracking issues: #176 design, #177 implementation, #178 real-data validation.
-Not yet on ASR output, and not yet in CI (#175).
+Not yet in CI (#175).
 
 ### Real-data validation (#178)
 
@@ -943,7 +944,7 @@ Not yet on ASR output, and not yet in CI (#175).
 (`ingestion/ami_transcripts.py`, #784), each meeting sent whole as one MEETING
 item to `BasicExtractor` (main at the #968 merge) on `gemini-3.6-flash`, scored
 with `evaluate_meetings` at the locked lexical τ = 0.60. Human transcripts, not
-ASR, so this measures extraction alone (mentor's call); an ASR run comes later.
+ASR, so this measures extraction alone (mentor's call); ASR is in "ASR transcripts" below.
 
 ```bash
 # needs a key; spends quota (see the script's docstring)
@@ -1083,6 +1084,68 @@ quality, which is why both are reported with the hand review: lexical 31%,
 embedding 44%, the hand review 56%. On 16 items neither backend can be called
 better. τ is not moved for this (§6): it was set on the §5 pairs before this
 run, and the review band is where these errors are caught.
+
+### ASR transcripts (2026-10-28)
+
+**The question.** The real pipeline transcribes a meeting recording; it never
+sees AMI's human transcript. How much does extraction lose when it reads ASR
+output instead? Expected: a clear drop, from word errors and from the missing
+speakers (the human transcript opens every line with a role, and the gold is
+phrased by role, "The Project Manager will…").
+
+**What was run.** IS1008b and IB4003 (IS1008d has no audio here), Mix-Headset,
+transcribed by Michal Brecher through the pipeline's `asr.transcribe()`
+(Whisper base.en, chunks of up to 60 s cut in silence, `vad_filter=True`); the
+only change was lifting the 600 s decode cap and 240 s timeout so a whole
+meeting is transcribed (`truncated=False`). No speaker labels; IS1008b's text is
+23% shorter than the human transcript (20,111 against 26,071 characters). The
+transcripts (CC BY 4.0, AMI Meeting Corpus) are in
+`eval/extraction_runs/asr_transcripts_2026-10-28/`; the run, the same model
+and gold, in `eval/extraction_runs/2026-10-28_asr_gemini-3.6-flash/`:
+
+```bash
+python scripts/run_ami_extraction_eval.py \
+    --transcripts-dir eval/extraction_runs/asr_transcripts_2026-10-28 --backend both
+```
+
+**Result, on the same two meetings (12 gold items)**, in the reporting format
+above, against the human-transcript run of 2026-10-25:
+
+| gold items found (of 12) | lexical | embedding | hand review |
+|---|---|---|---|
+| human transcript | 4 right, 1 wrong | 6 right, 2 wrong | **7 (58%)** |
+| ASR transcript | 4 right, 0 wrong | 5 right, 0 wrong | **5 (42%)** |
+
+The backends' own recall on ASR: lexical 33.3%, embedding 41.7%.
+
+**What the hand review found.**
+
+- **A small drop, and only part of it is ASR.** Two gold items were found from
+  the human transcript and not from ASR. IB4003's Gisella task is one, but the
+  ASR text has it ("putting Gisela with the other admin of the school is not
+  an option"): the model did not extract it this run, the run-to-run variation
+  seen before, not ASR. IS1008b's "research companies … voice recognition" is
+  the other: ASR wrote "companies like **Inter** or IBM", and the model extracted
+  speech-recognition tasks but none about finding companies (borderline;
+  counted as missed).
+- **Garbled names do not always cost an item.** "Pierrette" came out "Perret",
+  and "Ask Perret and Maggie about their preferences" was still extracted and
+  matched.
+- **The missing speakers did not hurt what this eval measures.** It compares a
+  task's content, not who owns it. Tasks from ASR come without an owner ("Ask
+  Perret and Maggie…" rather than "The Project Manager will ask…"): that affects
+  owner assignment, which this eval does not score.
+- **No wrong matches this time**, with either backend; "keep watching market
+  trends" was not matched to the marketing concept, its description now worded
+  differently.
+- **Extra items are still real tasks** absent from the gold (the minutes, the
+  shared folder, four places in the three-person room), as on the human
+  transcript.
+
+**Limitations.** Two meetings, 12 gold items, one run per transcript; a
+difference of two items cannot be put on ASR with confidence. The decode cap
+was lifted for these transcripts; in production a whole meeting would be cut
+at 600 s.
 
 ### Several tasks per text (#690, was a known limitation)
 

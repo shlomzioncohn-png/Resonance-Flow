@@ -1,0 +1,316 @@
+# IS1008b (AMI Mix-Headset), mind.multimodal.asr.transcribe(), Whisper base.en
+# chunks of up to 60 s cut in silence, vad_filter=True; decode cap and timeout lifted for a whole meeting
+# audio 1768.5 s of 1768.5 s, truncated=False, incomplete_file=False, 312 segments, wall 484 s
+
+It was supposed to change seats.
+I see, I see it's fine.
+Today, how are we disappearing?
+I did this no-no somewhere.
+And it disappeared.
+And who's...
+who's...
+I think I'm going to do this later.
+Me too, especially.
+Okay.
+Agnes.
+You can help me for the slide when I...
+Okay.
+Okay.
+Okay.
+Welcome back.
+I hope you have a fresh day in the fresh time.
+Now, the meeting actually we are gathering here to discuss about the functional design
+meeting, okay, and we received some information from all of you and it's in the, I think,
+in the sharing folder and I will invite the Christine and the aide and Agnes to discuss
+about on the various subjects. So, can you go to the next slide? Yeah, the agent of the
+meeting is opening, then I'm going to talk about the project management, what I'm going
+to do and of course, I'm doing the project management and secretary both, okay, to take
+the minutes of the meeting and there are three presentations. One is new project requirements
+and the second one about decision on remote control functions and finally, we are closing
+be 40 minutes. So you have to be very quick. And I have come up with management come with
+the new proposal and I have to discuss a few points on this. Burt says new insights in the
+aim of your project. The one is the teletext becomes out model because of the computer systems
+and new technology. So we don't need to consider really about the teletext and all in our new
+project design. The second one is about the remote control should be used only for the
+TV. That's what our management says. And the third point it's very very important to establish
+our marketing or corporate image with this new project or new product.
+So I will invite Agnes, can you go to the third slide?
+No, this is the third slide.
+Okay, this is it.
+So I'll invite Christine to discuss about the functional design.
+Kate, do you want to open the fair part?
+Number two.
+That's it.
+Do you want the mouse or do you want me to?
+I'll do.
+Thanks.
+Thank you.
+So, well, I figured we should identify some user requirements and from my experience I
+want to, and from research I did, the device has to turn the television on and off.
+The first time you press on the big button, he can't have like waffling on this point,
+you know, and he needs to be able to find it because one of the biggest problems with
+remote controls is finding them.
+So I also, since we have to establish our corporate image on the basis of this new product,
+that we better look at things that are popular and go beyond those and as I said in the first
+meeting.
+And then we might want to talk eventually about the materials that are appropriate
+to use in the construction, especially in the outside of the product so that it gives
+the appearance.
+and is reliable and so forth.
+I did a little history on the remote controls
+and when they were invented and so forth,
+so I guess this guy at Zenith created the Flashmatic,
+which I kind of like the idea,
+because it made me think of maybe the remote control
+made a big flash when you turn the TV on and off.
+That might be interesting.
+And so it was a highly directional flashlight
+that you could turn the picture on and off
+and the sound on and off and change channels.
+So I think those are still requirements we have today,
+50 years later.
+And it was really a pioneering innovation,
+but it was sensitive to the sun so that it would get,
+would start off by the, it would easily cause some problems.
+So in addition...
+to looking at the functional, so all of these devices are examples of where they represent
+examples that are available today, which I think the one in the middle is really something
+to keep in mind.
+It would be easy to find and it would throw it at things.
+If the TV didn't turn on it off, you could use it for something else.
+And since I'm not really an industrial designer, I didn't really know what to do with this slide,
+but I just took some different schematics and I put them into this and I guess this is what
+a slide might look like if you were doing a circuit board.
+I don't know why we were asked to do this.
+So, personal preferences, I think we could really...
+thinking outside the box here, and I think that we should
+consider perhaps having a size, a remote control that changes
+in size, depending on the user preference.
+So something that's very, very flexible and inflatable,
+and then you can shrink it.
+I think you could either be, you could go either one extreme,
+be very colorful, or you could make it clear,
+and kind of blend in with things.
+So you didn't have to have a problem with the decoration
+of the user's home.
+I think it needs to be waterproof, because sometimes they
+fall into cups, and it might be out by the swimming pool
+or something like that.
+If you, one of my requirements was about it needs to tell you
+when it's done its job or not, because after the time I keep
+pushing on the remote control, and I don't know if it's
+actually understood in my message.
+So I think it should give you some sort of an oral cue.
+And of course, I never want to replace the battery.
+So that's those are my preferences and that's my presentation. Yeah, let me interrupt you
+If you can add other facility other future like
+Unbreakable. Yes. Okay, because
+Especially today, you know, you have the family and the kids. Okay, and the kids throw out and they play with the remote
+Run over it with a car. Yes. Okay. So if you can add the future, okay for your fabric, whatever in your outline design
+Okay with unbreakable. Okay. I think that will give a lot of advantage
+For our product. Good idea. Good idea. I'll be you can add it in that. Yes
+Okay. Thank you, Christine, and any questions or clarifications or any discussion on the functional design?
+Do you have any preconceived ideas in terms of materials?
+Because, for example, in the unbreakable thing, doing something plastic would be harder
+where it's having something like, I don't know, steal our time.
+Titanium isn't really an energy.
+Titanium economically viable.
+It'd be heavy, too.
+No, I haven't really I
+Wanted feedback. I think we need to rate rank these yeah, but we'll see what your personal preferences are and I'm just wondering whether
+Do you had any? I like titanium? It's light
+Who said we know nobody told me how much what our financial objective is so yeah, it'd be hard to inflate something
+I'm sorry because the last meeting we supposed to discuss about the financial thing
+Let me go quickly. Maybe if I can go back. I know our project plan and the budget
+Let me see where is this fire, this thing.
+That's mine. Okay, I think verbally. Okay, I will send you mail. Okay, the project may be the the project a okay
+The end of the day the company
+wants to make at least
+the 50 million euro
+Okay, and of course the price will be very reasonable on the the sale side
+Okay, that maybe you will talk to you about how much the price and what's the
+How much it's cost for the manufacturing and how much it's going to be we sell in the market
+Okay, then you can come back with your feedback and I have one maybe the suggestion or opinion this remote control
+Okay, it can be for like a universal to use for any TV
+Okay and it will be slick okay and not fat not fat might be hard to find them
+but let's try it okay with the different the designs okay the
+functional designs okay so any other questions from her side I don't think
+there's too many more questions okay thank you for time being so then it okay
+from the marketing yeah from the marketing side just to to give an idea
+with the management is looking for I was looking for a remote control to have a
+I have a sales price of 25 euro with a production price of a 12 and a half a
+For what I think for what we're trying to find which one we're looking for I don't think that price is exactly in the market
+Okay, I'll explain myself here now in the sense that
+In a in the recent surveys
+From the ages from 15 to 35 80% are willing to spend more money for something as fancy as trendy
+25 euros, that's that's a pretty reasonable price. That's a market price right now
+Now if we're going to take a risk
+And push this up a bit
+Make it more expensive, but give them added things that they don't have now
+Then it could possibly sell obviously the risk is there too expensive. They're not going to buy
+But I think there's one other thing
+Interesting two things that are interesting is that from the 15 to 35 year old group
+Which always spends more money on trendy new things
+Speech recognition is requested
+We're talking between 75 to 90% of this group is willing to pay for a speech recognition on a remote
+Obviously, you can't make a remote into a computer, but maybe simple commands
+Louder softer on off
+That might be a possibility even though it costs more to be the first on the market to produce this
+35% say they're too difficult to use so we have to figure out a way of making it more user friendly
+50% so they can't find the remote half of the time.
+So maybe one word speech recognition commands say remote and there's a BBB and they can
+find it through, you know, 10 tons of newspapers, magazines, whatever you have at home.
+But in the cost that the management is looking for, that's not going to be possible.
+But if it's trendy, if it's fancy, it's got some color to it.
+It's very easy to use.
+If it's got simple remote speech remote control, like I said, louder, softer, change channel
+on off remote and goes BB, I can find my remote without spending half a day looking forward
+and getting all upset because I can't turn the TV on.
+So we have to look at it in this global idea with the ideas of the industrial design.
+The price obviously we have to talk about.
+Yeah.
+So what do you think about the design side testing?
+think you can make it or I'm sorry what do you think about the design what he
+was talking about speech recognition speech recognition well training is
+always an issue with commands so might we can perhaps do it if the user is
+willing to spend some time in the training process could reduce the the
+overall cost I'm not sure how but anyway I think also that this might impact the
+battery life and so maybe what we'll have to do is add something where you
+can
+recharge it wirelessly, so that, you know, send power to it, or maybe set it out in the
+sun and it, you know, gets from the light, a solar cell inside there, so that you have
+enough juice to do all these fancy things.
+It seems also like with the speech recognition, yeah, it's a great feature, but if you're
+watching TV, there's a lot of ambient sound and it's words.
+It's not just, you know, noises like something hitting.
+It's actual speech, so then you have to make sure that the speech recognizer is good enough
+to filter out the TV speech and the user's speech, otherwise you can say remote, but if
+someone on the screen is saying the same thing, all of a sudden you have someone in a movie
+saying off and your screen dies because they've triggered the remote control and it's turned
+off your TV.
+So I think if we can find a speech recognizer that can handle those types of...
+of problems, then you have a really good marketing gimmick, but I think we seriously need to consider
+how that would impact the situation.
+Very good point.
+Because, well, with speech recognition, I'm not that good at that idea, but if it's a one
+word recognition, because I know with telephones and cars and things, I've seen it in the states,
+a friend of mine says, call mom, and it calls up mom.
+The radio can be on and everything.
+Because I think with speech recognition, if the remote or like the telephone, it has
+an exact word that it has to hear, I don't think it would come through a sentence in
+a television.
+When somebody's speaking on the television, they're not going to stop and say, remote.
+So I think that something could be designed to recognize a single word, like the telephone.
+It would be a great idea if we can design it.
+This is years ago in the United States.
+driving down his call home on the telephone call immediately so that's kind
+of cute. What I can suggest to your Christian okay if you need some the technical
+feedback or some training okay about this facility especially for the speech
+recognition I can recommend you some companies like Inter or IBM okay because
+they're already in this speech recognition part okay and you can maybe
+have some technical backup from them some kind of technical tyre okay and if
+you want I can coordinate okay to get some information again you can let me
+know okay so what kind of the details you required okay to add this future in
+this project I don't think it's the difficult
+And we need to know how much is the time frame you need to develop
+Apart from what you have today
+Okay, we'll find that out
+From from your side you have to go back to management and yes be more precise. What do they want?
+Risk take a risk on the market something that's gonna cost more but could very easily
+Yes, make a boom in the market. Yeah, because it has to be something totally different hasn't be totally new
+Something that nobody has right now
+Yes, go to cost but end of the day you're the sales guy. So I will come back and sit on your head because
+Okay, it's a of course. It's good to tell the management how much it's cost us and how much you're going to benefit
+Okay, and so I don't mind to convince okay the management to spend
+Some more money on the project. Okay, if you can make
+out of obviously the money from the bottom line is positive I don't mind to
+convince the the management okay the management says okay so they don't want
+certain facilities which it's already world okay they want something new okay
+I think like a speech recognition definitely they will agree I don't think
+they say no for that okay and I hope I can convince the management on that okay
+so if you have any new ideas okay for you you can always come up and you can
+tell me if you need any special okay coordination okay between any technical
+companies which you can hide the technology backup okay for your functional
+design or technical design okay then I am ready to do that and what's your
+comments about
+Well, I mean, maybe if I go through my presentation, you can sort of see what the user perspective
+is and how it ties into the other two comments.
+Yeah.
+So, you'll finish at so I can, okay, I'll handle the technique, let's get it close to this.
+I'm going to participate in three.
+I'll participate in three.
+You're enjoying it?
+Okay, so, yeah.
+Is it okay? Yeah, that's fine. Okay, so, basically, the method that we usually use in user interface
+design is that we need to look at what people like and what people don't like about existing
+products. So in our case, existing remote controls. And then what the good ideas are and what the
+bad ideas are and why they're bad and good, which isn't always as obvious. We seem to have intuitions
+about why things are good or things are bad. But when you look technically at how it works,
+sometimes that's not the case. Then we need to decide what functionalities we really want to keep
+because that'll feed into both Ed's work and Christine's work. And then what the remote control
+should look like, obviously, once we've got a good idea of what the functionalities are. So in terms
+of the functionalities,
+that we need, you obviously need to be able to turn the TV on and off. You need to change channels both by directly going to a specific channel or by channel surfing.
+You need to be able to control the volume and then control any menus on the TV to regulate contrast or whatever.
+So the problems that people have expressed is that there's too many buttons on remote controls in general.
+The buttons, it's not clear what they're supposed to do.
+Often, you need to know specific button sequences to get certain functionalities done, which you don't necessarily always remember, especially if it's a functionality that you don't use very often, and that the buttons are too small.
+So here we've got two examples where here on the left-hand side you can see a remote control that has lots and lots of buttons.
+The buttons, in a lot of cases, are tiny. They're hard to see, and okay, they're labeled, but the labels don't necessary.
+early tell you too much. Whereas on the other side, you have a much simpler remote control
+that I think basically has the minimum functionalities that are needed. And it sort of looks simpler
+and just less imposing when you first look at it. So I would be inclined to go sort of
+towards this in terms of design rather than this. And if there are specific functionalities
+that require more buttons, then we can figure out how to do it with existing buttons. So
+my personal preferences are to keep the number of buttons to a limit or to a minimum, sorry,
+make frequently used buttons bigger and more strategically placed. So like the on button
+being really obvious when the channel changing and the volume. And to keep the design basically
+sleek and simple, which I think ties into what Christine and Ed have both said fairly
+reasonably. So that's pretty much it. And I don't know if you guys have any questions.
+Oh, it seems very understandable, clearly your research in hours heading in the same
+direction and the only thing that I saw missing from your research that we found was this
+ability to find the doggone thing when you need it.
+Yes, that's true.
+So, you know, but that's okay.
+That's why we're all here at the table.
+So that if we think of it in our research to indicate certain things with its complementary,
+I also think that the feel of it is when you hold it is something that was expressed more
+in my design and that's logical.
+normal because those are the parameters that an industrial designer is more
+thinking about the look and the feel and that's definitely a very important
+factor especially to users who are gonna be buying the thing and I'm using it
+almost on a daily basis in a lot of cases I think okay so I don't have any
+questions sounds good so for anybody need any help for time being on this
+subjects okay so please come back to me and Christian maybe I can try to help
+you to get some the technical other companies to help you for make a
+design slim okay and to add some futures like what we're talking about the speech
+recognition at all should we maybe make a decision about what features we
+actually want to include because we throw in a lot of features onto the table but
+do we actually want to incorporate all of them or have we
+anything do you want to go back and look at the closing slide maybe that would
+provide some guidance doesn't really tell us well it says individual actions it
+says user interface so I'm supposed to do the components concept it's supposed to
+work on the user interface concept and you're supposed to keep watching the
+trends and specific instructions will be sent by our our coach I think we should
+do as many features as start with all of them right now and eliminate them later
+in the process that's my suggestion okay that would be great and I'll send you
+the the minutes of you can object if you want
+I'm just thinking in terms of time.
+She's injecting it.
+Yes, now I'm injecting.
+No, I mean, I was just thinking, is it really practical to start designing something with
+features that we're just going to end up throwing away?
+I mean, it takes a lot of time and effort for everyone to consider different features.
+And if we spend that time and effort on features that we're not going to use, maybe it's better
+to spend it on the thinking more about features that we actually do want, but...
+I don't get to get a magazine for after the meeting, because our meeting time has run out.
+Somebody else just got to use this room and, you know, we can't hang out here and talk
+about this.
+Okay, what we'll do is we'll take for lunch break, okay, then we can discuss for the
+more, okay, with our RDS and then we will come back again in the next meeting.
+So, thanks for coming and I'll send you minutes of meeting and please put your all
+the information in the sharing folder so everybody can share the information.
+Okay.
+So let's go for lunch time.
+I agree.
+Thank you very much.

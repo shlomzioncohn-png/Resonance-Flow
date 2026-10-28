@@ -9,9 +9,11 @@ tau (`similarity.py`, `extraction_eval_design.md` §6): lexical by default,
 or `--backend embedding` once its tau is frozen.
 
 Manual on purpose, like `smoke_gemini.py`: it needs a key, it spends quota,
-and it must never run in CI. The transcript is AMI's human one, not ASR
-output, so this measures extraction alone (mentor's call, 2026-10-25); ASR
-is added on top later.
+and it must never run in CI. By default the transcript is AMI's human one,
+so it measures extraction alone (mentor's call, 2026-10-25). With
+`--transcripts-dir DIR` it reads `DIR/<meeting>.txt` instead — ASR output, one
+segment per line, `#` lines a header that is skipped — to measure extraction
+on what the pipeline actually transcribes; the gold is the same.
 
 The model's answers are written to `--outcomes` (default
 `extraction_outcomes.json`) before scoring, so the LLM is paid for once:
@@ -27,6 +29,8 @@ Usage:
     python scripts/run_ami_extraction_eval.py --from-outcomes extraction_outcomes.json
     python scripts/run_ami_extraction_eval.py --from-outcomes ... --backend embedding
     python scripts/run_ami_extraction_eval.py --from-outcomes ... --backend both   # as reported
+    ... python scripts/run_ami_extraction_eval.py \\
+        --transcripts-dir eval/extraction_runs/asr_transcripts_2026-10-28 --backend both
 """
 
 import argparse
@@ -52,6 +56,8 @@ from mind.ingestion.ami_transcripts import load_gold_actions, load_transcript
 # The v1 slice (`extraction_eval_design.md`, "Scope"): the meetings in ami.manifest.json.
 V1_MEETINGS = ["IB4003", "IS1008b", "IS1008d"]
 
+HUMAN_TRANSCRIPTS = "AMI human transcripts (ami_transcripts.py)"
+
 # Matched pairs scoring from tau to tau + this are reviewed by hand (design §6,
 # #178 step 4): the zone where a wrong pair could clear tau. 0.60-0.75 for lexical.
 REVIEW_BAND_WIDTH = 0.15
@@ -59,7 +65,16 @@ REVIEW_BAND_WIDTH = 0.15
 Outcome = ExtractionSuccess | ExtractionFailure
 
 
-def _extract(meetings: list[str]) -> tuple[list[Outcome], str]:
+def _read_transcript(meeting_id: str, transcripts_dir: Path | None) -> str:
+    """The meeting's text: AMI's human transcript, or `transcripts_dir/<id>.txt`."""
+
+    if transcripts_dir is None:
+        return load_transcript(meeting_id).text
+    lines = (transcripts_dir / f"{meeting_id}.txt").read_text(encoding="utf-8").splitlines()
+    return "\n".join(line for line in lines if line.strip() and not line.startswith("#"))
+
+
+def _extract(meetings: list[str], transcripts_dir: Path | None) -> tuple[list[Outcome], str]:
     from mind.extraction.providers.factory import build_provider
     from mind.extraction.providers.settings import load_gemini_settings
 
@@ -74,11 +89,9 @@ def _extract(meetings: list[str]) -> tuple[list[Outcome], str]:
     with build_provider("gemini") as provider:
         extractor = BasicExtractor(provider)
         for meeting_id in meetings:
-            transcript = load_transcript(meeting_id)
-            print(f"extracting {meeting_id} ({len(transcript.text)} chars)...")
-            outcomes.append(
-                extractor.extract(transcript.text, SourceType.MEETING, item_key=meeting_id)
-            )
+            text = _read_transcript(meeting_id, transcripts_dir)
+            print(f"extracting {meeting_id} ({len(text)} chars)...")
+            outcomes.append(extractor.extract(text, SourceType.MEETING, item_key=meeting_id))
     return outcomes, settings.model
 
 
@@ -203,6 +216,13 @@ def main() -> int:
         "the same answers with each, side by side, as every report shows them",
     )
     parser.add_argument(
+        "--transcripts-dir",
+        type=Path,
+        default=None,
+        help="read each meeting from DIR/<meeting>.txt (e.g. ASR output) instead of AMI's "
+        "human transcript; default meetings: those with a file there",
+    )
+    parser.add_argument(
         "--os-trust-store",
         action="store_true",
         help="verify TLS against the OS trust store (see smoke_gemini.py)",
@@ -220,6 +240,7 @@ def main() -> int:
         data = json.loads(args.from_outcomes.read_text(encoding="utf-8"))
         outcomes = _from_json(data)
         model = data["model"]
+        transcripts = data.get("transcripts", HUMAN_TRANSCRIPTS)
         meetings = sorted({o.item_key for o in outcomes if o.item_key is not None})
         print(f"re-scoring {args.from_outcomes} (model {model}); no model call")
     else:
@@ -227,18 +248,23 @@ def main() -> int:
             import truststore
 
             truststore.inject_into_ssl()
-        meetings = args.meeting or V1_MEETINGS
-        outcomes, model = _extract(meetings)
-        args.outcomes.write_text(
-            json.dumps(_to_json(outcomes, model), indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        if args.transcripts_dir is None:
+            transcripts = HUMAN_TRANSCRIPTS
+            meetings = args.meeting or V1_MEETINGS
+        else:
+            transcripts = f"{args.transcripts_dir.as_posix()}/<meeting>.txt"
+            on_disk = [m for m in V1_MEETINGS if (args.transcripts_dir / f"{m}.txt").exists()]
+            meetings = args.meeting or on_disk
+        outcomes, model = _extract(meetings, args.transcripts_dir)
+        saved = {**_to_json(outcomes, model), "transcripts": transcripts}
+        args.outcomes.write_text(json.dumps(saved, indent=2, ensure_ascii=False), encoding="utf-8")
         print(f"model answers saved to {args.outcomes}")
 
     gold = {meeting_id: load_gold_actions(meeting_id) for meeting_id in meetings}
     scored: dict[str, dict[str, Any]] = {}
     for name, (similarity, threshold) in backends.items():
         report = evaluate_meetings(outcomes, gold, similarity=similarity, threshold=threshold)
-        print(f"\n=== Extraction eval on AMI (human transcripts), model {model} ===")
+        print(f"\n=== Extraction eval on AMI ({transcripts}), model {model} ===")
         print(f"similarity: {similarity.__name__}, threshold {threshold}")
         print(slice_summary_lines(report))
         _print_details(report, threshold)
@@ -262,7 +288,7 @@ def main() -> int:
 
     output: dict[str, Any] = {
         "model": model,
-        "transcripts": "AMI human transcripts (ami_transcripts.py)",
+        "transcripts": transcripts,
     }
     output.update(scored[names[0]] if len(scored) == 1 else {"backends": scored})
     args.report.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
