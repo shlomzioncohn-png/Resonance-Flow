@@ -54,10 +54,16 @@ Normalization rules, applied in this order (see normalize()):
 6. Every character other than a-z, 0-9 and an apostrophe becomes a space:
    punctuation, hyphens ("twenty-five" -> "twenty five", "part-time" -> "part
    time") and Whisper's ellipses, which join words ("you...one").
-7. Spelling variants map to one form: "ok" -> "okay", "alright" -> "all
-   right", "'cause" -> "because", "'kay" -> "okay". Then apostrophes at
-   either end of a word are stripped; apostrophes inside a word stay ("we're"
-   and "were" are different words).
+7. Word forms map to one form, each from a fixed list:
+   - spelling variants: "ok" -> "okay", "alright" -> "all right", "'cause"
+     -> "because", "'kay" -> "okay";
+   - British spellings become American, as Whisper writes them: "organise"
+     -> "organize", "colour" -> "color" (BRITISH_SPELLINGS);
+   - spoken forms AMI writes as said become the words Whisper writes:
+     "wanna" -> "want to", "gonna" -> "going to", "dunno" -> "don't know"
+     (SPOKEN_FORMS).
+   Then apostrophes at either end of a word are stripped; apostrophes inside
+   a word stay ("we're" and "were" are different words).
 8. Filler words and backchannels are removed: uh, um, er, erm, ah, eh, hm,
    hmm, mm, mmm, mhm, huh (so "mm-hmm" and "uh-huh", split by rule 6, go
    too). Whisper drops these by design, and none carries task content.
@@ -128,6 +134,43 @@ SPELLING_VARIANTS = {
     "alright": ["all", "right"],
     "'cause": ["because"],
 }
+
+# Rule 7, British spellings: every one in the reference of IS1008b, IB4003 and
+# IS1008d (#480, D4). A list, not an -ise -> -ize rule, which would also turn
+# "advertise", "otherwise" and "precise" -- in the same reference -- into
+# words that don't exist. A meeting added to the set needs its reference
+# checked for more.
+BRITISH_SPELLINGS = {
+    "authorisation": ["authorization"],
+    "centre": ["center"],
+    "centres": ["centers"],
+    "colour": ["color"],
+    "customisation": ["customization"],
+    "customise": ["customize"],
+    "customised": ["customized"],
+    "finalise": ["finalize"],
+    "labelled": ["labeled"],
+    "labour": ["labor"],
+    "manoeuvre": ["maneuver"],
+    "minimise": ["minimize"],
+    "organise": ["organize"],
+    "recognise": ["recognize"],
+    "recognised": ["recognized"],
+    "synchronise": ["synchronize"],
+    "utilise": ["utilize"],
+}
+
+# Rule 7, spoken forms AMI writes as said and Whisper writes out: every one
+# in the same reference (#480, D4).
+SPOKEN_FORMS = {
+    "wanna": ["want", "to"],
+    "gonna": ["going", "to"],
+    "gotta": ["got", "to"],
+    "dunno": ["don't", "know"],
+    "kinda": ["kind", "of"],
+}
+
+_WORD_FORMS = SPELLING_VARIANTS | BRITISH_SPELLINGS | SPOKEN_FORMS
 
 _ONES = [
     "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
@@ -217,7 +260,7 @@ def normalize(text: str) -> list[str]:
 
     words: list[str] = []
     for token in text.split():
-        for word in SPELLING_VARIANTS.get(token, [token]):
+        for word in _WORD_FORMS.get(token, [token]):
             word = word.strip("'")
             if word and word not in FILLER_WORDS:
                 words.append(word)

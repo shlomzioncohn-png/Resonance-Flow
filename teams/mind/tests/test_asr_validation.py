@@ -109,6 +109,30 @@ def test_spelling_variants_map_to_one_form(variant: str, canonical: str):
     assert normalize(variant) == normalize(canonical)
 
 
+@pytest.mark.parametrize(
+    ("ami", "whisper"),
+    [("organise", "organize"), ("Colour", "color"), ("labelled", "labeled"),
+     ("manoeuvre", "maneuver"), ("recognised", "recognized")],
+)  # fmt: skip
+def test_british_spellings_match_whispers_american(ami: str, whisper: str):
+    assert normalize(ami) == normalize(whisper)
+
+
+def test_only_the_listed_british_spellings_change():
+    # -ise words that are not British spellings stay as they are.
+    words = "advertise otherwise precise promised surprised"
+    assert normalize(words) == words.split()
+
+
+@pytest.mark.parametrize(
+    ("ami", "whisper"),
+    [("wanna", "want to"), ("gonna", "going to"), ("gotta", "got to"),
+     ("dunno", "don't know"), ("kinda", "kind of")],
+)  # fmt: skip
+def test_spoken_forms_match_whispers_words(ami: str, whisper: str):
+    assert normalize(ami) == normalize(whisper)
+
+
 def test_bare_cause_is_not_because():
     # Only the apostrophe form is the conjunction; "cause" may be the noun.
     assert normalize("the cause") == ["the", "cause"]

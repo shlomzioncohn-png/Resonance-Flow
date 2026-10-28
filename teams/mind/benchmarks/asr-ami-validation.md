@@ -46,7 +46,7 @@ pinned by `test_the_fixed_set_is_pinned`.
 | IS1008b | `IS1008b.Mix-Headset.wav`, 1,768.5 s | 442–682, 884–1124, 1326–1566 |
 | IB4003 | `IB4003.Mix-Headset.wav`, 2,023.3 s | 506–746, 1012–1252, 1517–1757 |
 
-24 minutes of audio, 3,999 reference words after normalization. Reference: AMI's
+24 minutes of audio, 4,006 reference words after normalization. Reference: AMI's
 human transcript (`words/` layer of `ami_public_manual_1.6.2`), all four
 speakers interleaved by word start time. A word belongs to the window it
 *starts* in. CC BY 4.0, as in the manifest.
@@ -65,9 +65,20 @@ applied identically to reference and transcript, in this order:
 6. Every character except a–z, 0–9 and `'` becomes a space — punctuation,
    hyphens (`twenty-five`, `part-time`), and Whisper's ellipses that join
    words (`you...one`).
-7. `ok` → `okay`, `alright` → `all right`, `'cause` → `because`, `'kay` →
-   `okay`; then apostrophes at a word's edges are stripped, apostrophes inside
-   a word kept (`we're` ≠ `were` — #135's diff conflated them).
+7. Word forms, each from a fixed list (D4):
+   - `ok` → `okay`, `alright` → `all right`, `'cause` → `because`, `'kay` →
+     `okay`;
+   - British spellings become American, as Whisper writes them: every one in
+     the reference of IS1008b, IB4003 and IS1008d (17 words: `organise` →
+     `organize`, `colour` → `color`, `labelled` → `labeled`, …). A list, not
+     an *-ise* → *-ize* rule: `advertise`, `otherwise` and `precise` are in
+     the same reference;
+   - AMI's spoken forms become the words Whisper writes: `wanna` → `want to`,
+     `gonna` → `going to`, `gotta` → `got to`, `dunno` → `don't know`,
+     `kinda` → `kind of`.
+
+   Then apostrophes at a word's edges are stripped, apostrophes inside a word
+   kept (`we're` ≠ `were` — #135's diff conflated them).
 8. Fillers and backchannels removed: uh, um, er, erm, ah, eh, hm, hmm, mm,
    mmm, mhm, huh (so `mm-hmm`, `uh-huh` go too).
 
@@ -77,9 +88,7 @@ truncated words (`trunc="true"`, e.g. "recognit").
 
 Not normalized, on purpose, and listed so the residue is known: years and
 spoken number forms ("nineteen ninety five", "a hundred and fifty"), times as
-decimals ("9.30"), British/American spelling, AMI's spoken forms ("wanna",
-"dunno", "kinda") against Whisper's "want to"/"don't know"/"kind of". The last
-two measurably cost ~0.2 WER points — see F3.
+decimals ("9.30").
 
 **WER** is jiwer 4.0.0's word-level Levenshtein. Per-meeting and overall
 figures are **pooled** (errors summed over reference words), not averaged
@@ -115,26 +124,33 @@ measured.
 ### F1. WER per window and overall
 
 The 2026-10-28 run, one run per size; every window completed for every size.
-Overlapped = share of the window's reference words spoken while another
-speaker was speaking (F3).
+Scored with the normalization above, including D4's word forms. Overlapped =
+share of the window's reference words spoken while another speaker was
+speaking (F3).
 
 | Window | Overlapped | tiny.en | base.en | small.en |
 |---|---|---|---|---|
-| IS1008b 442–682 | 24.9% | 0.258 | 0.272 | 0.237 |
-| IS1008b 884–1124 | 12.6% | 0.127 | 0.124 | 0.107 |
-| IS1008b 1326–1566 | 3.7% | 0.068 | 0.059 | 0.059 |
-| IB4003 506–746 | 10.9% | 0.161 | 0.152 | 0.135 |
-| IB4003 1012–1252 | 32.3% | 0.253 | 0.245 | 0.220 |
-| IB4003 1517–1757 | 28.7% | 0.247 | 0.246 | 0.214 |
+| IS1008b 442–682 | 24.8% | 0.252 | 0.261 | 0.232 |
+| IS1008b 884–1124 | 12.5% | 0.122 | 0.120 | 0.103 |
+| IS1008b 1326–1566 | 3.8% | 0.063 | 0.054 | 0.057 |
+| IB4003 506–746 | 10.9% | 0.159 | 0.151 | 0.134 |
+| IB4003 1012–1252 | 32.3% | 0.251 | 0.242 | 0.218 |
+| IB4003 1517–1757 | 28.8% | 0.247 | 0.246 | 0.214 |
 
 Pooled:
 
 | | tiny.en | base.en | small.en |
 |---|---|---|---|
-| IS1008b (3 windows) | 0.139 | 0.138 | 0.123 |
-| IB4003 (3 windows) | 0.222 | 0.216 | 0.191 |
-| **Overall, all 6 windows** | 0.188 | **0.184** | **0.163** |
-| Substitutions / deletions / insertions | 197 / 524 / 30 | 160 / 554 / 21 | 120 / 505 / 27 |
+| IS1008b (3 windows) | 0.134 | 0.132 | 0.119 |
+| IB4003 (3 windows) | 0.221 | 0.215 | 0.190 |
+| **Overall, all 6 windows** | 0.185 | **0.180** | **0.161** |
+| Substitutions / deletions / insertions | 181 / 530 / 29 | 146 / 558 / 19 | 109 / 509 / 26 |
+
+- **D4's word forms lowered every size's WER by 0.2–0.4 points** on the same
+  transcripts (before them: 0.188 / 0.184 / 0.163), almost all in
+  substitutions (base.en: 160 → 146). The most frequent form is `gonna`: 28 times in the three meetings' reference.
+  The comparisons with the 10-15 run below are on the earlier normalization,
+  since that run was scored with it.
 
 - **The 2026-10-15 run measured `small.en` on 5 windows only.** The
   pipeline's timeout cut it off on IS1008b 442–682 (0.336, counting audio never
@@ -145,9 +161,9 @@ Pooled:
   16 have the identical transcript; the one that differs is IB4003 1517–1757
   for tiny.en and base.en (0.250 → 0.247, 0.244 → 0.246). base.en's overall
   WER moved 0.183 → 0.184.
-- **Within one size, windows range ~4.6x** (base.en: 0.059 to 0.272). The
+- **Within one size, windows range ~4.8x** (base.en: 0.054 to 0.261). The
   overall figure hides that spread.
-- **base.en's normalized WER is 0.184**, against #135's rough 0.263 on the
+- **base.en's normalized WER is 0.180**, against #135's rough 0.263 on the
   same two meetings. Different spans, though: whole meetings there, windows
   here — so the gap is not the effect of normalization alone.
 
@@ -173,9 +189,9 @@ Pooled:
 
 ### F3. What the errors are
 
-**Deletions dominate:** 554 of base.en's 735 errors (75%), and the deletion
-count moves little with model size (505–554). small.en's gain is mostly in
-substitutions: 120 against base.en's 160 (F1).
+**Deletions dominate:** 558 of base.en's 723 errors (77%), and the deletion
+count moves little with model size (509–558). small.en's gain is mostly in
+substitutions: 109 against base.en's 146 (F1).
 
 **Deletions concentrate in overlapped speech.** A reference word counts as
 overlapped when another speaker's word intersects it in time (AMI word
@@ -183,33 +199,34 @@ timings).
 
 | Size | Words | Overlapped: deletion rate | Not overlapped: deletion rate | Ratio | Overlapped: subst. rate | Not: subst. rate |
 |---|---|---|---|---|---|---|
-| tiny.en | all | 0.398 | 0.067 | 5.9x | 0.090 | 0.039 |
-| base.en | all | **0.411** | **0.073** | **5.6x** | 0.075 | 0.032 |
-| base.en | without response words* | 0.366 | 0.069 | 5.3x | 0.074 | 0.031 |
-| small.en | all | 0.403 | 0.060 | 6.7x | 0.048 | 0.026 |
+| tiny.en | all | 0.399 | 0.068 | 5.9x | 0.086 | 0.035 |
+| base.en | all | **0.412** | **0.073** | **5.6x** | 0.071 | 0.028 |
+| base.en | without response words* | 0.367 | 0.069 | 5.3x | 0.070 | 0.027 |
+| small.en | all | 0.403 | 0.060 | 6.7x | 0.047 | 0.022 |
 
 \* yeah, yes, yep, okay, right, oh, no, sure — often overlapped and often
 dropped, so left out to check they don't produce the effect alone. They don't:
 the ratio barely changes.
 
-- **Overlapped words are 19.4% of the reference but 57.6% of base.en's
-  deletions** (319 of 554); 59.0% for tiny.en, 62.0% for small.en.
+- **Overlapped words are 19.4% of the reference but 57.5% of base.en's
+  deletions** (321 of 558); 58.7% for tiny.en, 61.7% for small.en.
 - **Window by window, the order of overlap and WER mostly agree** (F1 table):
-  the 3.7%-overlap window has the lowest WER, the 24.9–32.3% windows the
+  the 3.8%-overlap window has the lowest WER, the 24.8–32.3% windows the
   highest.
 - **The exception is IB4003 506–746:** 10.9% overlap but 93 deletions (base.en),
-  far more than IS1008b 884–1124 at 12.6% overlap with 37.
+  far more than IS1008b 884–1124 at 12.5% overlap with 39.
 
-**Most deletions are isolated words.** For base.en, 109 of 554 deletions (19.7%)
+**Most deletions are isolated words.** For base.en, 109 of 558 deletions (19.5%)
 sit in runs of 5+ consecutive words (15 runs, the longest 12 words) — whole
 utterances missing. Most deleted words (overlapped / not): yeah 42/11, the 11/25,
 it's 8/11, okay 10/4, no 8/1.
 
-**Substitutions are a long tail:** base.en's 160 substitutions are 150 distinct
+**Substitutions are a long tail:** base.en's 146 substitutions are 137 distinct
 pairs, no pair more than 3 times.
-- **Normalization residue, not recognition errors:** 8 of them are British vs.
-  American spelling (organise ×2, recognise, authorisation) or AMI's spoken
-  forms (wanna, dunno, kinda, gonna). That is ~0.2 WER points.
+- **D4 took out the normalization residue seen among them:** British vs.
+  American spelling (organise ×2, recognise, authorisation) and AMI's spoken
+  forms (wanna, dunno, kinda, gonna). With it, base.en's substitutions went
+  from 160 to 146 on the same transcripts.
 - **Examples from base.en** (examples, not a counted category):
   - *Names:* christine → christian, pierrette → pierre, eddie → you.
   - *Domain words:* titanium → time, feature → future (×2), steel → steal,
@@ -259,7 +276,7 @@ four in both runs):
   - *Why it matters:* interleaving speakers by start time is a guess at word
     order. A transcript holding both speakers in another order would also
     score deletions.
-  - *Against reordering:* insertions are few (21–30 per size) — a
+  - *Against reordering:* insertions are few (19–29 per size) — a
     reordered word would show up as an insertion or substitution.
   - *Test:* bag-of-words recall of each overlapped stretch, independent of
     order.
@@ -270,7 +287,7 @@ four in both runs):
     timing, and see which speakers the deleted words belong to.
 - **H4 — small.en is really ~2 WER points better, mostly fewer
   substitutions.**
-  - *Fits:* 6 windows (0.184 → 0.163), and run-to-run noise looks small: the
+  - *Fits:* 6 windows (0.180 → 0.161), and run-to-run noise looks small: the
     5 windows small.en completed in both runs have identical transcripts,
     although it samples on fallback (#135).
   - *Unknown:* whether 2 points hold over more meetings — 6 windows from 2
@@ -308,12 +325,12 @@ four in both runs):
   - *What the data supports:* keep `base.en`, as #135 decided — confirmed on
     normalized WER, not revised. The case against small.en is cost and the
     time limit, not that it is too slow on every call (the 10-15 reading).
-    - Over tiny.en: 0.4 points of WER and 19% fewer substitutions, at 1.8x
+    - Over tiny.en: 0.5 points of WER and 19% fewer substitutions, at 1.8x
       the CPU.
-    - small.en is 2.1 points better (0.163 vs. 0.184), mostly on
-      substitutions (120 vs. 160: names and domain terms, F3). It does not
+    - small.en is 1.9 points better (0.161 vs. 0.180), mostly on
+      substitutions (109 vs. 146: names and domain terms, F3). It does not
       help where most words are lost: overlapped speech is deleted at the
-      same rate (0.403 vs. 0.411).
+      same rate (0.403 vs. 0.412).
     - It costs 2.2x base.en's CPU (F2). A recording of `MAX_DURATION_S`
       (600 s) at its measured RTF would take ~90–300 s on 10-28's host and
       ~360–460 s on 10-15's, against a `TRANSCRIBE_TIMEOUT_S` of 240 s — on
@@ -325,15 +342,16 @@ four in both runs):
   loses overlapped speech, so a single-channel model will not recover it.
   Whether that matters is R2's call (out of scope for #480 unless she says
   extraction needs it).
-- **D4 — Two more normalization rules?** British→American spelling and AMI's
-  spoken forms (F3: ~0.2 WER points). Adding them changes every number, so
-  decide before the final measurement, not after.
+- **D4 — Two more normalization rules: decided, added (2026-10-28).**
+  British→American spelling and AMI's spoken forms are now part of rule 7,
+  before the final measurement, so the final numbers use them from the start.
+  They lowered every size's WER by 0.2–0.4 points (F1).
 
 ## For R2: what to expect in the text reaching extraction
 
 Measured on base.en, provisional set:
 
-- **About 1 reference word in 5 is wrong or missing** (WER 0.184). It varies a
+- **About 1 reference word in 5 is wrong or missing** (WER 0.180). It varies a
   lot by stretch: ~6% in the window with the least overlapping speech, ~25% in
   the most overlapped ones (F1).
 - **Missing, not invented, is the main error.** 3 of 4 errors are deletions
