@@ -497,18 +497,15 @@ compared, the small-sample and many-items cases, and ASR per minute of audio
 `tests/test_cost_latency_monitoring.py` checks that ASR records the audio it
 ran on, up to the cap.
 
-### Not done yet
+### The conclusion
 
-- **The 1,000-item run** (#483) -- the second headline dataset. It waits for
-  #483; the report needs no change for it, only the run's directory.
 - **The written conclusion** -- the most expensive stage, the cost per item,
-  anything trending badly -- is drafted in `benchmarks/cost-latency-484.md`
-  from the demo dataset; its 1,000-item half waits for that run. From the
-  current #482 baseline (the two 2026-10-27 runs, 6 items, every stage
-  recorded): `to_text` -- ASR, with OCR's unmeasured CPU beside it -- is 93% of
-  the measured CPU (~31 CPU s a meeting) and 38% of the wall time in calls;
-  an item costs ~$0.0044 in LLM calls whatever its
-  type; 10,000 items at the demo's mix, ~$45 and at least 30 CPU-hours.
+  anything trending badly -- is in `benchmarks/cost-latency-484.md`, over
+  the demo dataset: the #482 baseline's two 2026-10-27 runs, 6 items, every
+  stage recorded. `to_text` -- ASR, with OCR's unmeasured CPU beside it -- is
+  93% of the measured CPU (~31 CPU s a meeting) and 38% of the wall time in
+  calls; an item costs ~$0.0045 in LLM calls whatever its type; 10,000 items
+  at the demo's mix, ~$45 and at least 29.5 CPU-hours.
 - **Cost per ASR minute** is reported for runs recorded since `audio_s` was
   added (`mind.model_call/2`); the #482 baseline's files are `/1`, so the
   report says it is not recorded there. Worked out by hand from them (the
