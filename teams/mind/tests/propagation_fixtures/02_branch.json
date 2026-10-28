@@ -1,16 +1,16 @@
 {
   "name": "branch",
-  "description": "One high-importance parent with children vs. an unrelated low-importance parent whose children look more urgent on their own features. At the current 0.93/0.07 weighting, own importance alone already produces the expected order -- see notes.",
+  "description": "One high-importance parent with children vs. an unrelated low-importance parent whose children look marginally more urgent on their own features. At the current 0.93/0.07 weighting, the children's own importance is close enough that the parent goal's importance still decides the order -- see notes.",
   "graph": {
     "nodes": [
       {"task_id": "goal_high", "parent_task_id": null, "importance": 0.9, "label": "Top strategic goal"},
       {"task_id": "goal_low", "parent_task_id": null, "importance": 0.15, "label": "Routine, deprioritized goal"},
-      {"task_id": "task_high_1", "parent_task_id": "goal_high", "importance": 0.3, "label": "Child of the strategic goal, low own urgency"},
-      {"task_id": "task_high_2", "parent_task_id": "goal_high", "importance": 0.2, "label": "Another child of the strategic goal, even lower own urgency"},
-      {"task_id": "task_low_1", "parent_task_id": "goal_low", "importance": 0.8, "label": "Child of the routine goal, looks urgent on its own"},
-      {"task_id": "task_low_2", "parent_task_id": "goal_low", "importance": 0.7, "label": "Another child of the routine goal"}
+      {"task_id": "task_high_1", "parent_task_id": "goal_high", "importance": 0.30, "label": "Child of the strategic goal"},
+      {"task_id": "task_high_2", "parent_task_id": "goal_high", "importance": 0.29, "label": "Another child of the strategic goal, marginally lower own urgency"},
+      {"task_id": "task_low_1", "parent_task_id": "goal_low", "importance": 0.33, "label": "Child of the routine goal, marginally more urgent on its own"},
+      {"task_id": "task_low_2", "parent_task_id": "goal_low", "importance": 0.32, "label": "Another child of the routine goal"}
     ]
   },
-  "expected_order": ["task_low_1", "task_low_2", "task_high_1", "task_high_2"],
-  "notes": "Written for an earlier 0.5*own + 0.5*mean(ancestors) weighting, where the parent goal's importance was strong enough to flip the across-group order despite task_low_1/2's higher own importance (0.7-0.8 vs 0.2-0.3) -- that flip was the fixture's whole point ('proves propagation changes the outcome, not just that it runs'). Revised down to 0.93*own + 0.07*mean(ancestors) (review on #474): 0.07 is too small for a 0.75-point ancestor-importance gap (goal_high=0.9 vs goal_low=0.15) to outweigh a 0.5-point own-importance gap (task_low ~0.75 vs task_high ~0.25) -- task_high_1=0.93*0.3+0.07*0.9=0.342, task_high_2=0.93*0.2+0.07*0.9=0.249, task_low_1=0.93*0.8+0.07*0.15=0.7545, task_low_2=0.93*0.7+0.07*0.15=0.6615. Own importance alone already produces this exact order; at this weight, this fixture no longer demonstrates that propagation changes the outcome -- it would rank the same with ancestors ignored entirely. Left as a regression check on the arithmetic (and on OWN_WEIGHT not silently drifting back up), not as evidence that hierarchy matters here."
+  "expected_order": ["task_high_1", "task_high_2", "task_low_1", "task_low_2"],
+  "notes": "Written for an earlier 0.5*own + 0.5*mean(ancestors) weighting, where the parent goal's importance was strong enough to flip the across-group order despite task_low_1/2's higher own importance (0.7-0.8 vs 0.2-0.3). Revised down to 0.93*own + 0.07*mean(ancestors) (review on #474) broke that: 0.07 was too small for the 0.75-point ancestor-importance gap to outweigh a 0.5-point own-importance gap, so own importance alone already produced the (unchanged) expected order -- the fixture no longer demonstrated that propagation changes the outcome. Fixed by narrowing the own-importance gap instead of the ancestor gap: task_high_1/2 at 0.30/0.29, task_low_1/2 at 0.33/0.32 (max own-importance gap now 0.03, scaled by 0.93 = 0.0279) versus the unchanged 0.75-point ancestor gap (scaled by 0.07 = 0.0525) -- the ancestor gap now wins. Scores: task_high_1=0.93*0.30+0.07*0.9=0.342, task_high_2=0.93*0.29+0.07*0.9=0.3297, task_low_1=0.93*0.33+0.07*0.15=0.3174, task_low_2=0.93*0.32+0.07*0.15=0.3081 -- the high group now outranks the low group despite the low group's own importance being nominally higher, which a formula reading only the leaf's own score (or ignoring ancestors) would get backwards."
 }
