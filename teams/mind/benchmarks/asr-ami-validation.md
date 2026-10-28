@@ -1,10 +1,10 @@
 # MIND — ASR Validation Against AMI, with a Measured WER (#480)
 
-**Status: measurement infrastructure complete; results provisional.** The file
-set is not final (it waits on R2, who owns the AMI slice), and neither the model
-nor the pipeline's time limits were changed on these numbers. The numbers are
-from a re-run on 2026-10-28, on the pipeline after #481; the first run
-(2026-10-15) measured `small.en` only partially — see F1.
+**Status: measured on the proposed final set; the set awaits R2's
+confirmation (D1).** The numbers are from the final run on 2026-10-28 — nine
+windows from the three meetings of the real-data slice, on the pipeline after
+#481. Neither the model nor the pipeline's time limits were changed on them.
+An earlier run (2026-10-15) measured `small.en` only partially — see F1.
 
 This document keeps three kinds of statement apart, and each section says which
 one it holds:
@@ -33,9 +33,10 @@ through `mind.multimodal.asr.transcribe()` as WAV bytes — the same chunking,
 VAD, caps and timeout as in production. The run fails unless each call leaves
 an ASR `record_call()` record under the size being measured; latency and CPU
 time come from that record. (#135's `asr_benchmark.py` called faster-whisper
-directly; it is unchanged, so its numbers still reproduce.)
+directly; it keeps to its two meetings, `SIZE_BENCHMARK_MEETINGS`, so its
+numbers still reproduce.)
 
-**The fixed set (provisional — see D1).** Three 240 s windows per meeting, at
+**The fixed set (proposed — see D1).** Three 240 s windows per meeting, at
 1/4, 1/2 and 3/4 of its length. Windows rather than whole meetings because
 `transcribe()` decodes at most `MAX_DURATION_S` (600 s) and gives up after
 `TRANSCRIBE_TIMEOUT_S` (240 s) — a 30-minute meeting hits both. The set is
@@ -45,11 +46,10 @@ pinned by `test_the_fixed_set_is_pinned`.
 |---|---|---|
 | IS1008b | `IS1008b.Mix-Headset.wav`, 1,768.5 s | 442–682, 884–1124, 1326–1566 |
 | IB4003 | `IB4003.Mix-Headset.wav`, 2,023.3 s | 506–746, 1012–1252, 1517–1757 |
-| IS1008d | `IS1008d.Mix-Headset.wav`, 1,480.8 s | 370–610, 740–980, 1111–1351 — **added for D1, not yet measured** |
+| IS1008d | `IS1008d.Mix-Headset.wav`, 1,480.8 s | 370–610, 740–980, 1111–1351 |
 
-The numbers below cover the first two meetings: 24 minutes of audio, 4,006
-reference words after normalization. Reference: AMI's
-human transcript (`words/` layer of `ami_public_manual_1.6.2`), all four
+36 minutes of audio, 6,100 reference words after normalization. Reference:
+AMI's human transcript (`words/` layer of `ami_public_manual_1.6.2`), all four
 speakers interleaved by word start time. A word belongs to the window it
 *starts* in. CC BY 4.0, as in the manifest.
 
@@ -90,7 +90,8 @@ truncated words (`trunc="true"`, e.g. "recognit").
 
 Not normalized, on purpose, and listed so the residue is known: years and
 spoken number forms ("nineteen ninety five", "a hundred and fifty"), times as
-decimals ("9.30").
+decimals ("9.30"), and `etcetera` against Whisper's `etc` (2 substitutions,
+small.en only).
 
 **WER** is jiwer 4.0.0's word-level Levenshtein. Per-meeting and overall
 figures are **pooled** (errors summed over reference words), not averaged
@@ -98,9 +99,9 @@ rates. Only the WER is unique: when two alignments cost the same, how errors
 split into S/D/I is jiwer's choice.
 
 **Engine and host:** faster-whisper int8, CPU, 4 threads, beam 5; one dev
-laptop, 2026-10-15 and again 2026-10-28. `tiny.en`/`small.en` load unpinned weights (no sha256
-check — `PINNED_WHISPER_MODELS` pins only `base.en`); they were hash-checked
-when placed by hand in #135.
+laptop, runs on 2026-10-15 and twice on 2026-10-28. `tiny.en`/`small.en` load
+unpinned weights (no sha256 check — `PINNED_WHISPER_MODELS` pins only
+`base.en`); they were hash-checked when placed by hand in #135.
 
 **Reproduce** (from `teams/mind/`, with the AMI audio and annotations placed as
 in the manifest):
@@ -125,10 +126,9 @@ measured.
 
 ### F1. WER per window and overall
 
-The 2026-10-28 run, one run per size; every window completed for every size.
-Scored with the normalization above, including D4's word forms. Overlapped =
-share of the window's reference words spoken while another speaker was
-speaking (F3).
+The final run (2026-10-28), one run per size; every window completed for every
+size. Overlapped = share of the window's reference words spoken while another
+speaker was speaking (F3).
 
 | Window | Overlapped | tiny.en | base.en | small.en |
 |---|---|---|---|---|
@@ -138,6 +138,9 @@ speaking (F3).
 | IB4003 506–746 | 10.9% | 0.159 | 0.151 | 0.134 |
 | IB4003 1012–1252 | 32.3% | 0.251 | 0.242 | 0.218 |
 | IB4003 1517–1757 | 28.8% | 0.247 | 0.246 | 0.214 |
+| IS1008d 370–610 | 22.5% | 0.248 | 0.240 | 0.221 |
+| IS1008d 740–980 | 23.4% | 0.191 | 0.157 | 0.157 |
+| IS1008d 1111–1351 | 22.8% | 0.173 | 0.164 | 0.159 |
 
 Pooled:
 
@@ -145,55 +148,60 @@ Pooled:
 |---|---|---|---|
 | IS1008b (3 windows) | 0.134 | 0.132 | 0.119 |
 | IB4003 (3 windows) | 0.221 | 0.215 | 0.190 |
-| **Overall, all 6 windows** | 0.185 | **0.180** | **0.161** |
-| Substitutions / deletions / insertions | 181 / 530 / 29 | 146 / 558 / 19 | 109 / 509 / 26 |
+| IS1008d (3 windows) | 0.202 | 0.184 | 0.176 |
+| **Overall, all 9 windows** | 0.190 | **0.182** | **0.166** |
+| Substitutions / deletions / insertions | 303 / 782 / 77 | 248 / 796 / 64 | 185 / 767 / 61 |
 
-- **D4's word forms lowered every size's WER by 0.2–0.4 points** on the same
-  transcripts (before them: 0.188 / 0.184 / 0.163), almost all in
-  substitutions (base.en: 160 → 146). The most frequent form is `gonna`: 28 times in the three meetings' reference.
-  The comparisons with the 10-15 run below are on the earlier normalization,
-  since that run was scored with it.
-
-- **The 2026-10-15 run measured `small.en` on 5 windows only.** The
-  pipeline's timeout cut it off on IS1008b 442–682 (0.336, counting audio never
-  transcribed), so that run reported small.en on the other 5 windows (0.154)
-  and called it not viable on its latency (F2, D2). On 2026-10-28 the same window completed
-  (0.237), so the 6-window figure above is the first complete one.
-- **The re-run reproduces the first.** Of the 17 windows both runs completed,
-  16 have the identical transcript; the one that differs is IB4003 1517–1757
-  for tiny.en and base.en (0.250 → 0.247, 0.244 → 0.246). base.en's overall
-  WER moved 0.183 → 0.184.
 - **Within one size, windows range ~4.8x** (base.en: 0.054 to 0.261). The
   overall figure hides that spread.
-- **base.en's normalized WER is 0.180**, against #135's rough 0.263 on the
-  same two meetings. Different spans, though: whole meetings there, windows
-  here — so the gap is not the effect of normalization alone.
+- **base.en's normalized WER is 0.182** (0.180 on IS1008b and IB4003 alone),
+  against #135's rough 0.263 on those two meetings. Different spans, though:
+  whole meetings there, windows here — so the gap is not the effect of
+  normalization alone.
+- **IS1008d has most of the set's insertions:** 42 of base.en's 64 (H8).
+- **The runs reproduce.** Across the three runs, every window's transcript is
+  identical run to run, small.en's included — except IB4003 1517–1757 for
+  tiny.en and base.en, which differs every time (base.en scores 0.246 in both
+  10-28 runs, with a different S/D/I split), and the small.en window the
+  10-15 run cut short.
+- **The 2026-10-15 run measured `small.en` on 5 windows only.** The pipeline's
+  timeout cut it off on IS1008b 442–682 (0.336, counting audio never
+  transcribed), so that run reported small.en on the other 5 windows and
+  called it not viable on its latency (F2, D2). On 10-28 the same window
+  completed (0.232).
+- **D4's word forms lowered every size's WER by 0.2–0.4 points** on the first
+  two meetings' transcripts (base.en 0.184 → 0.180), almost all in
+  substitutions (base.en: 160 → 146). The most frequent form is `gonna`: 28
+  times in the three meetings' reference.
 
 ### F2. Runtime (from the `record_call()` records)
 
-| | RTF per window, 10-28 | CPU s per 240 s window, 10-28 | RTF, 10-15 | CPU s, 10-15 |
-|---|---|---|---|---|
-| tiny.en | 0.060–0.167 | 37–87 | 0.058–0.165 | 37–85 |
-| base.en | 0.129–0.221 | 69–146 | 0.109–0.370 | 71–254 |
-| small.en | 0.153–0.499 | 140–303 | 0.603–0.765 (5 windows); 1.200 truncated | 399–508 |
+RTF and CPU seconds per 240 s window, per run:
 
-- **On 10-28 no call passed the 120 s "slow" limit** for any size (small.en's
-  slowest: RTF 0.499, ~120 s). On 10-15 every small.en call did, and the
-  truncated one ran 288 s against a `TRANSCRIBE_TIMEOUT_S` of 240 s.
-- **small.en took about half the time and CPU on 10-28 for the same
-  transcripts** (the 5 windows both runs completed are identical, F1). Same
-  output means the same decoding work, so the difference is the host's state,
-  not the pipeline: on this laptop, the same work varies ~2x between runs.
-- **base.en's RTF (~0.13–0.22) is still above #135's clean run (~0.1).** See
-  H5.
-- **CPU per window, summed over the 6 windows (10-28):** tiny.en 404 s,
-  base.en 726 s, small.en 1,597 s — small.en is 2.2x base.en.
+| | 10-15 | 10-28, first (6 windows) | 10-28, final (9 windows) |
+|---|---|---|---|
+| tiny.en RTF / CPU s | 0.058–0.165 / 37–85 | 0.060–0.167 / 37–87 | 0.026–0.059 / 23–53 |
+| base.en RTF / CPU s | 0.109–0.370 / 71–254 | 0.129–0.221 / 69–146 | 0.049–0.181 / 44–150 |
+| small.en RTF / CPU s | 0.603–0.765 / 399–508 (5 windows); 1.200 truncated | 0.153–0.499 / 140–303 | 0.122–0.690 / 114–446 |
+| Calls over the 120 s "slow" limit | small.en 6 of 6 | none | small.en 2 of 9 (166 s, 158 s) |
+
+- **The host, not the pipeline, sets these numbers.** The transcripts are the
+  same run to run (F1), so the decoding work is the same, yet the time for it
+  moves 2–3x between runs, and within the final run small.en's RTF swung
+  0.12–0.69 across windows of the same length.
+- **The truncated 10-15 call ran 288 s** against a `TRANSCRIBE_TIMEOUT_S` of
+  240 s (H6).
+- **base.en ran at 0.05–0.10 RTF on 8 of 9 windows in the final run**, at or
+  below #135's clean ~0.1 (H5).
+- **CPU summed over a run's windows:** final run tiny.en 385 s, base.en 725 s,
+  small.en 2,584 s (3.6x base.en); first 10-28 run 2.2x. small.en costs 2–4x
+  base.en's CPU, depending on the run.
 
 ### F3. What the errors are
 
-**Deletions dominate:** 558 of base.en's 723 errors (77%), and the deletion
-count moves little with model size (509–558). small.en's gain is mostly in
-substitutions: 109 against base.en's 146 (F1).
+**Deletions dominate:** 796 of base.en's 1,108 errors (72%), and the deletion
+count moves little with model size (767–796). small.en's gain is mostly in
+substitutions: 185 against base.en's 248 (F1).
 
 **Deletions concentrate in overlapped speech.** A reference word counts as
 overlapped when another speaker's word intersects it in time (AMI word
@@ -201,72 +209,89 @@ timings).
 
 | Size | Words | Overlapped: deletion rate | Not overlapped: deletion rate | Ratio | Overlapped: subst. rate | Not: subst. rate |
 |---|---|---|---|---|---|---|
-| tiny.en | all | 0.399 | 0.068 | 5.9x | 0.086 | 0.035 |
-| base.en | all | **0.412** | **0.073** | **5.6x** | 0.071 | 0.028 |
-| base.en | without response words* | 0.367 | 0.069 | 5.3x | 0.070 | 0.027 |
-| small.en | all | 0.403 | 0.060 | 6.7x | 0.047 | 0.022 |
+| tiny.en | all | 0.396 | 0.059 | 6.7x | 0.086 | 0.040 |
+| base.en | all | **0.404** | **0.059** | **6.8x** | 0.065 | 0.034 |
+| base.en | without response words* | 0.350 | 0.055 | 6.4x | 0.066 | 0.033 |
+| small.en | all | 0.407 | 0.052 | 7.8x | 0.042 | 0.027 |
 
 \* yeah, yes, yep, okay, right, oh, no, sure — often overlapped and often
 dropped, so left out to check they don't produce the effect alone. They don't:
 the ratio barely changes.
 
-- **Overlapped words are 19.4% of the reference but 57.5% of base.en's
-  deletions** (321 of 558); 58.7% for tiny.en, 61.7% for small.en.
+- **Overlapped words are 20.6% of the reference but 63.9% of base.en's
+  deletions** (509 of 796); 63.7% for tiny.en, 66.9% for small.en.
 - **Window by window, the order of overlap and WER mostly agree** (F1 table):
   the 3.8%-overlap window has the lowest WER, the 24.8–32.3% windows the
-  highest.
+  highest, IS1008d's 22.5–23.4% windows in between.
 - **The exception is IB4003 506–746:** 10.9% overlap but 93 deletions (base.en),
   far more than IS1008b 884–1124 at 12.5% overlap with 39.
 
-**Most deletions are isolated words.** For base.en, 109 of 558 deletions (19.5%)
-sit in runs of 5+ consecutive words (15 runs, the longest 12 words) — whole
-utterances missing. Most deleted words (overlapped / not): yeah 42/11, the 11/25,
-it's 8/11, okay 10/4, no 8/1.
+**Most deletions are isolated words.** For base.en, 155 of 796 deletions (19.5%)
+sit in runs of 5+ consecutive words (21 runs, the longest 17 words, F4.4) —
+whole utterances missing. Most deleted words (overlapped / not): yeah 62/14,
+yes 22/0, okay 17/10, it's 16/11, the 16/31.
 
-**Substitutions are a long tail:** base.en's 146 substitutions are 137 distinct
-pairs, no pair more than 3 times.
+**Substitutions are a long tail:** base.en's 248 substitutions are 218 distinct
+pairs, no pair more than 5 times (a → the, the → a).
 - **D4 took out the normalization residue seen among them:** British vs.
   American spelling (organise ×2, recognise, authorisation) and AMI's spoken
-  forms (wanna, dunno, kinda, gonna). With it, base.en's substitutions went
-  from 160 to 146 on the same transcripts.
+  forms (wanna, dunno, kinda, gonna).
 - **Examples from base.en** (examples, not a counted category):
   - *Names:* christine → christian, pierrette → pierre, eddie → you.
   - *Domain words:* titanium → time, feature → future (×2), steel → steal,
-    file → fire, backup → background.
+    file → fire, backup → background, compliments → minutes.
 
 ### F4. The worst stretches, read
 
 The `asr_error_analysis` report ranks 30 s bins by error rate (bins with 20+
-reference words). base.en's worst four, read against the reference (the same
-four in both runs):
+reference words). base.en's worst four in the final run, read against the
+reference:
 
-1. **IB4003 1162–1192 s (0.37):**
+1. **IS1008d 370–400 s (0.42):** the team reacts to a prototype, several
+   people at once.
+   - Short reactions over the main speaker are gone ("okay", "I'm fine", "of
+     course").
+   - A claim loses its content: "egg shapes aren't the most economical" →
+     "egg shapes aren't i".
+   - A content word is swapped: "a couple of compliments to the artist" →
+     "a couple of minutes to the artist".
+   - Words appear that the reference lacks ("probably", "a couple of", "when
+     it comes to the") — they read as natural speech (H8).
+2. **IB4003 1162–1192 s (0.37):**
    - Two speakers trade short turns. The transcript keeps one speaker's
      sentences ("you can't prevent having visitors…") and has none of the
      other's interjections ("you want to have visitors", "it's funny that").
    - At the end, the reference's "…move researchers to another building"
      comes out as "we need to research on our building" — the content
      changes, not just the wording.
-2. **IB4003 1727–1757 s (0.36):**
+3. **IB4003 1727–1757 s (0.36):**
    - While one speaker sets out a plan, the words of a second speaker
      interleaved with it are missing ("we're", "gonna", "should", "be",
      "there", "why", "couldn't").
    - So is a stretch of the plan itself, "come up with the optimal solution"
      (a run of deletions).
    - A name is substituted: "Pierrette" → "Pierre".
-3. **IS1008b 532–562 s (0.34):** cross-talk in a materials discussion. The
-   content words "expensive", "the marketing comes out" and "made out of
-   titanium" are missing.
-4. **IB4003 1607–1637 s (0.34):** "that's not realistic either" → "that
-   realistic leader" — **the negation is dropped**. One observed instance;
-   not counted across the set.
+4. **IS1008d 520–550 s (0.35):** the longest deletion run in the set, 17
+   words. Two speakers overlap — "a bit of a difference of opinion", "a long
+   way", "cost a lot of money to market it" — and the transcript joins them
+   into one sentence neither said: **"we're going to have a lot of money to
+   market it"**. A cost becomes money to spend.
+
+Also read, from the earlier runs' top four (0.34 each in the final run):
+
+5. **IS1008b 532–562 s:** cross-talk in a materials discussion. The content
+   words "expensive", "the marketing comes out" and "made out of titanium"
+   are missing.
+6. **IB4003 1607–1637 s:** "that's not realistic either" → "that realistic
+   leader" — **the negation is dropped**. One observed instance; not counted
+   across the set.
 
 ## 2. Hypotheses that need testing
 
 - **H1 — Whisper transcribes one speaker of an overlap and drops the other.**
-  - *Fits:* F3's 5.7x deletion ratio, which holds without response words and
+  - *Fits:* F3's 6.8x deletion ratio, which holds without response words and
     for every size, and F4's stretches, where the transcript follows one
-    coherent speaker.
+    coherent speaker — or, at 520–550 s, joins two into one sentence.
   - *Not shown:*
     - why — the dominant (louder/closer) voice is the obvious candidate,
       untested;
@@ -278,8 +303,9 @@ four in both runs):
   - *Why it matters:* interleaving speakers by start time is a guess at word
     order. A transcript holding both speakers in another order would also
     score deletions.
-  - *Against reordering:* insertions are few (19–29 per size) — a
-    reordered word would show up as an insertion or substitution.
+  - *Against reordering:* insertions are few (61–77 per size, 1.0–1.3% of
+    reference words) — a reordered word would show up as an insertion or
+    substitution.
   - *Test:* bag-of-words recall of each overlapped stretch, independent of
     order.
 - **H3 — IB4003 506–746 has a cause other than overlap.**
@@ -287,20 +313,20 @@ four in both runs):
   - *Candidates:* VAD dropping quiet or distant speech, or one quiet speaker.
   - *Test:* compare the ASR segments' timestamps with the reference words'
     timing, and see which speakers the deleted words belong to.
-- **H4 — small.en is really ~2 WER points better, mostly fewer
+- **H4 — small.en is really ~1.6 WER points better, mostly fewer
   substitutions.**
-  - *Fits:* 6 windows (0.180 → 0.161), and run-to-run noise looks small: the
-    5 windows small.en completed in both runs have identical transcripts,
-    although it samples on fallback (#135).
-  - *Unknown:* whether 2 points hold over more meetings — 6 windows from 2
-    meetings is a small sample.
-  - *Test:* the final file set (D1).
-- **H5 — base.en's latency (~0.13–0.22 RTF, vs. ~0.1 in #135) is host load,
+  - *Fits:* 9 windows (0.182 → 0.166), and its transcripts repeat exactly
+    run to run, although it samples on fallback (#135).
+  - *Unknown:* how much of it holds on other meetings — the gain varies 3x
+    between these three (IS1008b 1.3 points, IB4003 2.5, IS1008d 0.8).
+  - *Test:* more meetings.
+- **H5 — base.en's slower runs (~0.2 RTF, vs. ~0.1 in #135) were host load,
   not pipeline overhead.**
-  - *Supports it:* small.en took half the time on 10-28 for identical
-    transcripts (F2), so host state alone moves this laptop's latency ~2x.
-  - *Unknown:* the chunked VAD + `transcribe()` path could still cost more
-    than #135's direct call; neither run controlled host load.
+  - *Supports it:* in the final run base.en ran at 0.05–0.10 on 8 of 9
+    windows, on the same pipeline, and the same transcripts took 2–3x
+    different time between runs (F2).
+  - *Unknown:* no run controlled host load, so the pipeline's own overhead
+    over #135's direct call is not measured.
   - *Test:* a run on a quiet machine, then compare with #135.
 - **H6 — The timeout overshoots (288 s vs. 240 s, on 10-15) because it is
   checked only between segments.**
@@ -312,39 +338,48 @@ four in both runs):
   non-native English speakers, and every window is affected alike. This set
   cannot tell accent errors from others; nothing here supports a claim either
   way.
+- **H8 — IS1008d's insertions are mostly words AMI's transcriber left out,
+  not words Whisper invented.**
+  - *Fits:* in F4.1 the inserted words ("probably", "a couple of", "when it
+    comes to the") read as natural speech in context, and IS1008d holds 42 of
+    base.en's 64 insertions.
+  - *Why it matters:* if so, part of IS1008d's WER is the reference's, not
+    the ASR's.
+  - *Test:* listen to the inserted stretches.
 
 ## 3. Decisions pending approval
 
 - **D1 — The final file set (R2).**
-  - *Proposal:* the meetings of R2's real-data slice (`ami.manifest.json`):
-    IS1008b, IB4003, and IS1008d, same window rule. IS1008d's audio is now
-    in `ami-audio.manifest.json` (2026-10-28), from the same AMI source as
-    the other two.
+  - *Proposal, now measured:* the three meetings of R2's real-data slice
+    (`ami.manifest.json`) — IS1008b, IB4003, IS1008d — same window rule.
+    IS1008d's audio comes from the same AMI source as the other two.
   - *R2 to confirm:* the set, and whether she wants windows placed on the
     stretches her extraction reads.
-  - *After that:* rerun everything above; the numbers here are replaced, not
+  - *If she wants other windows:* rerun; the numbers here are replaced, not
     averaged in.
 - **D2 — The long-term model size.**
   - *What the data supports:* keep `base.en`, as #135 decided — confirmed on
-    normalized WER, not revised. The case against small.en is cost and the
-    time limit, not that it is too slow on every call (the 10-15 reading).
-    - Over tiny.en: 0.5 points of WER and 19% fewer substitutions, at 1.8x
-      the CPU.
-    - small.en is 1.9 points better (0.161 vs. 0.180), mostly on
-      substitutions (109 vs. 146: names and domain terms, F3). It does not
-      help where most words are lost: overlapped speech is deleted at the
-      same rate (0.403 vs. 0.412).
-    - It costs 2.2x base.en's CPU (F2). A recording of `MAX_DURATION_S`
-      (600 s) at its measured RTF would take ~90–300 s on 10-28's host and
-      ~360–460 s on 10-15's, against a `TRANSCRIBE_TIMEOUT_S` of 240 s — on
-      a laptop with 4 threads, before any pod CPU limit.
+    normalized WER over the final set, not revised. The case against small.en
+    is cost and the time limit.
+    - Over tiny.en: 0.8 points of WER (0.190 → 0.182) and 18% fewer
+      substitutions, at 1.9x the CPU.
+    - small.en is 1.6 points better (0.166 vs. 0.182), mostly on
+      substitutions (185 vs. 248: names and domain terms, F3), and only 0.8
+      on IS1008d. It does not help where most words are lost: overlapped
+      speech is deleted at the same rate (0.407 vs. 0.404).
+    - It costs 2–4x base.en's CPU (F2). Over all three runs its RTF ranged
+      0.12–0.77, so a recording of `MAX_DURATION_S` (600 s) would take
+      ~70–460 s against a `TRANSCRIBE_TIMEOUT_S` of 240 s. base.en's
+      0.05–0.37 is ~30–220 s, under the limit in every run. All on a laptop
+      with 4 threads, before any pod CPU limit.
   - *Not decided:* moving to small.en means also deciding the timeout and the
     compute budget. Worth reopening only if wrong names and terms turn out to
-    hurt extraction (R2/R1). Nothing was changed on provisional numbers.
-- **D3 — Diarization / per-speaker channels.** H1 suggests the mixed channel
-  loses overlapped speech, so a single-channel model will not recover it.
-  Whether that matters is R2's call (out of scope for #480 unless she says
-  extraction needs it).
+    hurt extraction (R2/R1).
+- **D3 — Diarization / per-speaker channels.** The transcript has no speaker
+  labels, and H1 suggests the mixed channel loses overlapped speech — a
+  single-channel model will not recover it. R2 said on 2026-10-28 that she
+  would prefer to know who said what. Out of scope for #480; a separate issue
+  if the team takes it up.
 - **D4 — Two more normalization rules: decided, added (2026-10-28).**
   British→American spelling and AMI's spoken forms are now part of rule 7,
   before the final measurement, so the final numbers use them from the start.
@@ -352,21 +387,23 @@ four in both runs):
 
 ## For R2: what to expect in the text reaching extraction
 
-Measured on base.en, provisional set:
+Measured on base.en, final set:
 
-- **About 1 reference word in 5 is wrong or missing** (WER 0.180). It varies a
-  lot by stretch: ~6% in the window with the least overlapping speech, ~25% in
+- **About 1 reference word in 5 is wrong or missing** (WER 0.182). It varies a
+  lot by stretch: ~5% in the window with the least overlapping speech, ~25% in
   the most overlapped ones (F1).
-- **Missing, not invented, is the main error.** 3 of 4 errors are deletions
-  (F3), and insertions are rare: if a task isn't extracted, its words may
-  simply not be in the transcript.
+- **Missing, not invented, is the main error.** About 3 of 4 errors are
+  deletions (F3), and insertions are rare: if a task isn't extracted, its
+  words may simply not be in the transcript.
 - **Overlapped speech loses ~40% of its words** (F3). Interjections and
   objections said over someone else are the most likely to vanish — including
   content, not only "yeah" (F4).
+- **Two overlapping speakers can come out as one sentence neither said**, with
+  a different meaning (F4.4: a cost becomes "a lot of money to market it").
 - **Names and domain terms get substituted** with plausible wrong words
-  (christine → christian, titanium → time). An extracted owner or item name
-  can be wrong while looking fine.
-- **A dropped "not" can invert a statement** — one instance seen (F4.4); not
+  (christine → christian, titanium → time, compliments → minutes). An
+  extracted owner or item name can be wrong while looking fine.
+- **A dropped "not" can invert a statement** — one instance seen (F4.6); not
   counted.
 - **Format** (unchanged from #478):
   - plain text, segments joined;
@@ -377,15 +414,15 @@ Measured on base.en, provisional set:
 ## Acceptance criteria (#480)
 
 - [x] **A fixed, named set of AMI recordings, recorded:** above, pinned by a
-  test. Provisional pending R2 (D1).
+  test. Pending R2's confirmation (D1).
 - [x] **WER with a standard library against AMI's reference:** jiwer 4.0.0.
 - [x] **Normalization documented explicitly:** "Setup", and the
   `asr_validation.py` docstring.
 - [x] **WER per recording and overall:** F1.
 - [x] **At least two worst segments examined, failure modes described:** F4,
   F3.
-- [ ] **Model-size choice confirmed or revised, with evidence:** the evidence
-  confirms base.en (D2). Awaiting approval, and the rerun on the final set.
+- [x] **Model-size choice confirmed or revised, with evidence:** the final set
+  confirms base.en (D2).
 - [x] **Written up in `benchmarks/`:** this document.
-- [ ] **R2 told what failure modes to expect:** the section above is ready to
-  send; not sent yet.
+- [x] **R2 told what failure modes to expect:** sent on 2026-10-28; her reply
+  is in D3.
