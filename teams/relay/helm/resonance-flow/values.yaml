@@ -246,7 +246,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/bridge"
       pullPolicy: IfNotPresent
-      tag: "3d539c2"
+      tag: "f82f899"
     containerPort: 8080
     service: *defaultService
     # base-path: / in bridge's application.yml, so no /actuator prefix.
