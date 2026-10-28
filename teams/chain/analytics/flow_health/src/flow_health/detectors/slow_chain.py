@@ -76,13 +76,13 @@ def detect(paths: pd.DataFrame, tasks: pd.DataFrame, cfg: SlowChainConfig) -> li
 
     kept = sorted(_drop_overlaps(candidates, cfg.max_overlap), key=lambda c: c[0])
     scores = percentile_scores([c[1] for c in kept], [c[0] for c in kept])
-    scope = " בפרויקט" if cfg.link_ratio_column.endswith("_project") else ""
+    scope = " in its project" if cfg.link_ratio_column.endswith("_project") else ""
     flags = []
     for (fid, z, ratio, ids, value, median, length, r), score in zip(kept, scores):
-        text = (f"שרשרת באורך {length} נסגרה ב-{round(r.end_to_end_days)} יום; חציון זמן העבודה של חוליה הוא פי {value:.1f} "
-                f"מהרגיל ב-tier שלה{scope} (פי {ratio:.1f} מהחציון של שרשראות באורך {length}), "
-                f"ללא חוליה שאחראית ליותר מ-{round(cfg.max_link_share * 100)} אחוז מהזמן "
-                f"(הגדולה ביותר: {round(r.max_hop_share * 100)} אחוז)")
+        text = (f"Chain of {length} tasks closed in {round(r.end_to_end_days)} days; the median work time of a link is {value:.1f}x "
+                f"the usual for its tier{scope} ({ratio:.1f}x the median of chains of {length} tasks), "
+                f"with no link accounting for more than {round(cfg.max_link_share * 100)} percent of the time "
+                f"(largest: {round(r.max_hop_share * 100)} percent)")
         evidence = {"chain_length": length, "end_to_end_days": round(float(r.end_to_end_days), 2),
                     "median_link_ratio": round(value, 2), "group_median_link_ratio": round(median, 2),
                     "ratio_to_median": round(ratio, 2), "robust_z": round(z, 2),

@@ -12,8 +12,8 @@ DEFAULT_PATH = Path(__file__).with_name("config.yaml")
 @dataclass(frozen=True)
 class ChronicBlockerConfig:
     ratio_column: str = "active_ratio_to_tier_project"
-    min_active_ratio: float = 8.0
-    min_dependents: int = 1
+    min_active_ratio: float = 12.0
+    min_dependents: int = 3
     medium_from_ratio: float = 16.0
     high_from_ratio: float = 32.0
 
@@ -35,7 +35,7 @@ class SlowChainConfig:
     min_length: int = 4
     max_length: int = 8
     min_group_size: int = 8
-    min_ratio_to_median: float = 2.0
+    min_ratio_to_median: float = 4.0
     min_robust_z: float = 3.5
     max_link_share: float = 0.5
     medium_from_ratio: float = 4.0

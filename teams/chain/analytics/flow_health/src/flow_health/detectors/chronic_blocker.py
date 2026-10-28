@@ -28,7 +28,7 @@ def detect(tasks: pd.DataFrame, cfg: ChronicBlockerConfig, clusters: pd.DataFram
     hit = t[(t[cfg.ratio_column] >= cfg.min_active_ratio) & (t["n_dependents_max"] >= cfg.min_dependents)]
     hit = hit.sort_values("task_id")
 
-    scope = " באותו פרויקט" if cfg.ratio_column.endswith("_project") else ""
+    scope = " in the same project" if cfg.ratio_column.endswith("_project") else ""
     rows = []
     for r in hit.itertuples():
         ratio = float(getattr(r, cfg.ratio_column))
@@ -41,10 +41,10 @@ def detect(tasks: pd.DataFrame, cfg: ChronicBlockerConfig, clusters: pd.DataFram
         }
         if clusters is not None:
             evidence["cluster"] = None if pd.isna(r.cluster) else int(r.cluster)
-        explanation = (f"בעבודה {round(r.days_active)} יום, פי {ratio:.1f} מהחציון של {tier_phrase(r.tier)}{scope} "
-                       f"({round(tier_median)} יום), חוסמת {int(r.n_dependents_max)} משימות")
+        explanation = (f"Worked on for {round(r.days_active)} days, {ratio:.1f}x the median of {tier_phrase(r.tier)}{scope} "
+                       f"({round(tier_median)} days), blocks {int(r.n_dependents_max)} tasks")
         if r.is_open:
-            explanation += "; המשימה עדיין לא הסתיימה"
+            explanation += "; the task is still not finished"
         rows.append((r.task_id, ratio, _severity(ratio, cfg), explanation, evidence))
 
     ids = [make_flag_id(PATTERN, [task_id]) for task_id, *_ in rows]

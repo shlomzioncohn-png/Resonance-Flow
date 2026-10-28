@@ -52,7 +52,7 @@ def test_decoys_are_not_flagged():
 
 def test_explanation_contains_the_actual_numbers():
     (flag,) = detect(_history(*_flapping("A", "B", [0, 7, 14, 21, 27])), CFG)
-    assert "4 פעמים" in flag.explanation and "27 יום" in flag.explanation and "מרווח חציוני 7 ימים" in flag.explanation
+    assert "4 times" in flag.explanation and "27 days" in flag.explanation and "median gap 7 days" in flag.explanation
 
 
 def test_near_cycle_pair_is_flagged_on_both_edges():
@@ -60,7 +60,7 @@ def test_near_cycle_pair_is_flagged_on_both_edges():
         ("T", "X", "ADDED", 0), ("T", "Y", "ADDED", 0),
         ("T", "X", "REMOVED", 5), ("T", "X", "ADDED", 12)), CFG)
     assert flag.entity_type == "edge_pair" and flag.entity_ids == ["T>X", "T>Y"] and flag.severity == "low"
-    assert flag.evidence["days_away"] == 7 and "7 ימים" in flag.explanation
+    assert flag.evidence["days_away"] == 7 and "after 7 days" in flag.explanation
 
 
 def test_pair_decoys_a_lone_edge_and_a_sibling_that_was_not_live():

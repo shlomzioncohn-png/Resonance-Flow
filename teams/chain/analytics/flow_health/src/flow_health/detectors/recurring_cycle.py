@@ -70,8 +70,8 @@ def _edge_flags(histories, cfg, slow_blocker) -> list[tuple[float, Flag]]:
         evidence = {"transitions": transitions, "span_days": round(stats["span_days"], 2),
                     "median_gap_days": round(stats["median_gap_days"], 2), "gap_cv": round(stats["cv"], 2),
                     "gaps_days": [round(g, 2) for g in stats["gaps"]], "last_action": events[-1][1]}
-        text = (f"הקשת התחלפה {transitions} פעמים בתוך {round(stats['span_days'])} יום "
-                f"(מרווח חציוני {_fmt(stats['median_gap_days'])} ימים)")
+        text = (f"The edge switched {transitions} times within {round(stats['span_days'])} days "
+                f"(median gap {_fmt(stats['median_gap_days'])} days)")
         flag = Flag(flag_id=make_flag_id(PATTERN, entity), pattern=PATTERN, entity_type="edge", entity_ids=entity,
                     score=0.0, severity=_severity(transitions, stats["cv"], cfg), explanation=text, evidence=evidence)
         out.append((transitions + 1 / (1 + stats["cv"]), flag))  # ties between equal counts: the more even gaps rank higher
@@ -105,8 +105,8 @@ def _pair_flags(histories, flagged: set[tuple[str, str]], cfg, slow_blocker) -> 
                     out.append((2 + 1 / (1 + gaps["cv"]), Flag(
                         flag_id=make_flag_id(PATTERN, ids), pattern=PATTERN, entity_type="edge_pair", entity_ids=ids,
                         score=0.0, severity="low",
-                        explanation=(f"זוג קשתות של אותה משימה: אחת הוסרה וחזרה אחרי {_fmt(away)} ימים, "
-                                     f"בזמן שהשנייה נשארה פעילה"),
+                        explanation=(f"Two edges of one task: one was removed and came back after {_fmt(away)} days, "
+                                     f"while the other stayed active"),
                         evidence={"broken_edge": _edge_id(*broken), "kept_edge": _edge_id(*other),
                                   "removed_at": t_rem.isoformat(), "returned_at": t_back.isoformat(),
                                   "days_away": round(away, 2)})))

@@ -3,7 +3,7 @@ import pandas as pd
 from flow_health.detectors.config import SlowChainConfig, load_config
 from flow_health.detectors.slow_chain import detect
 
-CFG = SlowChainConfig()
+CFG = SlowChainConfig(min_ratio_to_median=2.0)   # fixed example values, independent of the tuned defaults
 PATH_COLUMNS = ["sink_task_id", "task_ids", "chain_length", "end_to_end_days", "max_hop_share"]
 HEALTHY_LINK_RATIOS = (0.8, 1.0, 1.2)
 
@@ -30,7 +30,7 @@ def _ids(flags):
 
 
 def test_load_config_matches_the_dataclass_defaults():
-    assert load_config().slow_chain == CFG
+    assert load_config().slow_chain == SlowChainConfig()
 
 
 def test_a_path_whose_links_are_all_far_slower_than_usual_is_flagged_with_the_right_severity():
@@ -60,8 +60,8 @@ def test_a_group_where_every_path_is_slow_flags_none_because_length_alone_is_not
 
 def test_explanation_contains_the_actual_numbers():
     (flag,) = detect(*_frames(("slow", 5, 3.2, 0.31, 38.0)), CFG)
-    assert "שרשרת באורך 5" in flag.explanation and "ב-38 יום" in flag.explanation
-    assert "פי 3.2" in flag.explanation and "ליותר מ-50 אחוז" in flag.explanation and "הגדולה ביותר: 31 אחוז" in flag.explanation
+    assert "Chain of 5 tasks" in flag.explanation and "in 38 days" in flag.explanation
+    assert "3.2x" in flag.explanation and "more than 50 percent" in flag.explanation and "largest: 31 percent" in flag.explanation
     assert flag.evidence["median_link_ratio"] == 3.2 and flag.evidence["chain_length"] == 5
 
 

@@ -9,7 +9,7 @@ from pathlib import Path
 PATTERNS = ("CHRONIC_BLOCKER", "RECURRING_CYCLE", "SLOW_CHAIN")
 SEVERITIES = ("low", "medium", "high")
 
-TIER_HE = {"operational": "תפעוליות", "tactical": "טקטיות", "strategic": "אסטרטגיות"}
+TIER_NAMES = {"operational", "tactical", "strategic"}
 
 
 @dataclass(frozen=True)
@@ -41,8 +41,8 @@ def percentile_scores(values: list[float], flag_ids: list[str]) -> list[float]:
 
 
 def tier_phrase(tier: str) -> str:
-    """'משימות טקטיות'; a task with no known tier is compared with all tasks."""
-    return f"משימות {TIER_HE[tier]}" if tier in TIER_HE else "כלל המשימות"
+    """'tactical tasks'; a task with no known tier is compared with all tasks."""
+    return f"{tier} tasks" if tier in TIER_NAMES else "all tasks"
 
 
 def write_flags(flags: list[Flag], path: Path | str, meta: dict | None = None) -> None:

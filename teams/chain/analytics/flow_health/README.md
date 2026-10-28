@@ -173,7 +173,7 @@ python -m flow_health.detectors --data data/dev --features out/dev --seed 42   #
 Three deterministic detectors; each returns a list of flags and the command writes all of them to one `flags.json`
 (`{"meta": {...}, "flags": [...]}`). Output is a recommendation only: nothing is written to Chain, and no task or
 dependency is changed. A flag has `flag_id`, `pattern`, `entity_type`, `entity_ids`, `score` (0-1, percentile rank inside
-its detector), `severity` (`low` / `medium` / `high`), `explanation` (a Hebrew sentence built from a template and the real
+its detector), `severity` (`low` / `medium` / `high`), `explanation` (an English sentence built from a template and the real
 numbers) and `evidence` (the numbers themselves). Merging the three lists into one ranked report is the next task.
 The detectors never read the answer files (checked by `tests/test_no_answer_leak.py`).
 
@@ -208,3 +208,36 @@ tier with fewer than 5 worked-on tasks in a project takes the tier-wide `active_
 from the task's opening values to fit dev: the chronic blocker's dependents (3 to 1, with the ratio raised to 8) and the
 slow chain's ratio to the group median (3 to 2). A subtle chronic blocker with a single dependent is still hard to tell
 from an ordinary busy task, and a slow chain with ordinary-looking links is not visible to any of these features.
+
+## Evaluation, ranked list and mentor review (`flow_health.evaluation`, `flow_health.run_all`)
+
+One command runs features, detectors and the evaluation on a data set:
+
+```bash
+python -m flow_health.generator --out /tmp/gen --eval-seed 7     # once; copy /tmp/gen/eval to data/heldout (dev is unchanged)
+python -m flow_health.run_all --data data/dev                    # writes out/dev
+python -m flow_health.run_all --data data/heldout                # writes out/heldout
+```
+
+Each run writes to `out/<name>` (`--out` changes it): `ranked_flags.csv`, `evaluation.json`, `evaluation_report.md`,
+`mentor_review.csv` (plus the features and `flags.json`). Results of the last runs are kept in `../docs/results/`;
+the write-up is `../docs/writeup.md`.
+
+- **Matching.** Chronic blocker: same task. Recurring cycle: same edge (either edge of a near-cycle pair). Slow chain:
+  Jaccard of the task sets >= 0.5. Several flags on one disease count as one TP; a flag on no disease is an FP, and one
+  that touches a decoy task (`slow_legit`, `backlog`, `abandoned`) is also listed as `fell_for_decoy`; a disease with no
+  flag is an FN. Flags that hit only `growing_bottleneck` / `stuck_subgraph` (not stage A) are listed as out of scope.
+  Precision / recall are `n/a` (null in the JSON) when undefined. Recall is also reported for `subtle` (borderline) diseases.
+- **Ranked list.** Severity (high, medium, low), then score descending, ties by `flag_id`. Columns: `rank, pattern, entity,
+  severity, score, explanation`, then `related` (ranks of rows from another detector sharing a task) and `flag_id`.
+  The score is a percentile inside its own detector, so across detectors the order inside a severity is only indicative.
+  A recommendation only; nothing is written to Chain.
+- **Frozen config.** `--freeze` stores the SHA-256 of `detectors/config.yaml` in `evaluation/config.lock`; from then on
+  `run_all` refuses to run with a different config. Order of work: tune on dev, freeze, run heldout once, report as is.
+  The hash is printed in `evaluation_report.md`.
+- **Mentor.** `mentor_review.csv` holds 5 random flags per detector (seed 7, any outcome, no hint of TP/FP). The mentor
+  fills `reasonable` (yes/no) and `comment`. `run_all` never overwrites a sheet that already has answers, and rerunning it
+  adds the count and comments to the report. A detector with fewer than 5 flags contributes all of them.
+- Only `evaluation/` may read the answer files (`tests/test_no_answer_leak.py`); the detectors never import it.
+- **Re-running from scratch** needs the data directories (they are git-ignored): `python -m flow_health.generator` for dev, and
+  the command above for heldout.
