@@ -21,7 +21,10 @@ inbox:
 # Chain (dependency graph, task history) - see ChainClient. Every call sends X-Tenant-Id.
 chain:
   service:
-    url: ${CHAIN_SERVICE_URL:http://chain-service:8081}
+    # Chain runs on Docker (teams/chain, default host port 8081) - use localhost when BFF runs
+    # locally. If you moved Chain to another port (its SERVER_PORT), set CHAIN_SERVICE_URL to match.
+    # The cluster sets its own URL (helm values), so this default only affects local runs.
+    url: ${CHAIN_SERVICE_URL:http://localhost:8081}
 
 management:
   endpoints:
