@@ -120,6 +120,16 @@ bridge:
     organization-id: ${CRM_ORGANIZATION_ID:00000000-0000-0000-0000-000000000000}
     # Days an open deal (PROSPECT/QUALIFIED/PROPOSAL/NEGOTIATION) may sit in the same stage before +1 urgency; <= 0 disables it.
     stalled-after-days: ${CRM_STALLED_AFTER_DAYS:14}
+    enrichment:
+      # Minimum spacing between real crm-deal-enrichment model calls (cache hits and
+      # skipped/terminal/blank deals never wait) - keeps a CRM sync within the model's
+      # own requests-per-minute limit, not just its daily one. 4s = 60/15, matching
+      # gemini-3.5-flash-lite's verified RPM 15 (see bridge.ai.models.gemini-crm) - a
+      # sync without this can exhaust RPM well before the daily cap, as the live check
+      # against the real API confirmed (16 calls in under 15s triggered a real 429).
+      # <= 0 disables throttling entirely. Trade-off: a cold sync over many CRM_DEAL
+      # tasks gets slower (one-time cost), in exchange for not burning calls on 429s.
+      min-call-interval: ${BRIDGE_CRM_MIN_CALL_INTERVAL:4s}
     sync:
       # Set to true to enable the automatic daily HubSpot to Kafka sync.
       # Off by default, same convention as github.sync.cron - an operator
@@ -219,6 +229,22 @@ bridge:
         # Reply cap (max_tokens). The JSON a classification needs is ~100 tokens; a reply cut
         # off here fails loudly ("cut off at max_tokens"), it is never parsed half-done.
         max-output-tokens: 1024
+      gemini-crm:
+        provider: gemini
+        name: ${BRIDGE_AI_GEMINI_CRM_MODEL:gemini-3.5-flash-lite}
+        images: false
+        # Free tier only - verified at https://ai.dev/rate-limit for this exact model (2026-10-26,
+        # same Google AI Studio project as the key): RPM 15 / TPM 250,000 / RPD 500. A dedicated
+        # model (not gemini-flash) so crm-deal-enrichment has its own quota, per design doc section 5.
+        free: true
+        # reasoning-effort intentionally left unset: "none" is documented for gemini-flash
+        # (gemini-3.6-flash) but not confirmed for this model - an unsupported value is a 400
+        # (see ai/README.md's warning), so this is left out rather than guessed. Revisit with
+        # Esther if this model's "thinking" behavior is ever confirmed one way or the other.
+        # Reply cap - the JSON this usage produces is a <=120-char title plus an optional
+        # <=1000-char description plus an optional small integer (EnrichmentReplyParser), with
+        # generous margin; tighter than gemini-flash's 1024 since this model never takes images.
+        max-output-tokens: 512
     defaults:
       redact-pii: true
       # Per usage per UTC day. Gemini's free tier allows 20 requests/day per model per project
@@ -235,6 +261,11 @@ bridge:
         daily-call-limit: 10
         # Documents are sent as images - regex redaction has nothing to act on.
         redact-pii: false
+      crm-deal-enrichment:
+        model: gemini-crm
+        # Below the model's verified RPD 500 (see the gemini-crm model entry above) - redact-pii
+        # stays at its default true (CRM descriptions are untrusted free text, design doc section 8).
+        daily-call-limit: 400
     monitoring:
       # MODEL_CALL_SLOW / MODEL_CALL_EXPENSIVE thresholds (Mind uses 10s; an image request to
       # the free tier can take longer, so 15s).
@@ -297,7 +328,11 @@ bridge:
 
 llm:
   enrichment:
-    # Master switch for the rule-based task enrichment engine.
+    # Master switch - covers both the rule-based engine (GitHub/Jira) and CrmDealLlmEnricher
+    # (CRM_DEAL), routed by SourceRoutingTaskEnricher. Off by default, unchanged by the CRM LLM
+    # work: to demo CRM enrichment in isolation, set LLM_ENRICHMENT_ENABLED=true and
+    # LLM_ENRICHMENT_SUPPORTED_SOURCES=CRM_DEAL (GitHub/Jira then bypass enrichment entirely,
+    # since they're no longer in the list - include them too to keep both paths active).
     enabled: ${LLM_ENRICHMENT_ENABLED:false}
     # Only these source types are enriched; all others are skipped entirely.
     supported-sources: ${LLM_ENRICHMENT_SUPPORTED_SOURCES:GITHUB_ISSUE,JIRA_ISSUE}
