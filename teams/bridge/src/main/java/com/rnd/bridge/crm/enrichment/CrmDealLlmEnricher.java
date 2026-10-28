@@ -34,6 +34,7 @@ public final class CrmDealLlmEnricher implements TaskEnricher {
     public static final String USAGE = "crm-deal-enrichment";
 
     private static final String ORIGINAL_NOTES_HEADER = "\n\nOriginal CRM notes:\n";
+    private static final String ORIGINAL_DEAL_LABEL = "Original CRM deal: ";
 
     private static final Logger log = LoggerFactory.getLogger(CrmDealLlmEnricher.class);
 
@@ -95,7 +96,7 @@ public final class CrmDealLlmEnricher implements TaskEnricher {
         EnrichmentReplyParser.Result result = replyParser.parse(replyText);
         return switch (result) {
             case EnrichmentReplyParser.Result.Accepted accepted ->
-                    new EnrichmentReplyCache.Outcome.Success(toOutput(accepted, input.description()));
+                    new EnrichmentReplyCache.Outcome.Success(toOutput(accepted, input.title(), input.description()));
             case EnrichmentReplyParser.Result.Rejected rejected -> {
                 log.info("CRM deal enrichment reply rejected sourceRef={} reason={}",
                         input.sourceRef(), rejected.reason());
@@ -105,12 +106,27 @@ public final class CrmDealLlmEnricher implements TaskEnricher {
     }
 
     private static EnrichmentOutput toOutput(EnrichmentReplyParser.Result.Accepted accepted,
-                                             String originalDescription) {
-        String description = accepted.description() == null || isDuplicateOfOriginal(accepted.description(), originalDescription)
-                // no model description, or it adds nothing over the original -> null means
-                // "keep original unchanged" (AbstractTaskMapper), never prepend a no-op copy.
-                ? null
-                : accepted.description() + ORIGINAL_NOTES_HEADER + originalDescription;
+                                             String originalTitle, String originalDescription) {
+        boolean modelDescriptionUsable = accepted.description() != null
+                && !isDuplicateOfOriginal(accepted.description(), originalDescription);
+        boolean titleChanged = !normalizeWhitespace(accepted.title()).equalsIgnoreCase(normalizeWhitespace(originalTitle));
+
+        String description;
+        if (!titleChanged) {
+            // Unchanged behavior: the rewritten title still carries the deal name, so there's
+            // nothing extra to preserve. null means "keep original unchanged" (AbstractTaskMapper).
+            description = modelDescriptionUsable
+                    ? accepted.description() + ORIGINAL_NOTES_HEADER + originalDescription
+                    : null;
+        } else {
+            // The rewritten title dropped the deal name (company/deal identity) - a salesperson
+            // must still be able to tell which deal this is, so the original title is preserved
+            // in the description regardless of whether the model also gave a usable description.
+            String originalNotes = originalDescription != null ? ORIGINAL_NOTES_HEADER + originalDescription : "";
+            description = modelDescriptionUsable
+                    ? accepted.description() + "\n\n" + ORIGINAL_DEAL_LABEL + originalTitle + originalNotes
+                    : ORIGINAL_DEAL_LABEL + originalTitle + originalNotes;
+        }
         return new EnrichmentOutput(null, null, accepted.title(), description, null, accepted.effortEstimateMinutes());
     }
 

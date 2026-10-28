@@ -50,28 +50,47 @@ class CrmDealLlmEnricherTest {
             + "\"description\": \"Revise pricing per the new terms.\", \"effortEstimateMinutes\": 45}";
 
     @Test
-    void validReply_returnsEnrichedFields_withPrependedOriginalNotes() {
+    void titleChanged_withModelDescription_descriptionHasModelTextDealNameAndOriginalNotes() {
+        // Original title "Original deal title" vs model title "Prepare the proposal" - changed.
         FakeLlmClient client = FakeLlmClient.returning(VALID_REPLY);
         CrmDealLlmEnricher enricher = enricherFor(client);
 
         EnrichmentOutput output = enricher.enrich(input(TaskStatus.NEW, "Customer asked to revise pricing.", null));
 
         assertEquals("Prepare the proposal", output.title());
-        assertEquals("Revise pricing per the new terms.\n\nOriginal CRM notes:\nCustomer asked to revise pricing.",
+        assertEquals("Revise pricing per the new terms.\n\nOriginal CRM deal: Original deal title"
+                        + "\n\nOriginal CRM notes:\nCustomer asked to revise pricing.",
                 output.description());
         assertEquals(45, output.effortEstimateMinutes());
         assertEquals(1, client.callCount());
     }
 
     @Test
-    void modelReturnedNoDescription_outputDescriptionNull_keepsOriginalUnchanged() {
+    void titleChanged_noModelDescription_descriptionIsDealNameAndOriginalNotes() {
+        // Original title "Original deal title" vs model title "Prepare the proposal" - changed.
         FakeLlmClient client = FakeLlmClient.returning("{\"title\": \"Prepare the proposal\"}");
         CrmDealLlmEnricher enricher = enricherFor(client);
 
         EnrichmentOutput output = enricher.enrich(input(TaskStatus.NEW, "Customer asked to revise pricing.", null));
 
         assertEquals("Prepare the proposal", output.title());
-        assertNull(output.description());
+        assertEquals("Original CRM deal: Original deal title\n\nOriginal CRM notes:\nCustomer asked to revise pricing.",
+                output.description());
+    }
+
+    @Test
+    void titleUnchanged_behavesExactlyAsBefore_noDealNameInjected() {
+        // Same deal name as the model's reply, just different case/whitespace - still "unchanged".
+        FakeLlmClient client = FakeLlmClient.returning(VALID_REPLY);
+        CrmDealLlmEnricher enricher = enricherFor(client);
+
+        EnrichmentOutput output = enricher.enrich(input("prepare THE Proposal  ", TaskStatus.NEW,
+                "Customer asked to revise pricing.", null, "crm:json:D-1", Instant.now(), 3));
+
+        assertEquals("Prepare the proposal", output.title());
+        assertEquals("Revise pricing per the new terms.\n\nOriginal CRM notes:\nCustomer asked to revise pricing.",
+                output.description());
+        assertEquals(45, output.effortEstimateMinutes());
     }
 
     @Test
@@ -437,24 +456,29 @@ class CrmDealLlmEnricherTest {
 
     @Test
     void modelDescriptionEqualsOriginal_afterWhitespaceNormalization_notPrepended() {
+        // Title kept identical to the model's reply (unchanged), to test description-duplicate
+        // detection in isolation from the title-preservation behavior tested above.
         String reply = "{\"title\": \"Prepare the proposal\", "
                 + "\"description\": \"  Customer   asked to revise pricing.  \"}";
         FakeLlmClient client = FakeLlmClient.returning(reply);
         CrmDealLlmEnricher enricher = enricherFor(client);
 
-        EnrichmentOutput output = enricher.enrich(input(TaskStatus.NEW, "Customer asked to revise pricing.", null));
+        EnrichmentOutput output = enricher.enrich(input("Prepare the proposal", TaskStatus.NEW,
+                "Customer asked to revise pricing.", null, "crm:json:D-1", Instant.now(), 3));
 
         assertNull(output.description());
     }
 
     @Test
     void originalDescriptionContainsModelDescriptionEntirely_notPrepended() {
+        // Title kept identical to the model's reply (unchanged), to test description-duplicate
+        // detection in isolation from the title-preservation behavior tested above.
         String reply = "{\"title\": \"Prepare the proposal\", \"description\": \"revise pricing\"}";
         FakeLlmClient client = FakeLlmClient.returning(reply);
         CrmDealLlmEnricher enricher = enricherFor(client);
 
-        EnrichmentOutput output = enricher.enrich(
-                input(TaskStatus.NEW, "Customer asked to revise pricing before month end.", null));
+        EnrichmentOutput output = enricher.enrich(input("Prepare the proposal", TaskStatus.NEW,
+                "Customer asked to revise pricing before month end.", null, "crm:json:D-1", Instant.now(), 3));
 
         assertNull(output.description());
     }

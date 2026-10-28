@@ -148,7 +148,8 @@ class CrmEnrichmentSpringContextTest {
 
                     assertEquals("Prepare the proposal", enriched.title());
                     assertEquals(
-                            "Revise pricing per the new terms.\n\nOriginal CRM notes:\nCustomer asked to revise pricing.",
+                            "Revise pricing per the new terms.\n\nOriginal CRM deal: ETL title"
+                                    + "\n\nOriginal CRM notes:\nCustomer asked to revise pricing.",
                             enriched.description());
                     assertEquals(45, enriched.effortEstimateMinutes());
 
