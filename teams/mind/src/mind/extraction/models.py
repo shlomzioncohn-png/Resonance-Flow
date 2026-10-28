@@ -45,6 +45,24 @@ MAX_DESCRIPTION_LENGTH = 600
 # many named pieces of work is almost always a model listing every noun.
 MAX_MENTIONS_PER_TASK = 10
 
+# A person's name, or one email address, fits well within this (#132). Past it
+# the model is echoing the content, and a lookup would match nobody anyway.
+MAX_OWNER_MENTION_LENGTH = 100
+
+# Words the content uses for nobody in particular. Said in the content, so
+# grounding would keep them, and the directory would be asked for "someone".
+_NOT_A_PERSON = frozenset(
+    {
+        "someone", "somebody", "anyone", "anybody", "everyone", "everybody",
+        "nobody", "no one", "someone else", "everyone else", "all", "you",
+        "me", "we", "us", "they", "them", "he", "she", "him", "her",
+        "the team", "my team", "our team", "your team", "the group",
+    }
+)  # fmt: skip
+
+# A word of a name: letters and digits, so "Dana C." is "Dana" and "C".
+_NAME_WORD = re.compile(r"[^\W_]+")
+
 # Strings an LLM emits when it means "nothing here". Normalised to None so
 # that a missing value looks missing to the confidence heuristic instead of
 # masquerading as evidence.
@@ -582,6 +600,104 @@ class ExtractedFields(BaseModel):
             )
             kept = kept[:MAX_MENTIONS_PER_TASK]
         return kept
+
+    # The person the content makes responsible for the task, by name, as the
+    # content writes it (#132): "Yossi will sign it" gives "Yossi". Never the
+    # sender, and never an address. Only a suggestion: it is looked up in
+    # Inbox's directory, and what travels is a user id or nothing, never this.
+    owner_mention: str | None = None
+
+    # Whether the task is the email's recipient's: "you are asked to sign".
+    # The model only says so; the address is taken from the email record by
+    # code, and only when there is one recipient, since a model copying one
+    # off the To line could as well copy the From line's. Given with a name,
+    # both are kept: which one wins needs the item's recipients, so it is
+    # settled in task_creation/owner.what_to_look_up.
+    owner_is_recipient: bool = False
+
+    @field_validator("owner_mention", mode="before")
+    @classmethod
+    def one_usable_name_or_none(cls, value: object) -> str | None:
+        """One name, or None. Never raises, for the same reason as
+        `dependency_mentions`: a bad owner must not send a meeting to repair.
+
+        A list is read as a whole, never by its first item: the same name, once
+        or repeated, is one owner. Two different names are two owners, and
+        Inbox takes one suggested owner, so picking one would be a guess. Logs
+        say what came back, never the name: Inbox's directory logs none either.
+        """
+
+        if value is None or value == []:
+            return None
+        if isinstance(value, list):
+            names = {v.strip().lower() for v in value if isinstance(v, str)}
+            if len(names) != 1 or not all(isinstance(v, str) for v in value):
+                logger.warning(
+                    "extraction: owner_mention came back as a list of %d, not one name; "
+                    "recording no owner",
+                    len(value),
+                )
+                return None
+            value = value[0]
+        if not isinstance(value, str):
+            logger.warning(
+                "extraction: owner_mention came back as a %s, not one name; recording no owner",
+                type(value).__name__,
+            )
+            return None
+        name = value.strip()
+        if name.lower() in _NULL_PLACEHOLDERS:
+            return None
+        if name.lower() in _NOT_A_PERSON:
+            logger.warning(
+                "extraction: owner_mention came back as a word that is not a person; "
+                "recording no owner"
+            )
+            return None
+        if "@" in name:
+            logger.warning(
+                "extraction: owner_mention came back as an address, not a name; recording no owner"
+            )
+            return None
+        words = _NAME_WORD.findall(name)
+        if not words:
+            logger.warning(
+                "extraction: owner_mention came back with no letters or digits; recording no owner"
+            )
+            return None
+        # A speaker's label, not a name: AMI writes its speakers as A to D. An
+        # initial beside a whole word ("Dana C.") is still a name.
+        if all(len(word) == 1 for word in words):
+            logger.warning(
+                "extraction: owner_mention came back as single letters, not a name; "
+                "recording no owner"
+            )
+            return None
+        if len(name) > MAX_OWNER_MENTION_LENGTH:
+            logger.warning(
+                "extraction: owner_mention is %d characters, longer than %d; recording no owner",
+                len(name),
+                MAX_OWNER_MENTION_LENGTH,
+            )
+            return None
+        return name
+
+    @field_validator("owner_is_recipient", mode="wrap")
+    @classmethod
+    def a_yes_or_a_no(cls, value: object, handler: ValidatorFunctionWrapHandler) -> bool:
+        """A yes or a no, and anything else is a no: never a repair round."""
+
+        if value is None:
+            return False
+        try:
+            return bool(handler(value))
+        except ValidationError:
+            logger.warning(
+                "extraction: owner_is_recipient came back as a %s, not true or false; "
+                "recording false",
+                type(value).__name__,
+            )
+            return False
 
     @field_validator("description", "source_ref", mode="after")
     @classmethod

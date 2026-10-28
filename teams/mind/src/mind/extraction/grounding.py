@@ -28,6 +28,10 @@ content in hand to tell a real mention from an invented one.
 **The deadline's phrase (#960)** is checked by `ground_deadline`, the same
 way as a mention and then by its numbers too.
 
+**`owner_mention` (#132)** is checked by `ground_owner_mention`, more strictly
+than a mention: a name is not a paraphrase, so none of its words may be
+missing, and they must stand together.
+
 `confidence.title_grounding` does the same kind of overlap check for the
 title, but for scoring rather than for dropping. Folding the two together is
 a follow-up, not a change to make while fixing this.
@@ -128,18 +132,26 @@ def _numbers(text: str) -> set[int]:
 class Said:
     """The content's words and numbers, read once per item.
 
-    Every task of an item is checked against the same text, twice (mentions,
-    deadline): a meeting of fifteen tasks used to read its 100k characters
-    thirty times. The extractor reads it once and hands this to each task's
-    checks; it lives as long as that one item's extraction, no longer.
+    Every task of an item is checked against the same text, three times
+    (mentions, owner, deadline): a meeting of fifteen tasks used to read its
+    100k characters thirty times. The extractor reads it once and hands this
+    to each task's checks; it lives as long as that one item's extraction.
+
+    `name_words` is for the owner: every word in order, short ones too, one
+    run of words between two email addresses (see `_written_together`).
     """
 
     words: frozenset[str]
     numbers: frozenset[int]
+    name_words: tuple[tuple[str, ...], ...]
 
 
 def said_in(raw_text: str) -> Said:
-    return Said(frozenset(content_words(raw_text)), frozenset(_numbers(raw_text)))
+    return Said(
+        frozenset(content_words(raw_text)),
+        frozenset(_numbers(raw_text)),
+        tuple(tuple(_name_words(stretch)) for stretch in _ADDRESS.split(raw_text)),
+    )
 
 
 def _words_said(words: list[str], said: frozenset[str]) -> bool:
@@ -210,6 +222,62 @@ def ground_dependency_mentions(
     return fields.model_copy(
         update={"dependency_mentions": kept, "has_dependencies": has_dependencies}
     )
+
+
+# A name's words: letters and digits, every one of them kept. Not
+# `content_words`, which drops words under three letters and would read
+# "Dana C." as "Dana" and "Li Wu" as nothing.
+_NAME_WORD = re.compile(r"[^\W_]+")
+
+# An email address in the content. Its words do not name anyone: "Dana" is
+# not written by dana.cohen@acme.test, and the recipient's address comes from
+# the email record, not from a name grounded here (#132). It starts only where
+# a run of address characters starts: tried from every character, a long run
+# with no "@" (base64 in a Gmail message) took quadratic time, 25 s at 100k.
+_ADDRESS = re.compile(r"(?<![\w.%+-])[\w.%+-]+@[\w-]+(?:\.[\w-]+)*")
+
+
+def _name_words(text: str) -> list[str]:
+    return _NAME_WORD.findall(text.lower())
+
+
+def _written_together(name: str, said: Said) -> bool:
+    """Every word of the name, side by side in the content, in either order:
+    "Cohen, Dana" writes "Dana Cohen"; "Dana Levi and Moshe Cohen" does not.
+
+    Each stretch between two addresses is read on its own, so the words on
+    either side of an address never stand together.
+    """
+
+    wanted = sorted(_name_words(name))
+    if not wanted:
+        return False
+    size = len(wanted)
+    return any(
+        sorted(words[i : i + size]) == wanted
+        for words in said.name_words
+        for i in range(len(words) - size + 1)
+    )
+
+
+def ground_owner_mention(
+    fields: ExtractedFields, raw_text: str, said: Said | None = None
+) -> ExtractedFields:
+    """Keep the owner only if the content writes the name; otherwise there is none.
+
+    Strict because a wrong owner costs more than none: Inbox rejects the whole
+    task for an id it does not know, and a guessed id names the wrong person.
+    It closes invention, not the sender: a sender who signs their name has
+    written it, so only the prompt keeps them out. Logged without the name.
+    """
+
+    claimed = fields.owner_mention
+    if claimed is None:
+        return fields
+    if _written_together(claimed, said or said_in(raw_text)):
+        return fields
+    logger.warning("extraction: owner_mention does not appear in the content; recording no owner")
+    return fields.model_copy(update={"owner_mention": None})
 
 
 def ground_deadline(
