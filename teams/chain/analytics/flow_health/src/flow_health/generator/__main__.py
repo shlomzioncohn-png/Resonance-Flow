@@ -7,8 +7,10 @@ from pathlib import Path
 
 from . import GeneratorConfig, generate, validate
 from .export import write_dataset
+from .seal import sealed_version, verify
+from .version import GENERATOR_VERSION
 
-DEFAULT_EVAL_SEED = 4242
+DEFAULT_EVAL_SEED = 591009  # the first eval seed (4242) was inspected while the generator was tuned, so it is retired
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -26,7 +28,17 @@ def main(argv: list[str] | None = None) -> int:
                    help="planted instances per disease type and severity")
     p.add_argument("--missing-tier-rate", type=float, default=GeneratorConfig.missing_tier_rate,
                    help="share of tasks whose tier is hidden from the analysis (1.0 = like real Chain, no tiers)")
+    p.add_argument("--verify", type=Path, nargs="+", metavar="DIR",
+                   help="check that these generated directories are untouched since they were written, then exit")
     args = p.parse_args(argv)
+    if args.verify:
+        problems = [e for d in args.verify for e in verify(d)]
+        print(*(problems or ["untouched"]), sep="\n")
+        for d in args.verify:
+            if sealed_version(d) not in (None, GENERATOR_VERSION):
+                print(f"{d}: sealed with generator {sealed_version(d)}, this code is {GENERATOR_VERSION}; "
+                      "regenerating would give different data")
+        return 1 if problems else 0
     if args.seed == args.eval_seed:
         p.error("--seed and --eval-seed must differ, otherwise eval shares its healthy data with dev")
 
