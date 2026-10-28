@@ -922,14 +922,17 @@ that file's docstring. The similarity the CLI uses is the lexical backend
 (`similarity.lexical_similarity`, `rapidfuzz`'s `token_set_ratio`, with the locked
 `LEXICAL_THRESHOLD = 0.60`, `extraction_eval_design.md` §4.2/§6); the fixture scores
 the same with it. The Jaccard `placeholder_similarity` stays for the unit tests,
-whose expected counts are worked out for it. An embedding backend can replace the
-lexical one at the call site once Ayala exposes one.
+whose expected counts are worked out for it. The embedding backend
+(`similarity.embedding_similarity`, `EMBEDDING_THRESHOLD = 0.70`) is chosen with
+`scripts/run_ami_extraction_eval.py --backend embedding`; see "Embedding backend"
+below.
 `metrics.extraction_precision_recall` is a stricter placeholder still (exact
 string match); it is not this eval.
 
 ### Current status
 
-**Run once on real AMI meetings through main's real extraction (#178, 2026-10-25).**
+**Run once on real AMI meetings through main's real extraction (#178, 2026-10-25);
+re-scored with the embedding backend (2026-10-28).**
 Tracking issues: #176 design, #177 implementation, #178 real-data validation.
 Not yet on ASR output, and not yet in CI (#175).
 
@@ -1015,6 +1018,63 @@ gives one TP and one FN there, as design §3.4 intends.
 
 **Limitations.** Three meetings, 16 gold items, one run of one model; human
 transcripts, not ASR; the hand review is one reviewer's reading.
+
+### Embedding backend (2026-10-28)
+
+Finding 1 above is why it exists. Ayala's `mind.embeddings.similarity` (cosine
+over bge-small-en-v1.5, [0, 1]) is wired in as `similarity.embedding_similarity`;
+the lexical backend stays, for CI without the model and as the comparison
+point (`extraction_eval_design.md` §4.3).
+
+**τ = 0.70, chosen on the §5 pairs only**, before the real run was scored with
+it (`scripts/derive_embedding_threshold.py`, the pairs in `threshold_pairs.py`;
+§6 has the detail). Same-task pairs score 0.751–0.958, different-task pairs
+0.507–0.793, so no τ separates them pair by pair; every τ from 0.643 to 0.750
+makes the one-to-one matching return exactly the hand-labelled pairs, also with
+each true item left out, and 0.70 is the middle. The script's first rule
+(pair by pair) gave 0.83 and failed 8 of those 9 checks; the rule was changed to
+the matching criterion the lexical τ was held to, recorded in §6. Until a τ is
+frozen, the backend refuses to run.
+
+**The same recorded answers, re-scored** (no model call; `--from-outcomes ...
+--backend embedding`, saved as `scores_embedding.json` next to `scores.json`):
+
+| | lexical, τ 0.60 | embedding, τ 0.70 |
+|---|---|---|
+| precision (micro) | 31.6% | 57.9% |
+| recall (micro) | 37.5% | 68.8% |
+| F1 (micro) | 34.3% | 62.9% |
+| matched pairs | 6 | 11 |
+| … right, by the hand review above | 5 | 7 |
+| … wrong | 1 | 4 |
+
+**Hand review of the 11 embedding matches**, against the review above:
+
+- **Recovered:** the three right pairs the lexical backend lost to synonyms —
+  IB4003 split offices (0.80) and Gisella (0.74), IS1008b Intel/IBM with
+  "speech" for "voice recognition" (0.74).
+- **Wrong, and new:** within one meeting, different tasks on the same topic now
+  clear τ. IB4003 "Prepare a concrete proposal…" → "the group members will come
+  up with their own preferences…" (0.76; the item is g5/g6's); IS1008d "Start
+  real production" → "the group will evaluate the product after real units have
+  been produced" (0.76); IS1008d "Launch product in the market" → "the Marketing
+  Expert will begin his marketing plan after production has begun" (0.71).
+- **Wrong, as with lexical:** IS1008b "Keep watching market trends" → "the
+  Marketing Expert will present the marketing concept" (0.76).
+- **Still missed:** IS1008d g2 (the promotion plan to management, which the
+  model extracted as "convince management to align the launch…"), and IB4003
+  g5/g6, whose item went to g3.
+
+All four wrong matches score 0.70–0.85, inside the band the run script flags
+for review by hand.
+
+**What it shows.** The embedding backend fixes the lexical one's misses on
+synonyms, but it over-matches on topic: the official recall (68.8%) counts
+7 right pairs out of 16 (44%), against 5 (31%) for lexical and 9 (56%) found by
+the model on the hand review. Neither number alone is the extraction quality;
+the gap between them is the matching rule's error. τ is not moved for this
+(§6): it was set on the §5 pairs before this run, and the review band is where
+these errors are caught.
 
 ### Several tasks per text (#690, was a known limitation)
 

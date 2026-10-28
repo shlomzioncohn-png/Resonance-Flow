@@ -7,6 +7,7 @@ here before it shows up in an eval number.
 
 import pytest
 
+from mind.evaluation import similarity as similarity_module
 from mind.evaluation.extraction_eval import evaluate_extraction
 from mind.evaluation.similarity import LEXICAL_THRESHOLD, lexical_similarity
 
@@ -84,3 +85,43 @@ def test_works_as_the_harness_similarity() -> None:
     assert report.true_positives == 1
     assert report.false_positives == ["Book the board room for Monday"]
     assert report.missed == []
+
+
+# -- backend selection --------------------------------------------------------
+
+
+def test_the_lexical_backend_is_the_locked_pair() -> None:
+    assert similarity_module.backend("lexical") == (lexical_similarity, LEXICAL_THRESHOLD)
+
+
+def test_the_embedding_backend_refuses_to_run_without_a_frozen_threshold(monkeypatch) -> None:
+    # No number may come out of a tau that was not chosen on the §5 pairs.
+    monkeypatch.setattr(similarity_module, "EMBEDDING_THRESHOLD", None)
+
+    with pytest.raises(ValueError, match="no frozen threshold"):
+        similarity_module.backend("embedding")
+
+
+def test_the_embedding_backend_uses_its_frozen_threshold(monkeypatch) -> None:
+    monkeypatch.setattr(similarity_module, "EMBEDDING_THRESHOLD", 0.8)
+
+    assert similarity_module.backend("embedding") == (
+        similarity_module.embedding_similarity,
+        0.8,
+    )
+
+
+def test_embedding_similarity_is_mind_embeddings_similarity(monkeypatch) -> None:
+    # Delegates to Ayala's function, so the eval and the service read texts alike.
+    from mind.embeddings import embeddings
+
+    calls: list[tuple[str, str]] = []
+
+    def fake(a: str, b: str) -> float:
+        calls.append((a, b))
+        return 0.42
+
+    monkeypatch.setattr(embeddings, "similarity", fake)
+
+    assert similarity_module.embedding_similarity("a", "b") == 0.42
+    assert calls == [("a", "b")]

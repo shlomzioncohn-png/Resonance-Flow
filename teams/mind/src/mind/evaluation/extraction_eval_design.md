@@ -417,12 +417,32 @@ written in §5):
 - **Caveat:** 29 pairs, 7 positive, and the extracted side is invented. This
   shows 0.60 is reasonable; the hand review on real output is the real test.
 
-### Embedding backend — `τ = TODO(Ayala)`, method LOCKED
+### Embedding backend — `τ = 0.70`, LOCKED 2026-10-28
 
-Cannot be a number yet (depends on her model). The **method** is fixed: take
-the ~20 §5 accept/reject pairs as a labelled dev set, pick the `τ` that best
-separates accept from reject for her model, freeze it. Never adjusted against
-precision/recall output.
+The method: take the §5 accept/reject pairs as a labelled dev set, pick the `τ`
+that best separates accept from reject for her model, freeze it. Never adjusted
+against precision/recall output.
+
+**Set 2026-10-28**, with `mind.embeddings.similarity` (Ayala; cosine over
+bge-small-en-v1.5, clamped to [0, 1]) as `similarity.embedding_similarity`, by
+`scripts/derive_embedding_threshold.py` on the 29 pairs in
+`threshold_pairs.py`, before any real output was scored with this backend:
+
+- Same-task pairs score **0.751–0.958**, different-task pairs **0.507–0.793**.
+  As with the lexical backend, no `τ` separates them pair by pair: two wrong
+  pairs (ES2002a G1–E2 0.793, IS1008b G2–E1 0.789) outscore three true ones
+  (0.774, 0.762, 0.751).
+- **"Best separates" is read through the matching, as for lexical:** every `τ`
+  from **0.643 to 0.750** makes one-to-one matching return exactly the
+  hand-labelled pairs, also with each true extracted item left out. `τ` is the
+  middle, **0.70**.
+- **Deviation, recorded:** the script's first rule chose `τ` pair by pair (the
+  most pairs on the right side). It gave 0.83, which drops the three weak true
+  pairs and fails 8 of the 9 matching checks. The rule was changed to the
+  matching criterion the lexical `τ` was already held to, on the §5 pairs only;
+  no real-run number was seen with this backend before the change.
+- Pinned in `tests/test_similarity_threshold.py` (skipped where the model is not
+  downloaded).
 
 ### Lock discipline
 
@@ -591,7 +611,9 @@ owner-match diagnostic are still to build on top of it.
 ## Open items
 
 **Blocking (external):**
-- [ ] `TODO(Ayala)` — reusable `similarity(a,b)->float`? model? range? pinned?
+- [x] `TODO(Ayala)` — reusable `similarity(a,b)->float`: `mind.embeddings.similarity`
+      (on main 2026-10-28), cosine over bge-small-en-v1.5, [0, 1]. Backend wired,
+      `τ = 0.70` (§6).
       If no within a few days → build the §4.2 lexical baseline.
 - [x] ~~`TODO(Yonit)` — confirm corpus-loader `source_ref = records[].id`~~ —
       superseded: the meeting id travels as the extractor's `item_key`, held by

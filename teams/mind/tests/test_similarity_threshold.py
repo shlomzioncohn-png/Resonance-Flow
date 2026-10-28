@@ -15,62 +15,20 @@ tests pin that, including when the extractor misses one item.
 
 import pytest
 
-from mind.evaluation.extraction_eval import evaluate_extraction
-from mind.evaluation.similarity import LEXICAL_THRESHOLD, lexical_similarity
+from mind.evaluation.similarity import (
+    EMBEDDING_THRESHOLD,
+    LEXICAL_THRESHOLD,
+    embedding_similarity,
+    lexical_similarity,
+)
+from mind.evaluation.threshold_pairs import (
+    MEETINGS,
+    matched_ids,
+    matching_failures,
+    missing_one_cases,
+)
 
-# meeting -> (gold by id, extracted by id, the same-task pairs as (gold id, extracted id))
-MEETINGS: dict[str, tuple[dict[str, str], dict[str, str], set[tuple[str, str]]]] = {
-    # §5.1: paraphrase and abbreviation; E5 is a discussion point, not an action.
-    "IS1008b": (
-        {
-            "G1": "The Industrial Designer will make a presentation on the components concept "
-            "for the product.",
-            "G2": "The User Interface Designer will make a presentation on the user interface "
-            "concept.",
-            "G3": "The Marketing Expert will present the marketing concept.",
-            "G4": "The Project Manager will research companies that can provide the Industrial "
-            "Designer with help on integrating voice recognition into her design.",
-        },
-        {
-            "E1": "Industrial Designer to present the components concept",
-            "E2": "UI Designer to present the interface concept",
-            "E3": "Marketing Expert to present the marketing concept",
-            "E4": "PM to find companies to help with voice recognition",
-            "E5": "Team to decide on the remote's functions",
-        },
-        {("G1", "E1"), ("G2", "E2"), ("G3", "E3"), ("G4", "E4")},
-    ),
-    # §5.3: repeated wording ("will work on ... the remote") across the items.
-    "ES2002a": (
-        {
-            "G1": "the industrial designer will work on the working design of the remote",
-            "G2": "the user interface designer will work on the technical functions of the remote",
-            "G3": "the marketing executive will work on what requirements the remote has to fulfill",
-        },
-        {
-            "E1": "industrial designer: work on the working design",
-            "E2": "UI designer: work on technical functions of the remote",
-            "E3": "marketing exec: define product requirements",
-        },
-        {("G1", "E1"), ("G2", "E2"), ("G3", "E3")},
-    ),
-}
-
-
-def _matched_ids(
-    gold: dict[str, str], extracted: dict[str, str], keep: list[str]
-) -> set[tuple[str, str]]:
-    """Run the harness on the `keep` extracted items; return the matched pairs as ids."""
-
-    report = evaluate_extraction(
-        [extracted[e] for e in keep],
-        list(gold.values()),
-        similarity=lexical_similarity,
-        threshold=LEXICAL_THRESHOLD,
-    )
-    gold_id = {text: g for g, text in gold.items()}
-    extracted_id = {text: e for e, text in extracted.items()}
-    return {(gold_id[m.annotated], extracted_id[m.extracted]) for m in report.matched}
+LEXICAL = {"similarity": lexical_similarity, "threshold": LEXICAL_THRESHOLD}
 
 
 @pytest.mark.parametrize("meeting", list(MEETINGS))
@@ -82,17 +40,36 @@ def test_every_same_task_pair_clears_the_threshold(meeting: str) -> None:
 
 @pytest.mark.parametrize("meeting", list(MEETINGS))
 def test_matching_finds_exactly_the_hand_labelled_pairs(meeting: str) -> None:
-    gold, extracted, same = MEETINGS[meeting]
-    assert _matched_ids(gold, extracted, list(extracted)) == same
+    _, extracted, same = MEETINGS[meeting]
+    assert matched_ids(meeting, list(extracted), **LEXICAL) == same
 
 
-@pytest.mark.parametrize(
-    ("meeting", "missing"),
-    [(meeting, e) for meeting, (_, _, same) in MEETINGS.items() for _, e in sorted(same)],
-)
+@pytest.mark.parametrize(("meeting", "missing"), missing_one_cases())
 def test_a_missed_item_does_not_pull_in_a_wrong_match(meeting: str, missing: str) -> None:
     """The extractor misses one item: its gold sentence stays unmatched, nothing else moves."""
 
-    gold, extracted, same = MEETINGS[meeting]
+    _, extracted, same = MEETINGS[meeting]
     keep = [e for e in extracted if e != missing]
-    assert _matched_ids(gold, extracted, keep) == {(g, e) for g, e in same if e != missing}
+    assert matched_ids(meeting, keep, **LEXICAL) == {(g, e) for g, e in same if e != missing}
+
+
+# -- the embedding backend's τ (§6, frozen 2026-10-28) -------------------------
+
+
+@pytest.fixture(scope="module")
+def embedding():
+    # The model is downloaded in CI and under models/ locally; where it cannot
+    # load (no network, no local copy), there is nothing to check.
+    try:
+        embedding_similarity("a", "a")
+    except Exception as e:  # noqa: BLE001 - any load failure means "no model here"
+        pytest.skip(f"embedding model not available: {e}")
+    return embedding_similarity
+
+
+def test_the_embedding_threshold_is_frozen() -> None:
+    assert EMBEDDING_THRESHOLD == 0.70
+
+
+def test_the_embedding_threshold_passes_every_matching_check(embedding) -> None:
+    assert matching_failures(embedding, EMBEDDING_THRESHOLD) == []

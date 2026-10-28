@@ -4,8 +4,9 @@
 Each meeting's human transcript (`ingestion/ami_transcripts.py`, #784) goes to
 `BasicExtractor` as one MEETING item whose `item_key` is the AMI meeting id;
 the outcomes are scored with `evaluate_meetings` against the meeting's gold
-`<actions>` (`load_gold_actions`), with the lexical backend at its locked
-tau (`similarity.py`, `extraction_eval_design.md` §6).
+`<actions>` (`load_gold_actions`), with a similarity backend at its locked
+tau (`similarity.py`, `extraction_eval_design.md` §6): lexical by default,
+or `--backend embedding` once its tau is frozen.
 
 Manual on purpose, like `smoke_gemini.py`: it needs a key, it spends quota,
 and it must never run in CI. The transcript is AMI's human one, not ASR
@@ -24,6 +25,7 @@ Usage:
         python scripts/run_ami_extraction_eval.py --meeting IS1008b   # one meeting first
     ... python scripts/run_ami_extraction_eval.py                     # the whole v1 slice
     python scripts/run_ami_extraction_eval.py --from-outcomes extraction_outcomes.json
+    python scripts/run_ami_extraction_eval.py --from-outcomes ... --backend embedding
 """
 
 import argparse
@@ -35,7 +37,7 @@ from typing import Any
 from mind.contracts.base_enums import SourceType
 from mind.evaluation.extraction_eval import ExtractionSliceReport, evaluate_meetings
 from mind.evaluation.run_extraction_eval import slice_summary_lines
-from mind.evaluation.similarity import LEXICAL_THRESHOLD, lexical_similarity
+from mind.evaluation.similarity import backend
 from mind.extraction.confidence import ConfidenceBreakdown
 from mind.extraction.extractor import (
     BasicExtractor,
@@ -49,9 +51,9 @@ from mind.ingestion.ami_transcripts import load_gold_actions, load_transcript
 # The v1 slice (`extraction_eval_design.md`, "Scope"): the meetings in ami.manifest.json.
 V1_MEETINGS = ["IB4003", "IS1008b", "IS1008d"]
 
-# Matched pairs scoring in this band are reviewed by hand (design §6, #178 step 4):
-# the zone where a wrong pair could clear tau.
-REVIEW_BAND = (LEXICAL_THRESHOLD, 0.75)
+# Matched pairs scoring from tau to tau + this are reviewed by hand (design §6,
+# #178 step 4): the zone where a wrong pair could clear tau. 0.60-0.75 for lexical.
+REVIEW_BAND_WIDTH = 0.15
 
 Outcome = ExtractionSuccess | ExtractionFailure
 
@@ -143,8 +145,8 @@ def _from_json(data: dict[str, Any]) -> list[Outcome]:
     return outcomes
 
 
-def _print_details(report: ExtractionSliceReport) -> None:
-    low, high = REVIEW_BAND
+def _print_details(report: ExtractionSliceReport, threshold: float) -> None:
+    low, high = threshold, threshold + REVIEW_BAND_WIDTH
     for meeting in report.meetings:
         failed = "  FAILED" if meeting.failed else ""
         print(
@@ -193,11 +195,23 @@ def main() -> int:
         help="re-score a saved outcomes file instead of calling the model",
     )
     parser.add_argument(
+        "--backend",
+        choices=["lexical", "embedding"],
+        default="lexical",
+        help="similarity backend, at its frozen tau (default: lexical)",
+    )
+    parser.add_argument(
         "--os-trust-store",
         action="store_true",
         help="verify TLS against the OS trust store (see smoke_gemini.py)",
     )
     args = parser.parse_args()
+    # Before any model call: an embedding run with no frozen tau stops here.
+    try:
+        similarity, threshold = backend(args.backend)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 1
 
     if args.from_outcomes is not None:
         data = json.loads(args.from_outcomes.read_text(encoding="utf-8"))
@@ -218,22 +232,20 @@ def main() -> int:
         print(f"model answers saved to {args.outcomes}")
 
     gold = {meeting_id: load_gold_actions(meeting_id) for meeting_id in meetings}
-    report = evaluate_meetings(
-        outcomes, gold, similarity=lexical_similarity, threshold=LEXICAL_THRESHOLD
-    )
+    report = evaluate_meetings(outcomes, gold, similarity=similarity, threshold=threshold)
 
     print(f"\n=== Extraction eval on AMI (human transcripts), model {model} ===")
-    print(f"similarity: lexical_similarity, threshold {LEXICAL_THRESHOLD}")
+    print(f"similarity: {similarity.__name__}, threshold {threshold}")
     print(slice_summary_lines(report))
-    _print_details(report)
+    _print_details(report, threshold)
 
     args.report.write_text(
         json.dumps(
             {
                 "model": model,
                 "transcripts": "AMI human transcripts (ami_transcripts.py)",
-                "similarity_backend": "lexical_similarity",
-                "threshold": LEXICAL_THRESHOLD,
+                "similarity_backend": similarity.__name__,
+                "threshold": threshold,
                 "report": report.model_dump(mode="json"),
             },
             indent=2,
