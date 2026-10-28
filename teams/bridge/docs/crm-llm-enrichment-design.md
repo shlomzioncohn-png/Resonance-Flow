@@ -207,6 +207,15 @@ F. Resolved (2026-10-26, owner: Ruth): prepend - the enriched description, then 
    original CRM text - unless the model's description is a whitespace-normalized
    duplicate of the original (or fully contained in it), in which case the original is
    left unchanged rather than prepending a no-op copy.
+   Follow-up (2026-10-28): rewriting the title can drop the company/deal name a
+   salesperson relies on to tell which deal a task belongs to. The prompt (bumped to
+   PROMPT_VERSION v2) now instructs the model to keep that name in the rewritten
+   title; as a deterministic safety net independent of the model, CrmDealLlmEnricher
+   compares the accepted title against the original (whitespace-normalized,
+   case-insensitive) and, whenever it changed, prepends "Original CRM deal: <original
+   title>" to the description - ahead of the original CRM notes, and even when the
+   model gave no usable description of its own - so the original deal identity is
+   never lost.
 
 Design summary: add an optional LLM layer to CRM task mapping, reuse the shared AI
 infrastructure, minimize model calls through caching, and preserve synchronization

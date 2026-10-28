@@ -64,7 +64,8 @@ overall and per source).
 - `LoggingPayloadPublisher` logs each resulting task as
   `payload=Task[... title=..., description=..., effortEstimateMinutes=..., ...]`. An
   enriched description contains `Original CRM notes:` followed by the original text
-  below it.
+  below it; if the rewritten title dropped the deal's name, it also contains
+  `Original CRM deal: <original title>` right before that.
 - `MeteredLlmClient` logs one `model_call usage=crm-deal-enrichment ... status=success`
   (or `error`) line per real model call.
 - `CrmDealLlmEnricher` logs `CRM deal enrichment reply rejected ... reason=...` or
