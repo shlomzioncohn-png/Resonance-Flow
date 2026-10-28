@@ -765,10 +765,27 @@ kafka-exporter:
   kafkaBrokerVersion: "3.6.0"
   sasl:
     enabled: true
+    # Off: it reads username and password from one Secret, but the password is
+    # Kafka's own (client-passwords, created by the kafka-sasl hook). env and
+    # extraArgs below pass the same flags instead.
     scram:
-      enabled: true
-      mechanism: plain
-      secretName: resonance-flow-kafka-exporter-sasl
+      enabled: false
+  env:
+    - name: KAFKA_SASL_USERNAME
+      valueFrom:
+        secretKeyRef:
+          # templates/kafka-exporter-sasl-secret.yaml, from kafka.sasl.client.users.
+          name: resonance-flow-kafka-exporter-sasl
+          key: username
+    - name: KAFKA_SASL_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: resonance-flow-kafka-sasl-credentials
+          key: client-passwords
+  extraArgs:
+    - --sasl.mechanism=plain
+    - --sasl.username=$(KAFKA_SASL_USERNAME)
+    - --sasl.password=$(KAFKA_SASL_PASSWORD)
   # see README.md "Metrics scraping".
   prometheus:
     serviceMonitor:
