@@ -1,15 +1,19 @@
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import { expect, fn, userEvent, within } from 'storybook/test';
+import type { Decorator } from '@storybook/nextjs-vite';
+import { RoleProvider, type Role } from '../RoleProvider';
 import Sidebar from './Sidebar';
 
-// RoleProvider (mounted in .storybook/preview.tsx) hydrates the role from
-// localStorage on mount - seed it before the story renders and clear it after,
-// so a role never leaks into the next story.
-const ROLE_STORAGE_KEY = 'lens.role';
-const withRole = (role: 'TENANT_ADMIN' | 'EMPLOYEE') => () => {
-  window.localStorage.setItem(ROLE_STORAGE_KEY, role);
-  return () => window.localStorage.removeItem(ROLE_STORAGE_KEY);
-};
+// RoleProvider keeps the role in memory only (set at sign-in), so a story gives
+// it a starting role with its own provider, which overrides the one in preview.tsx.
+const withRole = (role: Role): Decorator =>
+  function WithRole(Story) {
+    return (
+      <RoleProvider initialRole={role}>
+        <Story />
+      </RoleProvider>
+    );
+  };
 
 const meta = {
   component: Sidebar,
@@ -40,7 +44,7 @@ export const Default: Story = {
 };
 
 export const ManagerRole: Story = {
-  beforeEach: withRole('TENANT_ADMIN'),
+  decorators: [withRole('TENANT_ADMIN')],
   parameters: { nextjs: { navigation: { pathname: '/manager/workload' } } },
   play: async ({ canvas }) => {
     await expect(await canvas.findByRole('link', { name: 'Workload' })).toBeVisible();
@@ -49,7 +53,7 @@ export const ManagerRole: Story = {
 };
 
 export const EmployeeRole: Story = {
-  beforeEach: withRole('EMPLOYEE'),
+  decorators: [withRole('EMPLOYEE')],
   parameters: { nextjs: { navigation: { pathname: '/employee' } } },
   play: async ({ canvas }) => {
     await expect(await canvas.findByRole('link', { name: 'My Tasks' })).toBeVisible();

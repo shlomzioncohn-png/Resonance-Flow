@@ -12,7 +12,7 @@
  *   NEXT_PUBLIC_API_MOCKING=enabled the whole screen - list, create, edit,
  *   status change - works with nothing but `npm run dev`. The data lives in
  *   memory: changes survive until the page is reloaded.
- * - POST /api/auth/login, which the Gateway doesn't expose yet. Once it does,
+ * - POST /auth/login (the Gateway's real path), so sign-in works without a Gateway. Once it's always available,
  *   delete its handler - services/authApi.ts already has its final shape.
  * - GET /api/manager/bottlenecks/graph, the Bottlenecks screen's dependency
  *   graph, until the Gateway/BFF serve it. Once they do, delete its handler -
@@ -95,14 +95,14 @@ resetMockUsers();
 // Same users and passwords as the Keycloak realm (teams/lens/keycloak/realm-lens.json).
 const MOCK_ACCOUNTS: (LoginRequest & { password: string; id: string; displayName: string; role: AuthRole })[] = [
   {
-    login: 'manager1',
+    login: 'manager1@lens.local',
     password: 'manager1',
     id: 'a3c5e0b2-4f1d-4c8e-9b7a-1d2e3f4a5b01',
     displayName: 'Maya Manager',
     role: 'TENANT_ADMIN',
   },
   {
-    login: 'employee1',
+    login: 'employee1@lens.local',
     password: 'employee1',
     id: 'a3c5e0b2-4f1d-4c8e-9b7a-1d2e3f4a5b02',
     displayName: 'Eli Employee',
@@ -228,10 +228,10 @@ export const handlers = [
     return HttpResponse.json(touch(user, fields));
   }),
 
-  // POST /api/auth/login - a wrong username or password gets the Gateway's 401 error body.
+  // POST /auth/login - a wrong username or password gets the Gateway's 401 error body.
   // The generics type the request body and allow either response body (success or error).
   http.post<never, LoginRequest, LoginResponse | GatewayErrorBody>(
-    `${API_BASE_URL}/api/auth/login`,
+    `${API_BASE_URL}/auth/login`,
     async ({ request }) => {
       await delay(400);
 
@@ -246,7 +246,7 @@ export const handlers = [
             status: 'ERROR',
             errorCode: 'UNAUTHORIZED',
             message: 'Invalid username or password',
-            path: '/api/auth/login',
+            path: '/auth/login',
             timestamp: new Date().toISOString(),
           },
           { status: 401 },
