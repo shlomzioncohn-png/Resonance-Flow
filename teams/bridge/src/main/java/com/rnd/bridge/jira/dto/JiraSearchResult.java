@@ -5,7 +5,8 @@ import java.util.List;
 public class JiraSearchResult {
 
     private List<JiraIssue> issues;
-    private int total;
+    private boolean isLast;
+    private String nextPageToken;
 
     public JiraSearchResult() {
     }
@@ -18,11 +19,19 @@ public class JiraSearchResult {
         this.issues = issues;
     }
 
-    public int getTotal() {
-        return total;
+    public boolean isLast() {
+        return isLast;
     }
 
-    public void setTotal(int total) {
-        this.total = total;
+    public void setLast(boolean last) {
+        isLast = last;
+    }
+
+    public String getNextPageToken() {
+        return nextPageToken;
+    }
+
+    public void setNextPageToken(String nextPageToken) {
+        this.nextPageToken = nextPageToken;
     }
 }

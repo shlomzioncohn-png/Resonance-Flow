@@ -10,7 +10,7 @@ The Jira Bridge Adapter is a structured ETL lane for the Resonance Flow platform
 
 | Component | Package / File | Responsibility |
 |-----------|----------------|----------------|
-| `JiraClient` | `com.rnd.bridge.jira.service.JiraClient` | Calls `/rest/api/2/search` with `startAt`/`maxResults` pagination (page size: `jira.page-size`, default 100), iterating offsets until the reported `total` is consumed or an empty page returns. Maps each issue through `JiraIssueMapper`, validates it, and applies a 3-attempt exponential backoff retry on 5xx/429 responses. |
+| `JiraClient` | `com.rnd.bridge.jira.service.JiraClient` | Calls `/rest/api/3/search/jql` with `maxResults`/`nextPageToken` pagination (page size: `jira.page-size`, default 100), following tokens until Jira reports `isLast`, the token is absent, or an empty page returns. Maps each issue through `JiraIssueMapper`, validates it, and applies a 3-attempt exponential backoff retry on 5xx/429 responses. |
 | `JiraIssueMapper` | `com.rnd.bridge.jira.mapper.JiraIssueMapper` | Extends `AbstractTaskMapper<JiraIssue>`, producing `Task` records with `SourceType.JIRA`. |
 | `TaskValidator` | `com.rnd.bridge.task.TaskValidator` | Validates each `Task` after mapping; invalid records are logged and skipped without terminating the stream. |
 | `PayloadPublisher<Task>` | `com.rnd.bridge.core.PayloadPublisher` | Shared publisher - resolves to `KafkaPayloadPublisher` under the `kafka` profile (Protobuf `StructuredTaskEvent` to `bridge.structured.tasks`), else `LoggingPayloadPublisher`. |
@@ -20,7 +20,7 @@ The Jira Bridge Adapter is a structured ETL lane for the Resonance Flow platform
 ## Data Flow
 
 1. `JiraBridgeController` or `JiraSyncScheduler` invokes `JiraClient.searchIssues(jql)`.
-2. `JiraClient` pages through `/rest/api/2/search` (`startAt` advances by the number of issues consumed; stops at `total` or on an empty page).
+2. `JiraClient` pages through `/rest/api/3/search/jql` (each response's `nextPageToken` is passed back verbatim; stops on `isLast`, a missing token, or an empty page).
 3. Each `JiraIssue` DTO is mapped to a `Task` by `JiraIssueMapper`, passing `Instant.now()` as the `asOf` parameter.
 4. `TaskValidator` validates every `Task` immediately after mapping; a record that fails validation is logged and skipped without terminating the stream.
 5. The shared `PayloadPublisher<Task>` publishes all valid tasks to `bridge.structured.tasks`, blocking per record so one failure can't fail the batch.
@@ -32,7 +32,7 @@ The Jira Bridge Adapter is a structured ETL lane for the Resonance Flow platform
 | `JIRA_API_BASE_URL` | `https://example.atlassian.net` | Base URL of the Jira instance. |
 | `JIRA_TOKEN` | empty | Jira API token; if empty, no auth header is sent. |
 | `JIRA_TARGET_PROJECT` | empty | Default project key used when the sync is called without a `projectKey` parameter. |
-| `JIRA_PAGE_SIZE` | `100` | `maxResults` for `/rest/api/2/search` pagination. |
+| `JIRA_PAGE_SIZE` | `100` | `maxResults` for `/rest/api/3/search/jql` pagination. |
 | `JIRA_SYNC_CRON_ENABLED` | `false` | Enables the scheduled `JiraSyncScheduler` when `true`. |
 | `JIRA_SYNC_CRON_EXPRESSION` | `0 0 2 * * ?` | Cron expression for the scheduled sync (default: 02:00 daily). |
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka broker list. |
@@ -47,7 +47,7 @@ The Jira Bridge Adapter is a structured ETL lane for the Resonance Flow platform
 
 ## Testing
 
-- `JiraClientTest`: verifies issue mapping, multi-page pagination (`startAt`/`total`), empty-result handling, and that an invalid record is skipped while valid ones still flow.
+- `JiraClientTest`: verifies issue mapping, multi-page pagination (`nextPageToken`/`isLast`), empty-result handling, and that an invalid record is skipped while valid ones still flow.
 
 ## Tech Stack
 
