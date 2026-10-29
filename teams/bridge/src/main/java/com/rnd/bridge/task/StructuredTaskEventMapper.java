@@ -20,8 +20,8 @@ import java.util.regex.Pattern;
  * ({@code com.rnd.inbox.event.StructuredTaskEvent}, compiled from the registered schema in
  * {@code shared/proto/structured-task-event.proto}) directly from a {@link Task}.
  * <p>
- * Lives alongside {@link BridgeTaskEventDto}, not in place of it - that DTO is the JSON wire
- * shape, this class is the Protobuf path. Pure mapper: no Kafka, no Spring wiring, no I/O.
+ * The only wire shape Bridge produces now - an earlier JSON DTO ({@code BridgeTaskEventDto}) was
+ * removed as unused (PR #1097). Pure mapper: no Kafka, no Spring wiring, no I/O.
  * <p>
  * {@code com.rnd.bridge.task.model.SourceType}/{@code TaskStatus} and
  * {@code com.rnd.inbox.event.SourceType}/{@code TaskStatus} share simple names - two teams
@@ -40,7 +40,7 @@ public final class StructuredTaskEventMapper {
     }
 
     public static StructuredTaskEvent from(Task task) {
-        String tenantId = task.organizationId(); // Task.organizationId() -> tenant_id, same deliberate rename as BridgeTaskEventDto.from()
+        String tenantId = task.organizationId(); // Task.organizationId() -> tenant_id, deliberate rename (CLAUDE.md §4/§6)
         requireValidTenantId(tenantId);
         requireNonBlank(task.title(), "title");
         requireNonBlank(task.sourceRef(), "sourceRef");

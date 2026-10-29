@@ -29,12 +29,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * then makes {@code HubSpotDealRepository.toDealHistory()} reject every
  * single deal as having "no dealstage history").
  * <p>
- * {@code BridgeTaskEventDto} needs snake_case on the wire for Kafka - that
- * is handled with a per-class {@code @JsonNaming(SnakeCaseStrategy.class)},
- * deliberately not a global strategy on this shared bean, precisely so this
- * test keeps passing. {@code JsonDealRepository} is not covered here: it
- * reads {@code crm/synthetic-deals.json} through its own isolated {@code
- * CrmDealJsonMapper}, never this bean, so it cannot be affected either way.
+ * {@code JsonDealRepository} is not covered here: it reads {@code crm/synthetic-deals.json}
+ * through its own isolated {@code CrmDealJsonMapper}, never this bean, so it cannot be affected
+ * either way.
  * <p>
  * {@code @JsonTest} is used (rather than a plain unit test with a
  * hand-built {@code ObjectMapper}) so {@link #objectMapper} is the real

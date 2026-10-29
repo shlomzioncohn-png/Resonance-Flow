@@ -39,12 +39,6 @@ spring:
       retries: 3
       properties:
         spring.json.add.type.headers: false
-    consumer:
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-      properties:
-        spring.json.trusted.packages: com.rnd.bridge
-        spring.json.value.default.type: com.rnd.bridge.task.BridgeTaskEventDto
 
 minio:
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
