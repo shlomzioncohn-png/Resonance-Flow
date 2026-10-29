@@ -43,4 +43,10 @@ export interface DataTableProps<T> {
 
   /** Controlled. Omit for a table without a pagination bar. */
   pagination?: DataTablePagination;
+
+  /**
+   * Makes the whole row clickable. A mouse shortcut only: put a real button or link in a cell
+   * for keyboard and screen-reader users, since the row itself is not focusable.
+   */
+  onRowClick?: (row: T) => void;
 }
