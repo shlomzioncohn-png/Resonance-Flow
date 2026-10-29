@@ -8,6 +8,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 /**
  * Body of POST /api/manager/users. Being a typed DTO is also the allowlist:
@@ -45,4 +46,14 @@ public class UserCreateRequestDTO {
     @NotBlank(message = "role is required")
     @Pattern(regexp = "MANAGER|EMPLOYEE", message = "role must be one of MANAGER, EMPLOYEE")
     private String role;
+
+    /**
+     * The initial password the manager sets. Inbox hashes it and checks the
+     * byte limit (72); here only the length is checked. Kept out of toString
+     * so it never reaches a log line.
+     */
+    @NotBlank(message = "password is required")
+    @Size(min = 8, message = "password must be at least 8 characters")
+    @ToString.Exclude
+    private String password;
 }
