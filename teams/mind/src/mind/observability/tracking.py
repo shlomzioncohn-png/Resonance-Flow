@@ -33,6 +33,8 @@ from functools import lru_cache
 from pydantic import BaseModel, ValidationError
 
 from mind.config import MonitoringSettings
+from mind.observability.context import current_context
+from mind.observability.sink import JsonlSink, default_process_name
 
 logger = logging.getLogger("mind.observability")
 
@@ -44,11 +46,21 @@ _NOT_APPLICABLE = "n/a"
 
 
 class CallKind(StrEnum):
-    """Which stage of the pipeline made the call -- what a summary groups by."""
+    """Which stage of the pipeline made the call -- what a summary groups by.
+
+    OCR, ASR and LLM are model calls (#479). The rest are the other stages of
+    the full flow (#482): EMBEDDING and SCORING are local compute, measured in
+    CPU seconds like OCR/ASR; VECTOR_QUERY and CHAIN wait on another service
+    (pgvector, Chain's traversal API), so only their latency applies.
+    """
 
     OCR = "ocr"
     ASR = "asr"
     LLM = "llm"
+    EMBEDDING = "embedding"
+    VECTOR_QUERY = "vector_query"
+    SCORING = "scoring"
+    CHAIN = "chain"
 
 
 class CallStatus(StrEnum):
@@ -59,12 +71,17 @@ class CallStatus(StrEnum):
 
 
 def _cpu_applies(kind: CallKind | None) -> bool:
-    """CPU seconds are the compute cost of the local models: OCR and ASR.
+    """CPU seconds are the compute cost of local work: OCR, ASR, embedding, scoring.
 
     A call recorded without a kind gets every measure -- nothing says which
     of them it should have.
     """
-    return kind is None or kind in (CallKind.OCR, CallKind.ASR)
+    return kind is None or kind in (
+        CallKind.OCR,
+        CallKind.ASR,
+        CallKind.EMBEDDING,
+        CallKind.SCORING,
+    )
 
 
 def _llm_measures_apply(kind: CallKind | None) -> bool:
@@ -94,6 +111,18 @@ class ModelCallRecord:
     # As the provider reported them; None when it did not.
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    # The call succeeded, but on a fallback path: e.g. a score computed
+    # without its ancestors because Chain could not be asked. Its result is
+    # not the full path's, so it is counted apart rather than passed off as one.
+    degraded: bool = False
+    # Seconds of audio an ASR call ran on, after the cap (#484) -- what a cost
+    # per audio minute is reckoned against. None for every other call.
+    audio_s: float | None = None
+    # Which item, Inbox task and stage the call was made for (#482), from the
+    # context it was recorded in (observability/context.py); None outside one.
+    item: str | None = None
+    task: str | None = None
+    stage: str | None = None
     timestamp: float = field(default_factory=time.time)
 
 
@@ -119,12 +148,36 @@ def monitoring_settings() -> MonitoringSettings:
         return MonitoringSettings.model_construct()
 
 
+_sink: JsonlSink | None = None
+_sink_built = False
+_sink_lock = threading.Lock()
+
+
+def calls_sink() -> JsonlSink | None:
+    """This process's JSONL file (#482), or None when MIND_MONITORING__CALLS_DIR is not set.
+
+    Built once, on the first recorded call, under a lock: two threads must not
+    open the same file twice. Like the limits, read once per process.
+    """
+    global _sink, _sink_built
+    with _sink_lock:
+        if not _sink_built:
+            settings = monitoring_settings()
+            if settings.calls_dir is not None:
+                process = settings.process_name or default_process_name()
+                _sink = JsonlSink(settings.calls_dir, process)
+            _sink_built = True
+        return _sink
+
+
 def _limits(kind: CallKind | None) -> tuple[float | None, float | None]:
     """(duration limit in ms, cost limit in USD) for a kind; None means no check.
 
     Only LLM calls have a cost limit: they are the only ones priced in
     dollars. A call recorded without a kind has no limits: there is nothing
-    to say what "expected" is for it.
+    to say what "expected" is for it. Neither do the #482 kinds (embedding,
+    vector query, scoring, Chain) yet: a limit waits for their measured
+    baseline, as the OCR/ASR CPU-seconds limit does.
     """
     settings = monitoring_settings()
     match kind:
@@ -247,6 +300,7 @@ class _Totals:
     cost_usd: float = 0.0
     slow: int = 0
     expensive: int = 0
+    degraded: int = 0
 
     def add(self, record: ModelCallRecord, check: LimitCheck) -> None:
         if record.kind is not None:
@@ -255,6 +309,8 @@ class _Totals:
         self.call_count += 1
         if record.status == CallStatus.ERROR:
             self.error_count += 1
+        if record.degraded:
+            self.degraded += 1
         if _cpu_applies(record.kind):
             self.cpu_applicable += 1
             if record.cpu_s is not None:
@@ -287,13 +343,16 @@ class CallNameSummary(BaseModel):
     """Every call recorded under one name since the process started.
 
     Units are in the names: CPU in seconds, cost in US dollars, durations in
-    milliseconds. CPU seconds apply to OCR/ASR calls; tokens and dollars to
-    LLM calls.
+    milliseconds. CPU seconds apply to OCR, ASR, embedding and scoring calls;
+    tokens and dollars to LLM calls; vector queries and Chain calls have
+    latency only.
 
-    error_count counts the calls that raised. A failed LLM call reported no
-    usage, so it is in unpriced_count too: unpriced_count is every call whose
-    dollar cost is unknown -- no price on file, or no usage reported -- and
-    error_count says how many of them failed.
+    error_count counts the calls that raised; degraded_count the ones that
+    succeeded on a fallback path (see ModelCallRecord.degraded).
+
+    A failed LLM call reported no usage, so it is in unpriced_count too:
+    unpriced_count is every call whose dollar cost is unknown -- no price on
+    file, or no usage reported -- and error_count says how many of them failed.
 
     For each measure, its *_count tells the two kinds of null apart:
 
@@ -323,6 +382,8 @@ class CallNameSummary(BaseModel):
     slow_count: int
     cost_limit_usd: float | None
     expensive_count: int
+    # Last, and defaulted, so a reader of the earlier shape is not broken.
+    degraded_count: int = 0
 
 
 class ModelCallSummary(BaseModel):
@@ -360,6 +421,7 @@ def _summarize(name: str, totals: _Totals, durations: list[float]) -> CallNameSu
         slow_count=totals.slow,
         cost_limit_usd=cost_limit_usd,
         expensive_count=totals.expensive,
+        degraded_count=totals.degraded,
     )
 
 
@@ -394,6 +456,12 @@ def _count(value: int | None) -> str:
     return _NOT_APPLICABLE if value is None else str(value)
 
 
+def _context_suffix(record: ModelCallRecord) -> str:
+    """` stage=... item=... task=...` for the fields the call's context set; "" outside one."""
+    fields = (("stage", record.stage), ("item", record.item), ("task", record.task))
+    return "".join(f" {name}={value}" for name, value in fields if value is not None)
+
+
 def log_summary() -> ModelCallSummary:
     """Log the summary, one line per call name, and return it.
 
@@ -407,7 +475,7 @@ def log_summary() -> ModelCallSummary:
             "model_call_summary call_name=%s kind=%s calls=%d errors=%d p50_ms=%.1f "
             "p95_ms=%.1f cpu_seconds=%s cpu_unmeasured=%s prompt_tokens=%s "
             "completion_tokens=%s tokens_unreported=%s cost_usd=%s unpriced=%s slow=%d "
-            "expensive=%d",
+            "expensive=%d degraded=%d",
             row.call_name,
             row.kind or "-",
             row.call_count,
@@ -427,6 +495,7 @@ def log_summary() -> ModelCallSummary:
             _count(row.unpriced_count),
             row.slow_count,
             row.expensive_count,
+            row.degraded_count,
         )
     return summary
 
@@ -441,6 +510,8 @@ def record_call(
     cpu_s: float | None = None,
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
+    degraded: bool = False,
+    audio_s: float | None = None,
 ) -> ModelCallRecord:
     """Record one model call.
 
@@ -455,13 +526,17 @@ def record_call(
             priced -- pass None rather than 0.0 for "unknown". OCR/ASR calls
             pass None: their cost is `cpu_s`. Record the call either way:
             every model call must be recorded.
-        kind: OCR, ASR or LLM -- also decides which measures apply (CPU
-            seconds for OCR/ASR; tokens and dollars for LLM).
+        kind: The stage (see CallKind) -- also decides which measures apply
+            (CPU seconds for OCR/ASR/embedding/scoring; tokens and dollars
+            for LLM; latency only for vector queries and Chain calls).
         status: ERROR if the call raised, so failed calls -- often the
             slowest ones -- stay in the latency figures.
-        cpu_s: CPU seconds the call used, if measured (OCR/ASR).
+        cpu_s: CPU seconds the call used, if measured.
         prompt_tokens, completion_tokens: Token usage, for LLM calls whose
             provider reports it.
+        degraded: The call succeeded on a fallback path, so its result is
+            not the full path's (see ModelCallRecord.degraded).
+        audio_s: Seconds of audio an ASR call ran on, after the cap.
 
     Returns:
         The stored record, for callers that want to log or assert on it
@@ -475,6 +550,7 @@ def record_call(
     decisions"), swap the storage here -- call sites do not change.
     """
     global _total_calls
+    context = current_context()
     record = ModelCallRecord(
         model_name=model_name,
         duration_ms=duration_ms,
@@ -484,6 +560,11 @@ def record_call(
         cpu_s=cpu_s,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
+        degraded=degraded,
+        audio_s=audio_s,
+        item=context.item,
+        task=context.task,
+        stage=context.stage,
     )
     check = check_limits(record)
     with _lock:
@@ -496,7 +577,7 @@ def record_call(
     llm_applies = _llm_measures_apply(record.kind)
     logger.info(
         "model_call model_name=%s kind=%s status=%s duration_ms=%.1f cpu_seconds=%s "
-        "prompt_tokens=%s completion_tokens=%s cost_usd=%s",
+        "prompt_tokens=%s completion_tokens=%s cost_usd=%s%s%s",
         record.model_name,
         record.kind or "-",
         record.status,
@@ -505,7 +586,14 @@ def record_call(
         _shown(record.prompt_tokens, llm_applies, "unreported"),
         _shown(record.completion_tokens, llm_applies, "unreported"),
         _shown(record.cost, llm_applies, "unpriced", ".6f"),
+        # Each only when set, so a line recorded outside any context, on the
+        # full path, is unchanged.
+        " degraded=true" if record.degraded else "",
+        _context_suffix(record),
     )
+    sink = calls_sink()
+    if sink is not None:
+        sink.write(record)  # never raises: a failed write is counted and logged
     _warn_if_over(record, check)
     if summary_due:
         log_summary()
@@ -531,8 +619,12 @@ def _reset_for_tests() -> None:
     tests/test_observability.py's autouse fixture, which calls this
     before every test.
     """
-    global _total_calls
+    global _total_calls, _sink, _sink_built
     with _lock:
         _records.clear()
         _totals.clear()
         _total_calls = 0
+    with _sink_lock:
+        if _sink is not None:
+            _sink.close()
+        _sink, _sink_built = None, False

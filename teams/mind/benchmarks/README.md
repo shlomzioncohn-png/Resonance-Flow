@@ -6,6 +6,20 @@ documented and reasoned about (e.g. the week-1 vector-store choice, the
 managed-API-vs-local-model spike). Keep raw run outputs here; write the
 resulting decision into the relevant README or an ADR.
 
+- `pipeline-baseline-482.md` — **preliminary** latency and cost baseline of
+  the full #359 demo flow (#482), one run per arrival order (natural,
+  slack-first), per stage and per item, every stage recorded, with each run's
+  raw JSONL and report under `pipeline-baseline-482/<run-id>/`. Every score
+  degraded (no Chain) and ~4x laptop noise on ASR: read its limitations
+  before using a number from it.
+- `serving-reliability-482.md` — #482: Mind's longest job (ASR at and past
+  its 600 s cap, repeated in one process) and the deployed API under
+  concurrent requests with `/health` probed; reproduced by
+  `serving_reliability.py`.
+  Laptop numbers; the API's memory, 453 MB of a 512Mi limit, is 78 MB since
+  the lazy import.
+- `cost-latency-484.md` — #484's written conclusion: the most expensive
+  stage, cost per item, what is trending badly -- over the demo dataset.
 - `ocr-asr-benchmark.md` — OCR: 5 configs benchmarked (Tesseract psm 3/6/11,
   PaddleOCR mobile/server); Tesseract `--psm 11` chosen on latency and memory,
   with the accuracy trade (PaddleOCR is ~2.7x more accurate) documented. ASR:
@@ -22,3 +36,16 @@ resulting decision into the relevant README or an ADR.
   `models/whisper/` (see the doc's "ASR — setup").
 - `asr_benchmark.py` — the ASR half on its own (`python -m
   benchmarks.asr_benchmark`, ~25 min on a laptop CPU, most of it `small.en`).
+- `asr-ami-validation.md` — ASR validation against AMI (#480): a real WER
+  (jiwer, documented normalization) of the ASR pipeline on a fixed set of
+  AMI windows, per window and overall, for tiny.en/base.en/small.en; what
+  breaks (deletions concentrate in overlapping speech); measured facts,
+  hypotheses and pending decisions kept apart. Provisional until R2 confirms
+  the file set.
+- `asr_validation.py` — produces those WER tables through
+  `mind.multimodal.asr.transcribe()` (`python -m benchmarks.asr_validation
+  [--sizes ...]`, ~25 min for all three sizes); saves every transcript under
+  the gitignored `local-data/ami/asr-validation/`.
+- `asr_error_analysis.py` — the failure analysis on those saved transcripts
+  (`python -m benchmarks.asr_error_analysis`): deletion and substitution rates
+  in overlapped vs. other speech, deletion runs, and the worst 30 s stretches.

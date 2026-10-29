@@ -197,7 +197,7 @@ def test_every_example_is_an_answer_the_parser_accepts() -> None:
     examples = _examples()
     shape = response_model(classify=True)
 
-    assert len(examples) == 10
+    assert len(examples) == 12
     for example in examples:
         for task in parse_response(json.dumps(example), shape):
             assert task.model_fields_set == set(shape.model_fields)
@@ -557,3 +557,77 @@ def test_the_prompt_keeps_descriptions_short() -> None:
 
     assert "at most about 300 characters" in prompt
     assert "never quote the content at length" in prompt
+
+
+# --- the owner (#132) -----------------------------------------------------
+
+
+@pytest.mark.parametrize("classify", [False, True])
+def test_both_owner_fields_are_asked_for_in_both_modes(classify: bool) -> None:
+    """Fields of every task, so they cannot live in the block the switch removes."""
+
+    prompt = system_prompt(classify)
+
+    assert "`owner_mention`" in prompt
+    assert "`owner_is_recipient`" in prompt
+    assert "Never output priority or owner" not in prompt
+
+
+def test_the_owner_is_a_name_and_never_the_asker_or_an_address() -> None:
+    prompt = system_prompt()
+
+    assert "Only the name" in prompt
+    assert "Never the person who asks for it" in prompt
+    assert "Never an email address" in prompt
+
+
+def test_passing_work_on_is_the_recipients_own_task() -> None:
+    """ "Dana, please ask Yossi to sign" asks Dana, not Yossi: her task is to
+    ask him. Only someone named as doing this task is `owner_mention`."""
+
+    prompt = system_prompt()
+
+    assert "names someone else as the one who does this task" in prompt
+    assert "is the recipient's own task" in prompt
+
+
+def test_the_prompt_says_the_two_owner_fields_never_go_together() -> None:
+    assert "`owner_is_recipient` is true, `owner_mention` is null" in system_prompt()
+
+
+def test_the_examples_show_the_recipient_a_named_owner_and_no_owner() -> None:
+    tasks = [task for example in _examples() for task in example["tasks"]]
+
+    assert any(task["owner_is_recipient"] for task in tasks)
+    assert any(task["owner_mention"] for task in tasks)
+    assert any(not task["owner_is_recipient"] and task["owner_mention"] is None for task in tasks)
+    for task in tasks:
+        assert not (task["owner_is_recipient"] and task["owner_mention"])
+
+
+def test_every_named_owner_in_the_examples_is_written_in_the_prompt() -> None:
+    """The examples teach the grounding rule too: a name the model sees made
+    up in an example is one it learns to make up."""
+
+    prompt = system_prompt(classify=True)
+    prose = "\n".join(line for line in prompt.splitlines() if not line.strip().startswith("{"))
+    owners = [
+        task["owner_mention"]
+        for example in _examples()
+        for task in example["tasks"]
+        if task["owner_mention"]
+    ]
+
+    assert owners
+    for owner in owners:
+        assert owner in prose
+
+
+def test_a_speakers_label_is_an_owner_only_when_it_is_a_persons_name() -> None:
+    """Live on AMI and the design meeting: "A", "C" and "Project Manager" came
+    back as owners. Labels that are letters or roles name nobody."""
+
+    prompt = system_prompt()
+
+    assert "A speaker's label is a name only when it is a person's name" in prompt
+    assert '"A:" and "Project Manager:" are not' in prompt

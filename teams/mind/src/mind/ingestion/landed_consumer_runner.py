@@ -10,6 +10,12 @@ one process (task_creation/README.md, "Running it"). The overdue timer runs
 beside them. When the store moves to Postgres (#918) the listener can move
 out.
 
+Every model call is attributed to its item and stage (#482,
+observability/context.py), set here, where messages are handled, so no
+handler changes: a landed item is `landed`, with its objects' OCR/ASR in
+`to_text`, its LLM calls in `extraction` and each candidate's index search in
+`duplicate_check`; Inbox's task.created reply is `task_created`, with its task.
+
 Usage:
     make run-landed-consumer
     python -m mind.ingestion.landed_consumer_runner
@@ -19,6 +25,8 @@ import asyncio
 import logging
 import os
 import threading
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from typing import Any
 from uuid import UUID
 
@@ -29,18 +37,24 @@ from mind.dependencies.kafka_sink import KafkaDependencySink
 from mind.dependencies.publisher import DependencyPublisher
 from mind.embeddings.confidence import ScoredResult
 from mind.embeddings.duplicate_detection import find_duplicate
+from mind.embeddings.embeddings import warm_up as warm_up_embeddings
 from mind.embeddings.pgvector_store import PgVectorStore
+from mind.extraction.assembly import source_ref_for_inbox
 from mind.extraction.config import ExtractionConfig
 from mind.extraction.extractor import BasicExtractor, ExtractionItem
 from mind.extraction.providers.factory import build_provider
 from mind.ingestion.creation_pipeline import CreationPipeline
+from mind.ingestion.extraction_items import extraction_items
 from mind.ingestion.landed_consumer import LandedHandler
 from mind.ingestion.minio_reader import minio_reader
 from mind.ingestion.seen_revisions import InMemoryRevisionStore
 from mind.messaging import ProtobufConsumer, ProtobufProducer
 from mind.messaging.raw_object_event_pb2 import RawObjectEvent as RawObjectEventMessage
 from mind.multimodal import asr
+from mind.observability.context import CallContext, call_context, message_context
 from mind.task_creation.flow import TaskCreationFlow
+from mind.task_creation.listener import GROUP_ID as TASK_CREATED_GROUP_ID
+from mind.task_creation.listener import TOPIC as TASK_CREATED_TOPIC
 from mind.task_creation.listener import run_overdue_timer, run_task_created_listener
 from mind.task_creation.pending import PendingRequests
 
@@ -65,6 +79,67 @@ def _log_items(event: RawObjectEvent, items: list[ExtractionItem]) -> None:
         )
 
 
+def _inbox_source_ref(message: RawObjectEventMessage) -> str | None:
+    """The source_ref Mind will send Inbox for this item's tasks, as
+    `to_task_creation_requested` builds it -- the one the API sees again on
+    task.created -- or None when the event is too broken to have one (it is
+    skipped as invalid anyway)."""
+    try:
+        bridge_ref = message.source_ref if message.HasField("source_ref") else None
+        return source_ref_for_inbox(bridge_ref, UUID(message.correlation_id))
+    except ValueError:
+        return None
+
+
+def _landed_context(message: RawObjectEventMessage) -> AbstractContextManager[CallContext]:
+    """The calls of one landed item, attributed to it (#482)."""
+    return message_context(
+        stage="landed", tenant_id=message.tenant_id, source_ref=_inbox_source_ref(message)
+    )
+
+
+def _in_stage[**P, R](stage: str, call: Callable[P, R]) -> Callable[P, R]:
+    """`call`, with the calls recorded inside it attributed to `stage`."""
+
+    def staged(*args: P.args, **kwargs: P.kwargs) -> R:
+        with call_context(stage=stage):
+            return call(*args, **kwargs)
+
+    return staged
+
+
+class _AttributedTaskCreatedConsumer:
+    """task.created's consumer, each message's calls attributed to its task (#482).
+
+    Handed to run_task_created_listener as its consumer_factory, so the
+    listener itself is unchanged: indexing and dependency resolution run
+    inside `handler`, on a loop this thread drives, so they see the context.
+    """
+
+    def __init__(self) -> None:
+        self._consumer = ProtobufConsumer(
+            group_id=TASK_CREATED_GROUP_ID, topics=[TASK_CREATED_TOPIC]
+        )
+
+    def run(
+        self,
+        message_type: type,
+        handler: Callable[[object, object], None],
+        *,
+        idle_timeout: float | None = None,
+    ) -> int:
+        def attributed(event: Any, message: object) -> None:
+            with message_context(
+                stage="task_created",
+                tenant_id=event.tenant_id,
+                source_ref=event.source_ref,
+                task=event.id,
+            ):
+                handler(event, message)
+
+        return self._consumer.run(message_type, attributed, idle_timeout=idle_timeout)
+
+
 def _die_on_thread_crash(args: threading.ExceptHookArgs) -> None:
     # The listener gives up only after MAX_OUTAGE: the whole process goes, so
     # it is restarted, rather than consuming on with nobody matching replies.
@@ -83,6 +158,9 @@ def main() -> None:
     provider = build_provider()
     # Load Whisper now, not inside the first audio message's handler (R4, #478).
     asr.warm_up()
+    # And the embedding model: its import is lazy since #482, so the first item
+    # to reach the duplicate check would otherwise wait 20-100 s for it.
+    warm_up_embeddings()
 
     threading.excepthook = _die_on_thread_crash
     producer = ProtobufProducer()
@@ -112,6 +190,7 @@ def main() -> None:
     threading.Thread(
         target=run_task_created_listener,
         args=(flow, listener_loop),
+        kwargs={"consumer_factory": _AttributedTaskCreatedConsumer},
         name="task-created-listener",
         daemon=True,
     ).start()
@@ -127,15 +206,21 @@ def main() -> None:
 
     async def _find_duplicate(tenant_id: UUID, title: str, description: str) -> ScoredResult | None:
         # Only the item's own tenant (#841).
-        return await find_duplicate(search_index.for_tenant(tenant_id), title, description)
+        with call_context(stage="duplicate_check"):
+            return await find_duplicate(search_index.for_tenant(tenant_id), title, description)
 
     pipeline = CreationPipeline(
-        extract=lambda item: extractor.extract(item.text, item.source_type, item.item_key),
+        extract=_in_stage(
+            "extraction",
+            lambda item: extractor.extract(item.text, item.source_type, item.item_key),
+        ),
         find_duplicate=_find_duplicate,
         sender=flow,
         # Read once at start: a bad zone or working week stops the runner here,
         # not on the first deadline (#960).
         deadline_settings=DeadlineSettings(),
+        # No `directory` yet: #131's InboxDirectory is not on main, so no
+        # suggested owner is sent (#132, task_creation/README.md).
     )
 
     def _on_items(event: RawObjectEvent, items: list[ExtractionItem]) -> None:
@@ -146,13 +231,15 @@ def main() -> None:
         read_object=read_object,
         store=InMemoryRevisionStore(),
         on_items=_on_items,
+        to_items=_in_stage("to_text", extraction_items),
     )
 
     def _handler(event: Any, msg: object) -> None:
         # Any: run() has already deserialized it into a RawObjectEventMessage.
         # No try/except: a failure that may pass later must propagate, so the
         # offset stays uncommitted and the message comes again after a restart.
-        handle(event, msg)
+        with _landed_context(event):
+            handle(event, msg)
 
     consumer = ProtobufConsumer(
         group_id=settings.group_id,

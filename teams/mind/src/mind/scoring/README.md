@@ -175,25 +175,29 @@ It implements `RankingModel` (and `TaskScorer`, the live path's wider
 equivalent) exactly the baseline does, so R1's harness and `score_publisher.py`
 both run it with no special-casing.
 
-**The formula.** `base_score = 0.5*own_base + 0.5*mean(ancestor importance)`
+**The formula.** `base_score = 0.93*own_base + 0.07*mean(ancestor importance)`
 when the task has at least one (known) ancestor, `own_base` unchanged
 otherwise — walking every ancestor up to the root, **undiminished — no depth
-decay**. No decay rate or curve is written down anywhere in the roadmap or
-the team-role documents, so inventing one now would bake an unfounded guess
-into the one thing (#473's seven constructed graphs) that is supposed to
-have a hand-verified, defensible answer. Revisit this deliberately if real
-propagated data ever shows deep descendants overweighted — don't drift into
-it. Averaging, not summing, is a deliberate, explicit decision over an
-earlier additive design: own_base and every ancestor's importance are
-already in [0, 1], so the weighted average never leaves that range either —
-no clamping, no separate normalization step before this is used for
-anything published. One consequence worth naming: this does **not** satisfy
-`tests/propagation_fixtures/README.md`'s "a parent can only add, never
-remove" assumption, written for the additive design it describes — an
-unimportant ancestor's mean can pull a task's own high baseline down below
-it (#473's 02_branch's `task_low_1`/`task_low_2` are exactly this). All
-seven fixtures were re-checked by hand against this formula and still
-produce the stated order regardless.
+decay**. The weight started at 0.5/0.5; revised down to 0.93/0.07 (review on
+#474) so a task's own urgency dominates and an ancestor's importance is a
+small nudge, not an equal vote. No decay rate or curve is written down
+anywhere in the roadmap or the team-role documents, so inventing one now
+would bake an unfounded guess into the one thing (#473's seven constructed
+graphs) that is supposed to have a hand-verified, defensible answer. Revisit
+this deliberately if real propagated data ever shows deep descendants
+overweighted — don't drift into it. Averaging, not summing, is a deliberate,
+explicit decision over an earlier additive design: own_base and every
+ancestor's importance are already in [0, 1], so the weighted average never
+leaves that range either — no clamping, no separate normalization step
+before this is used for anything published. One consequence worth naming:
+this does **not** satisfy `tests/propagation_fixtures/README.md`'s "a parent
+can only add, never remove" assumption, written for the additive design it
+describes — an unimportant ancestor's mean can still pull a task's own
+baseline down, now only very slightly at 7%, rather than potentially all the
+way below it the way a 50% weight could (#473's 02_branch's
+`task_low_1`/`task_low_2` were exactly this, at the old weight). All seven
+fixtures were re-checked by hand against this formula and still produce the
+stated order regardless.
 
 **Cycle: detect and refuse, not a depth limit.** A cyclic `parent_task_id`
 chain raises `CycleError` rather than looping forever —
@@ -225,8 +229,8 @@ score, is a necessary change from an earlier design, not a stylistic one:
 summing an undiminished total composes recursively (a parent's own
 propagated total already contains everything above it, so reading it alone
 was equivalent to summing the whole chain), but averaging does not — a
-parent's own *mean* already baked in its own ancestors at its own 50/50
-weight, which is not the same number a grandchild's 50/50 blend with the
+parent's own *mean* already baked in its own ancestors at its own 93/7
+weight, which is not the same number a grandchild's 93/7 blend with the
 *raw* grandparent value needs. There is therefore no shortcut left that
 reads fewer than every ancestor. Using Chain's own `score` instead was
 considered and rejected: it is computed by a different, unrelated

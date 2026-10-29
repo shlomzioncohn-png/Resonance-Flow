@@ -59,10 +59,10 @@ import org.springframework.stereotype.Component;
  * resync, exactly like Calendar's 410-on-expired-syncToken handling; readFull()'s own fresh
  * historyId (not a continuation of the expired one) is returned as part of that same
  * EmailReadResult.
- * Only mail the user received is ingested: drafts (every autosave is a new message id, so each
- * would land as its own object), the user's own sent mail, spam and trash are skipped - on the
- * full scan via the FULL_SYNC_QUERY search, and on both paths via the message's labelIds, since
- * users.history.list takes no search query.
+ * Drafts (every autosave is a new message id, so each would land as its own object), spam and
+ * trash are skipped - on the full scan via the FULL_SYNC_QUERY search, and on both paths via the
+ * message's labelIds, since users.history.list takes no search query. The user's own sent mail is
+ * ingested (Daniel/#1052: sent mail matters for task detection too).
  */
 @Component
 @ConditionalOnProperty(prefix = "bridge.intake.email", name = "mode", havingValue = "real")
@@ -71,8 +71,8 @@ public class RealEmailSourceReader implements EmailSourceReader {
     private static final Logger log = LoggerFactory.getLogger(RealEmailSourceReader.class);
     private static final Pattern ANGLE_BRACKET_EMAIL = Pattern.compile("<([^>]+)>");
     // messages.list already leaves out spam and trash unless includeSpamTrash is set.
-    static final String FULL_SYNC_QUERY = "-in:drafts -in:sent";
-    static final Set<String> EXCLUDED_LABELS = Set.of("DRAFT", "SENT", "SPAM", "TRASH");
+    static final String FULL_SYNC_QUERY = "-in:drafts";
+    static final Set<String> EXCLUDED_LABELS = Set.of("DRAFT", "SPAM", "TRASH");
 
     private final GoogleCredentialsProvider credentialsProvider;
     private final BridgeTenantId tenantId;
@@ -147,7 +147,13 @@ public class RealEmailSourceReader implements EmailSourceReader {
             ListMessagesResponse page = listPage(gmail, pageToken);
             if (page.getMessages() != null) {
                 for (Message summary : page.getMessages()) {
-                    Message full = getFull(gmail, summary.getId());
+                    Message full;
+                    try {
+                        full = getFull(gmail, summary.getId());
+                    } catch (MessageNotFoundException e) {
+                        log.warn("Gmail message {} no longer exists (404) - skipping", summary.getId());
+                        continue;
+                    }
                     if (!isExcluded(full)) {
                         records.addAll(toSourceRecords(gmail, full));
                     }
@@ -198,7 +204,13 @@ public class RealEmailSourceReader implements EmailSourceReader {
 
         List<SourceRecord> records = new ArrayList<>();
         for (String messageId : changedMessageIds) {
-            Message full = getFull(gmail, messageId);
+            Message full;
+            try {
+                full = getFull(gmail, messageId);
+            } catch (MessageNotFoundException e) {
+                log.warn("Gmail message {} no longer exists (404) - skipping", messageId);
+                continue;
+            }
             if (!isExcluded(full)) {
                 records.addAll(toSourceRecords(gmail, full));
             }
@@ -232,8 +244,21 @@ public class RealEmailSourceReader implements EmailSourceReader {
     private Message getFull(Gmail gmail, String messageId) {
         try {
             return gmail.users().messages().get("me", messageId).setFormat("full").execute();
+        } catch (GoogleJsonResponseException e) {
+            if (e.getStatusCode() == 404) {
+                throw new MessageNotFoundException(messageId, e);
+            }
+            throw new UncheckedIOException("Failed to fetch Gmail message " + messageId, e);
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to fetch Gmail message " + messageId, e);
+        }
+    }
+
+    /** Internal signal that a single message id is gone (deleted between history/list and the
+     * get call) - callers skip just that message instead of failing the whole run. */
+    private static final class MessageNotFoundException extends RuntimeException {
+        MessageNotFoundException(String messageId, GoogleJsonResponseException cause) {
+            super("Gmail message " + messageId + " not found (404)", cause);
         }
     }
 
@@ -276,9 +301,17 @@ public class RealEmailSourceReader implements EmailSourceReader {
         int index = 0;
         for (MessagePart attachment : attachmentParts) {
             index++;
+            byte[] bytes;
+            try {
+                bytes = attachmentBytes(gmail, message.getId(), attachment);
+            } catch (AttachmentNotFoundException e) {
+                log.warn("Gmail attachment {} on message {} no longer exists - publishing message without it",
+                        attachment.getBody().getAttachmentId(), message.getId());
+                continue;
+            }
             records.add(new SourceRecord(
                     RawSourceType.EMAIL, tenantId.value(), naturalId + "|attachment-" + index, correlationId,
-                    occurredAt, from, participants, null, null, attachmentBytes(gmail, message.getId(), attachment),
+                    occurredAt, from, participants, null, null, bytes,
                     attachment.getMimeType(), attachment.getFilename(), index, attachmentCount, List.of(), 0));
         }
         return records;
@@ -390,9 +423,24 @@ public class RealEmailSourceReader implements EmailSourceReader {
                     .get("me", messageId, body.getAttachmentId())
                     .execute();
             return Base64.getUrlDecoder().decode(fetched.getData());
+        } catch (GoogleJsonResponseException e) {
+            if (e.getStatusCode() == 404 || e.getStatusCode() == 410) {
+                throw new AttachmentNotFoundException(body.getAttachmentId(), messageId, e);
+            }
+            throw new UncheckedIOException(
+                    "Failed to fetch Gmail attachment " + body.getAttachmentId() + " on message " + messageId, e);
         } catch (IOException e) {
             throw new UncheckedIOException(
                     "Failed to fetch Gmail attachment " + body.getAttachmentId() + " on message " + messageId, e);
+        }
+    }
+
+    /** Internal signal that a single attachment is gone (404/410, deleted between the message
+     * being parsed and the attachment byte fetch) - callers skip just that attachment and still
+     * publish the rest of the message. */
+    private static final class AttachmentNotFoundException extends RuntimeException {
+        AttachmentNotFoundException(String attachmentId, String messageId, GoogleJsonResponseException cause) {
+            super("Gmail attachment " + attachmentId + " on message " + messageId + " not found", cause);
         }
     }
 

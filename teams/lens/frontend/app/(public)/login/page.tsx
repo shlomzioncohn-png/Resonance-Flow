@@ -10,11 +10,12 @@ import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Logo from '@/components/layout/Logo';
 import { useRole } from '@/components/layout/RoleProvider';
+import { homeFor } from '@/components/layout/Sidebar/navConfig';
 import { getErrorMessage } from '@/services/api';
 import { login } from '@/services/authApi';
 
 export default function LoginPage() {
-  const { setRole } = useRole();
+  const { signIn } = useRole();
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -28,11 +29,9 @@ export default function LoginPage() {
     setError(null);
     try {
       const response = await login({ login: email, password });
-      // Token is now stored ONLY in HttpOnly cookie set by Gateway
-      // No need to store in localStorage — browser manages the cookie automatically
-      setRole(response.user.role);
-      // Route based on role: TENANT_ADMIN and TEAM_LEAD go to /manager, EMPLOYEE goes to /employee
-      router.push(['TENANT_ADMIN', 'TEAM_LEAD'].includes(response.user.role) ? '/manager' : '/employee');
+      // The token itself is in the Gateway's HttpOnly cookie - the browser sends it on its own
+      signIn(response.user);
+      router.push(homeFor(response.user.role));
     } catch (err) {
       setError(getErrorMessage(err, '/auth/login'));
       setSubmitting(false);
@@ -55,11 +54,12 @@ export default function LoginPage() {
             <Logo variant="light" />
           </Box>
           <TextField
-            label="Email"
-            type="email"
+            // Plain text, not type="email": the accounts sign in with a username
+            // (manager1) as well as an email, and the browser would block a username.
+            label="Email or username"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            autoComplete="email"
+            autoComplete="username"
             required
             fullWidth
           />

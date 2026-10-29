@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import PersonAddOutlinedIcon from '@mui/icons-material/PersonAddOutlined';
+import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
@@ -58,6 +59,8 @@ export default function ManagerUsersPage() {
   const [editingUser, setEditingUser] = useState<UserDetails | null>(null);
   const [editForm, setEditForm] = useState<UserEditFields>({});
   const [editError, setEditError] = useState<string | null>(null);
+  // Opening the edit dialog failed - shown above the table, since the dialog never opened
+  const [openEditError, setOpenEditError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [creating, setCreating] = useState(false);
@@ -117,6 +120,7 @@ export default function ManagerUsersPage() {
 
   const openEdit = useCallback((row: UserRow) => {
     setEditError(null);
+    setOpenEditError(null);
     getUser(row.id)
       .then((details) => {
         setEditingUser(details);
@@ -129,10 +133,11 @@ export default function ManagerUsersPage() {
       })
       .catch((error) => {
         if (error instanceof ApiError && error.status === 404) {
-          setErrorMessage('User not found.');
+          // Someone else removed the user - refresh the list so the row goes away
+          setOpenEditError('This user no longer exists. The list was refreshed.');
           fetchUsers();
         } else {
-          setEditError(errorMessageFor(error));
+          setOpenEditError(errorMessageFor(error));
         }
       });
   }, [fetchUsers]);
@@ -218,6 +223,12 @@ export default function ManagerUsersPage() {
         </Button>
       }
     >
+      {openEditError && (
+        <Alert severity="error" onClose={() => setOpenEditError(null)} sx={{ mb: 2 }}>
+          {openEditError}
+        </Alert>
+      )}
+
       <DataTable
         ariaLabel="Users"
         columns={columns}
