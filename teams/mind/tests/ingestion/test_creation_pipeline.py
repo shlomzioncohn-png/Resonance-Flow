@@ -572,7 +572,7 @@ async def test_a_duplicate_is_never_looked_up() -> None:
     """It is not sent, so asking Inbox's directory for it would be wasted."""
 
     directory = Directory(_User(1.0))
-    match = SearchResult(task_id=TASK_ID, similarity=0.97)
+    match = ScoredResult(task_id=TASK_ID, similarity=0.97, confidence=0.7)
     parts = Parts(MALKI_TAKES_IT, match=match, directory=directory)
 
     await parts.pipeline.handle(_event(), [_chat_item()])
