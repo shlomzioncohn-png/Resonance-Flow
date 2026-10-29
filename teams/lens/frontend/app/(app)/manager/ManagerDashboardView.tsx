@@ -13,9 +13,12 @@ import DependencyGraph from '@/components/ui/DependencyGraph';
 import { useDashboardFilters } from '@/hooks/useDashboardFilters';
 import { useDependencyGraph } from '@/hooks/useDependencyGraph';
 import { useManagerKpis } from '@/hooks/useManagerKpis';
+import { useProjectTaskCounts } from '@/hooks/useProjectTaskCounts';
 import { getErrorMessage } from '@/services/api';
+import { graphErrorMessage } from '@/services/bottlenecksApi';
 import { getProjects } from '@/services/projectsApi';
 import { projectKeys } from '@/services/queryKeys';
+import DashboardCharts from './DashboardCharts';
 import ManagerKpiTiles from './ManagerKpiTiles';
 
 /** No API returns the tenant's display name yet. */
@@ -51,6 +54,8 @@ export default function ManagerDashboardView() {
   // It has no period: Chain's graph is always "right now".
   const graph = useDependencyGraph(projectId);
   const kpis = useManagerKpis({ period: filters.period, project: projectId });
+  // The charts always show every project - they compare projects with each other.
+  const projectCounts = useProjectTaskCounts();
   // Only feeds the Project chip's options: if it fails, the chip just offers no projects.
   const projectsQuery = useQuery({ queryKey: projectKeys.all, queryFn: getProjects });
   const updatedSecondsAgo = useSecondsSince(Math.max(kpis.dataUpdatedAt, graph.dataUpdatedAt));
@@ -70,6 +75,13 @@ export default function ManagerDashboardView() {
         loading={kpis.isPending}
         error={kpis.isError ? getErrorMessage(kpis.error) : null}
         onRetry={() => kpis.refetch()}
+      />
+
+      <DashboardCharts
+        projects={projectCounts.data}
+        loading={projectCounts.isPending}
+        error={projectCounts.isError ? getErrorMessage(projectCounts.error) : null}
+        onRetry={() => projectCounts.refetch()}
       />
 
       <Card component="section" aria-labelledby="dashboard-bottlenecks-title" sx={{ p: 3 }}>
@@ -101,7 +113,7 @@ export default function ManagerDashboardView() {
           ariaLabel="Top bottlenecks"
           graph={graph.data}
           loading={graph.isPending}
-          error={graph.isError ? getErrorMessage(graph.error) : null}
+          error={graph.isError ? graphErrorMessage(graph.error) : null}
           onRetry={() => graph.refetch()}
           onNodeSelect={(id) => router.push(bottlenecksHref(projectId, id))}
         />

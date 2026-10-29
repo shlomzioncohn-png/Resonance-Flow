@@ -1,0 +1,14 @@
+{
+  "case_id": "no_action_items",
+  "provider": "gemini",
+  "model": "gemini-3.6-flash",
+  "recorded_at": "2026-10-26T15:53:18+00:00",
+  "answers": [
+    "{\"tasks\": []}"
+  ],
+  "observed_live": {
+    "kind": "success",
+    "tasks": [],
+    "schema_attempts": 1
+  }
+}

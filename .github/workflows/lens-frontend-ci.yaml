@@ -53,7 +53,7 @@ jobs:
       container_port: 8083
 
   playwright:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 15
     needs: ci
     if: always()
@@ -83,8 +83,11 @@ jobs:
       - name: E2E Tests (Playwright)
         run: npm run test:e2e
 
+      # Only needed to debug a failure. Not being able to upload it (e.g. the
+      # repo's artifact storage quota is full) must not fail a passing run.
       - name: Upload test results
-        if: always()
+        if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
@@ -92,7 +95,7 @@ jobs:
           retention-days: 7
 
   storybook:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 15
     needs: ci
     if: always()

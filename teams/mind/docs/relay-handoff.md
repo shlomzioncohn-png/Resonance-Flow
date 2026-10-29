@@ -47,17 +47,22 @@ flagging so Relay isn't surprised by the size jump. (Decided: Tesseract. PaddleO
 
 ## Containers
 
-Two MIND containers now exist, built from the same image (`Dockerfile`),
+Three MIND containers exist, built from the same image (`Dockerfile`),
 differing only in `command`:
 
 | Service | Command | Exposes HTTP? |
 |---|---|---|
-| `mind` | `uvicorn mind.api.main:app` | Yes, port `8000`. |
+| `mind` | `uvicorn mind.api.main:app` | Yes, port `8000`. Also runs the score publisher (#920) as threads in the same process. |
 | `mind-index-consumer` (#470) | `python -m mind.embeddings.index_consumer_runner` | No — consumes `task.created`/`task.updated`/`task.completed` from Kafka and writes to the vector store. No port to expose. |
+| `mind-landed-consumer` (#919) | `python -m mind.ingestion.landed_consumer_runner` | No — consumes `bridge.raw.landed`, publishes `task.creation.requested`, and, from Inbox's `task.created` reply, `task.dependencies.proposed`. Its pending requests are in memory: one replica only until #918. |
 
-**Open item:** `mind-index-consumer` has no positive liveness probe (no
-HTTP port) — it exits non-zero on a thread crash, but can't signal
-"stuck but alive". Flagging for Relay.
+Both embedding and Whisper weights are baked into the image
+(`/opt/models/`), so no container downloads a model at start-up or needs
+egress to Hugging Face.
+
+**Open item:** neither consumer has a positive liveness probe (no HTTP
+port) — each exits non-zero on a thread crash or a Kafka error, but can't
+signal "stuck but alive". Flagging for Relay.
 
 ## Ports
 
@@ -96,7 +101,8 @@ connection setting.
 | `MIND_VECTOR_STORE__TABLE` | `task_embeddings` | Test-only knob. The migration always creates `task_embeddings` -- changing this in a real deploy points at a table that doesn't exist. |
 | `MIND_VECTOR_STORE__SEARCH_EFFORT` | `400` | HNSW query-time accuracy/speed knob (pgvector's `hnsw.ef_search`). |
 | `MIND_DUPLICATE_SIMILARITY_THRESHOLD` (and the other `MIND_*_THRESHOLD`s) | calibrated | See `src/mind/embeddings/README.md` "Threshold calibration". |
-| `MODEL_CACHE_DIR` | `./models` | Where local model weights get mounted (see `docker-compose.yml`'s `models` volume). Never bake weights into the image. |
+| `MODEL_CACHE_DIR` | `./models` | Local dev only: where hand-placed model weights get mounted (see `docker-compose.yml`'s `models` volume, `models/README.md`). In the image the baked copies win. |
+| `WHISPER_MODELS_DIR` / `EMBEDDING_MODELS_DIR` | set by the `Dockerfile` | Where the weights baked into the image live (`/opt/models/whisper`, `/opt/models/embeddings`). Don't override in the chart. |
 | `WHISPER_MODEL` | `base.en` | Fallback only: config.yaml's `asr.whisper_model` wins. Decided in #135, see `benchmarks/ocr-asr-benchmark.md`. |
 | `MIND_LOG_LEVEL` | `INFO` | Fallback only: config.yaml's `service.log_level` wins, and the API applies it at start-up. |
 | `MIND_API_PORT` | `8000` | Documented for completeness; the port MIND actually binds to is hardcoded to `8000` in the `Dockerfile` (`EXPOSE`/`CMD`) and `docker-compose.yml`. Changing this variable alone does not move the port -- a known gap, not a working override. |

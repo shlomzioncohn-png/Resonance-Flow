@@ -171,7 +171,7 @@ def test_cost_partly_priced_is_a_lower_bound_with_the_gap_counted():
 # --- not applicable is neither unknown nor zero -------------------------------------
 
 
-@pytest.mark.parametrize("kind", [CallKind.OCR, CallKind.ASR])
+@pytest.mark.parametrize("kind", [CallKind.OCR, CallKind.ASR, CallKind.EMBEDDING, CallKind.SCORING])
 def test_tokens_and_dollars_do_not_apply_to_a_local_model(kind: CallKind):
     record_call("local", 10.0, None, kind=kind, cpu_s=1.5)
     r = row("local")
@@ -198,6 +198,17 @@ def test_a_dollar_cost_passed_for_a_local_model_is_not_counted():
     record_call("tesseract", 10.0, 0.5, kind=CallKind.OCR, cpu_s=1.0)
     r = row("tesseract")
     assert (r.cost_usd_total, r.unpriced_count) == (None, None)
+
+
+@pytest.mark.parametrize("kind", [CallKind.VECTOR_QUERY, CallKind.CHAIN])
+def test_a_call_to_another_service_has_latency_only(kind: CallKind):
+    # #482: waiting on pgvector or Chain costs this process no CPU worth a
+    # total, and no dollars: every measure but the duration is not applicable.
+    record_call("service", 12.0, None, kind=kind, cpu_s=0.5)
+    r = row("service")
+    assert (r.cpu_seconds_total, r.cpu_unmeasured_count) == (None, None)
+    assert (r.tokens_unreported_count, r.cost_usd_total, r.unpriced_count) == (None, None, None)
+    assert (r.call_count, r.p50_duration_ms) == (1, 12.0)
 
 
 def test_every_measure_applies_to_a_call_without_a_kind():
@@ -275,6 +286,55 @@ def test_a_local_model_has_no_cost_limit(kind: CallKind):
     record_call("local", 10.0, 99.0, kind=kind)
     r = row("local")
     assert (r.cost_limit_usd, r.expensive_count) == (None, 0)
+
+
+@pytest.mark.parametrize(
+    "kind", [CallKind.EMBEDDING, CallKind.VECTOR_QUERY, CallKind.SCORING, CallKind.CHAIN]
+)
+def test_the_full_flow_stages_have_no_limits_until_a_baseline(
+    kind: CallKind, caplog: pytest.LogCaptureFixture
+):
+    # #482 measures them first; a limit picked before that would be a guess.
+    with caplog.at_level(logging.WARNING, logger="mind.observability"):
+        record_call("stage", 10_000_000.0, None, kind=kind)
+    r = row("stage")
+    assert (r.duration_limit_ms, r.slow_count, r.cost_limit_usd) == (None, 0, None)
+    assert not [m for m in caplog.messages if m.startswith("MODEL_CALL_")]
+
+
+# --- degraded: a success on a fallback path ------------------------------------------
+
+
+def test_a_degraded_call_is_counted_apart_from_errors_and_full_successes():
+    record_call("hierarchical-ranking", 5.0, None, kind=CallKind.SCORING, degraded=True)
+    record_call("hierarchical-ranking", 5.0, None, kind=CallKind.SCORING)
+    record_call("hierarchical-ranking", 5.0, None, kind=CallKind.SCORING, status=CallStatus.ERROR)
+    r = row("hierarchical-ranking")
+    assert (r.call_count, r.error_count, r.degraded_count) == (3, 1, 1)
+
+
+def test_a_call_is_not_degraded_unless_said_so():
+    # Every call site from before #482 passes no `degraded`: nothing changes for it.
+    record_call("tesseract", 10.0, None, kind=CallKind.OCR)
+    assert row("tesseract").degraded_count == 0
+    assert tracking.get_recent_calls()[-1].degraded is False
+
+
+def test_only_a_degraded_call_says_so_in_its_log_line(caplog: pytest.LogCaptureFixture):
+    with caplog.at_level(logging.INFO, logger="mind.observability"):
+        record_call("hierarchical-ranking", 5.0, None, kind=CallKind.SCORING, degraded=True)
+        record_call("hierarchical-ranking", 5.0, None, kind=CallKind.SCORING)
+    degraded, full = [m for m in caplog.messages if m.startswith("model_call ")]
+    assert degraded.endswith(" degraded=true")
+    assert "degraded" not in full
+
+
+def test_the_logged_summary_counts_degraded_calls(caplog: pytest.LogCaptureFixture):
+    record_call("hierarchical-ranking", 5.0, None, kind=CallKind.SCORING, degraded=True)
+    with caplog.at_level(logging.INFO, logger="mind.observability"):
+        log_summary()
+    [line] = [m for m in caplog.messages if m.startswith("model_call_summary")]
+    assert line.endswith(" degraded=1")
 
 
 # --- logged summary -----------------------------------------------------------------
@@ -358,3 +418,4 @@ def test_debug_model_calls_tells_unknown_from_not_applicable():
     assert (llm["cost_usd_total"], llm["unpriced_count"]) == (0.0005, 0)
     assert (llm["cpu_seconds_total"], llm["cpu_unmeasured_count"]) == (None, None)
     assert (llm["duration_limit_ms"], llm["cost_limit_usd"]) == (10_000, 0.02)
+    assert (ocr["degraded_count"], llm["degraded_count"]) == (0, 0)

@@ -77,6 +77,9 @@ class EmbeddingModelSettings(BaseSettings):
     )
 
     name: str = "BAAI/bge-small-en-v1.5"
+    # The copy baked into the image (the Dockerfile sets it); looked for before
+    # model_cache_dir, like ASRSettings.whisper_models_dir.
+    models_dir: str | None = Field(default=None, validation_alias="EMBEDDING_MODELS_DIR")
     model_cache_dir: str | None = Field(default=None, validation_alias="MODEL_CACHE_DIR")
 
 
@@ -247,6 +250,13 @@ class MonitoringSettings(BaseSettings):
     llm_max_cost_usd: float | None = Field(default=0.02, ge=0)
     # Log the summary every this many model calls; 0 or none turns it off.
     summary_every_n_calls: int | None = Field(default=100, ge=0)
+    # #482: a directory every recorded call is also written to, one JSON line
+    # each, in a file of this process's own (observability/sink.py). None: no
+    # file, as before.
+    calls_dir: Path | None = None
+    # Names this process in that file's name and on each line; the script's
+    # own name when not set.
+    process_name: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.-]{1,64}$")
 
 
 class DeadlineSettings(BaseSettings):
@@ -324,7 +334,13 @@ class VectorStoreSettings(BaseModel):
 
     dsn: Secret[PostgresDsn]
     table: str = "task_embeddings"
-    search_effort: int = Field(default=400, ge=1)
+    # #475: above ~260, the planner costs an HNSW scan above a plain Seq
+    # Scan + sort at 10,000 rows and drops the index. 200 keeps it in use,
+    # for 98.7% recall@5 vs exact (vs. the 400 case's "100%", which isn't
+    # real accuracy -- it's exact search because the index wasn't running
+    # at all). See benchmarks/vector-store-comparison.md, "Live-path
+    # latency under load".
+    search_effort: int = Field(default=200, ge=1)
     # No embedding_dim: the column width is baked into the migration
     # (migrations/versions/0001_initial_vector_schema.py), not config.
 

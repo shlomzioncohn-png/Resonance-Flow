@@ -37,16 +37,22 @@ public class SourceRecordRefMapper {
             // new one from rawContent, which is unused filler for this record.
             return record.precomputedRef();
         }
-        String objectKey = objectKeyBuilder.build(record, ingestedAt);
+        Role role = roleFor(record);
+        String objectKey = objectKeyBuilder.build(record, ingestedAt, role);
         String contentType = landingService.resolveContentType(record, objectKey);
         return new RawObjectRef(
-                roleFor(record), objectKey, computeContentHash(record), contentType,
+                role, objectKey, computeContentHash(record), contentType,
                 (long) record.rawContent().length, deriveModality(record));
     }
 
-    /** BODY for a standalone item; TRANSCRIPT for a chat session's own transcript record
-     * (index 0 on SLACK/WHATSAPP); ATTACHMENT for every other attachment record. */
+    /** record.objectRole() wins when set (today: EMAIL's SOURCE_METADATA sibling record - see
+     * SourceRecord's javadoc); otherwise BODY for a standalone item, TRANSCRIPT for a chat
+     * session's own transcript record (index 0 on SLACK/WHATSAPP), ATTACHMENT for every other
+     * attachment record. */
     private Role roleFor(SourceRecord record) {
+        if (record.objectRole() != null) {
+            return record.objectRole();
+        }
         if (record.attachmentIndex() > 0) {
             return Role.ATTACHMENT;
         }

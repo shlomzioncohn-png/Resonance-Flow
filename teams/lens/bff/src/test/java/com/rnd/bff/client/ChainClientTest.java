@@ -22,7 +22,7 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestTemplate;
 
-/** The wire format of the two task-history calls - above all, that X-Tenant-Id is always sent. */
+/** The wire format of the Chain calls - above all, that X-Tenant-Id is always sent. */
 class ChainClientTest {
 
     private static final String CHAIN = "http://chain.test";
@@ -112,6 +112,43 @@ class ChainClientTest {
                 .andRespond(withServerError());
 
         assertThatThrownBy(() -> client.getStateHistory(TASK, TENANT))
+                .isInstanceOf(HttpServerErrorException.class);
+    }
+
+    @Test
+    void dependencyGraphAsksForTheTenantsGraphWithLimit500() {
+        chain.expect(requestTo(CHAIN + "/tenants/" + TENANT + "/dependency-graph?limit=500"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("X-Tenant-Id", TENANT))
+                .andRespond(withSuccess("""
+                        {"nodes":[
+                          {"taskId":"t-1","status":"ACTIVE","isReady":true,"blockingCount":0,"transitiveDependentsCount":3,"blockedSince":null},
+                          {"taskId":"t-2","status":"PENDING","isReady":false,"blockingCount":1,"transitiveDependentsCount":0,"blockedSince":"2026-10-19T14:02:11Z"}
+                        ],"edges":[{"taskId":"t-2","dependsOnTaskId":"t-1"}],"hasMore":false}
+                        """, MediaType.APPLICATION_JSON));
+
+        ChainDependencyGraph graph = client.getDependencyGraph(TENANT);
+
+        chain.verify();
+        assertThat(graph.nodes()).hasSize(2);
+        assertThat(graph.nodes().get(0).isReady()).isTrue();
+        assertThat(graph.nodes().get(0).transitiveDependentsCount()).isEqualTo(3);
+        assertThat(graph.nodes().get(1).isReady()).isFalse();
+        assertThat(graph.nodes().get(1).blockedSince()).isEqualTo(Instant.parse("2026-10-19T14:02:11Z"));
+        assertThat(graph.edges()).singleElement().satisfies(edge -> {
+            assertThat(edge.taskId()).isEqualTo("t-2");
+            assertThat(edge.dependsOnTaskId()).isEqualTo("t-1");
+            // Chain doesn't send it yet
+            assertThat(edge.confidence()).isNull();
+        });
+    }
+
+    @Test
+    void dependencyGraphServerErrorIsAnError() {
+        chain.expect(requestTo(CHAIN + "/tenants/" + TENANT + "/dependency-graph?limit=500"))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> client.getDependencyGraph(TENANT))
                 .isInstanceOf(HttpServerErrorException.class);
     }
 }

@@ -63,6 +63,11 @@ class Project:
     sigma: float  # lognormal spread of both
 
 
+def typical_minutes(project: Project, tier: str | None) -> float:
+    """Median working time (minutes) a healthy task of this tier takes once started in this project."""
+    return project.work_hours * tier_profile(tier).work_mult * 60
+
+
 def typical_days(project: Project, tier: str | None) -> float:
     """Rough elapsed days a healthy task of this tier takes in this project (the peer yardstick)."""
     p = tier_profile(tier)
@@ -82,6 +87,8 @@ class TaskSpec:
     work_mult: float = 1.0
     hold_start_until: datetime | None = None  # task cannot leave PENDING before this
     hold_finish_until: datetime | None = None  # task cannot reach DONE before this
+    deadline: datetime | None = None  # Inbox's `deadline`; fixed per task, NULL for some
+    effort_estimate_minutes: int | None = None  # Inbox's `effort_estimate_minutes`; NULL for some
 
 
 @dataclass(frozen=True)

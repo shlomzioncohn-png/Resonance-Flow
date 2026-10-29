@@ -57,6 +57,39 @@ class RealWhatsAppSourceReaderTest {
     }
 
     @Test
+    void goneAttachmentIsSkippedButTheMessageAndOtherMessagesStillRead() throws IOException {
+        Files.writeString(importDir.resolve("family-chat.txt"), String.join("\n",
+                "01/03/2026, 09:00 - אמא: מי מביא עוגה?",
+                "01/03/2026, 09:05 - מלכי: <attached: gone-photo.jpg>",
+                "01/03/2026, 09:06 - מלכי: אני אביא",
+                ""));
+        // gone-photo.jpg is deliberately never created.
+
+        RealWhatsAppSourceReader reader = new RealWhatsAppSourceReader(
+                new WhatsAppImportProperties(importDir.toString(), "Asia/Jerusalem"), new BridgeTenantId("kamatech"));
+        List<ChatMessage> messages = reader.read();
+
+        assertThat(messages).hasSize(3);
+        ChatMessage attachmentLineMessage = messages.get(1);
+        assertThat(attachmentLineMessage.attachments()).isEmpty();
+    }
+
+    @Test
+    void genericAttachmentReadErrorStillPropagates() throws IOException {
+        Files.writeString(importDir.resolve("family-chat.txt"), String.join("\n",
+                "01/03/2026, 09:05 - מלכי: <attached: not-a-file.jpg>",
+                ""));
+        // A directory, not a file, at that path - readAllBytes fails with IOException, not
+        // NoSuchFileException, so this must still fail the read rather than being skipped.
+        Files.createDirectory(importDir.resolve("not-a-file.jpg"));
+
+        RealWhatsAppSourceReader reader = new RealWhatsAppSourceReader(
+                new WhatsAppImportProperties(importDir.toString(), "Asia/Jerusalem"), new BridgeTenantId("kamatech"));
+
+        assertThatThrownBy(reader::read).isInstanceOf(java.io.UncheckedIOException.class);
+    }
+
+    @Test
     void failsFastWhenImportDirIsNotConfigured() {
         RealWhatsAppSourceReader reader = new RealWhatsAppSourceReader(
                 new WhatsAppImportProperties(null, "Asia/Jerusalem"), new BridgeTenantId("kamatech"));

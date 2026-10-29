@@ -49,7 +49,7 @@ class TaskActivityServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new TaskActivityService(chainClient, inboxClient, inboxUserClient, DEV_ACTOR);
+        service = new TaskActivityService(chainClient, inboxClient, new UserTenantResolver(inboxUserClient, DEV_ACTOR));
         InboxUserRecord.TenantSummary tenant = new InboxUserRecord.TenantSummary();
         tenant.setId(TENANT);
         InboxUserRecord user = new InboxUserRecord();
@@ -230,7 +230,7 @@ class TaskActivityServiceTest {
 
     @Test
     void withoutADevActorTheGatewayUserIsTheInboxActor() {
-        TaskActivityService plain = new TaskActivityService(chainClient, inboxClient, inboxUserClient, "");
+        TaskActivityService plain = new TaskActivityService(chainClient, inboxClient, new UserTenantResolver(inboxUserClient, ""));
         when(inboxUserClient.getUser(USER, USER)).thenReturn(null);
 
         assertThatThrownBy(() -> plain.getActivity(USER, TASK)).isInstanceOf(ServiceUnavailableException.class);

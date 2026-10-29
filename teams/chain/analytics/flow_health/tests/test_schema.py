@@ -30,11 +30,16 @@ def _columns(sql_file: str, table: str) -> list[str]:
     return cols
 
 
+# Columns the generator adds on top of the real tables: Inbox's deadline and estimate, assumed to be on the
+# history table (no migration yet). They must come after every real column.
+SIMULATED_EXTRA_COLUMNS = {"task_state_history": ["deadline", "effort_estimate_minutes"]}
+
+
 @pytest.mark.parametrize("table,migration", [("dependency_history", "V2__init_dependency_history.sql"),
                                              ("task_state_history", "V9__init_task_state_history.sql")])
-def test_csv_columns_match_chains_real_tables(tmp_path, table, migration):
+def test_csv_columns_are_chains_real_tables_plus_the_assumed_ones(tmp_path, table, migration):
     cfg = replace(GeneratorConfig(), n_normal_tasks=60, n_projects=3, instances_per_severity=1)
     data = generate(cfg)
     write_dataset(tmp_path, cfg, data.world, data.history)
     header = (tmp_path / f"{table}.csv").read_text(encoding="utf-8").splitlines()[0].split(",")
-    assert header == _columns(migration, table)
+    assert header == _columns(migration, table) + SIMULATED_EXTRA_COLUMNS.get(table, [])

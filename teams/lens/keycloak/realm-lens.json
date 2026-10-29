@@ -9,7 +9,7 @@
   "accessTokenLifespan": 300,
   "roles": {
     "realm": [
-      { "name": "manager", "description": "LENS manager — team workload, projects, bottlenecks" },
+      { "name": "manager", "description": "LENS manager — projects, bottlenecks, users" },
       { "name": "employee", "description": "LENS employee — own workspace and tasks" }
     ]
   },
