@@ -17,6 +17,10 @@ inbox:
   dev-actor-id: ${INBOX_DEV_ACTOR_ID:}
   connect-timeout-ms: ${INBOX_CONNECT_TIMEOUT_MS:2000}
   read-timeout-ms: ${INBOX_READ_TIMEOUT_MS:10000}
+  # Special timeout for work-insights: first call may take up to 90 seconds (AI processing),
+  # so this timeout must be longer than the standard read-timeout-ms.
+  # Subsequent calls within the same day are fast (cached in Inbox DB).
+  read-timeout-work-insights-ms: ${INBOX_READ_TIMEOUT_WORK_INSIGHTS_MS:120000}
 
 # Chain (dependency graph, task history) - see ChainClient. Every call sends X-Tenant-Id.
 chain:

@@ -4,7 +4,7 @@
  */
 import { api } from './api';
 
-export type WorkInsightStatus = 'READY' | 'NOT_ENOUGH_DATA';
+export type WorkInsightStatus = 'READY' | 'NOT_ENOUGH_DATA' | 'NO_INSIGHT';
 
 export interface InsightEvidence {
   text: string;
