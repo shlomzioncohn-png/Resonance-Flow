@@ -77,6 +77,9 @@ class EmbeddingModelSettings(BaseSettings):
     )
 
     name: str = "BAAI/bge-small-en-v1.5"
+    # The copy baked into the image (the Dockerfile sets it); looked for before
+    # model_cache_dir, like ASRSettings.whisper_models_dir.
+    models_dir: str | None = Field(default=None, validation_alias="EMBEDDING_MODELS_DIR")
     model_cache_dir: str | None = Field(default=None, validation_alias="MODEL_CACHE_DIR")
 
 
