@@ -181,3 +181,82 @@ Clustering is one KMeans (random_state 42) over eight task features, standardise
 `tier` and `project_id` stay in `features_task.csv` but are not clustered. The code never reads the answer key; the
 tests do, as a sanity check. One of them (chronic blockers in the top decile) currently fails on dev and is recorded
 as an expected failure with its reason.
+
+## Detectors (`flow_health.detectors`)
+
+```bash
+python -m flow_health.features --data data/dev --out out/dev        # once: task features and clusters
+python -m flow_health.detectors --data data/dev --features out/dev --seed 42   # writes out/dev/flags.json
+```
+
+Three deterministic detectors; each returns a list of flags and the command writes all of them to one `flags.json`
+(`{"meta": {...}, "flags": [...]}`). Output is a recommendation only: nothing is written to Chain, and no task or
+dependency is changed. A flag has `flag_id`, `pattern`, `entity_type`, `entity_ids`, `score` (0-1, percentile rank inside
+its detector), `severity` (`low` / `medium` / `high`), `explanation` (an English sentence built from a template and the real
+numbers) and `evidence` (the numbers themselves). Merging the three lists into one ranked report is the next task.
+The detectors never read the answer files (checked by `tests/test_no_answer_leak.py`).
+
+| Detector | Looks at | Flagged when | Severity |
+|---|---|---|---|
+| `CHRONIC_BLOCKER` (a task) | `features_task` | `active_ratio_to_tier_project` (days the task was ACTIVE / the usual for its tier inside its project) is at least 8 **and** it had at least 1 dependent. A long task nobody waits on is not flagged. A chronic blocker is held while it is worked on, so its own blocked time is not used. | by the ratio: 8-16 low, 16-32 medium, 32 and up high |
+| `RECURRING_CYCLE` (an edge, or a pair of edges) | `dependency_history`: ADDED / REMOVED events of each `(task_id, depends_on_task_id)`, up to the moment the task it points at finished | at least 3 switches (the first ADDED is not a switch), a median gap between events of 1-10 days, **and** the task it points at is itself slow (`active_ratio_to_tier_project` at least 4: a blocker that stays stuck, not a healthy task that was re-planned). An edge fixed once is not flagged. A **near-cycle** (two live edges of one task, one removed and back after at least a day) is flagged on the pair; edges already flagged alone are not repeated. | 8+ switches, or 5+ with even gaps (CV <= 0.3): high; 5+ medium; else low. A pair is always low. |
+| `SLOW_CHAIN` (a path) | windows of 4-8 consecutive finished tasks of the dependency graph (`chain_paths.py`); value of a window = the median `active_ratio_to_tier_project` of its tasks | the value is at least 2x the median value of windows **of the same length**, robust z (median / MAD, IQR when MAD is 0) at least 3.5, **and** no single link above 50% of the total time (such a path is a chronic blocker). Groups smaller than 8 are not judged. Overlapping windows of one stretch give one flag (the strongest). | by the ratio to the group median: 2-4 low, 4-8 medium, 8 and up high |
+
+**Paths.** The graph holds finished tasks; an edge counts if it was active when its dependent finished and its target
+finished no later. A maximal path starts at a task with no such dependency and ends at one nothing depends on; every
+window of 4-8 consecutive tasks of it is a candidate, so a slow stretch inside a longer path is seen. The time runs from
+the first task's first ACTIVE to the last task's DONE; the first hop is the first task's own work, so the hops add up
+to the total. Windows share tasks, so after the thresholds the weaker of two windows that share more than half of the
+smaller one is dropped.
+
+**Thresholds** live in `src/flow_health/detectors/config.yaml` (`--config` points at another file); the file's comments
+say what each value means. The ones that decide most: `chronic_blocker.min_active_ratio`, `min_dependents`;
+`recurring_cycle.min_transitions`, `min_median_gap_days`, `max_median_gap_days`; `slow_chain.min_ratio_to_median`,
+`min_robust_z`, `max_link_share`, `min_group_size`. They were set on the dev set (seed 42) only; the eval set was not opened.
+The only change from the starting values: `min_median_gap_days` is 1.0 instead of 2 (on dev every edge with 3 or more
+switches has a median gap of 1.8-3.0 days).
+
+**Result on dev** (seed 42): with the generator before the review pass, 220 flags: 88 chronic blockers, 18 recurring-cycle
+edges, 114 slow chains, 0 near-cycle pairs. With the review pass (healthy re-planned tasks, `GENERATOR_VERSION` 1.0.0): 229
+flags: 87 chronic blockers, 37 recurring-cycle (26 edges, 11 pairs), 105 slow chains. Without the two recurring-cycle
+conditions above (events after the blocker finished are ignored; the blocker must be slow) the same data gives 903
+recurring-cycle flags, almost all re-planned healthy tasks.
+
+**Limits.** The work-time features compare a task with its tier inside its project (`active_ratio_to_tier_project`; a
+tier with fewer than 5 worked-on tasks in a project takes the tier-wide `active_ratio_to_tier`). Two thresholds moved
+from the task's opening values to fit dev: the chronic blocker's dependents (3 to 1, with the ratio raised to 8) and the
+slow chain's ratio to the group median (3 to 2). A subtle chronic blocker with a single dependent is still hard to tell
+from an ordinary busy task, and a slow chain with ordinary-looking links is not visible to any of these features.
+
+## Evaluation, ranked list and mentor review (`flow_health.evaluation`, `flow_health.run_all`)
+
+One command runs features, detectors and the evaluation on a data set:
+
+```bash
+python -m flow_health.generator --out /tmp/gen --eval-seed 7     # once; copy /tmp/gen/eval to data/heldout (dev is unchanged)
+python -m flow_health.run_all --data data/dev                    # writes out/dev
+python -m flow_health.run_all --data data/heldout                # writes out/heldout
+```
+
+Each run writes to `out/<name>` (`--out` changes it): `ranked_flags.csv`, `evaluation.json`, `evaluation_report.md`,
+`mentor_review.csv` (plus the features and `flags.json`). Results of the last runs are kept in `../docs/results/`;
+the write-up is `../docs/writeup.md`.
+
+- **Matching.** Chronic blocker: same task. Recurring cycle: same edge (either edge of a near-cycle pair). Slow chain:
+  Jaccard of the task sets >= 0.5. Several flags on one disease count as one TP; a flag on no disease is an FP, and one
+  that touches a decoy task (`slow_legit`, `backlog`, `abandoned`) is also listed as `fell_for_decoy`; a disease with no
+  flag is an FN. Flags that hit only `growing_bottleneck` / `stuck_subgraph` (not stage A) are listed as out of scope.
+  Precision / recall are `n/a` (null in the JSON) when undefined. Recall is also reported for `subtle` (borderline) diseases.
+- **Ranked list.** Severity (high, medium, low), then score descending, ties by `flag_id`. Columns: `rank, pattern, entity,
+  severity, score, explanation`, then `related` (ranks of rows from another detector sharing a task) and `flag_id`.
+  The score is a percentile inside its own detector, so across detectors the order inside a severity is only indicative.
+  A recommendation only; nothing is written to Chain.
+- **Frozen config.** `--freeze` stores the SHA-256 of `detectors/config.yaml` in `evaluation/config.lock`; from then on
+  `run_all` refuses to run with a different config. Order of work: tune on dev, freeze, run heldout once, report as is.
+  The hash is printed in `evaluation_report.md`.
+- **Mentor.** `mentor_review.csv` holds 5 random flags per detector (seed 7, any outcome, no hint of TP/FP). The mentor
+  fills `reasonable` (yes/no) and `comment`. `run_all` never overwrites a sheet that already has answers, and rerunning it
+  adds the count and comments to the report. A detector with fewer than 5 flags contributes all of them.
+- Only `evaluation/` may read the answer files (`tests/test_no_answer_leak.py`); the detectors never import it.
+- **Re-running from scratch** needs the data directories (they are git-ignored): `python -m flow_health.generator` for dev, and
+  the command above for heldout.
