@@ -196,6 +196,46 @@ components:
       create: false
     kafkaSasl: true
     inboxActorId: "00000000-0000-0000-0000-000000000003"
+  mind-landed-consumer:
+    enabled: true
+    shareFrom: mind
+    team: mind
+    replicaCount: 1
+    command: ["python", "-m", "mind.ingestion.landed_consumer_runner"]
+    updateStrategy:
+      type: Recreate
+    dependencies:
+      - name: object-storage
+        port: 9000
+      - name: postgresql
+        port: 5432
+      - name: schema-registry
+        port: 8080
+    resources:
+      requests:
+        cpu: "1"
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 1536Mi
+  mind-index-consumer:
+    enabled: true
+    shareFrom: mind
+    team: mind
+    replicaCount: 1
+    command: ["python", "-m", "mind.embeddings.index_consumer_runner"]
+    dependencies:
+      - name: postgresql
+        port: 5432
+      - name: schema-registry
+        port: 8080
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
   lens-bff:
     enabled: true
     replicaCount: 1
@@ -389,8 +429,6 @@ components:
         port: 8080
       - name: postgresql
         port: 5432
-      - name: schema-registry
-        port: 8080
   lens-frontend:
     enabled: true
     # Not scraped (no metrics block), but its pod alerts still route to lens.
@@ -663,7 +701,7 @@ components:
           secretName: resonance-flow-lens-gateway-jwt
     config:
       jwt:
-        key_id: "2026-10"
+        key_id: "gateway-key-1"
         private_key_location: /etc/resonance-flow/secrets/lens-gateway-jwt/private.pem
         public_key_location: /etc/resonance-flow/secrets/lens-gateway-jwt/public.pem
       bff:
