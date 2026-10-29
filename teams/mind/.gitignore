@@ -49,6 +49,11 @@ benchmarks/**/*.csv
 # threshold_calibration_tasks.json is input data (the task pool), not a
 # results dump -- must be tracked or the script isn't reproducible.
 !benchmarks/threshold_calibration_tasks.json
+# #475: raw LLM-generated seed texts for the synthetic 10,000-row load,
+# one file per domain -- input data, not a run artifact. See
+# synthetic_task_seeds.py's module docstring for provenance/reproduction.
+!benchmarks/synthetic_task_seeds_raw/
+!benchmarks/synthetic_task_seeds_raw/*.json
 
 # Datasets — manifests/checksums only, never the corpora
 eval/datasets/*

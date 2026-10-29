@@ -4,18 +4,13 @@ import com.rnd.bff.client.ChainClient;
 import com.rnd.bff.client.ChainDependencyHistoryEntry;
 import com.rnd.bff.client.ChainStateHistoryEntry;
 import com.rnd.bff.client.InboxClient;
-import com.rnd.bff.client.InboxUserClient;
-import com.rnd.bff.client.InboxUserRecord;
 import com.rnd.bff.dto.TaskActivityDTO;
 import com.rnd.bff.dto.TaskDTO;
-import com.rnd.bff.exception.InboxRejectedException;
 import com.rnd.bff.exception.ServiceUnavailableException;
 import com.rnd.bff.exception.TaskNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.HttpClientErrorException;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -51,22 +46,19 @@ public class TaskActivityService {
 
     private final ChainClient chainClient;
     private final InboxClient inboxClient;
-    private final InboxUserClient inboxUserClient;
-    private final String devActorId;
+    private final UserTenantResolver tenantResolver;
 
-    public TaskActivityService(ChainClient chainClient, InboxClient inboxClient, InboxUserClient inboxUserClient,
-                               @Value("${inbox.dev-actor-id:}") String devActorId) {
+    public TaskActivityService(ChainClient chainClient, InboxClient inboxClient, UserTenantResolver tenantResolver) {
         this.chainClient = chainClient;
         this.inboxClient = inboxClient;
-        this.inboxUserClient = inboxUserClient;
-        this.devActorId = devActorId;
+        this.tenantResolver = tenantResolver;
     }
 
     public TaskActivityDTO getActivity(String userId, String taskId) {
         if (!isUuid(taskId)) {
             throw new TaskNotFoundException(taskId);
         }
-        String tenantId = tenantOf(userId);
+        String tenantId = tenantResolver.tenantOf(userId);
 
         List<ChainStateHistoryEntry> states = null;
         List<ChainDependencyHistoryEntry> dependencies = null;
@@ -138,24 +130,6 @@ public class TaskActivityService {
                     }
                 });
         return titles;
-    }
-
-    /** The signed-in user's tenant, from their own Inbox record. */
-    private String tenantOf(String userId) {
-        String actorId = devActorId.isBlank() ? userId : devActorId;
-        InboxUserRecord user;
-        try {
-            user = inboxUserClient.getUser(actorId, actorId);
-        } catch (HttpClientErrorException ex) {
-            throw new InboxRejectedException(ex.getStatusCode().value() == 403 ? 403 : 401,
-                    "Couldn't identify the signed-in user");
-        } catch (RuntimeException ex) {
-            throw new ServiceUnavailableException("inbox", "Inbox is unavailable", ex);
-        }
-        if (user == null || user.getTenant() == null || user.getTenant().getId() == null) {
-            throw new ServiceUnavailableException("inbox", "Inbox didn't return the user's tenant");
-        }
-        return user.getTenant().getId();
     }
 
     private static boolean isUuid(String id) {

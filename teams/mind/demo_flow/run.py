@@ -20,7 +20,9 @@ What it does, each step a STAGE line:
    -> duplicate check -> `task.creation.requested`, and the `task.created`
    listener) and Mind's API, which runs the score publisher (#920), as two
    processes on this machine, their output here with a prefix and in
-   runs/<run-id>/.
+   runs/<run-id>/. Each also writes every model call it makes to
+   runs/<run-id>/calls/ (#482); when the run ends, runs/<run-id>/report.md
+   breaks them down by stage and by item (`mind.observability.report`).
 5. **feed**: `demo_flow.feed` lands the three items and publishes their
    pointer events, in the order asked for.
 6. **result**: reads the topics until everything expected.json predicts
@@ -51,6 +53,7 @@ from pathlib import Path
 from typing import IO, TextIO
 
 from demo_flow import common, feed, verify
+from mind.observability import report
 
 logger = logging.getLogger("demo_flow.run")
 
@@ -68,6 +71,9 @@ MINIO_ENDPOINT = "http://localhost:9000"
 #: developer's own API is left alone.
 MIND_API_PORT = 8800
 MIND_API_HEALTH_URL = f"http://127.0.0.1:{MIND_API_PORT}/health"
+#: runs/<run-id>/calls/: every model call of the run, a JSONL file per Mind
+#: process (#482, observability/README.md "The JSONL file").
+CALLS_DIR_NAME = "calls"
 
 #: Every topic a party in the run reads. Inbox's own two are here so its
 #: consumers start cleanly; nothing in the demo publishes to them.
@@ -297,11 +303,20 @@ class MindProcess:
     last_output: float = field(default_factory=time.monotonic)
     restarts: int = 0
 
+    def monitoring_env(self, env: dict[str, str], log_dir: Path) -> dict[str, str]:
+        """`env`, plus where this process writes its model calls (#482): one
+        JSONL file per process in the run's calls/, named after the process."""
+
+        return env | {
+            "MIND_MONITORING__CALLS_DIR": str(log_dir / CALLS_DIR_NAME),
+            "MIND_MONITORING__PROCESS_NAME": self.name,
+        }
+
     def start(self, env: dict[str, str], log_dir: Path) -> None:
         self.process = subprocess.Popen(
             [sys.executable, "-m", self.module, *self.args],
             cwd=MIND_DIR,
-            env=env,
+            env=self.monitoring_env(env, log_dir),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -454,6 +469,26 @@ def watch(
 # --------------------------------------------------------------------- main
 
 
+def write_report(log_dir: Path) -> Path | None:
+    """runs/<run-id>/report.md: the run's per-stage and per-item latency and
+    cost, from calls/ (#482). Best effort: a report that cannot be written is
+    logged, and never changes the run's result."""
+
+    calls_dir = log_dir / CALLS_DIR_NAME
+    if not calls_dir.is_dir():
+        logger.warning("no %s: no model call was recorded, so no report", calls_dir)
+        return None
+    out = log_dir / "report.md"
+    try:
+        loaded = report.load(calls_dir)
+        out.write_text(report.render(loaded, title=f"Demo run {log_dir.name}"), encoding="utf-8")
+    except (OSError, ValueError) as error:
+        logger.error("could not write %s: %s", out, error)
+        return None
+    logger.info("latency and cost report: %s (%d calls)", out, len(loaded.calls))
+    return out
+
+
 def run(args: argparse.Namespace) -> int:
     run_id = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{args.order}"
     log_dir = common.RUNS_DIR / run_id
@@ -521,6 +556,7 @@ def run(args: argparse.Namespace) -> int:
     finally:
         for process in processes:
             process.stop()
+        write_report(log_dir)
         if args.down:
             _run(_compose("down", "-v"), what="docker compose down")
             logger.info("stack taken down")

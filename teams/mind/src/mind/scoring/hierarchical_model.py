@@ -1,12 +1,15 @@
 """#474: hierarchical value propagation, layered over R2's baseline (#354).
 
-`base = 0.5 * own_base + 0.5 * mean(ancestor_values)`, `own_base` unchanged
-if there are no ancestors. Averaging, not summing: both operands are already
-in [0, 1], so `base` never leaves that range either -- no clamp, no
-normalization step, unlike an earlier additive design. Each ancestor's value
-is its own raw, un-propagated score, never another task's already-adjusted
-one; see `ancestor_source.py` for why and `scoring/README.md`'s "Where an
-ancestor's importance comes from" for the full rationale.
+`base = 0.93 * own_base + 0.07 * mean(ancestor_values)`, `own_base`
+unchanged if there are no ancestors. A task's own urgency/importance
+dominates; an ancestor's share is a small nudge, not an equal vote --
+revised down from an initial 50/50 split. Averaging, not summing: both
+operands are already in [0, 1], so `base` never leaves that range either --
+no clamp, no normalization step, unlike an earlier additive design. Each
+ancestor's value is its own raw, un-propagated score, never another task's
+already-adjusted one; see `ancestor_source.py` for why and
+`scoring/README.md`'s "Where an ancestor's importance comes from" for the
+full rationale.
 
 The baseline is never modified: this model only calls
 `SegmentedRankingModel.score()` for a task's own features and composes that
@@ -21,9 +24,9 @@ from mind.scoring.factors import Factor
 from mind.scoring.inputs import ScorableTask
 from mind.scoring.segmented_model import SegmentedRankingModel, band
 
-#: own_base's fixed weight in the blend -- the other half is split evenly
-#: across however many ancestors a task has, not per-ancestor.
-OWN_WEIGHT = 0.5
+#: own_base's fixed weight in the blend -- the remaining 0.07 is split
+#: evenly across however many ancestors a task has, not per-ancestor.
+OWN_WEIGHT = 0.93
 
 
 class HierarchicalRankingModel:

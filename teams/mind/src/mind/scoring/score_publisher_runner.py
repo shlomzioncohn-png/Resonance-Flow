@@ -19,16 +19,24 @@ the API's start-up before any thread starts.
 
 The publisher keeps its state in memory, so MIND must run as one replica with
 one uvicorn worker: a second copy would split the topics between two states.
+
+Every score and every Chain request is recorded with record_call() (#482),
+from the outside: the model is wrapped in `RecordedScorer`, and the Chain
+client is handed an HTTP client that records its requests. Neither the model
+nor the client changes; a score whose Chain lookup failed is recorded as
+`degraded` (observability/recording.py).
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from threading import Event
 from typing import Any
 
+import httpx
 from google.protobuf.message import Message
 
 from mind.messaging import ProtobufConsumer, ProtobufProducer
@@ -36,8 +44,19 @@ from mind.messaging.background import BackgroundThreads, Progress, Target
 from mind.messaging.config import MessagingSettings, load_settings
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
+from mind.observability.context import CallContext, message_context
+from mind.observability.recording import (
+    RecordedScorer,
+    RecordingClient,
+    name_by_last_path_segment,
+)
+from mind.observability.tracking import CallKind
 from mind.scoring.ancestor_source import ChainAncestorSource
-from mind.scoring.chain_hierarchy_client import ChainHierarchyClient
+from mind.scoring.chain_hierarchy_client import (
+    ChainHierarchyClient,
+    ChainHierarchySettings,
+    load_chain_hierarchy_settings,
+)
 from mind.scoring.hierarchical_model import HierarchicalRankingModel
 from mind.scoring.inbox_task import InboxTask
 from mind.scoring.kafka_sink import KafkaScoreSink
@@ -53,6 +72,31 @@ _GROUP_IDS = {
     "task.created": "mind-score-publisher-task-created",
     "task.updated": "mind-score-publisher-task-updated",
 }
+
+#: The name every score is recorded under (#482).
+SCORING_CALL_NAME = "hierarchical-ranking"
+
+
+def _recorded_chain_client(
+    settings: ChainHierarchySettings | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> ChainHierarchyClient:
+    """The Chain client, over an HTTP client whose every request is recorded
+    as `chain-ancestors` / `chain-children` (kind CHAIN).
+
+    The HTTP client is built with the arguments `ChainHierarchyClient` builds
+    its own with -- base URL and timeout, httpx's defaults otherwise -- so it
+    sends exactly as before. `transport` replaces httpx's own, for tests.
+    """
+    settings = settings if settings is not None else load_chain_hierarchy_settings()
+    http_client = RecordingClient(
+        call_name=name_by_last_path_segment("chain"),
+        kind=CallKind.CHAIN,
+        base_url=settings.base_url,
+        timeout=httpx.Timeout(settings.timeout_seconds),
+        transport=transport,
+    )
+    return ChainHierarchyClient(settings, http_client)
 
 
 class _PublisherRef:
@@ -106,12 +150,15 @@ def start_score_publisher(
         logger.info("score_publisher: Kafka is not configured, not started")
         return None
 
-    chain_client = ChainHierarchyClient()
+    chain_client = _recorded_chain_client()
     publisher_ref = _PublisherRef()
     baseline = SegmentedRankingModel()
-    model = HierarchicalRankingModel(
-        ChainAncestorSource(chain_client, baseline, publisher_ref.cached_task),
-        baseline=baseline,
+    model = RecordedScorer(
+        HierarchicalRankingModel(
+            ChainAncestorSource(chain_client, baseline, publisher_ref.cached_task),
+            baseline=baseline,
+        ),
+        SCORING_CALL_NAME,
     )
     publisher = ScorePublisher(
         KafkaScoreSink(ProtobufProducer(settings)), model=model, children_client=chain_client
@@ -138,6 +185,22 @@ def start_score_publisher(
 
 # Any: each handler takes its own topic's event type, which run() has
 # already deserialized into exactly that type.
+def _score_context(event: object) -> AbstractContextManager[CallContext]:
+    """The score and Chain calls of one task event, attributed to its task and
+    item (#482): the item from the source_ref Mind sent Inbox, which comes back
+    on both task.created and task.updated. The rescore worker's re-scores run
+    outside any message, so they carry no context."""
+    if isinstance(event, TaskCreatedEvent):
+        task_id = event.id
+    elif isinstance(event, TaskUpdatedEvent):
+        task_id = event.task_id
+    else:
+        return message_context(stage="score")
+    return message_context(
+        stage="score", tenant_id=event.tenant_id, source_ref=event.source_ref, task=task_id
+    )
+
+
 def _consume(
     settings: MessagingSettings,
     topic: str,
@@ -148,7 +211,8 @@ def _consume(
         def _handler(event: object, msg: object) -> None:
             # No try/except: a Kafka error must end the loop with the offset
             # uncommitted. BackgroundThreads logs it and runs this again.
-            handle(event)
+            with _score_context(event):
+                handle(event)
             # Handled (or skipped as one that can never be scored): the thread
             # is moving again.
             progress()

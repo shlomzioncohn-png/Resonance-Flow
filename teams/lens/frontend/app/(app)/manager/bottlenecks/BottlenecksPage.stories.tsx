@@ -4,12 +4,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { expect, waitFor, within } from 'storybook/test';
 import { sampleGraph } from '@/mocks/dependencyGraphData';
-import { bottlenecksGraphEmptyHandler, bottlenecksGraphErrorHandler } from '@/mocks/handlers';
+import {
+  bottlenecksGraphEmptyHandler,
+  bottlenecksGraphErrorHandler,
+  bottlenecksGraphHandler,
+} from '@/mocks/handlers';
 import ManagerBottlenecksPage from './page';
 
-// GET /api/manager/bottlenecks/graph is answered by the shared handler in
-// mocks/handlers.ts (the sample graph); Empty and ServerError swap in the
-// alternative handlers exported next to it.
+// GET /api/manager/bottlenecks/graph is real in the app (Chain's graph through
+// the BFF), so here it's answered per story: the sample graph by default, and
+// Empty and ServerError swap in the alternative handlers from mocks/handlers.ts.
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080';
 
@@ -39,6 +43,7 @@ const meta = {
           { id: 'p7', name: 'CRM Sync Pipeline' },
         ]),
       ),
+      bottlenecksGraphHandler,
     );
   },
 } satisfies Meta<typeof ManagerBottlenecksPage>;

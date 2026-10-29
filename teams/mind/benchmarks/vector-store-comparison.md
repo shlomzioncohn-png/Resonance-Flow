@@ -370,14 +370,13 @@ headroom before <300ms would even become a concern, and the one recall
 miss is attributable to the embedding model's inherent limits on a hard
 paraphrase, not to index accuracy.
 
-**Open, not settled here:** review flagged (via `EXPLAIN`) that at this
-10,000-row scale, with `hnsw.ef_search = 400`, Postgres's planner may
-choose a sequential scan over the HNSW index for this query shape --
-not independently re-verified yet. If true, the latency numbers above
-don't actually validate the HNSW index at this scale; they'd just show
-that 10,000 rows is small enough for a seq scan to also be fast. Needs
-an `EXPLAIN ANALYZE` run against the real benchmark table to confirm
-before treating "no index change needed" as settled.
+**Investigated and fixed by #475 below:** review flagged (via `EXPLAIN`)
+that at this 10,000-row scale, with `hnsw.ef_search = 400`, Postgres's
+planner may choose a sequential scan over the HNSW index for this query
+shape. It does: see "Live-path latency under load" below. The production
+`search_effort` default (400) made the planner cost an HNSW scan above a
+plain Seq Scan + sort at this row count -- the index went unused, and the
+live-path p95 target failed, until `search_effort` was lowered to 200.
 
 ## Foundation Gate benchmark (week 3)
 
@@ -460,5 +459,181 @@ The benchmark still uses synthetic filler data (random word-soup), not
 real task text -- the original issue asked for the real FUNSD dataset.
 Not switched over in this PR; flagging rather than fixing, since it
 changes what the recall numbers above actually measure.
+
+## Live-path latency under load (#475)
+
+The two validations above both measure `PgTenantStore.search()` directly.
+That skips two round trips the live endpoint (`GET /v1/tasks/{task_id}/related`,
+#472) actually makes before `search()` even runs: `VectorIndex.tenant_of()`
+and `VectorStore.get_vector()`. Neither run under concurrency, and neither
+has writes happening at the same time the real index consumer would be
+making them. Measuring an isolated, read-only, single-threaded call to
+`search()` alone is measuring a faster path than production ships --
+exactly what #475 asks not to do. This re-measures through the actual
+live path, under conditions closer to production.
+
+Script: [`related_tasks_live_path_benchmark.py`](related_tasks_live_path_benchmark.py)
+(raw results: `related_tasks_live_path_benchmark_results.json`, gitignored
+-- regenerate by re-running the script). Its own table
+(`task_embeddings_benchmark_475`), dropped after the run.
+
+### What is actually measured
+
+Each of the 300 measured calls times exactly one invocation of
+`mind.api.v1.router.get_related_tasks(task_id, index)` -- the literal
+function FastAPI calls for that route, not a hand-written query. One call
+is 5 round trips to Postgres: `tenant_of()` (1), `get_vector()` (1), then
+`search()`'s own 3 (two `SET` statements for `hnsw.ef_search` /
+`hnsw.iterative_scan`, then the `ORDER BY embedding <=> ... LIMIT k`
+itself) -- plus Python-side threshold filtering, no further I/O. No
+embedding happens in this path: `get_related_tasks` starts from a task's
+*already-stored* vector, not fresh text.
+
+Not driven through a running HTTP server or ASGI transport: the app's own
+lifespan (`api/main.py`) also starts Kafka consumers and the score
+publisher, neither of which bears on vector-search latency, and both of
+which would make this benchmark need a Kafka broker just to start. Calling
+the router function directly runs the exact same code the live endpoint
+runs; the one thing skipped is the loopback socket hop into uvicorn,
+whose overhead for a local call is itself sub-millisecond.
+
+### Dataset: 10,000 rows, 0 real, 100% synthetic
+
+No real Mind task corpus exists at this scale to load, so every row is
+synthetic -- stated plainly, not glossed over. Not random word-soup
+either (gibberish or near-identical strings cluster in embedding space in
+ways real task text never does, which would make a latency number
+measured against them not representative -- flagged in review): row text
+comes from [`synthetic_task_seeds.py`](synthetic_task_seeds.py), built on
+realistic task descriptions an LLM (Gemini) wrote, saved under
+[`synthetic_task_seeds_raw/`](synthetic_task_seeds_raw/) (committed --
+see `.gitignore`'s exception for it). Currently 1,647 unique seed entries
+spanning several work domains (software engineering/bug triage, sales,
+finance/procurement, HR/payroll, facilities, compliance, logistics,
+customer support, events), not just one.
+
+1,647 seeds don't reach 10,000 rows on their own, so `expand_to()` cycles
+through a fixed shuffle of them, reusing each about 6 times. The first
+use of each seed is exactly what the LLM wrote; every reuse after that is
+re-textured -- a different name, date, ticket id, number, and (since most
+titles contain none of those) an occasional leading-verb synonym swap and
+bracketed tag -- so reusing the corpus several times over doesn't itself
+produce near-duplicate rows. Checked, not assumed: of the 10,000 expanded
+rows, 8,148 have a unique title and 9,727 have a unique full text.
+Deterministic (`seed=475` by default): anyone re-running `expand_to(10_000)`
+gets the same 10,000 rows.
+
+### Conditions
+
+- **Warm**: 20 queries run and are discarded before measurement starts.
+- **Concurrent**: 20 `get_related_tasks()` calls in flight at once
+  (`asyncio.Semaphore`), not one request at a time.
+- **Writes in flight**: a background task continuously upserts rows for
+  the whole measured window, the way the real index consumer would.
+  Confirmed, not assumed to have run: the result records
+  `writes_during_measurement` (50 in the run below) -- a real count, not
+  zero.
+- **Varied queries**: each of the 300 measured calls targets a different,
+  randomly chosen task_id out of the 10,000 loaded -- not one query
+  repeated, which would measure a cache rather than the index.
+
+### Results (10,000 rows, 1,647-seed multi-domain corpus)
+
+**The original "HNSW confirmed in use" conclusion below was wrong.**
+`_explain_hnsw_is_used` hand-wrote its own `EXPLAIN` query -- a fixed
+`[0.01]*dim` vector, `LIMIT 5`, no `exclude_task_id`, and (the setting
+that actually matters here) no `hnsw.iterative_scan` -- which is not the
+query `search()` runs. Fixed to literally replay
+`PgTenantStore._search_query()`, with `search()`'s own `set_config`
+calls, a real stored vector, and a real excluded task_id. Re-run against
+the real 10,000-row table, it reports `hnsw_index_used: False` -- the
+real query is a Seq Scan, not HNSW, at the then-default `search_effort`
+of 400.
+
+**A single run's p95 is not reproducible on a developer laptop, and
+shouldn't be trusted as *the* number** (review on #1033) -- this ran
+**3 times**, not once, at the production default `search_effort=200`:
+
+| run | avg (ms) | p50 (ms) | p95 (ms) | p99 (ms) | max (ms) | HNSW used | <300ms p95 |
+|---:|---:|---:|---:|---:|---:|:---:|:---:|
+| 1 | 101.92 | 93.48 | 151.31 | 164.90 | 174.97 | **Yes** | PASS |
+| 2 | 95.40 | 88.51 | 133.13 | 141.57 | 143.93 | **Yes** | PASS |
+| 3 | 173.09 | 170.04 | 231.58 | 276.64 | 341.65 | **Yes** | PASS |
+
+Machine: 13th Gen Intel Core i7-13620H (10C/16T), 16 GB RAM, Windows,
+Docker Desktop/WSL2 for Postgres, otherwise idle. p95 still moves
+133-232ms run to run with nothing else changed -- not a tight number,
+but all three pass with margin, and **HNSW stays in use in every run**.
+At `search_effort=400` (the previous default), the same table instead
+takes a Seq Scan every time (see "Diagnosis" below) -- that property,
+not a specific millisecond figure, is what's actually reproducible and
+what this page's conclusion rests on.
+
+### Diagnosis: why the planner skips the index (#475 asks for this)
+
+Not a missing `ANALYZE` -- tested directly: running `ANALYZE` on the
+freshly loaded table doesn't change the plan; still Seq Scan. The actual
+cause is `hnsw.ef_search` itself: pgvector's planner cost estimate for an
+HNSW index scan scales with `ef_search` (how many candidate nodes a scan
+visits), and at 400 that estimate exceeds a plain Seq Scan + sort's cost
+for this 10,000-row table -- the planner picks Seq Scan, correctly by its
+own cost model. Lowering `ef_search` lowers the HNSW cost estimate until
+the planner switches back to the index.
+
+Binary-searched the crossover on this table: HNSW is used through
+`ef_search=260`, not at 275 or above. Recall@5 against the exact
+(brute-force) top-5, averaged over 30 sampled queries, is flat at
+**98.7%** for every value from 200-260 that keeps HNSW in use (worst
+single query: 60%) -- there's no recall reason to sit close to the
+260-275 edge, since recall doesn't improve by doing so, only margin
+against future data growth or stats drift shrinks.
+
+**Change made:** `VectorStoreSettings.search_effort`'s default lowered
+from 400 to 200 (`src/mind/config.py`) -- comfortable margin below the
+measured ~260-275 crossover, confirmed end-to-end above: HNSW stayed in
+use in every `search_effort=200` run recorded on this page (10,000
+through 100,000 rows), unlike `search_effort=400`, which never used it
+once. The "100% recall" the 400 default appeared to have wasn't real
+accuracy -- it's what exact search gives you when the index isn't
+running at all, which is also why it was slow.
+
+### Breaking point
+
+Run at `--vectors 50000` and `--vectors 100000`, both at
+`search_effort=200` (one run each, not three -- the point here is
+finding where p95 crosses 300ms as the row count grows, not
+re-measuring the same stability question the 10,000-row table above
+already covers):
+
+| n_vectors | avg (ms) | p50 (ms) | p95 (ms) | p99 (ms) | max (ms) | HNSW used | <300ms p95 |
+|---:|---:|---:|---:|---:|---:|:---:|:---:|
+| 50,000 | 137.04 | 137.27 | 165.11 | 183.12 | 197.22 | **Yes** | PASS |
+| 100,000 | 192.22 | 195.29 | 239.13 | 264.79 | 294.18 | **Yes** | PASS |
+
+**No breaking point found up to 100,000 rows.** p95 stays under 300ms
+the whole way, and HNSW stays in use at `search_effort=200` at both
+scales -- the index's own cost advantage over a Seq Scan only grows
+with table size, so there's no reason to expect the crossover found at
+10,000 rows to reappear here. This is the honest result, not a forced
+failure: #475's target was proven to hold at 10x the row count it was
+originally measured at, not just at the minimum scale.
+
+### Known limitations
+
+- **The seed corpus is multi-domain but still far smaller than 10,000**:
+  1,647 unique scenarios, each reused ~6 times with re-texturing. More
+  domains narrow the gap further but do not close it completely; a
+  production corpus this size would have far more independent scenarios.
+- **HNSW build-time quality (`ef_construction`) still untuned** --
+  only `ef_search` (query-time) was tuned here; see "Follow-up" above
+  (#270).
+- **Connection-pool size (25) and concurrency (20) are this benchmark's
+  own choices**, not derived from a measured production concurrency
+  profile, which does not exist yet to measure.
+- **Absolute latency numbers on this machine are not a production
+  estimate** -- see the load-sensitivity discussion above. Only the
+  HNSW-used/not-used property and the under-300ms-with-headroom
+  direction should be read as a claim; a specific ms figure here is
+  this machine on this day, not a capacity number.
 
 ---

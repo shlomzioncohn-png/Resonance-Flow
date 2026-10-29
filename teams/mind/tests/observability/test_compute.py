@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -35,6 +36,35 @@ def test_the_clock_does_not_count_waiting():
     time.sleep(0.3)
     elapsed = clock.elapsed_s()
     assert elapsed is not None and elapsed < 0.1
+
+
+def burn_thread_cpu(seconds: float) -> None:
+    started = time.thread_time()
+    while time.thread_time() - started < seconds:
+        pass
+
+
+def test_the_thread_clock_counts_this_threads_cpu():
+    clock = CpuClock(this_thread_only=True)
+    burn_thread_cpu(0.2)
+    elapsed = clock.elapsed_s()
+    assert elapsed is not None and elapsed >= 0.2
+
+
+def test_the_thread_clock_leaves_another_threads_cpu_out():
+    # #482: scoring runs in one thread of the API next to others; the
+    # process-wide clock would charge a score for their CPU too.
+    clock = CpuClock(this_thread_only=True)
+    busy = threading.Thread(target=burn_thread_cpu, args=(0.3,))
+    busy.start()
+    busy.join()
+    elapsed = clock.elapsed_s()
+    assert elapsed is not None and elapsed < 0.1
+
+
+def test_a_thread_clock_cannot_also_count_child_processes():
+    with pytest.raises(ValueError):
+        CpuClock(include_children=True, this_thread_only=True)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows reports no child-process CPU")

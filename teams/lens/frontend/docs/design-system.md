@@ -181,7 +181,7 @@ import StatusBadge from '@/components/ui/StatusBadge';
 <StatusBadge status="critical" label="Blocked" />;
 ```
 
-See it in use in `app/(app)/manager/workload/page.tsx`.
+See it in use in `components/ui/DependencyGraph/DependencyGraph.tsx`.
 
 **Example that would not qualify:** a `Card` wrapper that just sets a
 default `elevation={0}` — that's a per-instance default, and belongs in

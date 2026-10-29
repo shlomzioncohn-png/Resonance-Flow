@@ -21,8 +21,11 @@ from tests.test_index_consumer import FakeTenantStore, FakeVectorIndex
 
 import mind.ingestion.landed_consumer_runner as runner
 from mind.embeddings.base import SearchResult
+from mind.extraction.assembly import source_ref_for_inbox
 from mind.messaging.raw_object_event_pb2 import RawObjectEvent as RawObjectEventMessage
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
+from mind.observability.context import CallContext, current_context, item_ref
+from mind.observability.tracking import CallKind, _reset_for_tests, get_recent_calls
 from mind.task_creation.correlation import correlation_id_for
 from mind.task_creation.flow import TaskCreationFlow
 
@@ -72,6 +75,8 @@ class World:
         self.provider = Provider(*[ANSWER] * len(messages))
         self.consumer: dict[str, Any] = {}
         self.listener: tuple[TaskCreationFlow, asyncio.AbstractEventLoop] | None = None
+        self.listener_consumer_factory: Any = None
+        self.duplicate_check_context: CallContext | None = None
         self.timer: tuple[TaskCreationFlow, threading.Event] | None = None
         self.threads_ran = threading.Barrier(3, timeout=5)
 
@@ -84,10 +89,17 @@ class World:
         ) -> SearchResult | None:
             # The tenant's slice of an index: which index, and which tenant (#841).
             self.searched_in.append((store.index, store.tenant_id))
+            self.duplicate_check_context = current_context()
             return match
 
-        def listener(flow: TaskCreationFlow, loop: asyncio.AbstractEventLoop) -> None:
+        def listener(
+            flow: TaskCreationFlow,
+            loop: asyncio.AbstractEventLoop,
+            *,
+            consumer_factory: Any = None,
+        ) -> None:
             self.listener = (flow, loop)
+            self.listener_consumer_factory = consumer_factory
             self.threads_ran.wait()
 
         def timer(flow: TaskCreationFlow, stop: threading.Event) -> None:
@@ -112,6 +124,13 @@ class World:
         monkeypatch.setattr(runner, "minio_reader", lambda: _read)
         monkeypatch.setattr(runner, "build_provider", lambda: self.provider)
         monkeypatch.setattr(runner.asr, "warm_up", lambda: True)
+        self.embeddings_warmed = False
+
+        def warm_up_embeddings() -> bool:
+            self.embeddings_warmed = True
+            return True
+
+        monkeypatch.setattr(runner, "warm_up_embeddings", warm_up_embeddings)
         monkeypatch.setattr(runner, "ProtobufProducer", lambda: self.producer)
         monkeypatch.setattr(runner, "PgVectorStore", make_store)
         monkeypatch.setattr(runner, "find_duplicate", find_duplicate)
@@ -204,3 +223,75 @@ def test_a_thread_that_dies_takes_the_process_down(monkeypatch: pytest.MonkeyPat
     threading.excepthook(args)  # type: ignore[arg-type]
 
     assert exits == [1]
+
+
+# --- #482: each call attributed to its item and stage, set by the runner -----------------
+
+#: The item as the API will name it: from the source_ref Mind sends Inbox.
+ITEM_REF = item_ref(TENANT, source_ref_for_inbox(None, ITEM))
+
+
+def test_a_landed_items_calls_are_attributed_to_it_by_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _reset_for_tests()
+    world = World(monkeypatch, [_message()])
+
+    world.run_main()
+
+    # The LLM call, recorded by R2's extractor -- which knows nothing of items.
+    [llm] = [r for r in get_recent_calls() if r.kind == CallKind.LLM]
+    assert (llm.item, llm.stage, llm.task) == (ITEM_REF, "extraction", None)
+    # The duplicate check runs on the pipeline's loop, and still sees it.
+    assert world.duplicate_check_context == CallContext(item=ITEM_REF, stage="duplicate_check")
+    # Nothing is left set once the message is handled.
+    assert current_context() == CallContext()
+
+
+def test_bridges_own_source_ref_names_the_item_when_bridge_sends_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _reset_for_tests()
+    world = World(monkeypatch, [_message(source_ref="slack:C024BE91L/1729000000.000100")])
+
+    world.run_main()
+
+    [llm] = [r for r in get_recent_calls() if r.kind == CallKind.LLM]
+    assert llm.item == item_ref(TENANT, "slack:C024BE91L/1729000000.000100")
+
+
+def test_task_created_replies_are_attributed_to_their_task_and_item(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = World(monkeypatch, [])
+    world.run_main()
+    assert world.listener_consumer_factory is runner._AttributedTaskCreatedConsumer
+
+    reply = TaskCreatedEvent(
+        id=TASK_ID, tenant_id=TENANT, source_ref=source_ref_for_inbox(None, ITEM)
+    )
+    seen: list[CallContext] = []
+
+    class Consumer:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def run(self, message_type: type, handler: Any, *, idle_timeout: float | None) -> int:
+            handler(reply, None)
+            return 1
+
+    monkeypatch.setattr(runner, "ProtobufConsumer", Consumer)
+    consumer = runner._AttributedTaskCreatedConsumer()
+    consumer.run(TaskCreatedEvent, lambda event, msg: seen.append(current_context()))
+
+    assert seen == [CallContext(item=ITEM_REF, task=TASK_ID, stage="task_created")]
+
+
+def test_the_embedding_model_is_warmed_at_start_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    # #482: its import is lazy, so without this the first item to reach the
+    # duplicate check would wait for it (20-100 s measured) inside its handler.
+    world = World(monkeypatch, [])
+
+    world.run_main()
+
+    assert world.embeddings_warmed

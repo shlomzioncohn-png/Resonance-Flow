@@ -25,12 +25,6 @@ export interface ManagerFilters {
   project?: string;
 }
 
-export const workloadKeys = {
-  all: ['manager', 'workload'] as const,
-  filtered: (filters?: ManagerFilters) =>
-    [...workloadKeys.all, filters ? { ...filters } : {}] as const,
-};
-
 export const kpiKeys = {
   all: ['manager', 'kpis'] as const,
   list: (filters: ManagerKpiFilters) => [...kpiKeys.all, filters] as const,
@@ -44,7 +38,7 @@ export const projectKeys = {
   all: ['manager', 'projects'] as const,
   filtered: (filters?: ManagerFilters) =>
     [...projectKeys.all, filters ? { ...filters } : {}] as const,
-  // Trend data (e.g., "Flow over time", "Workload by team and week")
+  // Trend data (e.g., "Flow over time")
   trend: () => [...projectKeys.all, 'trend'] as const,
 };
 

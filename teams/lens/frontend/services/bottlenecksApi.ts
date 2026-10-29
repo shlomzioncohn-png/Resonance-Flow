@@ -1,8 +1,9 @@
 /**
  * Bottlenecks API — typed wrapper around the Gateway's task dependency graph
- * for the manager's Bottlenecks screen. The contract is agreed with the
- * Gateway/BFF task (built in parallel): don't change a field here without
- * them. Until the Gateway serves it, MSW answers it (mocks/handlers.ts).
+ * for the manager's Bottlenecks screen. Real data: the BFF reads Chain's
+ * graph for the manager's tenant (GET /tenants/{tenantId}/dependency-graph)
+ * and adds each task's title from Inbox. Same shape as the Gateway's and BFF's
+ * DependencyGraphDTO - don't change a field here without them.
  */
 import { api, ApiError, getErrorMessage } from './api';
 
@@ -39,9 +40,9 @@ export function getDependencyGraph(projectId?: string): Promise<DependencyGraph>
 }
 
 /**
- * The message for a failed graph request. A 404 means the Gateway doesn't
- * serve the graph yet (only MSW does) - the generic 404 text talks about
- * "this task", which would be wrong here.
+ * The message for a failed graph request. A 404 means the Gateway in use is
+ * older than the graph endpoint - the generic 404 text talks about "this
+ * task", which would be wrong here.
  */
 export function graphErrorMessage(error: unknown): string {
   if (error instanceof ApiError && error.status === 404) {

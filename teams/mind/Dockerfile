@@ -61,6 +61,22 @@ RUN python -c "from huggingface_hub import snapshot_download; snapshot_download(
     && rm -rf /opt/models/whisper/base.en/.cache \
     && echo "${WHISPER_MODEL_SHA256}  /opt/models/whisper/base.en/model.bin" | sha256sum -c -
 
+# bge-small-en-v1.5 for src/mind/embeddings (duplicate detection, the index
+# consumer, dependency resolution), baked in for the same reason as Whisper above:
+# a pod starts without downloading it and needs no egress to Hugging Face. Pinned
+# to a revision and checked against the sha256 Hugging Face publishes for
+# model.safetensors. Only the files SentenceTransformer loads (models/README.md):
+# no onnx/, no pytorch_model.bin. EMBEDDING_REPO must match
+# EmbeddingModelSettings.name (tests/test_embedding_model_sync.py). Above
+# `COPY src` for the same reason as the Whisper layer: the 133 MB download comes
+# from CI's layer cache.
+ARG EMBEDDING_REPO=BAAI/bge-small-en-v1.5
+ARG EMBEDDING_REVISION=5c38ec7c405ec4b44b94cc5a9bb96e735b38267a
+ARG EMBEDDING_MODEL_SHA256=3c9f31665447c8911517620762200d2245a2518d6e7208acc78cd9db317e21ad
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('${EMBEDDING_REPO}', revision='${EMBEDDING_REVISION}', local_dir='/opt/models/embeddings/bge-small-en-v1.5', allow_patterns=['config.json', 'config_sentence_transformers.json', 'model.safetensors', 'modules.json', 'sentence_bert_config.json', 'special_tokens_map.json', 'tokenizer.json', 'tokenizer_config.json', 'vocab.txt', '1_Pooling/config.json'])" \
+    && rm -rf /opt/models/embeddings/bge-small-en-v1.5/.cache \
+    && echo "${EMBEDDING_MODEL_SHA256}  /opt/models/embeddings/bge-small-en-v1.5/model.safetensors" | sha256sum -c -
+
 # Now bring in the real source (plus the generated proto classes and
 # scripts/) and reinstall over the placeholder.
 # --no-deps: dependencies are already installed above; this step is
@@ -100,6 +116,8 @@ COPY --from=builder --chown=mind:mind /app/scripts ./scripts
 COPY --from=builder /opt/models /opt/models
 # asr.py loads <WHISPER_MODELS_DIR>/<WHISPER_MODEL>/ (see ASRSettings in config.py).
 ENV WHISPER_MODELS_DIR=/opt/models/whisper
+# embeddings.py loads <EMBEDDING_MODELS_DIR>/bge-small-en-v1.5/ (see EmbeddingModelSettings).
+ENV EMBEDDING_MODELS_DIR=/opt/models/embeddings
 
 # alembic.ini/migrations/ aren't part of the pip-installed package (they
 # live beside pyproject.toml, not under src/mind/), so the venv copy

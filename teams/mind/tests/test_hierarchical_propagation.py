@@ -2,7 +2,7 @@
 
 Three things are checked, deliberately apart:
 
-- The formula itself (0.5*own + 0.5*mean(ancestors' raw values), cycle ->
+- The formula itself (0.93*own + 0.07*mean(ancestors' raw values), cycle ->
   raise), against #473's seven constructed graphs, via `FixtureAncestorSource`.
   Averaging rather than summing happens not to produce any tie here (unlike
   the old additive design, nothing clamps to a hard ceiling), so every
