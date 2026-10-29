@@ -53,7 +53,6 @@ src/main/java/com/rnd/bridge/
 ├── scoping/                   # shared scoping filter (Malki's lane; media lane skips it)
 ├── shared/                    # Kafka topic config shared by the unstructured lanes
 ├── ai/                        # shared LLM client infrastructure (see its README.md)
-├── enrichment/                # dependency/severity/due-date suggestion types
 └── runner/                    # ManualSyncRunner
 src/main/resources/application.yml
 src/main/resources/fixtures/unstructured/   # synthetic Gmail/Drive/Slack/WhatsApp/Calendar data
@@ -98,6 +97,52 @@ To stop:
 ```bash
 docker compose down
 ```
+
+## CRM lane (Ruth)
+
+HubSpot / Salesforce / a synthetic JSON fixture → `Deal` → `Task`, published to Kafka (or just
+logged, without the `kafka` profile). See `teams/bridge/CLAUDE.md` §4, §9, §10 for the full CRM
+lane design; this section covers only the optional LLM enrichment layer.
+
+### LLM enrichment
+
+An optional layer that rewrites a `CRM_DEAL` task's title and description into a more
+actionable form via Gemini, and estimates effort in minutes. Off by default; CRM
+synchronization is unaffected if it's disabled, or if the model fails for any reason.
+
+Example, from a real run against the synthetic dataset:
+
+- **Before** - title: `Multi-region deployment — Wayne Energy`; description:
+  `Proposal sent covering three regions, long procurement cycle.`
+- **After** - title: `Follow up on multi-region deployment proposal with Wayne Energy`;
+  description: `Proposal sent covering three regions; prepare for a long procurement
+  cycle and follow up with the client.` (the original CRM notes are kept, appended
+  below it); `effortEstimateMinutes: 30`
+
+**Enable it:**
+
+```bash
+LLM_ENRICHMENT_ENABLED=true
+LLM_ENRICHMENT_SUPPORTED_SOURCES=CRM_DEAL
+```
+
+(Include `GITHUB_ISSUE,JIRA_ISSUE` too if you also want to keep their existing
+rule-based enrichment active at the same time.)
+
+**Config keys** (`application.yml` / `.env`):
+
+| Key | Purpose |
+|---|---|
+| `bridge.ai.models.gemini-crm` | the dedicated Gemini model for this usage (`BRIDGE_AI_GEMINI_CRM_MODEL` to override it) |
+| `bridge.ai.usages.crm-deal-enrichment` | points at `gemini-crm`, `daily-call-limit: 400` |
+| `bridge.crm.enrichment.min-call-interval` | minimum spacing between real model calls (`BRIDGE_CRM_MIN_CALL_INTERVAL`, default `4s`) - keeps a sync within the model's requests-per-minute limit, not just its daily one |
+
+**Local setup:** put your own key in `teams/bridge/.env` as `BRIDGE_AI_GEMINI_API_KEY` - never
+in `.env.example`, never committed. `CRM_ORGANIZATION_ID` must be a UUID;
+`CrmTaskValidator` rejects anything else, independent of this feature.
+
+See `teams/bridge/docs/crm-llm-enrichment-demo.md` for a full step-by-step demo, and
+`teams/bridge/docs/crm-llm-enrichment-design.md` for the design and its trade-offs.
 
 ## Unstructured-intake lane (Malki)
 

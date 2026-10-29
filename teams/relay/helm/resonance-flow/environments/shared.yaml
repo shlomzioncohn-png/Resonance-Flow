@@ -10,6 +10,11 @@ ingress:
   # plus cert-manager annotations if it issues it.
   tlsSecretName: ""
   annotations: {}
+components:
+  mind:
+    config:
+      llm:
+        provider: gemini
 kafka:
   metrics:
     jmx:
