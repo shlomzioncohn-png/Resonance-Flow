@@ -62,15 +62,21 @@ async def index():
     await s.close()
 
 
-async def _explain(index: PgVectorStore, ef_search: int) -> str:
+async def _explain(index: PgVectorStore, ef_search: int, *, disable_index_scan: bool = False) -> str:
     """Replays the exact query search() runs (same set_config calls,
     same _search_query()), the way #475 review required -- not a
-    hand-written approximation that can silently diverge from it."""
+    hand-written approximation that can silently diverge from it.
+
+    `disable_index_scan` is for the negative control only (see its own
+    docstring): it does not change what the real path does."""
     store = index.for_tenant(TENANT)
     sample_vector = [0.3] * EMBEDDING_DIM
     async with index._pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("SELECT set_config('hnsw.ef_search', %s, true);", (str(ef_search),))
         await cur.execute("SELECT set_config('hnsw.iterative_scan', 'strict_order', true);")
+        if disable_index_scan:
+            await cur.execute("SELECT set_config('enable_indexscan', 'off', true);")
+            await cur.execute("SELECT set_config('enable_bitmapscan', 'off', true);")
         await cur.execute(
             sql.SQL("EXPLAIN (ANALYZE, FORMAT TEXT) ")
             + store._search_query(exclude_completed=False, exclude_task_id=False),
@@ -94,6 +100,17 @@ async def test_a_high_enough_search_effort_does_fall_back_to_a_seq_scan(index):
     """Negative control: proves the assertion above can actually fail.
     #475's original EXPLAIN check (#1033 review) silently passed even
     when the real path took a Seq Scan -- a check that can't fail is
-    worthless, so this confirms this one can."""
-    plan = await _explain(index, 400)
-    assert "Seq Scan" in plan, f"expected ef_search=400 to force a Seq Scan:\n{plan}"
+    worthless, so this confirms this one can.
+
+    Originally replayed #475's real regression value, ef_search=400 --
+    dropped after CI's own Postgres (different cost constants/cache state
+    than wherever 400 was first verified) still chose the HNSW scan there,
+    and hnsw.ef_search's valid range (1-1000) leaves no higher value to
+    retry with reliably. `enable_indexscan`/`enable_bitmapscan` off makes
+    the planner fall back to a Seq Scan deterministically on any Postgres,
+    which is all this control needs to prove -- the regression itself is
+    still caught by the cost-driven assertion above, at the real default."""
+    plan = await _explain(
+        index, VectorStoreSettings.model_fields["search_effort"].default, disable_index_scan=True
+    )
+    assert "Seq Scan" in plan, f"expected a Seq Scan with index scans disabled:\n{plan}"
