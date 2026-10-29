@@ -12,6 +12,7 @@ import com.rnd.bff.dto.DependencyGraphDTO;
 import com.rnd.bff.dto.ManagerProjectDTO;
 import com.rnd.bff.service.BottlenecksService;
 import com.rnd.bff.service.ManagerKpisService;
+import com.rnd.bff.service.TaskConstraintsService;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +33,7 @@ class ManagerControllerTest {
 
     @MockBean private ManagerKpisService managerKpisService;
     @MockBean private BottlenecksService bottlenecksService;
+    @MockBean private TaskConstraintsService taskConstraintsService;
 
     @Test
     void getProjects_returnsTheActorsProjects() throws Exception {

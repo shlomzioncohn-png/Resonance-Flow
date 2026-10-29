@@ -1,15 +1,22 @@
 package com.rnd.bff.controller;
 
+import com.rnd.bff.dto.ConstraintDTO;
+import com.rnd.bff.dto.ConstraintStatusUpdateDTO;
 import com.rnd.bff.dto.DependencyGraphDTO;
 import com.rnd.bff.dto.ManagerProjectDTO;
 import com.rnd.bff.service.BottlenecksService;
 import com.rnd.bff.service.ManagerKpisService;
+import com.rnd.bff.service.TaskConstraintsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -18,7 +25,8 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * Manager Dashboard's all-projects grid and the Bottlenecks screen's dependency graph.
+ * Manager Dashboard's all-projects grid, the Bottlenecks screen's dependency graph,
+ * and the constraints of a task in the Bottlenecks screen's task drawer.
  *
  * Gateway forwards GET /api/manager/projects and GET /api/manager/bottlenecks/graph
  * here as GET /manager/projects and GET /manager/bottlenecks/graph.
@@ -32,10 +40,13 @@ public class ManagerController {
 
     private final ManagerKpisService managerKpisService;
     private final BottlenecksService bottlenecksService;
+    private final TaskConstraintsService taskConstraintsService;
 
-    public ManagerController(ManagerKpisService managerKpisService, BottlenecksService bottlenecksService) {
+    public ManagerController(ManagerKpisService managerKpisService, BottlenecksService bottlenecksService,
+                             TaskConstraintsService taskConstraintsService) {
         this.managerKpisService = managerKpisService;
         this.bottlenecksService = bottlenecksService;
+        this.taskConstraintsService = taskConstraintsService;
     }
 
     @Operation(summary = "List all projects",
@@ -55,5 +66,32 @@ public class ManagerController {
             @RequestParam(required = false) String projectId) {
         logger.info("Bottlenecks graph request - actorId: {}, projectId: {}", userId, projectId);
         return ResponseEntity.ok(bottlenecksService.getGraph(userId, projectId));
+    }
+
+    @Operation(summary = "Task constraints",
+            description = "Chain's constraints of one task in the user's tenant. "
+                    + "404 when the task isn't in the tenant. 503 when Chain or Inbox is unavailable.")
+    @GetMapping("/tasks/{taskId}/constraints")
+    public ResponseEntity<List<ConstraintDTO>> getTaskConstraints(
+            @RequestHeader("X-User-Id") String userId,
+            @PathVariable String taskId) {
+        logger.info("Task constraints request - actorId: {}, taskId: {}", userId, taskId);
+        return ResponseEntity.ok(taskConstraintsService.getConstraints(userId, taskId));
+    }
+
+    @Operation(summary = "Update constraint status",
+            description = "Sets a constraint to PENDING, SATISFIED or WAIVED in Chain. "
+                    + "400 for any other status. 404 when the task isn't in the tenant or the constraint "
+                    + "doesn't exist on it. 503 when Chain or Inbox is unavailable.")
+    @PatchMapping("/tasks/{taskId}/constraints/{constraintId}")
+    public ResponseEntity<ConstraintDTO> updateConstraintStatus(
+            @RequestHeader("X-User-Id") String userId,
+            @PathVariable String taskId,
+            @PathVariable String constraintId,
+            @Valid @RequestBody ConstraintStatusUpdateDTO body) {
+        logger.info("Constraint status update - actorId: {}, taskId: {}, constraintId: {}, newStatus: {}",
+                userId, taskId, constraintId, body.getStatus());
+        return ResponseEntity.ok(
+                taskConstraintsService.updateStatus(userId, taskId, constraintId, body.getStatus()));
     }
 }
