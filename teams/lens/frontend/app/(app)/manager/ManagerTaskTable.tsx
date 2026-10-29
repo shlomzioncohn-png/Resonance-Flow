@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import NextLink from 'next/link';
 import Chip from '@mui/material/Chip';
+import MuiLink from '@mui/material/Link';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import DataTable, { type Column } from '@/components/ui/DataTable';
@@ -21,15 +23,33 @@ export function isPastDue(dueDate: string | undefined, today = new Date()): bool
   return due < startOfToday;
 }
 
-const baseColumns: Column<ApiTask>[] = [
-  {
+/** The Bottlenecks screen with this task's drawer open: what it waits on, and its constraints. */
+function bottlenecksTaskHref(taskId: string): string {
+  return `/manager/bottlenecks?taskId=${encodeURIComponent(taskId)}`;
+}
+
+/** The task's title; on Blocked & delayed it links to the task's drawer in Bottlenecks. */
+function titleColumn(linkToBottlenecks: boolean): Column<ApiTask> {
+  return {
     id: 'title',
     header: 'Task',
     render: (task) => (
       <Stack spacing={0.25}>
-        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-          {task.title}
-        </Typography>
+        {linkToBottlenecks ? (
+          <MuiLink
+            component={NextLink}
+            href={bottlenecksTaskHref(task.id)}
+            variant="body2"
+            underline="hover"
+            sx={{ fontWeight: 600 }}
+          >
+            {task.title}
+          </MuiLink>
+        ) : (
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            {task.title}
+          </Typography>
+        )}
         {task.project && (
           <Typography variant="caption" color="text.secondary">
             {task.project}
@@ -37,7 +57,10 @@ const baseColumns: Column<ApiTask>[] = [
         )}
       </Stack>
     ),
-  },
+  };
+}
+
+const otherColumns: Column<ApiTask>[] = [
   {
     id: 'status',
     header: 'Status',
@@ -94,7 +117,10 @@ export default function ManagerTaskTable({
   const [pageSize, setPageSize] = useState(20);
 
   const rows = tasks.data ?? [];
-  const columns = view === 'blocked-delayed' ? [...baseColumns, reasonColumn] : baseColumns;
+  const columns =
+    view === 'blocked-delayed'
+      ? [titleColumn(true), ...otherColumns, reasonColumn]
+      : [titleColumn(false), ...otherColumns];
 
   return (
     <DataTable

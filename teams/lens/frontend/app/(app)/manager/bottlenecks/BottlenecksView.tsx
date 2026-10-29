@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
+import Alert from '@mui/material/Alert';
 import Stack from '@mui/material/Stack';
 import EmptyState from '@/components/feedback/EmptyState';
 import ErrorState from '@/components/feedback/ErrorState';
@@ -63,6 +64,8 @@ export default function BottlenecksView() {
 
   const graph = graphQuery.data;
   const selected = graph?.nodes.find((node) => node.id === selectedId) ?? null;
+  // A link (e.g. from Blocked & delayed) to a task Chain's graph doesn't have opens nothing - say so.
+  const selectedMissing = !!graph && !!selectedId && !selected;
 
   return (
     <Stack spacing={3}>
@@ -74,6 +77,14 @@ export default function BottlenecksView() {
           onChange={changeProject}
         />
       </Stack>
+
+      {selectedMissing && (
+        <Alert severity="info" onClose={() => setSelectedId(null)}>
+          {projectId
+            ? "This task isn't in this project's dependency graph."
+            : "Chain has no dependency data for this task yet, so its details can't be shown here."}
+        </Alert>
+      )}
 
       {graphQuery.isPending && <LoadingState message="Loading dependency graph…" />}
 
