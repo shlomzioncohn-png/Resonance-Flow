@@ -1,4 +1,4 @@
-name: Lens Storybook CD
+name: Lens Storybook release
 
 # Deploys the lens-frontend Storybook as its own service (lens-storybook).
 # PR checks for stories run in lens-frontend-ci.yaml's `storybook` job.
@@ -17,12 +17,12 @@ permissions:
   contents: read
 
 jobs:
-  cd:
+  release:
     permissions:
       contents: write
       packages: write
       pull-requests: write
-    uses: ./.github/workflows/service-cd.yaml
+    uses: ./.github/workflows/service-release.yaml
     secrets: inherit
     with:
       service_name: lens-storybook

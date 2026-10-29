@@ -2,7 +2,7 @@ name: CI - Java service
 description: >
   Brings up the shared test infra (kind cluster + Helm chart with
   this component disabled + Postgres), then runs this service's Java tests. Used by
-  both service-ci-java.yaml (PR) and service-cd.yaml's build job (push/dispatch).
+  both service-ci-java.yaml (PR) and service-release.yaml's build-and-push job (push/dispatch).
 
 inputs:
   service_name:

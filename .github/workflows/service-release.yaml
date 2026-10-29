@@ -1,4 +1,4 @@
-name: Service CD (reusable)
+name: Service release (reusable)
 
 on:
   workflow_call:
@@ -31,7 +31,7 @@ on:
         default: ""
 
 jobs:
-  build:
+  build-and-push:
     runs-on: self-hosted
     permissions:
       contents: read
@@ -71,7 +71,7 @@ jobs:
           target: ${{ inputs.target }}
 
   update-manifest:
-    needs: build
+    needs: build-and-push
     permissions:
       contents: write
       pull-requests: write
@@ -79,5 +79,5 @@ jobs:
     secrets: inherit
     with:
       service_name: ${{ inputs.service_name }}
-      image_tag: ${{ needs.build.outputs.image_tag }}
-      image_repository: ${{ needs.build.outputs.image_repository }}
+      image_tag: ${{ needs.build-and-push.outputs.image_tag }}
+      image_repository: ${{ needs.build-and-push.outputs.image_repository }}

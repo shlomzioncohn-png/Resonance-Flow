@@ -48,12 +48,14 @@ docker compose down           # stop (add -v to also drop named volumes)
 (`teams/inbox/README.md` still describes Java 11 / Spring Boot 2.7.18 — that's stale; its `pom.xml`
 and `teams/inbox/CLAUDE.md` are current and authoritative.)
 
-CI/CD is a set of reusable workflows called by each team's own `<team>-ci.yaml`:
-`service-ci-<language>.yaml` (one per language) runs `mvn -B test` (or the Python/Node
-equivalent) on pull requests only; the single `service-cd.yaml` (takes `language` as an
-input, since a workflow's `uses:` target can't be chosen dynamically) runs the same tests
-on push/tag/`workflow_dispatch`, then builds/pushes a GHCR image and smoke-tests it in a
-`kind` cluster, then calls `service-update-manifest.yaml` to open the manifest-bump PR. The
+CI/CD is a set of reusable workflows called by each team's own `<team>-ci.yaml`. Its `ci`
+job calls `service-ci-<language>.yaml` (one per language), which runs `mvn -B test` (or the
+Python/Node equivalent) on pull requests only. Its `release` job calls the single
+`service-release.yaml` (takes `language` as an input, since a workflow's `uses:` target
+can't be chosen dynamically) on push/tag/`workflow_dispatch`: its `build-and-push` job (still
+CI) runs the same tests, then builds a GHCR image, smoke-tests it in a `kind` cluster and
+pushes it; its `update-manifest` job (the CD part) then calls `service-update-manifest.yaml`
+to open the manifest-bump PR. The
 kind cluster + Helm chart setup shared by both phases lives in the
 `.github/actions/setup-service-infra` composite action, so there's exactly one kind cluster
 per job regardless of which phase runs. Each team's workflow (`bridge-ci.yaml`,
