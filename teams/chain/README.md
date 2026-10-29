@@ -164,6 +164,8 @@ Ancestors has no `/transitive` variant - the ancestor chain already is the trans
 | GET | `/tasks/{taskId}/dependencies/transitive` | All (transitive) dependencies |
 | GET | `/tasks/{taskId}/dependencies/history` | Dependency change history |
 | GET | `/tasks/{taskId}/state-history` | Status / blocking history, filterable by time range |
+| GET | `/tasks/state-history` | Tenant-wide state history, `from`/`to` required (max 90 days), cursor-paged oldest first |
+| GET | `/tasks/blocked-since` | Currently blocked tasks of the tenant with `blockedSince`, optional `taskIds` |
 | GET | `/tasks/{taskId}/constraints/history` | Constraint history, filterable by time range |
 | GET | `/tasks/{taskId}/dependents` | Direct dependents |
 | GET | `/tasks/{taskId}/dependents/transitive` | All (transitive) dependents |
@@ -1146,6 +1148,14 @@ malformed and goes straight to `.errors`. A missing source or target task is cre
 placeholder in that tenant (`updatedAt` = epoch) inside the graph lock, and the edge is
 recorded right away. An existing task is never overwritten, and one in a different tenant rejects the
 whole event (no retry, nothing created). A later `task.updated` replaces the placeholder's state.
+
+**Scheduling publish after `task.dependencies.proposed`.** Inbox creates a `has_dependencies` task with
+`is_available=false`, and only Chain flips it. The handler therefore also creates the event's own task as a
+placeholder up front (so an empty dependency list still has a row), and after processing the edges reads its
+readiness from `task_readiness`: if ready, it queues `task.scheduling.updated` after commit for that task
+only (never for a `dependsOnTaskId`); if blocked, nothing is published. This runs on every non-duplicate
+event, including when a `DuplicateDependencyException` was swallowed. A redelivered `event_id` is still
+blocked by `ChainEventProcessingTemplate`.
 
 Tests: `TaskEligibilityServiceTest` (same/different/null-tenant `addDependency`/`addDependencies`,
 `onTaskStatusChangedIfNewer` backfill/match/reject incl. the stale-redelivery case),

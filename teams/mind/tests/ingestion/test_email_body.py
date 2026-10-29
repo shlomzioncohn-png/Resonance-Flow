@@ -3,7 +3,7 @@ import logging
 
 import pytest
 
-from mind.ingestion.email_body import email_body_text
+from mind.ingestion.email_body import EmailBody, email_body_text, read_email_body
 
 KEY = "EMAIL/550e8400-e29b-41d4-a716-446655440000/2026-10-05/body.json"
 
@@ -172,3 +172,92 @@ def test_a_recipient_given_as_an_address_record_keeps_its_address() -> None:
 
 def test_a_body_that_starts_with_a_byte_order_mark_is_still_read() -> None:
     assert email_body_text("\ufeff" + json.dumps(RECORD), KEY) == _text(RECORD)
+
+
+# --- who sent it and to whom (#132) --------------------------------------------
+
+
+def _read(record: object) -> EmailBody:
+    return read_email_body(json.dumps(record), KEY)
+
+
+def test_the_sender_and_recipients_come_with_the_same_text() -> None:
+    """Read once: a body can be hundreds of thousands of characters (#968)."""
+
+    body = _read(RECORD)
+
+    assert body.text == _text(RECORD)
+    assert body.sender == "lisa.grant@northwind.example"
+    assert body.recipients == ("dana@brightline.example", "omer@brightline.example")
+
+
+def test_a_single_recipient_as_a_string_is_one_recipient() -> None:
+    assert _read({"to": "dana@brightline.example", "body": "Hi."}).recipients == (
+        "dana@brightline.example",
+    )
+
+
+def test_an_address_record_keeps_the_name_beside_the_address() -> None:
+    """The name tells the sender's signature apart, and tells whether a name
+    the model gave is the recipient's. Inbox is still asked by address alone."""
+
+    record = {
+        "from": {"name": "Lisa Grant", "email": "lisa.grant@northwind.example"},
+        "to": [{"name": "Dana Cohen", "email": "dana@brightline.example"}],
+        "body": "Hi.",
+    }
+
+    body = _read(record)
+
+    assert body.sender == "Lisa Grant <lisa.grant@northwind.example>"
+    assert body.recipients == ("Dana Cohen <dana@brightline.example>",)
+
+
+@pytest.mark.parametrize("text", ["not json", '{"subject": "no body"}', "[1, 2]"])
+def test_a_body_that_is_not_an_email_record_has_no_sender_or_recipients(text: str) -> None:
+    body = read_email_body(text, KEY)
+
+    assert (body.text, body.sender, body.recipients) == (text, None, ())
+
+
+def test_a_sender_with_a_name_and_no_address_is_the_name() -> None:
+    """Still enough to tell "Thanks, Lisa" is the sender signing."""
+
+    assert _read({"from": {"name": "Lisa  Grant"}, "body": "Hi."}).sender == "Lisa Grant"
+
+
+@pytest.mark.parametrize(
+    "value", [None, 42, ["a@x.example", "b@x.example"], {"name": " "}, {"email": 3}]
+)
+def test_a_sender_that_is_not_one_address_is_none(value: object) -> None:
+    assert _read({"from": value, "body": "Hi."}).sender is None
+
+
+@pytest.mark.parametrize(
+    ("to", "recipients"),
+    [
+        ("Dana Cohen <dana@brightline.example>", ("Dana Cohen <dana@brightline.example>",)),
+        # Several in one string are several recipients, not one.
+        (
+            "Dana Cohen <dana@brightline.example>, omer@brightline.example",
+            ("Dana Cohen <dana@brightline.example>", "omer@brightline.example"),
+        ),
+        ('"Cohen, Dana" <dana@brightline.example>', ('"Cohen, Dana" <dana@brightline.example>',)),
+        (["Dana <dana@brightline.example>"], ("Dana <dana@brightline.example>",)),
+        # Not an address: nobody to look up.
+        ("Dana Cohen", ()),
+    ],
+)
+def test_each_recipient_is_one_address_with_its_name(
+    to: object, recipients: tuple[str, ...]
+) -> None:
+    """One recipient each, written the way a header writes one person: the
+    owner check reads the name, and Inbox is asked by the address alone."""
+
+    assert _read({"to": to, "body": "Hi."}).recipients == recipients
+
+
+def test_a_sender_given_as_a_list_of_one_record_keeps_its_name() -> None:
+    record = {"from": [{"name": "Avraham Katz", "email": "ak@acme.example"}], "body": "Hi."}
+
+    assert _read(record).sender == "Avraham Katz <ak@acme.example>"

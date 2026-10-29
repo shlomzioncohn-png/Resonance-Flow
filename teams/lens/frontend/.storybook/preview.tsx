@@ -5,7 +5,7 @@ import { resetMockUsers, resetMockWorkInsights } from '@/mocks/handlers';
 import CssBaseline from '@mui/material/CssBaseline';
 import { ThemeProvider } from '@mui/material/styles';
 import { theme } from '@/theme';
-import { RoleProvider } from '@/components/layout/RoleProvider';
+import { RoleProvider, USER_STORAGE_KEY } from '@/components/layout/RoleProvider';
 import '../app/globals.css';
 
 const preview: Preview = {
@@ -24,10 +24,10 @@ const preview: Preview = {
     resetMockUsers();
     // Reset work insights state
     resetMockWorkInsights();
-    // Every story starts signed out. RoleProvider keeps the role in localStorage, and all
+    // Every story starts signed out. RoleProvider keeps the user in sessionStorage, and all
     // stories share one browser, so a story that signs in (Pages/Login) would otherwise
-    // leave its role behind for the next one.
-    window.localStorage.removeItem('lens.role');
+    // leave its user behind for the next one.
+    window.sessionStorage.removeItem(USER_STORAGE_KEY);
   },
   parameters: {
     controls: {

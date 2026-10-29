@@ -79,7 +79,8 @@ public class DependencyEdgeService {
                 tenantId);
     }
 
-    private void insertPlaceholderIfAbsent(
+    @Transactional
+    public void insertPlaceholderIfAbsent(
             UUID taskId,
             UUID tenantId) {
 

@@ -1,21 +1,16 @@
 syntax = "proto3";
-
 package com.rnd.mind.event;
 
 option java_package = "com.rnd.mind.event";
 option java_multiple_files = true;
 
-// kafkaTopic: task.dependencies.proposed (Mind -> Chain). Kafka key = task_id.
-// Contract agreed between Mind and Chain (#133). Re-publishing for the same task
-// adds edges, never replaces them; Mind never removes an edge.
-
 message DependencyProposedEvent {
-  string event_id = 1;                    // UUID as string. Chain dedupes on it.
-  string task_id = 2;                     // UUID as string.
+  string event_id = 1;
+  string task_id = 2;
   repeated Dependency dependencies = 3;
+  string tenant_id = 4;
 }
-
 message Dependency {
-  string depends_on_task_id = 1;          // UUID as string. Final ids only.
-  float confidence = 2;                   // 0.0..1.0.
+  string depends_on_task_id = 1;
+  float confidence = 2;
 }

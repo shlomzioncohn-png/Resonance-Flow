@@ -12,12 +12,16 @@
  *   NEXT_PUBLIC_API_MOCKING=enabled the whole screen - list, create, edit,
  *   status change - works with nothing but `npm run dev`. The data lives in
  *   memory: changes survive until the page is reloaded.
- * - POST /api/auth/login, which the Gateway doesn't expose yet. Once it does,
- *   delete its handler - services/authApi.ts already has its final shape.
+ * - POST /auth/login and /auth/logout. The Gateway serves them for real (against
+ *   Inbox's users); the mock keeps the Login screen working without them, and
+ *   backs its stories.
  * - GET /api/manager/bottlenecks/graph, the Bottlenecks screen's dependency
- *   graph, until the Gateway/BFF serve it. Once they do, delete its handler -
- *   services/bottlenecksApi.ts already has its final shape. The data lives in
+ *   graph - only as exported handlers for the stories. The app always gets
+ *   Chain's real graph from the Gateway. The sample data lives in
  *   mocks/dependencyGraphData.ts, shared with the DependencyGraph stories.
+ * - GET /api/manager/dashboard/projects, the Dashboard's charts - only as
+ *   exported handlers for the stories. The app always gets the real counts
+ *   from the Gateway, like the KPIs.
  *
  * The calling code (services/managerUsersApi.ts, services/authApi.ts) is the
  * same either way. Storybook uses these same handlers (.storybook/preview.tsx),
@@ -27,6 +31,7 @@ import { delay, http, HttpResponse } from 'msw';
 import type { GatewayErrorBody } from '@/services/api';
 import type { AuthRole, LoginRequest, LoginResponse } from '@/services/authApi';
 import type { DependencyGraph } from '@/services/bottlenecksApi';
+import type { ProjectTaskCounts } from '@/services/managerApi';
 import type {
   UserCreateFields,
   UserDetails,
@@ -35,6 +40,7 @@ import type {
   UserStatus,
 } from '@/services/managerUsersApi';
 import type { WorkInsight, InsightFeedbackRequest } from '@/services/workInsightsApi';
+import { sampleProjectTaskCounts } from './dashboardChartsData';
 import { emptyGraph, sampleGraph, sampleGraphForProject } from './dependencyGraphData';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080';
@@ -147,6 +153,29 @@ function notFound(path: string) {
  * for trying the screen's other states by hand: no dependencies at all, and a
  * server error.
  */
+const PROJECT_TASK_COUNTS_URL = `${API_BASE_URL}/api/manager/dashboard/projects`;
+
+/**
+ * The Dashboard's charts, for stories only - not in `handlers`, so in mock
+ * mode the app gets the real counts from the Gateway, same as the KPIs.
+ */
+export const projectTaskCountsHandler = http.get(PROJECT_TASK_COUNTS_URL, async () => {
+  await delay(400);
+  return HttpResponse.json<ProjectTaskCounts[]>(sampleProjectTaskCounts);
+});
+
+/** The Dashboard's charts with no tasks at all - for stories. */
+export const projectTaskCountsEmptyHandler = http.get(PROJECT_TASK_COUNTS_URL, () =>
+  HttpResponse.json<ProjectTaskCounts[]>([]),
+);
+
+/** The sample graph (?projectId= keeps one project's tasks) - for stories. */
+export const bottlenecksGraphHandler = http.get(BOTTLENECKS_GRAPH_URL, async ({ request }) => {
+  await delay(400);
+  const projectId = new URL(request.url).searchParams.get('projectId');
+  return HttpResponse.json<DependencyGraph>(projectId ? sampleGraphForProject(projectId) : sampleGraph);
+});
+
 export const bottlenecksGraphEmptyHandler = http.get(BOTTLENECKS_GRAPH_URL, async () => {
   await delay(300);
   return HttpResponse.json<DependencyGraph>(emptyGraph);
@@ -242,10 +271,10 @@ export const handlers = [
     return HttpResponse.json(touch(user, fields));
   }),
 
-  // POST /api/auth/login - a wrong username or password gets the Gateway's 401 error body.
+  // POST /auth/login - a wrong email or password gets the Gateway's 401 error body.
   // The generics type the request body and allow either response body (success or error).
   http.post<never, LoginRequest, LoginResponse | GatewayErrorBody>(
-    `${API_BASE_URL}/api/auth/login`,
+    `${API_BASE_URL}/auth/login`,
     async ({ request }) => {
       await delay(400);
 
@@ -259,14 +288,15 @@ export const handlers = [
           {
             status: 'ERROR',
             errorCode: 'UNAUTHORIZED',
-            message: 'Invalid username or password',
-            path: '/api/auth/login',
+            message: 'Invalid email or password',
+            path: '/auth/login',
             timestamp: new Date().toISOString(),
           },
           { status: 401 },
         );
       }
 
+      // The real Gateway also sets the token as an HttpOnly cookie; the mock has no token at all.
       return HttpResponse.json<LoginResponse>({
         expiresIn: 3600,
         user: {
@@ -277,15 +307,6 @@ export const handlers = [
       });
     },
   ),
-
-  // GET /api/manager/bottlenecks/graph?projectId= - projectId is optional.
-  http.get(BOTTLENECKS_GRAPH_URL, async ({ request }) => {
-    await delay(400);
-    const projectId = new URL(request.url).searchParams.get('projectId');
-    return HttpResponse.json<DependencyGraph>(
-      projectId ? sampleGraphForProject(projectId) : sampleGraph,
-    );
-  }),
 
   // GET /api/work-insights - Get today's work insight
   // Returns READY status with insight and evidence on first call,
@@ -331,4 +352,7 @@ export const handlers = [
     // Return 204 No Content (success, no body)
     return new HttpResponse(null, { status: 204 });
   }),
+
+  // POST /auth/logout - the real Gateway clears the token cookie; the mock has none to clear.
+  http.post(`${API_BASE_URL}/auth/logout`, () => new HttpResponse(null, { status: 204 })),
 ];

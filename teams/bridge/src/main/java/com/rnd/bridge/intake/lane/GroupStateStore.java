@@ -134,14 +134,12 @@ public class GroupStateStore {
             return;
         }
         update(sourceType, tenantId, groupId, MISSING_GROUP_SENTINEL, current -> {
-            if (current == MISSING_GROUP_SENTINEL || current.revision() != expectedRevision || current.published()
-                    || current.superseded()) {
+            if (current == MISSING_GROUP_SENTINEL || current.revision() != expectedRevision || current.published()) {
                 return current;
             }
             return new GroupState(
                     current.groupId(), current.sourceType(), current.tenantId(), current.chatId(),
-                    current.threadId(), current.correlationId(), current.messages(), true, current.revision(), null,
-                    current.superseded());
+                    current.threadId(), current.correlationId(), current.messages(), true, current.revision(), null);
         });
     }
 
@@ -184,7 +182,7 @@ public class GroupStateStore {
             return new GroupState(
                     current.groupId(), current.sourceType(), current.tenantId(), current.chatId(),
                     current.threadId(), current.correlationId(), updatedMessages, current.published(),
-                    current.revision(), current.claimedRevision(), current.superseded());
+                    current.revision(), current.claimedRevision());
         });
     }
 
@@ -222,7 +220,6 @@ public class GroupStateStore {
             if (current == MISSING_GROUP_SENTINEL
                     || current.revision() != expectedRevision
                     || current.published()
-                    || current.superseded()
                     || (current.claimedRevision() != null && current.claimedRevision() == expectedRevision)) {
                 return current;
             }
@@ -230,37 +227,9 @@ public class GroupStateStore {
             return new GroupState(
                     current.groupId(), current.sourceType(), current.tenantId(), current.chatId(),
                     current.threadId(), current.correlationId(), current.messages(), current.published(),
-                    current.revision(), expectedRevision, current.superseded());
+                    current.revision(), expectedRevision);
         });
         return claimed[0];
-    }
-
-    /**
-     * Marks a group as superseded - its content has been migrated into a different group's
-     * identity (today: a non-thread group whose root was adopted by a newly-created thread
-     * group, see ChatGroupStateReconciler.newThreadGroupState) and must never be independently
-     * published again, including by a pending inactivity timer that was already scheduled before
-     * the migration happened (see SlackSessionScheduler.onDeadline's superseded check).
-     * Deliberately not the same as marking it published: this group's content was never actually
-     * acknowledged by Kafka under its own correlationId, so published=true here would be a false
-     * claim of delivery that never happened - superseded says "retired, nothing further to do",
-     * independent of whether anything was ever actually sent.
-     * Same not-found tolerance as confirmPublished/recordLandedAttachment for a group that
-     * genuinely isn't there, and idempotent - a no-op if already superseded.
-     */
-    public void markSuperseded(RawSourceType sourceType, String tenantId, String groupId) {
-        if (load(sourceType, tenantId, groupId).isEmpty()) {
-            return;
-        }
-        update(sourceType, tenantId, groupId, MISSING_GROUP_SENTINEL, current -> {
-            if (current == MISSING_GROUP_SENTINEL || current.superseded()) {
-                return current;
-            }
-            return new GroupState(
-                    current.groupId(), current.sourceType(), current.tenantId(), current.chatId(),
-                    current.threadId(), current.correlationId(), current.messages(), current.published(),
-                    current.revision(), current.claimedRevision(), true);
-        });
     }
 
     /**

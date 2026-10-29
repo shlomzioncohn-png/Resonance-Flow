@@ -52,9 +52,10 @@ export const WithCustomColors: Story = {
   args: {
     title: 'Custom Color Stages',
     stages: [
-      { name: 'Backlog', count: 5, color: '#6366f1' },
-      { name: 'In Progress', count: 8, color: '#8b5cf6' },
-      { name: 'Done', count: 15, color: '#06b6d4' },
+      // Dark enough to be text on a light tint (4.5:1)
+      { name: 'Backlog', count: 5, color: '#4338ca' },
+      { name: 'In Progress', count: 8, color: '#6d28d9' },
+      { name: 'Done', count: 15, color: '#0e7490' },
     ],
   },
 };

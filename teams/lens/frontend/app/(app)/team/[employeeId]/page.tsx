@@ -11,11 +11,11 @@ export default async function TeamMemberPage({
   return (
     <PageContainer
       title={`Team member: ${employeeId}`}
-      description="Workload and blocker detail for this team member. Reached from Manager → Workload."
+      description="Blocker detail for this team member."
     >
       <EmptyState
         title="No detail data yet"
-        description={`Workload and blocker detail for employee "${employeeId}" will appear here once connected to real data.`}
+        description={`Blocker detail for employee "${employeeId}" will appear here once connected to real data.`}
       />
     </PageContainer>
   );

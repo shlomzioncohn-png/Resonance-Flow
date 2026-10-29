@@ -22,6 +22,11 @@ inbox:
   # Subsequent calls within the same day are fast (cached in Inbox DB).
   read-timeout-work-insights-ms: ${INBOX_READ_TIMEOUT_WORK_INSIGHTS_MS:120000}
 
+# Chain (dependency graph, task history) - see ChainClient. Every call sends X-Tenant-Id.
+chain:
+  service:
+    url: ${CHAIN_SERVICE_URL:http://chain-service:8081}
+
 management:
   endpoints:
     web:

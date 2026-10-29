@@ -235,6 +235,7 @@ The Gateway currently handles these endpoints (manual routing via explicit contr
 |----------|--------|---------|
 | `/api/workspace/recommend` | POST | Get task recommendation for available time |
 | `/api/workspace/tasks/{taskId}` | GET | Get full task details by ID |
+| `/api/workspace/tasks/{taskId}/activity` | GET | Task history from Chain, newest first (the task page's Activity tab) |
 | `/api/workspace/tasks/{taskId}/status` | PATCH | Update task status |
 | `/api/manager/dashboard/kpis` | GET | Manager Dashboard KPI tiles for the manager's tenant (`?period=`, `?project=` optional) |
 | `/api/manager/users` | GET | List users, MANAGER only — see below |

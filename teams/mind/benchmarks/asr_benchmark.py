@@ -3,8 +3,9 @@
 Run as part of the whole benchmark (python -m benchmarks.ocr_asr_benchmark)
 or on its own (python -m benchmarks.asr_benchmark), from teams/mind/.
 
-Three English-only sizes (WHISPER_SIZES) on the two AMI meetings in
-eval/datasets/ami-audio.manifest.json (Mix-Headset audio). Three, not two,
+Three English-only sizes (WHISPER_SIZES) on two AMI meetings in
+eval/datasets/ami-audio.manifest.json (Mix-Headset audio),
+SIZE_BENCHMARK_MEETINGS. Three, not two,
 for the same reason as the OCR configs: two points can't show whether
 accuracy keeps improving with size or flattens out.
 
@@ -58,6 +59,11 @@ _TRANSCRIPTS_DIR = _PROJECT_ROOT / "local-data" / "ami" / "asr-output"
 # The .en variants: MIND is English-only, and the multilingual model of the
 # same size costs the same and is typically worse on English.
 WHISPER_SIZES = ["tiny.en", "base.en", "small.en"]
+
+# The meetings #135 measured. The manifest has more since #480 (IS1008d); this
+# benchmark and asr_chunking.py keep to these two, so their recorded numbers
+# still reproduce.
+SIZE_BENCHMARK_MEETINGS = ("IS1008b", "IB4003")
 COMPUTE_TYPE = "int8"  # CTranslate2's CPU quantization -- what a CPU host would run
 BEAM_SIZE = 5  # faster-whisper's default, stated so the runs are reproducible
 # CTranslate2's own default, set explicitly so the environment can't change it:
@@ -157,8 +163,11 @@ class SizeAverages(BaseModel):
     word_precision: float
 
 
-def load_meetings() -> list[Meeting]:
+def load_meetings(ids: tuple[str, ...] | None = None) -> list[Meeting]:
     """Meetings from ami-audio.manifest.json, every file checksum-verified.
+
+    `ids` keeps only those records (all of them when None), so a meeting
+    added to the manifest doesn't change a benchmark pinned to fewer.
 
     The audio and annotations are gitignored, so a fresh clone won't have
     them: fail with a pointer to the manifest's source page, not a traceback.
@@ -171,6 +180,8 @@ def load_meetings() -> list[Meeting]:
 
     meetings: list[Meeting] = []
     for record in manifest["records"]:
+        if ids is not None and record["id"] not in ids:
+            continue
         audio: Path | None = None
         words_files: list[Path] = []
         for rel_path in record["files"]:
@@ -411,7 +422,7 @@ def format_asr_conclusion(averages: dict[str, SizeAverages]) -> str:
 def run_asr_benchmark() -> dict[str, SizeAverages]:
     """Benchmark every size in WHISPER_SIZES, each in its own fresh process."""
     print("\n--- ASR (Whisper, faster-whisper int8 on CPU) ---")
-    meetings = load_meetings()
+    meetings = load_meetings(SIZE_BENCHMARK_MEETINGS)
     for size in WHISPER_SIZES:
         _model_dir(size)  # fail before any long run if a model is missing
     averages: dict[str, SizeAverages] = {}

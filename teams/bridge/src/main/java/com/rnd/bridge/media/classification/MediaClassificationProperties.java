@@ -23,12 +23,12 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record MediaClassificationProperties(
         @DefaultValue("false") boolean enabled,
         @DefaultValue("0.6") double minConfidenceToExclude,
-        @DefaultValue("60s") Duration minMeetingDuration,
+        @DefaultValue("30s") Duration minMeetingDuration,
         @DefaultValue("4000") int transcriptExcerptChars,
         @DefaultValue({"TEST", "SOCIAL"}) Set<MeetingCategory> excludedMeetingCategories,
         @DefaultValue({"BLANK", "ADVERTISEMENT"}) Set<DocumentCategory> excludedDocumentCategories,
         @DefaultValue Documents documents,
-        @DefaultValue("v4") String promptVersion) {
+        @DefaultValue("v6") String promptVersion) {
 
     public MediaClassificationProperties {
         if (!(minConfidenceToExclude >= 0.0 && minConfidenceToExclude <= 1.0)) {

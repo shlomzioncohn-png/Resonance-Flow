@@ -10,6 +10,7 @@ loop under FastAPI.
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import LiteralString
@@ -23,6 +24,7 @@ from psycopg_pool import AsyncConnectionPool
 from mind.config import VectorStoreSettings
 from mind.embeddings.base import SearchResult, VectorIndex, VectorStore
 from mind.embeddings.embeddings import embed_async
+from mind.observability.tracking import CallKind, CallStatus, record_call
 
 # Defaults only -- a DSN override wins. See README.md "Connection resilience".
 _CONNECTION_DEFAULTS = {
@@ -249,6 +251,36 @@ class PgTenantStore(VectorStore):
         *,
         exclude_completed: bool = False,
         exclude_task_id: str | None = None,
+    ) -> list[SearchResult]:
+        # Recorded with record_call() (#482): wall time from asking the pool
+        # for a connection to the last row, ERROR if it raised.
+        started = time.perf_counter()
+        status = CallStatus.ERROR
+        try:
+            results = await self._search(
+                query_vector,
+                k,
+                exclude_completed=exclude_completed,
+                exclude_task_id=exclude_task_id,
+            )
+            status = CallStatus.SUCCESS
+            return results
+        finally:
+            record_call(
+                "pgvector-search",
+                (time.perf_counter() - started) * 1000,
+                None,
+                kind=CallKind.VECTOR_QUERY,
+                status=status,
+            )
+
+    async def _search(
+        self,
+        query_vector: list[float],
+        k: int,
+        *,
+        exclude_completed: bool,
+        exclude_task_id: str | None,
     ) -> list[SearchResult]:
         async with self._index._cursor() as cur:
             # set_config(), not SET LOCAL -- that can't take a bound param.

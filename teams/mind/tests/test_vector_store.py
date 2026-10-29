@@ -283,7 +283,7 @@ async def test_search_exclude_task_id_does_not_let_self_consume_the_k_budget(sto
 
 async def test_search_exclude_task_id_respects_k_starvation_at_low_search_effort(index, store):
     """The earlier "excluding 1 id can never starve k" reasoning only held
-    for the default search_effort=400 -- it's a runtime setting, and can
+    for the default search_effort=200 -- it's a runtime setting, and can
     go as low as k itself. With search_effort==k, excluding the self row
     must still not come back short."""
     settings = index._settings.model_copy(update={"search_effort": 1})

@@ -32,11 +32,11 @@ export default function UnauthorizedPage() {
             Access denied
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Your role does not have access to this page. This route is reserved for the
-            role-mismatch redirect once authentication is implemented.
+            Your role does not have access to this page.
           </Typography>
+          {/* "/" sends each role to its own home screen */}
           <Button component={Link} href="/" variant="contained" fullWidth>
-            Back to dashboard
+            Back to my home page
           </Button>
         </Stack>
       </Paper>
