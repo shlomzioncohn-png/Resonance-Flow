@@ -1,19 +1,22 @@
 /**
  * Work Insights API - typed wrapper around the Gateway's /api/work-insights endpoints.
- * Not served yet: the Gateway, BFF and Inbox endpoints are built after this screen.
+ * Inbox serves them; the Gateway and BFF routes that forward to Inbox are not built yet.
  */
 import { api } from './api';
 
-export type WorkInsightStatus = 'READY' | 'NOT_ENOUGH_DATA';
+type WorkInsightStatus ='READY' | 'NOT_ENOUGH_DATA' | 'NO_INSIGHT';
 
-export interface InsightEvidence {
+type InsightEvidence = {
   text: string;
-  achieved: number;
-  total: number;
-}
+  /** Present only when the evidence is an "X of Y" count */
+  achieved?: number;
+  /** Present only when the evidence is an "X of Y" count */
+  total?: number;
+};
 
-export interface WorkInsight {
-  insightId: string;
+export type WorkInsight = {
+  /** Present only when status is READY */
+  insightId?: string;
   status: WorkInsightStatus;
   /** Length of the analyzed period, in days */
   periodDays: number;
@@ -23,11 +26,11 @@ export interface WorkInsight {
   recommendation?: string;
   /** Present only when status is READY */
   evidence?: InsightEvidence;
-}
+};
 
-export interface InsightFeedbackRequest {
+type InsightFeedbackRequest = {
   helpful: boolean;
-}
+};
 
 export function getWorkInsight(): Promise<WorkInsight> {
   return api.get<WorkInsight>('/api/work-insights');
