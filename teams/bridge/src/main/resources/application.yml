@@ -371,8 +371,3 @@ llm:
       low: 1
       whenever: 1
       "nice to have": 1
-  consumer:
-    # Separate switch for the automatic Kafka enrichment channel.
-    enabled: ${LLM_CONSUMER_ENABLED:false}
-    input-topic: ${LLM_CONSUMER_INPUT_TOPIC:bridge.tasks.to-enrich}
-    group-id: ${LLM_CONSUMER_GROUP_ID:bridge-llm-enricher}

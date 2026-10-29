@@ -20,11 +20,8 @@ import java.util.regex.Pattern;
  * ({@code com.rnd.inbox.event.StructuredTaskEvent}, compiled from the registered schema in
  * {@code shared/proto/structured-task-event.proto}) directly from a {@link Task}.
  * <p>
- * Lives alongside {@link BridgeTaskEventDto}, not in place of it: that DTO still backs the JSON
- * path ({@code TaskEnrichmentConsumer}, and whichever producer config keeps
- * {@code bridge.structured-tasks.format=json}). This class is the Protobuf path only - which one
- * a producer actually calls is a later stage's job, not this one's. Pure mapper: no Kafka, no
- * Spring wiring, no I/O.
+ * Lives alongside {@link BridgeTaskEventDto}, not in place of it - that DTO is the JSON wire
+ * shape, this class is the Protobuf path. Pure mapper: no Kafka, no Spring wiring, no I/O.
  * <p>
  * {@code com.rnd.bridge.task.model.SourceType}/{@code TaskStatus} and
  * {@code com.rnd.inbox.event.SourceType}/{@code TaskStatus} share simple names - two teams

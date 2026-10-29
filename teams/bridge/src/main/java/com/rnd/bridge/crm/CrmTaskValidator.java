@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
  * already does, then adds tenant-id/{@code sourceRef} rules specific to a lane that actually has a
  * tenant id (finding F5 in the CRM-lane audit).
  * <p>
- * {@code GitHubClient}, {@code JiraClient} and {@code TaskEnrichmentConsumer} all share
+ * {@code GitHubClient} and {@code JiraClient} share
  * {@link TaskValidator} directly and never set
  * {@code Task.organizationId} - adding a tenant check to {@link TaskValidator} itself would reject
  * every task those lanes publish. {@link CrmLane} uses this class instead, never the shared
