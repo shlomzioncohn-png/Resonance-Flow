@@ -45,7 +45,7 @@ import org.springframework.beans.factory.annotation.Autowired;
  * listPage never sets orderBy - Google rejects combining it with syncToken, but a full
  * (token-less) list request is where this actually bit: orderBy("startTime") being present
  * unconditionally meant Google never returned a nextSyncToken from a full sync, so the cursor
- * was never saved (UnstructuredIntakeController.runTokenBasedSource's rejected==0 &&
+ * was never saved (UnstructuredIntakeService.runTokenBasedSource's rejected==0 &&
  * token!=null save gate never fired) and every run fell back to a full, unbounded re-list.
  * readPages sorts the accumulated records by occurredAt once, after paging completes, instead -
  * the same ordering guarantee without the orderBy/syncToken conflict.
@@ -151,7 +151,7 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
                 nextSyncToken = page.getNextSyncToken();
                 if (nextSyncToken == null) {
                     // Known-silent case until now: a full list finishing with no nextSyncToken
-                    // leaves UnstructuredIntakeController's save gate (rejected==0 &&
+                    // leaves UnstructuredIntakeService's save gate (rejected==0 &&
                     // token!=null) permanently unsatisfied, so the cursor is never persisted and
                     // every subsequent run repeats this same full, unbounded list.
                     log.warn("Calendar full list for calendar {} finished with no nextSyncToken - "

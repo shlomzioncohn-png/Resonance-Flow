@@ -179,6 +179,8 @@ services:
       - BRIDGE_DB_URL=jdbc:postgresql://postgres:5432/${DB_NAME:-resonance_flow}
       - BRIDGE_DB_USER=${DB_USER:-postgres}
       - BRIDGE_DB_PASSWORD=${DB_PASSWORD:-postgres}
+      # Opens the unauthenticated manual sync/run endpoints - on for local runs, off in the cluster.
+      - BRIDGE_MANUAL_TRIGGERS_ENABLED=${BRIDGE_MANUAL_TRIGGERS_ENABLED:-true}
     depends_on:
       postgres:
         condition: service_healthy
