@@ -148,7 +148,8 @@ class ManagerUsersServiceTest {
         when(inboxUserClient.createUser(eq(ACTOR_ID), any())).thenReturn(record(OTHER_USER_ID, "TENANT_ADMIN"));
 
         UserDetailsDTO result = managerUsersService.createUser(ACTOR_ID, UserCreateRequestDTO.builder()
-                .displayName("Noa Levi").email("noa@example.com").phone("").role("MANAGER").build());
+                .displayName("Noa Levi").email("noa@example.com").phone("").role("MANAGER")
+                .password("Welcome-2026").build());
 
         assertThat(result.getId()).isEqualTo(OTHER_USER_ID);
         assertThat(result.getRole()).isEqualTo("MANAGER");
@@ -156,7 +157,8 @@ class ManagerUsersServiceTest {
                 "tenantId", TENANT_ID,
                 "displayName", "Noa Levi",
                 "email", "noa@example.com",
-                "role", "TENANT_ADMIN")));
+                "role", "TENANT_ADMIN",
+                "password", "Welcome-2026")));
     }
 
     @Test
