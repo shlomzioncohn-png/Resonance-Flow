@@ -176,8 +176,7 @@ components:
         user: mind
         db: mind
       llm:
-        model: ""
-        cache_dir: ./models
+        provider: ""
       ocr:
         provider: local
       asr:

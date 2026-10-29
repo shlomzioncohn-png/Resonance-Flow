@@ -29,14 +29,21 @@ The keys read here, one subtree per provider:
       gemini:
         api_key: ...
 
+A key file in $LLM_SECRETS_DIR (the `resonance-flow-mind-llm` Secret),
+`deepseek-api-key` or `gemini-api-key`, wins over `api_key` in secrets.yaml.
+
 The files themselves are read by `mind.config_file`, the one loader shared
 with `mind.config` and `mind.messaging.config`.
 """
 
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from mind import config_file
+
+_DEFAULT_LLM_SECRETS_DIR = "/etc/resonance-flow/secrets/llm"
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-chat"
@@ -160,6 +167,18 @@ def _present(section: dict[str, Any], key: str) -> Any | None:
     return value
 
 
+def _api_key(provider: str, section: dict[str, Any]) -> str:
+    key_file = (
+        Path(os.environ.get("LLM_SECRETS_DIR", _DEFAULT_LLM_SECRETS_DIR)) / f"{provider}-api-key"
+    )
+    if key_file.is_file():
+        key = key_file.read_text(encoding="utf-8").strip()
+        if key:
+            return key
+    read = _present(section, "api_key")
+    return "" if read is None else str(read)
+
+
 def _llm_section() -> dict[str, Any]:
     """The whole `llm` subtree, merged across the two mounted files.
 
@@ -198,7 +217,7 @@ def load_deepseek_settings() -> DeepSeekSettings:
         return fallback if read is None else read
 
     return DeepSeekSettings(
-        api_key=str(value("api_key", "")),
+        api_key=_api_key("deepseek", deepseek),
         base_url=str(value("base_url", DEFAULT_BASE_URL)),
         model=str(value("model", DEFAULT_MODEL)),
         timeout_seconds=float(value("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)),
@@ -226,7 +245,7 @@ def load_gemini_settings() -> GeminiSettings:
     budget = gemini.get("thinking_budget", GEMINI_DEFAULT_THINKING_BUDGET)
 
     return GeminiSettings(
-        api_key=str(value("api_key", "")),
+        api_key=_api_key("gemini", gemini),
         base_url=str(value("base_url", GEMINI_DEFAULT_BASE_URL)),
         api_version=str(value("api_version", GEMINI_DEFAULT_API_VERSION)),
         model=str(value("model", GEMINI_DEFAULT_MODEL)),

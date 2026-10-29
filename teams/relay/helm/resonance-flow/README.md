@@ -464,5 +464,19 @@ password.
 Secret's `kafka.sasl` uses the dev credentials in `values.yaml`. A cluster with different
 Kafka credentials must change them there, or recreate the Secret.
 
-Still open: the MinIO credentials (`object_storage.access_key` / `secret_key`, empty), the
-LLM key (`llm.api_key`, empty), and the LLM, OCR, and ASR providers (`local` for now).
+### MIND's LLM key
+
+The chart doesn't create the LLM key, since it comes from the provider. The keys are the
+repository secrets `GEMINI_API_KEY` and `DEEPSEEK_API_KEY`, and the
+`.github/workflows/mind-llm-secret.yaml` workflow (run by hand, "Run workflow") writes the
+ones that are set into the `resonance-flow-mind-llm` Secret on the shared cluster, through
+the `KUBECONFIG` repository secret, then restarts MIND. Run it again after changing a key.
+The shared cluster's provider is set in `environments/shared.yaml`.
+
+Only the chosen provider's key is needed. The Secret is mounted optionally at
+`/etc/resonance-flow/secrets/llm/`, and MIND reads `<provider>-api-key` from there. When a
+provider is set and its key is missing, MIND's landed consumer fails at startup naming the
+missing key. CI leaves `llm.provider` empty and needs no key.
+
+Still open: the MinIO credentials (`object_storage.access_key` / `secret_key`, empty), and
+the OCR and ASR providers (`local` for now).
