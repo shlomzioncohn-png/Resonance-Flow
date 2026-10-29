@@ -28,7 +28,7 @@ export type WorkInsight = {
   evidence?: InsightEvidence;
 };
 
-type InsightFeedbackRequest = {
+export type InsightFeedbackRequest = {
   helpful: boolean;
 };
 
