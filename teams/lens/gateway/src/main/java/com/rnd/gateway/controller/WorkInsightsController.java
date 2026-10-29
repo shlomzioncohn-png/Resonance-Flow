@@ -13,6 +13,7 @@ import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -26,6 +27,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.SocketTimeoutException;
+import java.time.Duration;
 
 /**
  * Employee "Work Insights" screen — routes GET/POST /api/work-insights** to BFF,
@@ -57,6 +59,7 @@ public class WorkInsightsController {
 
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final long bffWorkInsightsReadTimeoutMs;
 
     @Value("${bff.service.url:http://localhost:8082}")
     private String bffServiceUrl;
@@ -64,12 +67,21 @@ public class WorkInsightsController {
     @Value("${bff.endpoints.work-insights:/work-insights}")
     private String bffWorkInsightsPath;
 
-    @Value("${bff.read-timeout-work-insights-ms:120000}")
-    private long bffWorkInsightsReadTimeoutMs;
-
-    public WorkInsightsController(RestTemplate restTemplate, ObjectMapper objectMapper) {
-        this.restTemplate = restTemplate;
+    /**
+     * Builds its own RestTemplate instead of the shared one from GatewayApplication:
+     * the shared one stops waiting for BFF after bff.read-timeout-ms (10s), which is
+     * shorter than the AI call behind the first insight of the day.
+     */
+    public WorkInsightsController(RestTemplateBuilder restTemplateBuilder,
+                                  ObjectMapper objectMapper,
+                                  @Value("${bff.connect-timeout-ms:2000}") long connectTimeoutMs,
+                                  @Value("${bff.read-timeout-work-insights-ms:120000}") long readTimeoutMs) {
+        this.restTemplate = restTemplateBuilder
+                .connectTimeout(Duration.ofMillis(connectTimeoutMs))
+                .readTimeout(Duration.ofMillis(readTimeoutMs))
+                .build();
         this.objectMapper = objectMapper;
+        this.bffWorkInsightsReadTimeoutMs = readTimeoutMs;
     }
 
     @Operation(

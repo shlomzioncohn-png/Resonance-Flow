@@ -1,5 +1,6 @@
 package com.rnd.gateway.dto;
 
+import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -18,6 +19,7 @@ import lombok.NoArgsConstructor;
 @Builder
 public class InsightFeedbackRequestDTO {
 
-    /** Whether the insight was helpful. */
+    /** Whether the insight was helpful. Required - Inbox rejects feedback without it. */
+    @NotNull(message = "helpful is required")
     private Boolean helpful;
 }
