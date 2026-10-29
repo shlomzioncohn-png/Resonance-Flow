@@ -14,7 +14,9 @@ from uuid import UUID
 import pytest
 
 from mind.contracts.task_dependencies_proposed import DependencyProposed
+from mind.dependencies.pending import PendingDependencies
 from mind.dependencies.publisher import DependencyPublisher
+from mind.embeddings.base import SearchResult
 from mind.embeddings.confidence import ScoredResult
 
 TASK_A = "3f2c1a9e-7b4d-4e8a-9c1f-0a2b3c4d5e6f"
@@ -300,3 +302,69 @@ async def test_resolve_is_called_once_for_every_mention_together(publisher, sink
     mock_resolve.assert_awaited_once_with(
         publisher._index, ["mention one", "mention two"], k=1, exclude_task_id=TASK_A
     )
+
+
+# --- #918: the optional `pending` store -------------------------------------
+
+
+async def test_an_unresolved_mention_is_registered_pending(sink) -> None:
+    pending = PendingDependencies()
+    publisher = DependencyPublisher(index=_FakeIndex(), sink=sink, pending=pending)  # type: ignore[arg-type]
+
+    with _resolved([]):
+        await publisher.publish_dependencies(
+            task_id=UUID(TASK_A),
+            tenant_id=TENANT,
+            dependency_mentions=["a task that doesn't exist yet"],
+        )
+
+    assert await pending.all_for_tenant(TENANT) == [
+        (UUID(TASK_A), "a task that doesn't exist yet")
+    ]
+
+
+async def test_a_resolved_mention_is_not_registered_pending(sink) -> None:
+    pending = PendingDependencies()
+    publisher = DependencyPublisher(index=_FakeIndex(), sink=sink, pending=pending)  # type: ignore[arg-type]
+
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+        await publisher.publish_dependencies(
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+
+    assert await pending.all_for_tenant(TENANT) == []
+
+
+async def test_a_mention_that_resolves_on_retry_is_discarded_from_pending(sink) -> None:
+    """The exact #918 scenario: unresolved once, pending; resolved on a
+    later call (as retry_pending_dependencies makes), no longer pending."""
+    pending = PendingDependencies()
+    publisher = DependencyPublisher(index=_FakeIndex(), sink=sink, pending=pending)  # type: ignore[arg-type]
+
+    with _resolved([]):
+        await publisher.publish_dependencies(
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["the pricing bug"]
+        )
+    assert await pending.all_for_tenant(TENANT) == [(UUID(TASK_A), "the pricing bug")]
+
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+        await publisher.publish_dependencies(
+            task_id=UUID(TASK_A), tenant_id=TENANT, dependency_mentions=["the pricing bug"]
+        )
+
+    assert await pending.all_for_tenant(TENANT) == []
+    [event] = sink.sent
+    assert event.dependencies[0].depends_on_task_id == UUID(TASK_B)
+
+
+async def test_without_a_pending_store_nothing_is_tracked(sink) -> None:
+    """The default (and every call site before #918's runner wiring):
+    #355's original one-shot behavior, unchanged."""
+    publisher = DependencyPublisher(index=_FakeIndex(), sink=sink)  # type: ignore[arg-type]
+
+    with _resolved([]):
+        await publisher.publish_dependencies(
+            task_id=UUID(TASK_A),
+            tenant_id=TENANT,
+            dependency_mentions=["a task that doesn't exist yet"],
+        )  # must not raise for lack of a pending store

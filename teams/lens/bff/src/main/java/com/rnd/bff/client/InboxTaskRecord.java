@@ -106,5 +106,4 @@ public class InboxTaskRecord {
     private String project;
 
     private List<String> dependencies;
-    private List<String> constraints;
 }

@@ -5,14 +5,21 @@ Hand-off: `publish_dependencies` takes `task_id`, `tenant_id` and
 `dependency_mentions` explicitly -- not read off #353's `MatchedReply`
 itself; `adapter.py` does that (see README.md).
 
-One shot, one event per resolved mention -- no retry, no local bookkeeping
-of what's already been sent. `event_id = uuid5(task_id:target)` (#353's
+One event per resolved mention. `event_id = uuid5(task_id:target)` (#353's
 pattern: a stable id derived from the edge itself, not from whatever else
 happened to resolve alongside it in a given call) means a redelivered
 task.created re-publishes the exact same event for an edge already sent,
-which Chain dedups on event_id -- so there is nothing here to track. A
-mention that doesn't resolve is logged and not retried: #355's scope ends
-at "publish what's known when task.created arrives"; see README.md for why.
+which Chain dedups on event_id -- so republishing one is harmless.
+
+A mention that doesn't resolve is logged and, when `pending` is given
+(#918), registered for retry: `retry.py`'s `retry_pending_dependencies`
+calls this same method again later with exactly the mentions still
+pending for a tenant, so a mention that resolves on retry goes through
+the identical logic below as one that resolved on the first try, and a
+mention that now resolves is discarded from `pending` whether this is
+its first attempt or its tenth. Without `pending` (the default, and
+every call site before #918's runner wiring), this is #355's original
+one-shot behavior -- see README.md.
 """
 
 from __future__ import annotations
@@ -23,7 +30,8 @@ from uuid import UUID, uuid5
 
 from mind.dependencies.event import build_dependency_event
 from mind.dependencies.kafka_sink import DependencySink
-from mind.embeddings.base import VectorIndex
+from mind.dependencies.pending import PendingDependencyStore
+from mind.embeddings.base import SearchResult, VectorIndex
 from mind.embeddings.dependency_resolution import resolve_dependency_targets
 
 logger = logging.getLogger(__name__)
@@ -33,10 +41,44 @@ logger = logging.getLogger(__name__)
 _NAMESPACE = UUID("914f772d-7854-498c-a738-c5e7f9a23572")
 
 
+def _resolved_target(task_id: UUID, mention: str, results: list[SearchResult]) -> UUID | None:
+    """The mention's target, or None if it isn't resolved yet -- any of no
+    candidate, a malformed target, or (defensively; `exclude_task_id`
+    should already have filtered this) resolving to the task itself."""
+
+    if not results:
+        logger.warning("dependencies: task %s's mention %r did not resolve", task_id, mention)
+        return None
+    try:
+        target_uuid = UUID(results[0].task_id)
+    except ValueError:
+        logger.warning(
+            "dependencies: task %s resolved target %r is not a UUID, skipping",
+            task_id,
+            results[0].task_id,
+        )
+        return None
+    # The store's own exclude_task_id filter is a case-sensitive SQL string
+    # compare -- a target stored in different case than our normalized
+    # lowercase id would slip through it. Compare as UUIDs.
+    if target_uuid == task_id:
+        logger.warning(
+            "dependencies: task %s resolved itself as a dependency target, skipping", task_id
+        )
+        return None
+    return target_uuid
+
+
 class DependencyPublisher:
-    def __init__(self, index: VectorIndex, sink: DependencySink) -> None:
+    def __init__(
+        self,
+        index: VectorIndex,
+        sink: DependencySink,
+        pending: PendingDependencyStore | None = None,
+    ) -> None:
         self._index = index
         self._sink = sink
+        self._pending = pending
 
     async def publish_dependencies(
         self,
@@ -72,31 +114,16 @@ class DependencyPublisher:
         # Two mentions can resolve to the same target: dedup by target first,
         # keeping the higher similarity, so they don't race two sends for one
         # event_id -- Chain keeps whichever arrives first, confidence included.
+        # `mentions_for` tracks every mention behind each target, so #918's
+        # pending store is only cleared for a mention once *its* edge has
+        # actually been sent -- see the loop below.
         candidates: dict[UUID, float] = {}
+        mentions_for: dict[UUID, list[str]] = {}
         for mention, results in zip(mentions, resolved_lists):
-            if not results:
-                logger.warning(
-                    "dependencies: task %s's mention %r did not resolve", task_id, mention
-                )
-                continue
-            result = results[0]
-            try:
-                target_uuid = UUID(result.task_id)
-            except ValueError:
-                logger.warning(
-                    "dependencies: task %s resolved target %r is not a UUID, skipping",
-                    task_id,
-                    result.task_id,
-                )
-                continue
-            # The store's own exclude_task_id filter is a case-sensitive SQL
-            # string compare -- a target stored in different case than our
-            # normalized lowercase id would slip through it. Compare as UUIDs.
-            if target_uuid == task_id:
-                logger.warning(
-                    "dependencies: task %s resolved itself as a dependency target, skipping",
-                    task_id,
-                )
+            target_uuid = _resolved_target(task_id, mention, results)
+            if target_uuid is None:
+                if self._pending is not None:
+                    await self._pending.add(task_id, tenant_id, mention)
                 continue
             # #476 review: Chain's README takes this field at face value as
             # a 0..1 confidence (defaulting to 1.0 for edges not sourced from
@@ -105,17 +132,25 @@ class DependencyPublisher:
             # similarity on their side. Switching what we send here would
             # silently change their priority_score with no coordination, so
             # this still sends raw similarity, not #476's new confidence.
-            similarity = result.similarity
+            similarity = results[0].similarity
             if target_uuid not in candidates or similarity > candidates[target_uuid]:
                 candidates[target_uuid] = similarity
+            mentions_for.setdefault(target_uuid, []).append(mention)
 
         for target_uuid, confidence in candidates.items():
             event_id = uuid5(_NAMESPACE, f"{task_id_normalized}:{target_uuid}")
             event = build_dependency_event(
                 task_id, tenant_id, {target_uuid: confidence}, event_id=event_id
             )
-            # Off the loop: send() blocks until Kafka acks.
+            # Off the loop: send() blocks until Kafka acks. Raises on failure --
+            # the mentions behind this target are only cleared from `pending`
+            # below, once the send actually succeeded (#918 review: clearing
+            # them beforehand lost an edge for good on a failed send, since
+            # nothing would ever retry a mention no longer marked pending).
             await asyncio.to_thread(self._sink.send, event)
+            if self._pending is not None:
+                for mention in mentions_for[target_uuid]:
+                    await self._pending.discard(task_id, mention)
             # Ids only, never the mention: it is written from the content (#359,
             # so a demo shows the dependency stage the way it shows the others).
             logger.info(

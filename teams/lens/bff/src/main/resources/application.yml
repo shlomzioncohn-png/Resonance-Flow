@@ -7,7 +7,7 @@ spring:
 
 # Inbox (task data) - see InboxClient and lens/frontend/docs/api-integration-status.md
 inbox:
-  # true = in-memory mock tasks, no Inbox needed. Set false to call the real Inbox.
+  # false (default) = call the real Inbox. true = in-memory mock tasks, no Inbox needed.
   mock-enabled: ${INBOX_MOCK_ENABLED:false}
   # Inbox runs on Docker - use localhost when BFF runs locally
   service:
@@ -21,7 +21,10 @@ inbox:
 # Chain (dependency graph, task history) - see ChainClient. Every call sends X-Tenant-Id.
 chain:
   service:
-    url: ${CHAIN_SERVICE_URL:http://chain-service:8081}
+    # Chain runs on Docker (teams/chain, default host port 8081) - use localhost when BFF runs
+    # locally. If you moved Chain to another port (its SERVER_PORT), set CHAIN_SERVICE_URL to match.
+    # The cluster sets its own URL (helm values), so this default only affects local runs.
+    url: ${CHAIN_SERVICE_URL:http://localhost:8081}
 
 management:
   endpoints:

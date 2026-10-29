@@ -1,5 +1,6 @@
 package com.rnd.gateway;
 
+import com.rnd.gateway.dto.ConstraintDTO;
 import com.rnd.gateway.dto.TaskDTO;
 import com.rnd.gateway.dto.TaskRecommendationDTO;
 import com.rnd.gateway.dto.TaskListResponseDTO;
@@ -16,6 +17,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.net.SocketTimeoutException;
 import java.util.List;
+import java.util.Map;
 
 import static org.hamcrest.Matchers.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -155,6 +157,62 @@ class GatewayRoutingIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value("task_001"))
                 .andExpect(jsonPath("$.title").value("Review API changes"));
+    }
+
+    private static TaskDTO taskWithConstraints() {
+        TaskDTO task = new TaskDTO();
+        task.setId("task_001");
+        task.setTitle("Update customer proposal");
+        task.setConstraints(List.of(
+                new ConstraintDTO("c1", "APPROVAL_NEEDED", "PENDING",
+                        Map.of("note", "Legal sign-off"), "2026-10-20T09:15:30"),
+                new ConstraintDTO("c2", "DATE_WINDOW", "SATISFIED", Map.of(), "2026-10-21T10:00:00")));
+        task.setOpenConstraintCount(1);
+        return task;
+    }
+
+    @Test
+    void listTasks_passesConstraintsAndOpenCountThroughUnchanged() throws Exception {
+        TaskListResponseDTO taskList = new TaskListResponseDTO();
+        taskList.setItems(List.of(taskWithConstraints()));
+        taskList.setTotal(1);
+        taskList.setPage(0);
+        taskList.setSize(20);
+        when(restTemplate.exchange(
+                contains("workspace/tasks"),
+                eq(org.springframework.http.HttpMethod.GET),
+                any(),
+                eq(TaskListResponseDTO.class)))
+                .thenReturn(org.springframework.http.ResponseEntity.ok(taskList));
+
+        mockMvc.perform(get("/api/workspace/tasks").with(jwt()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].openConstraintCount").value(1))
+                .andExpect(jsonPath("$.items[0].constraints", hasSize(2)))
+                .andExpect(jsonPath("$.items[0].constraints[0].constraintId").value("c1"))
+                .andExpect(jsonPath("$.items[0].constraints[0].type").value("APPROVAL_NEEDED"))
+                .andExpect(jsonPath("$.items[0].constraints[0].status").value("PENDING"))
+                .andExpect(jsonPath("$.items[0].constraints[0].reason.note").value("Legal sign-off"))
+                .andExpect(jsonPath("$.items[0].constraints[0].createdAt").value("2026-10-20T09:15:30"))
+                .andExpect(jsonPath("$.items[0].constraints[1].status").value("SATISFIED"));
+    }
+
+    @Test
+    void getTaskDetails_passesConstraintsAndOpenCountThroughUnchanged() throws Exception {
+        when(restTemplate.exchange(
+                contains("workspace/tasks/task_001"),
+                eq(org.springframework.http.HttpMethod.GET),
+                any(),
+                eq(TaskDTO.class)))
+                .thenReturn(org.springframework.http.ResponseEntity.ok(taskWithConstraints()));
+
+        mockMvc.perform(get("/api/workspace/tasks/task_001").with(jwt()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.openConstraintCount").value(1))
+                .andExpect(jsonPath("$.constraints", hasSize(2)))
+                .andExpect(jsonPath("$.constraints[0].type").value("APPROVAL_NEEDED"))
+                .andExpect(jsonPath("$.constraints[0].reason.note").value("Legal sign-off"))
+                .andExpect(jsonPath("$.constraints[1].type").value("DATE_WINDOW"));
     }
 
     @Test

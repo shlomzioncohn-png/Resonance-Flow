@@ -35,9 +35,9 @@ import java.util.UUID;
  * docs/lens-architecture-design.md).
  *
  * Two modes, switched by inbox.mock-enabled (INBOX_MOCK_ENABLED):
- * - true (default): an in-memory mock task set, no network calls — so the
+ * - true: an in-memory mock task set, no network calls — so the
  *   team can keep working without running Inbox locally.
- * - false: real HTTP calls to Inbox's Task API (/api/v1/tasks, currently on
+ * - false (default): real HTTP calls to Inbox's Task API (/api/v1/tasks, currently on
  *   Inbox's inbox-team branch) at inbox.service.url. See
  *   lens/frontend/docs/api-integration-status.md for how to run Inbox locally.
  *
@@ -94,7 +94,7 @@ public class InboxClient {
     @Autowired
     public InboxClient(
             @Value("${inbox.service.url:http://inbox-service:8080}") String inboxServiceUrl,
-            @Value("${inbox.mock-enabled:true}") boolean mockEnabled,
+            @Value("${inbox.mock-enabled:false}") boolean mockEnabled,
             @Value("${inbox.dev-actor-id:}") String devActorId,
             @Value("${inbox.connect-timeout-ms:2000}") long connectTimeoutMs,
             @Value("${inbox.read-timeout-ms:10000}") long readTimeoutMs) {
@@ -177,7 +177,6 @@ public class InboxClient {
                 .updatedAt(LocalDateTime.of(2026, 8, 25, 14, 0))
                 .owner("Alex Morgan")
                 .project("Customer Success")
-                .constraints(List.of("approval_needed"))
                 .build());
         // task_003: APPROVED status, snoozed/unavailable with deadline
         seed(InboxTaskRecord.builder()
@@ -206,7 +205,6 @@ public class InboxClient {
                 .updatedAt(LocalDateTime.of(2026, 8, 27, 16, 0))
                 .owner("Alex Morgan")
                 .project("Customer Success")
-                .constraints(List.of("waiting_for_customer"))
                 .build());
         // task_004: IN_PROGRESS status, available
         seed(InboxTaskRecord.builder()
@@ -311,7 +309,6 @@ public class InboxClient {
                 .updatedAt(LocalDateTime.of(2026, 9, 8, 11, 30))
                 .owner("Alex Morgan")
                 .project("Platform Service")
-                .constraints(List.of("out_of_scope"))
                 .build());
         // task_008: CANCELLED status (cancelled before completion), unavailable
         seed(InboxTaskRecord.builder()
@@ -686,7 +683,7 @@ public class InboxClient {
                 .owner(record.getOwner())
                 .project(record.getProject())
                 .dependencies(record.getDependencies())
-                .constraints(record.getConstraints())
+                // No constraints here: they're Chain's, attached by WorkspaceService.
                 // Real schema fields, surfaced as-is alongside their derived
                 // equivalents above - see TaskDTO's javadoc.
                 .tenantId(record.getTenantId())

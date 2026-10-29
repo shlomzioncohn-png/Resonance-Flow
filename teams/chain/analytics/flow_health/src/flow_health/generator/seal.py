@@ -24,7 +24,7 @@ def _files(directory: Path) -> list[Path]:
 def seal(directory: Path, seed: int, generator_version: str) -> dict:
     record = {"seed": seed, "generator_version": generator_version,
               "files": {p.name: _sha256(p) for p in _files(directory)}}
-    (directory / SEAL_NAME).write_text(json.dumps(record, indent=2), encoding="utf-8")
+    (directory / SEAL_NAME).write_text(json.dumps(record, indent=2), encoding="utf-8", newline="\n")
     return record
 
 
