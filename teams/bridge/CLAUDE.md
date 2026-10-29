@@ -36,32 +36,26 @@ single record with must extend `LaneException`** (see `ValidationException`, `Pu
 `CrmLane` (Deal → Task) is the only lane currently wired through this end to end. The GitHub lane
 predates this abstraction and does not use it (see §6).
 
-## 4. Task vs. BridgeTaskEventDto — two shapes, on purpose
+## 4. Task vs. the Kafka wire shape
 
-- `task.model.Task` is the **database-shaped** record: `@JsonNaming(SnakeCaseStrategy)`, enums
-  serialize lowercase via `@JsonValue`. This is what Inbox's `tasks` table looks like — except
-  `organization_id`/`organizationId`, which Inbox renamed to `tenant_id` on 2026-09-06 and `Task`
-  deliberately does not mirror (see §6).
-- `task.BridgeTaskEventDto` is the **Kafka wire shape** (Inbox's ingestion contract, topic
-  `bridge.structured.tasks`): camelCase keys, enums as raw `UPPER_SNAKE_CASE` `Enum.name()`, plus
-  a fresh `eventId` per publish, and it deliberately omits fields `Task` carries that Inbox
-  forbids on the wire (`extractionProvenance`, `completedAt`, `snoozedUntil`). Inbox confirmed
-  camelCase directly on 2026-09-15 — they have no `@JsonNaming` and no global Jackson naming
-  strategy, so a snake_case key from us simply doesn't match their field names. The cross-team
-  snake_case convention still stands as the eventual target, not rejected — Inbox just hasn't
-  adopted it on their side yet, and both producer and consumer have to switch in the same moment
-  for it to work. Don't change this DTO's casing unilaterally again until they have. Separately,
-  this DTO's tenant field is named `tenantId`, not `organizationId` like `Task` — Inbox renamed
-  `organization_id` to `tenant_id` across their schema on 2026-09-06 (#255, `9684b8e8`), including
-  the `bridge.structured.tasks` idempotency index, so the dedup key is `(tenant_id, source_type,
-  source_ref)`, not `(organization_id, source_type, source_ref)`. Every message Bridge published
-  between that rename and this fix was silently rejected by Inbox's `@NotBlank` validation on
-  `tenantId` (see §6) — `Task.organizationId` is deliberately NOT renamed to match, see above.
+- `task.model.Task` is Bridge's **internal, database-shaped** model: `@JsonNaming(SnakeCaseStrategy)`,
+  enums serialize lowercase via `@JsonValue`. This is what Inbox's `tasks` table looks like —
+  except `organization_id`/`organizationId`, which Inbox renamed to `tenant_id` on 2026-09-06 and
+  `Task` deliberately does not mirror (see §6).
+- The only wire shape Bridge produces is the Protobuf `StructuredTaskEvent`
+  (`shared/proto/structured-task-event.proto`), built from a `Task` by `StructuredTaskEventMapper`
+  and published to `bridge.structured.tasks` via `KafkaPayloadPublisher`. An earlier JSON DTO
+  (`BridgeTaskEventDto`) existed alongside it but was never actually produced in current code and
+  was removed as unused (PR #1097) — don't go looking for a second wire path.
+- `StructuredTaskEventMapper.from()` is what renames `Task.organizationId` onto the wire as
+  `tenant_id` — Inbox renamed `organization_id` to `tenant_id` across their schema on 2026-09-06
+  (#255, `9684b8e8`), including the `bridge.structured.tasks` idempotency index, so the dedup key
+  is `(tenant_id, source_type, source_ref)`, not `(organization_id, source_type, source_ref)`.
+  `Task.organizationId` is deliberately NOT renamed to match, see above.
 
 **Do not conflate these or serialize `Task` directly onto Kafka** — that was the old lane
 producers' approach (`GitHubKafkaProducer`/`JiraKafkaProducer`, since deleted) and it did not
-conform to the contract (§6). Anything Kafka-bound goes through the shared
-`KafkaPayloadPublisher` → `StructuredTaskEventMapper` (Protobuf `StructuredTaskEvent`).
+conform to the contract (§6). Anything Kafka-bound goes through `StructuredTaskEventMapper`.
 
 `organizationId` on `Task` is `null` by default from `AbstractTaskMapper` (no lane has a general
 tenant-id source) — a subclass overrides `AbstractTaskMapper.organizationId()` only once it has
@@ -121,9 +115,9 @@ being active together — that check existed and is gone.
   bypasses Bridge entirely, not one Bridge is expected to produce. Inbox already models this
   independently in its own `SourceType` enum (`com.rnd.inbox...`), separate from Bridge's
   (`com.rnd.bridge.task.model.SourceType`). Every current `SourceType` call site in Bridge (CRM,
-  GitHub Issue, GitHub PR) is hardcoded with no exhaustiveness check, and `BridgeTaskEventDto`
-  serializes via plain `Enum.name()`, so no code change was needed or made. No lane, now or in the
-  future, will need to emit `MANUAL`.
+  GitHub Issue, GitHub PR) is hardcoded with no exhaustiveness check, and `StructuredTaskEventMapper`
+  maps every `SourceType` explicitly via its own switch, so no code change was needed or made. No
+  lane, now or in the future, will need to emit `MANUAL`.
 - **The Inbox Kafka consumer's existence is unverified.** The contract lives on the unmerged
   branch `esti/inbox-kafka-ingestion-contract`
   (`teams/inbox/docs/Inbox_Kafka_Ingestion_Contract.md`) and claims "Consumer implemented &
@@ -137,7 +131,8 @@ being active together — that check existed and is gone.
   2026-09-15).** Inbox renamed `organization_id` to `tenant_id` across their schema on 2026-09-06
   (#255, `9684b8e8`) — `StructuredTaskEventDto.tenantId` is `@NotBlank`, has no `@JsonNaming`, and
   Inbox has no global Jackson naming strategy, so it matches nothing but a literal `tenantId` key.
-  `BridgeTaskEventDto` kept sending `organizationId` until this was found and fixed, so every CRM
+  `BridgeTaskEventDto` (Bridge's JSON producer DTO at the time, removed since — see §4) kept
+  sending `organizationId` until this was found and fixed, so every CRM
   and JIRA message in that window failed that validation and was routed to
   `bridge.structured.tasks.errors` — a real Kafka topic, logged at WARN, but nothing in this repo
   consumes `.errors` topics, so in practice it was invisible. Fixed by renaming the DTO's field to
@@ -162,9 +157,10 @@ being active together — that check existed and is gone.
 
 ## 7. Testing conventions
 
-- Wire-shape/schema tests pin literal JSON key strings and assert the full key set with
-  `assertEquals(expectedKeys, actualKeys)`, not just presence — see `TaskSerializationTest` (DB
-  shape) and `BridgeTaskEventDtoTest` (Kafka shape) as the two canonical examples.
+- Wire-shape/schema tests pin the full field set, not just presence — see `TaskSerializationTest`
+  (DB shape, literal JSON key strings via `assertEquals(expectedKeys, actualKeys)`) and
+  `StructuredTaskEventMapperTest` (Kafka shape, field-by-field against the proto schema) as the
+  two canonical examples.
 - `HubSpotDealRecordObjectMapperNamingStrategyTest` (`@JsonTest`) pins that Bridge's shared,
   Spring-auto-configured `ObjectMapper` stays on Jackson's default camelCase naming strategy —
   that bean also deserializes inbound HubSpot API responses (camelCase), so any future per-DTO
@@ -315,7 +311,7 @@ suite (126 tests, 0 failures — see §7):
   controller).
   Only a CRM-only `CrmTaskValidator` (wraps the shared `TaskValidator`, adds tenant-UUID/
   `sourceRef` checks) is new for F5 — the shared `TaskValidator` itself is unchanged, since
-  GitHub/JIRA/`TaskEnrichmentConsumer` share it directly and never set a tenant id.
+  GitHub/JIRA share it directly and never set a tenant id.
   **`CRM_ORGANIZATION_ID`'s default changed from `local-crm-org` to
   `CrmTaskValidator.LOCAL_PLACEHOLDER_TENANT_ID` (`00000000-0000-0000-0000-000000000000`),
   2026-10-06, fixing a real regression caught before merge:** `CrmTaskValidator` validates
@@ -356,139 +352,14 @@ suite (126 tests, 0 failures — see §7):
 - **`.env.example`** documents `CRM_ORGANIZATION_ID` as a per-environment real UUID Inbox
   (Ayala) still needs to hand back for dev/staging/prod — placeholder value is not usable as-is.
 
-### 9.3 What's done — enrichment scaffolding (Stage 3, first slice only)
-New package `com.rnd.bridge.enrichment`, built 2026-09-06 on `ruth/llm-enrichment`, committed
-(`bb84a69`), merged into `ruth/bridge-core` via PR #286 (§9.1 item 3):
+### 9.3 Enrichment scaffolding (Stage 3) — removed
 
-- `DueDateSuggestion`, `SeveritySuggestion`, `DependencySuggestion` (+ `DependencyRelation` Checking whether Task.snoozedUntil/TaskStatus.SNOOZED still exist in the working tree (our side removed the mapping; main kept the field):
-
-Command Select-String in …\Resonance-Flow
-
-Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\model\Task.java" -Pattern "snoozed|SNOOZED"; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\model\TaskStatus.java" -Pattern "SNOOZED"; "=== mapper method in worktree ==="; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java" -Pattern "toSnoozedUntil|SNOOZED" -Context 3,3; "=== abstract ==="; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\AbstractTaskMapper.java" -Pattern "snoozed"
-\Task.java" -Pattern "snoozed|SNOOZED"; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\model\TaskStatus.java" -Pattern "SNOOZED"; "=== mapper method in worktree ==="; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java" -Pattern "toSnoozedUntil|SNOOZED" -Context 3,3; "=== abstract ==="; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\AbstractTaskMapper.java" -Pattern "snoozed"
-=== mapper method in worktree ===
-
-  teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java:41:    public static TaskStatus toTaskStatus(DealStage stage) {
-  teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java:42:        return switch (stage) {
-  teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java:43:            case PROSPECT, QUALIFIED, PROPOSAL, NEGOTIATION -> TaskStatus.NEW;
-> teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java:44:            // Not SNOOZED: Inbox requires snoozed_until, and a Deal has no resume date to give it.
-  teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java:45:            case ON_HOLD -> TaskStatus.NEW;
-  teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java:46:            case CLOSED_WON -> TaskStatus.DONE;
-  teams\bridge\src\main\java\com\rnd\bridge\crm\mapper\DealToTaskMapper.java:47:            case CLOSED_LOST -> TaskStatus.CANCELLED;
-=== abstract ===
-
-The first grep output was cut — verifying whether Task.snoozedUntil still exists in the working tree, since tests still reference it:
-
-Command Select-String in …\Resonance-Flow
-
-Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\model\Task.java" -Pattern "snoozed" | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }; "===status==="; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\model\TaskStatus.java" -Pattern "SNOOZED" | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }; "===mapper ctor call==="; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\AbstractTaskMapper.java" -Pattern "snoozed" | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }
-_.Line.Trim())" }; "===status==="; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\model\TaskStatus.java" -Pattern "SNOOZED" | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }; "===mapper ctor call==="; Select-String -Path "teams\bridge\src\main\java\com\rnd\bridge\task\AbstractTaskMapper.java" -Pattern "snoozed" | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }
-===status===
-===mapper ctor call===
-
-The semantic conflict: our commit removed snoozedUntil/SNOOZED, but main's updated tests still reference them — that would break compilation. Fixing the three test files:
-
-Main's newer code still uses snoozedUntil/SNOOZED — which our commit deleted. I need to check every place the new main code references them so the merged code compiles:
-
-Command git, Select-Object, Measure-Object in …\Resonance-Flow
-
-"=== snoozed refs in main source (working tree) ==="; git grep -n "snoozedUntil\|toSnoozedUntil\|SNOOZED" -- "teams/bridge/src/main/java" | Select-Object -First 20; "=== new Task( calls count check ==="; git grep -rn "new Task(" -- "teams/bridge/src" | Measure-Object | Select-Object Count
-=== snoozed refs in main source (working tree) ===
-teams/bridge/src/main/java/com/rnd/bridge/crm/mapper/DealToTaskMapper.java:44:            // Not SNOOZED: Inbox requires snoozed_until, and a Deal has no resume date to give it.
-=== new Task( calls count check ===
-
-Count
------
-   43
-
-Command git, Select-String, Select-Object in …\Resonance-Flow
-
-"=== our commit's changes to Task/TaskStatus (f2f03c55 vs its base? use the commit) ==="; git show 92edf44b -- teams/bridge/src/main/java/com/rnd/bridge/task/model/Task.java teams/bridge/src/main/java/com/rnd/bridge/task/model/TaskStatus.java | Select-String "^[-+].*snoozed|^[-+].*SNOOZED"; "=== all new Task( call sites with arg lines ==="; git grep -rn "new Task(" -- "teams/bridge/src" | Select-Object -First 50
-=== our commit's changes to Task/TaskStatus (f2f03c55 vs its base? use the commit) ===
-
--        Instant snoozedUntil,
--    SNOOZED,
-=== all new Task( call sites with arg lines ===
-teams/bridge/src/main/java/com/rnd/bridge/task/AbstractTaskMapper.java:123:        return new Task(
-teams/bridge/src/main/java/com/rnd/bridge/task/enrichment/TaskEnrichmentConsumer.java:72:        return new Task(
-teams/bridge/src/main/java/com/rnd/bridge/task/enrichment/TaskEnrichmentConsumer.java:94:        return new Task(
-teams/bridge/src/test/java/com/rnd/bridge/crm/CrmTaskValidatorTest.java:23:        return new Task(
-teams/bridge/src/test/java/com/rnd/bridge/crm/CrmTaskValidatorTest.java:90:        return new Task(tenantId, t.projectId(), t.title(), t.description(), t.status(), t.urgency(),
-teams/bridge/src/test/java/com/rnd/bridge/crm/CrmTaskValidatorTest.java:96:        return new Task(t.organizationId(), t.projectId(), t.title(), t.description(), t.status(), t.urgency(),
-teams/bridge/src/test/java/com/rnd/bridge/crm/CrmTaskValidatorTest.java:102:        return new Task(t.organizationId(), t.projectId(), title, t.description(), t.status(), t.urgency(),
-teams/bridge/src/test/java/com/rnd/bridge/publish/LoggingPayloadPublisherTest.java:20:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/publish/kafka/KafkaPayloadPublisherTest.java:63:        return new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/BridgeTaskEventDtoInboxContractTest.java:107:        return new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/BridgeTaskEventDtoTest.java:54:        return new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventInboxMappingTest.java:33:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:41:        return new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:47:        return new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:151:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:175:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:193:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:230:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:256:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:266:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:275:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:289:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:301:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:310:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:320:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:330:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:340:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:349:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:359:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:368:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:415:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:449:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:484:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventMapperTest.java:521:        Task task = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventWireFormatTest.java:84:        Task minimal = new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/StructuredTaskEventWireFormatTest.java:122:        return new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/TaskValidatorTest.java:23:        return new Task(
-teams/bridge/src/test/java/com/rnd/bridge/task/TaskValidatorTest.java:74:        return new Task(t.organizationId(), t.projectId(), t.title(), t.description(), t.status(), urgency,
-teams/bridge/src/test/java/com/rnd/bridge/task/TaskValidatorTest.java:80:        return new Task(t.organizationId(), t.projectId(), t.title(), t.description(), t.status(), t.urgency(),
-teams/bridge/src/test/java/com/rnd/bridge/task/TaskValidatorTest.java:86:        return new Task(t.organizationId(), t.projectId(), t.title(), t.description(), t.status(), t.urgency(),
-teams/bridge/src/test/java/com/rnd/bridge/task/TaskValidatorTest.java:92:        return new Task(t.organizationId(), t.projectId(), t.title(), t.description(), status, t.urgency(),
-teams/bridge/src/test/java/com/rnd/bridge/task/TaskValidatorTest.java:98:        return new Task(t.organizationId(), t.projectId(), title, t.description(), t.status(), t.urgency(),
-teams/bridge/src/test/java/com/rnd/bridge/task/model/TaskSerializationTest.java:39:        return new Task(
-
-Our commit removed snoozedUntil/SNOOZED, but main's updated tests still use them — semantic conflict that won't compile. Checking the Task record arity mismatch across test call sites:
-
-Command Select-String, Select-Object, Get-Content in …\Resonance-Flow
-
-36 x 10
-Task now has 15 fields (we removed snoozedUntil), but main's updated tests may still construct 16-arg Tasks. Checking which files our commit touched vs. which contain stale call sites:
-
-Command git, Select-String in …\Resonance-Flow
-"=== files oenum:
-  `BLOCKS`/`BLOCKED_BY`/`FIXES`/`RELATES_TO`) — each carries its own `confidence` (`double`,
-  0.0–1.0, never null) and a `rationale` string. `SeveritySuggestion.label` is a free-text token
-  (e.g. "P0", "critical"), deliberately **not** `task.model.Tier` — Tier is an org-scope axis
-  (operational/tactical/strategic), not a severity scale; mapping one onto the other would be an
-  invented convention nobody asked for.
-- `TaskEnrichment` — the aggregate result for one piece of free text, keyed to
-  `Task.sourceRef`. A field that found nothing is `null`/empty-list, never a thrown exception —
-  `TaskEnrichment.empty(sourceRef)` is the canonical "nothing found" value.
-- `EnrichmentService` — the interface (`enrich(sourceRef, freeText) -> TaskEnrichment`), with an
-  explicit contract in its Javadoc: null/blank input, or an implementation that finds nothing,
-  **must never throw** — callers should never need a try/catch around this call.
-- `NoOpEnrichmentService` — the only implementation today. **No LLM vendor is chosen yet**
-  (Anthropic vs. OpenAI is still an open decision — see §9.4.3); this always returns an empty
-  result, wired as the default bean via `EnrichmentConfig`, following the same
-  default/`@Profile`-override convention as everything else in §5. A real provider becomes a
-  `@Profile`-gated bean later without touching this class.
-- `NoOpEnrichmentServiceTest` — proves the robustness contract: null/blank/whitespace-only input,
-  and realistic messy input (`"this PR might block the release of #789 but I'm not sure"`), all
-  return an empty `TaskEnrichment` without throwing.
-- **Verified**: compiles clean, all 5 new tests pass, and `BridgeApplicationTests` (full Spring
-  context load) still passes with `EnrichmentConfig`'s bean wired in — no collision with existing
-  beans.
-- **Explicitly not done in this slice**: no lane calls `EnrichmentService` yet (no wiring into
-  `CrmLane`/`DealToTaskMapper`/GitHub mappers), no publisher for `TaskEnrichment`/suggestions
-  (Chain is the eventual consumer for dependency hints per Kayvan's brief — "suggestions only, we
-  don't write the graph ourselves" — but no publish mechanism exists yet), no real LLM call
-  anywhere in this codebase.
+The original `com.rnd.bridge.enrichment` package from this slice (`DueDateSuggestion`,
+`SeveritySuggestion`, `DependencySuggestion`, `TaskEnrichment`, `EnrichmentService`,
+`NoOpEnrichmentService`) was deleted once CRM deal LLM enrichment landed (PR #1071,
+2026-10-26) — it was never wired into any lane. CRM deal enrichment now lives in
+`com.rnd.bridge.crm.enrichment`; see §13 and `docs/crm-llm-enrichment-design.md` for the
+current design.
 
 ### 9.4 Kayvan's 4-stage roadmap — status per stage
 
