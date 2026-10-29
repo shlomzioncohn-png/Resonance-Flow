@@ -429,8 +429,6 @@ components:
         port: 8080
       - name: postgresql
         port: 5432
-      - name: schema-registry
-        port: 8080
   lens-frontend:
     enabled: true
     # Not scraped (no metrics block), but its pod alerts still route to lens.
@@ -703,7 +701,7 @@ components:
           secretName: resonance-flow-lens-gateway-jwt
     config:
       jwt:
-        key_id: "2026-10"
+        key_id: "gateway-key-1"
         private_key_location: /etc/resonance-flow/secrets/lens-gateway-jwt/private.pem
         public_key_location: /etc/resonance-flow/secrets/lens-gateway-jwt/public.pem
       bff:
