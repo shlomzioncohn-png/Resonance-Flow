@@ -144,15 +144,17 @@ def write_dataset(out_dir: Path, cfg: GeneratorConfig, world: World, history: Hi
         "disease_types_held_out": [t for t in DISEASE_TYPES if t in cfg.excluded_diseases],
         "config": {k: (v if not isinstance(v, datetime) else _cell(v)) for k, v in asdict(cfg).items()},
     }
-    (out_dir / "manifest.json").write_text(json.dumps(manifest, default=_json_default, indent=2), encoding="utf-8")
+    (out_dir / "manifest.json").write_text(json.dumps(manifest, default=_json_default, indent=2),
+                                                  encoding="utf-8", newline="\n")
 
     observed = _observed(cfg, world, history, peers)
     manifest["counts"]["diseases_not_yet_visible"] = sum(1 for o in observed.values() if not o["visible_in_data"])
-    (out_dir / "manifest.json").write_text(json.dumps(manifest, default=_json_default, indent=2), encoding="utf-8")
+    (out_dir / "manifest.json").write_text(json.dumps(manifest, default=_json_default, indent=2),
+                                                  encoding="utf-8", newline="\n")
     (out_dir / "ground_truth.json").write_text(
         json.dumps({"diseases": [{**asdict(d), "observed": observed[d.id]} for d in world.diseases]},
                    default=_json_default, indent=2),
-        encoding="utf-8")
+        encoding="utf-8", newline="\n")
     # flat form for evaluation: one row per involved task and per involved edge
     rows = []
     for d in world.diseases:
