@@ -49,5 +49,9 @@ export const projectKeys = {
  */
 export const bottleneckKeys = {
   all: ['manager', 'bottlenecks'] as const,
-  graph: (projectId?: string) => [...bottleneckKeys.all, 'graph', projectId ?? 'all'] as const,
+  /** Every project's graph - invalidate this after a change that can block or unblock a task. */
+  graphs: () => [...bottleneckKeys.all, 'graph'] as const,
+  graph: (projectId?: string) => [...bottleneckKeys.graphs(), projectId ?? 'all'] as const,
+  /** One task's constraints, in the Bottlenecks screen's task drawer. */
+  constraints: (taskId: string) => [...bottleneckKeys.all, 'constraints', taskId] as const,
 };

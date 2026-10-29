@@ -18,13 +18,18 @@ export type ConstraintType = 'APPROVAL_NEEDED' | 'BLOCKED_BY_INFO' | 'DATE_WINDO
 /** PENDING = still open. SATISFIED / WAIVED = no longer blocks. */
 export type ConstraintStatus = 'PENDING' | 'SATISFIED' | 'WAIVED';
 
-/** One constraint on a task, from Chain via the BFF. Read-only in LENS. */
+/**
+ * One constraint on a task, from Chain via the BFF. Read-only for employees;
+ * a manager changes its status from the Bottlenecks screen (services/managerApi.ts).
+ */
 export interface Constraint {
   constraintId: string;
   type: ConstraintType;
   status: ConstraintStatus;
   /** Free-form details, flat key → value. Empty object when there are none. */
   reason?: Record<string, unknown>;
+  /** Where the constraint came from, as Chain sends it. */
+  sourceRef?: string | null;
   /** ISO local date-time, e.g. "2026-10-20T09:15:30" */
   createdAt?: string;
 }
