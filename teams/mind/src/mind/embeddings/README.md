@@ -36,7 +36,7 @@ Config lives in `mind.config`. Only `PgVectorStore` is constructed directly outs
 - **`index.for_tenant(tenant_id)` is a `VectorStore`** for one tenant. Every write sets `tenant_id`, every read and search adds `WHERE tenant_id = %s`. `nearest_tasks()`, `resolve_dependency_targets()`, `find_duplicate()` and `find_related()` keep their signatures: they take that scoped store.
 - **Where the tenant comes from:** `task.created` / `task.updated` carry it (index consumer). `task.completed` does not, so its handler reads it from the row with `tenant_of()`. So does `GET /v1/tasks/{task_id}/related`: the tenant is taken from the task's own row, never from the caller, and the endpoint is unchanged. A non-UUID `tenant_id` on an event is logged and skipped. `ingest.py`, `scripts/` and `benchmarks/` use `DEMO_TENANT_ID` (Inbox's built-in System tenant).
 - **Rows from before #841** have `tenant_id = NULL`. They never match a search and `tenant_of()` returns `None` for them. The next `task.updated` fills them: under the event's tenant the row has no `content_hash`, so it is re-embedded once and `upsert()` writes the tenant. `upsert()` never takes over a row that belongs to another tenant (it logs a warning). Once no `NULL` rows are left, a later migration can make the column `NOT NULL`.
-- **`hnsw.iterative_scan` is always on**, because the tenant condition alone can leave fewer than `k` matching rows inside the `ef_search` window. For a large tenant Postgres uses the HNSW index with the tenant as a filter. For a small one it uses the `tenant_id` btree and sorts exactly. Both return the right rows.
+- **`hnsw.iterative_scan` is always on**, because the tenant condition alone can leave fewer than `k` matching rows inside the `ef_search` window. For a large tenant Postgres uses the HNSW index with the tenant as a filter. For a small one it uses the `tenant_id` btree and sorts exactly. Both return the right rows. Whether HNSW is actually chosen also depends on `search_effort` itself -- see "#475: live-path latency under load" below.
 
 ```python
 from contextlib import asynccontextmanager
@@ -275,6 +275,29 @@ Unlike the two tables above, both sides here are real task_ids from the 21-task 
 - **At 10,000+ synthetic filler rows** (same approach as #87), to check the path still clears the target at the scale #469's week-8 proof is about -- **not** a claim about current production volume: **p50 18.84ms, p95 23.76ms**, comfortably under the 300ms target.
 
 Re-run: `python -m benchmarks.related_tasks_benchmark`.
+
+## #475: live-path latency under load (10,000 rows, 300ms target)
+
+**Target met**: p95 = 91.30ms at 10,000 rows, under full concurrency (20
+in-flight `get_related_tasks()` calls) plus a background writer upserting
+rows the whole time -- comfortably inside the <300ms p95 target, ~3.3x
+headroom. Full numbers and methodology:
+[`vector-store-comparison.md`](../../../benchmarks/vector-store-comparison.md),
+"Live-path latency under load".
+
+**Why `search_effort` is 200, not 400:** at 400 (the prior default),
+Postgres's planner costed an HNSW scan above a plain Seq Scan + sort at
+this row count, so the index went unused -- confirmed via `EXPLAIN`, not
+assumed. Binary-searching `ef_search` on the same 10,000-row table found
+the planner keeps using HNSW through 260, not at 275+; recall@5 against
+the exact (brute-force) top-5 is flat at **98.7%** (30 sampled queries,
+worst single query 60%) for every value in that HNSW-using range -- no
+accuracy gain from sitting close to the edge, so 200 was picked for
+margin against future data growth or stats drift, not for a recall
+difference from 260.
+
+Re-run: `python -m benchmarks.related_tasks_live_path_benchmark --vectors
+10000 --ef-search 200` (swap either flag for a different scale/setting).
 
 ## Serving this over HTTP (#450, R4)
 
