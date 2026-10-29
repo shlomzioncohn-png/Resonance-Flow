@@ -1,0 +1,15 @@
+
+demo flow result
+----------------
+  T1 'Get pricing proposal over to Northwind' (from slack): tier=TASK_TIER_TACTICAL urgency=3 role=TASK_ROLE_CONTEXT_SALESPERSON effort=- deadline=2026-10-29T15:00:00Z inbox_id=ae1bba81-af79-452c-8ba3-6937ab09f474
+  T2 'Finish the updated cost sheet' (from meeting): tier=TASK_TIER_OPERATIONAL urgency=3 role=- effort=240 deadline=2026-10-28T15:00:00Z inbox_id=36dd9c2c-6e15-4de2-9fa6-7afebd09d50c
+  T3 'Complete, sign and return the supplier registration form' (from email): tier=TASK_TIER_OPERATIONAL urgency=3 role=- effort=15 deadline=2026-10-30T15:00:00Z inbox_id=a31e7d3a-db76-4ce0-ae46-3820eb5921c3
+
+  PASS  three tasks come out, the expected ones: 3 requested, 3 created by Inbox
+  PASS  Inbox created every task Mind requested: all created
+  PASS  T1 is one task, not 2 (meeting + slack): sent from slack; meeting's 'Send Northwind the price quote' matched it (similarity 0.784)
+  FAIL  T1 depends on T2, on task.dependencies.proposed: 0 message(s) on task.dependencies.proposed, none for this pair
+  FAIL  tasks carry tier, urgency, role_context, owner, effort and deadline where expected: T1: no suggested owner (expected Dana); T2: no roleContext, no suggested owner (expected Omer); T3: no roleContext, no suggested owner (expected Dana)
+  PASS  every created task gets a score on task.score.proposed: 3 scored
+
+  4/6 criteria pass

@@ -330,6 +330,20 @@ def test_an_asr_call_is_recorded_with_its_latency_and_cpu(monkeypatch: pytest.Mo
     assert call.cost is None  # a local model costs CPU seconds, not dollars
 
 
+def test_an_asr_call_records_the_audio_it_ran_on(monkeypatch: pytest.MonkeyPatch):
+    # #484: seconds of audio after the cap, for a cost per audio minute.
+    one_asr_call(monkeypatch)  # tone(1.0): one second
+    [call] = get_recent_calls()
+    assert call.audio_s == pytest.approx(1.0)
+
+
+def test_a_capped_asr_call_records_the_audio_up_to_the_cap(monkeypatch: pytest.MonkeyPatch):
+    use_model(monkeypatch, FakeWhisper([fake_segment(" Hi.", 0.0, 1.0)]))
+    assert transcribe(tone(3.0), max_duration_s=2.0).success
+    [call] = get_recent_calls()
+    assert call.audio_s == pytest.approx(2.0)
+
+
 def test_an_asr_calls_window_includes_decoding_the_audio(monkeypatch: pytest.MonkeyPatch):
     real_decode = asr._decode
 

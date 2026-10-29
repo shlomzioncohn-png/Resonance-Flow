@@ -250,6 +250,13 @@ class MonitoringSettings(BaseSettings):
     llm_max_cost_usd: float | None = Field(default=0.02, ge=0)
     # Log the summary every this many model calls; 0 or none turns it off.
     summary_every_n_calls: int | None = Field(default=100, ge=0)
+    # #482: a directory every recorded call is also written to, one JSON line
+    # each, in a file of this process's own (observability/sink.py). None: no
+    # file, as before.
+    calls_dir: Path | None = None
+    # Names this process in that file's name and on each line; the script's
+    # own name when not set.
+    process_name: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.-]{1,64}$")
 
 
 class DeadlineSettings(BaseSettings):
