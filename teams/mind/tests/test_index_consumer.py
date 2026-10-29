@@ -155,6 +155,65 @@ async def test_handle_task_updated_creates_the_row_if_never_seen(index, store):
     assert "task-2" in store.rows
 
 
+# --- #918: on_indexed -------------------------------------------------------
+
+
+async def test_on_indexed_fires_for_a_newly_inserted_task(index, store):
+    calls = []
+
+    async def record(task_id, tenant_id, event):
+        calls.append(task_id)
+
+    event = _created(id="task-1", title="Fix the login bug", description="On the payments page")
+    await handle_task_created(index, event, [record])
+
+    assert calls == ["task-1"]
+
+
+async def test_on_indexed_fires_even_when_already_indexed(index, store):
+    """#918: a retry must find an already-indexed target too, not just a
+    task indexed for the first time by this exact call."""
+    await store.upsert_if_absent("task-1", [0.0] * 256)
+    calls = []
+
+    async def record(task_id, tenant_id, event):
+        calls.append(task_id)
+
+    event = _created(id="task-1", title="Fix the login bug", description="On the payments page")
+    await handle_task_created(index, event, [record])
+
+    assert calls == ["task-1"]
+
+
+async def test_on_indexed_does_not_fire_when_nothing_was_indexed(index, store):
+    calls = []
+
+    async def record(task_id, tenant_id, event):
+        calls.append(task_id)
+
+    event = _created(id="task-1", title="", description="")
+    await handle_task_created(index, event, [record])
+
+    assert calls == []
+
+
+async def test_a_failing_on_indexed_callback_does_not_stop_the_others(index, store, caplog):
+    calls = []
+
+    async def failing(task_id, tenant_id, event):
+        raise RuntimeError("boom")
+
+    async def record(task_id, tenant_id, event):
+        calls.append(task_id)
+
+    event = _created(id="task-1", title="Fix the login bug", description="On the payments page")
+    with caplog.at_level("ERROR"):
+        await handle_task_created(index, event, [failing, record])
+
+    assert calls == ["task-1"]
+    assert "on_indexed callback failed" in caplog.text
+
+
 async def test_handle_task_updated_overwrites_the_existing_vector(index, store):
     await store.upsert("task-2", [0.0] * 256)
     event = _updated(task_id="task-2", title="Write release notes", description="For v2.3")

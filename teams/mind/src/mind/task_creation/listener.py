@@ -154,7 +154,12 @@ def run_overdue_timer(
     of the listener's, so neither's work delays the other.
     """
 
-    loop = asyncio.new_event_loop()
+    # SelectorEventLoop, not new_event_loop(): psycopg's async mode rejects
+    # Windows' default ProactorEventLoop. With `pending_store_backend:
+    # "postgres"` (#918), check_overdue() now does real async I/O through
+    # this loop, where it never did before -- the mismatch was always
+    # latent, this is what makes it matter.
+    loop = asyncio.SelectorEventLoop()
     try:
         while not stop.is_set():
             try:

@@ -4,11 +4,13 @@ text to a task, each new task to `task.creation.requested`, and Inbox's
 `task.created` reply matched and indexed. Own process, like
 index_consumer_runner.
 
-Three threads, one `TaskCreationFlow`: the pending store is in memory, so the
-sender (this consumer) and the task.created listener must share it, and so
-one process (task_creation/README.md, "Running it"). The overdue timer runs
-beside them. When the store moves to Postgres (#918) the listener can move
-out.
+Three threads, one `TaskCreationFlow`, one `pending` store: the sender (this
+consumer), the task.created listener and the overdue timer all share it
+(task_creation/README.md, "Three threads, one store"), so they still need
+one process even with `pending_store_backend: "postgres"` (#918) --
+`PostgresPendingStore` is safe across the three loops (one pool per loop,
+opened lazily), but `TaskCreationFlow` itself still takes exactly one
+`pending` reference.
 
 Every model call is attributed to its item and stage (#482,
 observability/context.py), set here, where messages are handled, so no
@@ -30,10 +32,11 @@ from contextlib import AbstractContextManager
 from typing import Any
 from uuid import UUID
 
-from mind.config import DeadlineSettings, LandedConsumerSettings, get_settings
+from mind.config import DeadlineSettings, LandedConsumerSettings, Settings, get_settings
 from mind.contracts import RawObjectEvent
 from mind.dependencies.adapter import DependencyAdapter
 from mind.dependencies.kafka_sink import KafkaDependencySink
+from mind.dependencies.postgres_pending import pending_dependency_store
 from mind.dependencies.publisher import DependencyPublisher
 from mind.embeddings.base import SearchResult
 from mind.embeddings.duplicate_detection import find_duplicate
@@ -56,7 +59,8 @@ from mind.task_creation.flow import TaskCreationFlow
 from mind.task_creation.listener import GROUP_ID as TASK_CREATED_GROUP_ID
 from mind.task_creation.listener import TOPIC as TASK_CREATED_TOPIC
 from mind.task_creation.listener import run_overdue_timer, run_task_created_listener
-from mind.task_creation.pending import PendingRequests
+from mind.task_creation.pending import PendingRequests, PendingStore
+from mind.task_creation.postgres_pending_store import PostgresPendingStore
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +81,12 @@ def _log_items(event: RawObjectEvent, items: list[ExtractionItem]) -> None:
             event.correlation_id,
             len(item.text),
         )
+
+
+def _pending_store(settings: Settings) -> PendingStore:
+    if settings.pending_store_backend == "memory":
+        return PendingRequests()
+    return PostgresPendingStore(str(settings.vector_store.dsn.get_secret_value()))
 
 
 def _inbox_source_ref(message: RawObjectEventMessage) -> str | None:
@@ -153,7 +163,8 @@ def main() -> None:
     logging.basicConfig(level=settings.log_level)
     # Settings first: a missing credential, DSN or LLM provider fails in
     # milliseconds, not after the Whisper load below.
-    vector_store = get_settings().vector_store
+    mind_settings = get_settings()
+    vector_store = mind_settings.vector_store
     read_object = minio_reader()
     provider = build_provider()
     # Load Whisper now, not inside the first audio message's handler (R4, #478).
@@ -176,13 +187,20 @@ def main() -> None:
     # #355: each matched task's dependency mentions, resolved against the same
     # index and published to task.dependencies.proposed. on_matched runs on
     # the listener's loop, so it uses the listener's index (dependencies/README.md).
+    # #918: a mention that doesn't resolve now is retried later from the index
+    # consumer's on_indexed hook -- both need the same durable store to see it.
     dependencies = DependencyAdapter(
-        DependencyPublisher(listener_index, KafkaDependencySink(producer))
+        DependencyPublisher(
+            listener_index,
+            KafkaDependencySink(producer),
+            pending_dependency_store(mind_settings),
+        )
     )
+    pending = _pending_store(mind_settings)
     flow = TaskCreationFlow(
         producer=producer,
         index=listener_index,
-        pending=PendingRequests(),
+        pending=pending,
         on_matched=dependencies.on_task_created,
     )
     stop = threading.Event()
@@ -251,6 +269,14 @@ def main() -> None:
     finally:
         stop.set()
         loop.run_until_complete(search_index.close())
+        # This thread's own share of `pending` (it calls flow.send(), which
+        # uses `pending` -- see send.py). Its pool for `listener_loop`, and
+        # `listener_index`/the dependency pending store there, are not
+        # closed here: `run_task_created_listener` has no graceful-stop
+        # path today (a pre-existing gap, not one #918 introduces) to run
+        # cleanup on that loop while it's still blocked inside it.
+        if isinstance(pending, PostgresPendingStore):
+            loop.run_until_complete(pending.close())
         loop.close()
         producer.close()
         provider.close()

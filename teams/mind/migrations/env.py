@@ -19,7 +19,12 @@ from sqlalchemy import create_engine
 from mind.config import get_settings
 
 config = context.config
-if config.config_file_name is not None:
+# `attributes={"configure_logger": False}` opts out (the test suite's
+# `migrated_db` fixture does): alembic.ini's [loggers] section only lists
+# root/sqlalchemy/alembic, so fileConfig's default disable_existing_loggers
+# disables every other logger already created in the process -- every
+# mind.* one, permanently, for whoever's running this.
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name)
 
 # Migrations in this project are hand-written (see versions/0001_*.py's
