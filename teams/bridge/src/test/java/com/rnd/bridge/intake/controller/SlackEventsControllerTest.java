@@ -280,7 +280,7 @@ class SlackEventsControllerTest {
     @Test
     void editOfAnAlreadyIndexedMessageThatIsStillUnpublishedStillSchedules() throws Exception {
         // An edit can supersede an OPEN, CLAIMED, or even already-PUBLISHED group with a fresh
-        // unpublished revision (see ChatGroupStateReconciler.mergeIntoGroupState) - that revision
+        // unpublished revision (see GroupStateMutator.rebuild) - that revision
         // still needs a live timer, so scheduling must not skip edits anymore.
         String body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\"}}";
         when(verifier.isValid("1000", "v0=valid", body)).thenReturn(true);
