@@ -14,6 +14,21 @@ export interface WorkspaceRequest {
 
 // ── Task shape from the BFF ────────────────────────────────────────────────
 
+export type ConstraintType = 'APPROVAL_NEEDED' | 'BLOCKED_BY_INFO' | 'DATE_WINDOW';
+/** PENDING = still open. SATISFIED / WAIVED = no longer blocks. */
+export type ConstraintStatus = 'PENDING' | 'SATISFIED' | 'WAIVED';
+
+/** One constraint on a task, from Chain via the BFF. Read-only in LENS. */
+export interface Constraint {
+  constraintId: string;
+  type: ConstraintType;
+  status: ConstraintStatus;
+  /** Free-form details, flat key → value. Empty object when there are none. */
+  reason?: Record<string, unknown>;
+  /** ISO local date-time, e.g. "2026-10-20T09:15:30" */
+  createdAt?: string;
+}
+
 export interface ApiTask {
   id: string;
   title: string;
@@ -35,8 +50,10 @@ export interface ApiTask {
   project?: string;
   /** IDs of tasks this task depends on */
   dependencies?: string[];
-  /** Blocker labels, e.g. "approval_needed" */
-  constraints?: string[];
+  /** Chain's constraints on this task, all statuses. Missing = unknown (not loaded from Chain). */
+  constraints?: Constraint[];
+  /** How many of `constraints` are still open (PENDING). Missing = unknown. */
+  openConstraintCount?: number;
   /** Whether the task is available (no blockers) - computed by Chain */
   isAvailable?: boolean;
   /** operational / tactical / strategic (lowercase, from Inbox) */

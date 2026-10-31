@@ -147,6 +147,7 @@ class ManagerUsersControllerTest {
                         .with(jwt().authorities(new SimpleGrantedAuthority(MANAGER_AUTHORITY)))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"displayName\":\"Noa\",\"email\":\"noa@example.com\",\"role\":\"EMPLOYEE\","
+                                + "\"password\":\"Welcome-2026\","
                                 + "\"tenantId\":\"other-tenant\",\"status\":\"ACTIVE\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value("u9"));
@@ -155,30 +156,43 @@ class ManagerUsersControllerTest {
         assertThat(recorded.getMethod()).isEqualTo("POST");
         assertThat(recorded.getPath()).isEqualTo("/manager/users");
         String body = recorded.getBody().readUtf8();
-        assertThat(body).contains("noa@example.com").contains("EMPLOYEE");
+        assertThat(body).contains("noa@example.com").contains("EMPLOYEE").contains("Welcome-2026");
         assertThat(body).doesNotContain("other-tenant").doesNotContain("ACTIVE");
     }
 
     @Test
     @Order(13)
-    @DisplayName("POST create with a missing displayName or an unknown role returns 400, never reaches BFF")
+    @DisplayName("POST create with a missing displayName, an unknown role, or a missing/short password returns 400, never reaches BFF")
     void createUser_invalidBody_returns400() throws Exception {
         mockMvc.perform(post("/api/manager/users")
                         .with(jwt().authorities(new SimpleGrantedAuthority(MANAGER_AUTHORITY)))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"role\":\"EMPLOYEE\"}"))
+                        .content("{\"role\":\"EMPLOYEE\",\"password\":\"Welcome-2026\"}"))
                 .andExpect(status().isBadRequest());
 
         mockMvc.perform(post("/api/manager/users")
                         .with(jwt().authorities(new SimpleGrantedAuthority(MANAGER_AUTHORITY)))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"displayName\":\"Noa\",\"role\":\"SYSTEM_ADMIN\"}"))
+                        .content("{\"displayName\":\"Noa\",\"role\":\"SYSTEM_ADMIN\",\"password\":\"Welcome-2026\"}"))
                 .andExpect(status().isBadRequest());
 
         mockMvc.perform(post("/api/manager/users")
                         .with(jwt().authorities(new SimpleGrantedAuthority(MANAGER_AUTHORITY)))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"displayName\":\"Noa\",\"email\":\"not-an-email\",\"role\":\"EMPLOYEE\"}"))
+                        .content("{\"displayName\":\"Noa\",\"email\":\"not-an-email\",\"role\":\"EMPLOYEE\","
+                                + "\"password\":\"Welcome-2026\"}"))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(post("/api/manager/users")
+                        .with(jwt().authorities(new SimpleGrantedAuthority(MANAGER_AUTHORITY)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"Noa\",\"role\":\"EMPLOYEE\"}"))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(post("/api/manager/users")
+                        .with(jwt().authorities(new SimpleGrantedAuthority(MANAGER_AUTHORITY)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"Noa\",\"role\":\"EMPLOYEE\",\"password\":\"short\"}"))
                 .andExpect(status().isBadRequest());
 
         assertThat(mockBff.takeRequest(300, TimeUnit.MILLISECONDS))

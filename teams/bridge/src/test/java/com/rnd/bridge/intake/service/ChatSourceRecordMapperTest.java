@@ -182,7 +182,7 @@ class ChatSourceRecordMapperTest {
     @Test
     void persistedGroupTranscriptAndAttachmentShareTheSameCorrelationId() {
         // mergedGroup reflects the actual post-merge state the real reconciler would produce:
-        // ChatGroupStateReconciler.mergeSnapshots always merges m1's incoming attachment into
+        // GroupStateMutator.mergeSnapshots always merges m1's incoming attachment into
         // its MessageSnapshot before ChatSourceRecordMapper ever sees this GroupState, so m1's
         // persisted attachmentCount here already matches the incoming message (1, not 0).
         ChatMessage.Attachment attachment =

@@ -4,6 +4,7 @@ import com.rnd.bff.client.ChainClient;
 import com.rnd.bff.client.InboxClient;
 import com.rnd.bff.client.InboxSelectionResponse;
 import com.rnd.bff.client.MindClient;
+import com.rnd.bff.dto.ConstraintDTO;
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskDependenciesDTO;
 import com.rnd.bff.dto.TaskListResponseDTO;
@@ -86,7 +87,7 @@ public class WorkspaceService {
         Map<String, TaskDependenciesDTO> feasibilityByTaskId;
         boolean chainAvailable = true;
         try {
-            feasibilityByTaskId = chainClient.getFeasibility(userId, candidateIds);
+            feasibilityByTaskId = chainClient.getFeasibility(tenantOf(candidates), candidateIds);
         } catch (RuntimeException ex) {
             // Chain is down: a recommendation is still possible, just without
             // dependency data. Treat every task's dependency status as unknown
@@ -115,7 +116,7 @@ public class WorkspaceService {
             TaskDependenciesDTO feasibility = feasibilityByTaskId.get(task.getId());
             if (feasibility != null) {
                 task.setDependencies(feasibility.getDependencies());
-                task.setConstraints(feasibility.getConstraints());
+                setConstraints(task, feasibility.getConstraints());
             }
         }
 
@@ -183,6 +184,9 @@ public class WorkspaceService {
         TaskDTO bestTask = inboxClient.getTaskById(userId, first.getId());
         if (bestTask == null) {
             bestTask = toTaskDTO(first);
+        } else {
+            // The recommendation panel shows the task's constraints too
+            attachConstraints(userId, List.of(bestTask));
         }
         List<TaskDTO> alternatives = selected.stream().skip(1).map(WorkspaceService::toTaskDTO).toList();
 
@@ -298,14 +302,62 @@ public class WorkspaceService {
         int safePage = Math.max(page, 0);
         int safeSize = Math.min(Math.max(size, 1), 100);
 
+        TaskListResponseDTO result;
         try {
-            return inboxClient.listTasks(userId, toStatusFilter(filter), search, safePage, safeSize);
+            result = inboxClient.listTasks(userId, toStatusFilter(filter), search, safePage, safeSize);
         } catch (InboxRejectedException ex) {
             // Inbox is up and said no (401/403/400) - not an outage, pass it on as-is
             throw ex;
         } catch (RuntimeException ex) {
             throw new ServiceUnavailableException("Inbox", "Inbox is unavailable", ex);
         }
+        attachConstraints(userId, result.getItems());
+        return result;
+    }
+
+    /**
+     * Fills constraints + openConstraintCount from Chain, for real Inbox tasks.
+     * Chain is the only source of constraints. Mock tasks' ids aren't Chain's,
+     * so mock mode doesn't call it (those tasks show no constraints). Never fails the request: if Chain can't
+     * answer, the fields stay unknown (null) and the screen still loads.
+     */
+    private void attachConstraints(String userId, List<TaskDTO> tasks) {
+        if (inboxClient.isMockEnabled() || tasks == null || tasks.isEmpty()) {
+            return;
+        }
+        Map<String, TaskDependenciesDTO> byTaskId;
+        try {
+            byTaskId = chainClient.getFeasibility(tenantOf(tasks), tasks.stream().map(TaskDTO::getId).toList());
+        } catch (RuntimeException ex) {
+            logger.warn("Chain constraints unavailable - userId: {}", userId, ex);
+            return;
+        }
+        if (byTaskId == null) {
+            return;
+        }
+        for (TaskDTO task : tasks) {
+            TaskDependenciesDTO feasibility = byTaskId.get(task.getId());
+            if (feasibility != null) {
+                setConstraints(task, feasibility.getConstraints());
+            }
+        }
+    }
+
+    private static void setConstraints(TaskDTO task, List<ConstraintDTO> constraints) {
+        task.setConstraints(constraints);
+        task.setOpenConstraintCount(ConstraintDTO.countOpen(constraints));
+    }
+
+    /**
+     * Inbox only returns tasks of the acting user's own tenant, so every task
+     * carries the same tenant - it comes from Inbox, never from the request.
+     */
+    private static String tenantOf(List<TaskDTO> tasks) {
+        return tasks.stream()
+                .map(TaskDTO::getTenantId)
+                .filter(id -> id != null && !id.isBlank())
+                .findFirst()
+                .orElse(null);
     }
 
     private static final List<String> STATUSES = List.of(
@@ -384,6 +436,7 @@ public class WorkspaceService {
         if (task == null) {
             throw new TaskNotFoundException(taskId);
         }
+        attachConstraints(userId, List.of(task));
         return task;
     }
 

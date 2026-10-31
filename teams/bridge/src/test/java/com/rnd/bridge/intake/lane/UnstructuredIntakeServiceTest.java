@@ -21,7 +21,7 @@ import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.core.SourceReader;
 import com.rnd.bridge.core.error.LaneException;
 import com.rnd.bridge.intake.config.BridgeTenantId;
-import com.rnd.bridge.intake.controller.UnstructuredIntakeController;
+import com.rnd.bridge.intake.service.UnstructuredIntakeService;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.parser.calendar.CalendarReadResult;
 import com.rnd.bridge.intake.parser.calendar.CalendarSourceReader;
@@ -57,11 +57,11 @@ import org.mockito.ArgumentCaptor;
  * the cursor (so the same window is retried next run - see ChatGroupStateReconciler's two-phase
  * publish state, which makes that replay both safe and necessary), while every other source
  * keeps advancing unconditionally, exactly as before.
- * Lives in this package (rather than mirroring UnstructuredIntakeController's own
- * intake.controller package) because it needs to construct real UnstructuredIntakeLane
+ * Lives in this package (rather than mirroring UnstructuredIntakeService's own
+ * intake.service package) because it needs to construct real UnstructuredIntakeLane
  * instances, whose constructor is intentionally package-private to intake.lane.
  */
-class UnstructuredIntakeControllerTest {
+class UnstructuredIntakeServiceTest {
 
     private static final SourceRecord RECORD = new SourceRecord(
             RawSourceType.EMAIL, "00000000-0000-0000-0000-000000000001", "id-1", "corr-1", Instant.parse("2026-08-18T09:15:00Z"),
@@ -132,21 +132,21 @@ class UnstructuredIntakeControllerTest {
                 groupStateStore, calendarEventStateStore);
     }
 
-    private UnstructuredIntakeController controllerFor(RawSourceType sourceType) {
-        return new UnstructuredIntakeController(
+    private UnstructuredIntakeService serviceFor(RawSourceType sourceType) {
+        return new UnstructuredIntakeService(
                 List.of(laneFor(sourceType)), cursorStore, calendarSourceReader, emailSourceReader,
                 driveSourceReader, calendarCursorLock, new BridgeTenantId("00000000-0000-0000-0000-000000000001"));
     }
 
     @Test
     void slackCursorIsNotAdvancedWhenTheRunHasRejectedRecords() {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.SLACK);
+        UnstructuredIntakeService service = serviceFor(RawSourceType.SLACK);
         when(cursorStore.load(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001")).thenReturn(ReadCursor.full());
         when(sourceReader.read(any())).thenReturn(Stream.of(List.of(RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
         doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(any());
 
-        IntakeResult result = controller.run(RawSourceType.SLACK);
+        IntakeResult result = service.run(RawSourceType.SLACK);
 
         assertThat(result.rejected()).isEqualTo(1);
         verify(cursorStore, never()).save(any(), any(), any());
@@ -154,12 +154,12 @@ class UnstructuredIntakeControllerTest {
 
     @Test
     void slackCursorAdvancesWhenTheRunFullySucceeds() {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.SLACK);
+        UnstructuredIntakeService service = serviceFor(RawSourceType.SLACK);
         when(cursorStore.load(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001")).thenReturn(ReadCursor.full());
         when(sourceReader.read(any())).thenReturn(Stream.of(List.of(RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
 
-        IntakeResult result = controller.run(RawSourceType.SLACK);
+        IntakeResult result = service.run(RawSourceType.SLACK);
 
         assertThat(result.rejected()).isEqualTo(0);
         verify(cursorStore).save(eq(RawSourceType.SLACK), eq("00000000-0000-0000-0000-000000000001"), any());
@@ -174,32 +174,32 @@ class UnstructuredIntakeControllerTest {
      */
     @Test
     void slackCursorIsNotAdvancedWhenChatGroupConfirmationFailsAfterKafkaPublishSucceeds() {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.SLACK);
+        UnstructuredIntakeService service = serviceFor(RawSourceType.SLACK);
         when(cursorStore.load(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001")).thenReturn(ReadCursor.full());
         when(sourceReader.read(any())).thenReturn(Stream.of(List.of(SLACK_RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(SLACK_EVENT);
         doThrow(new IllegalStateException("MinIO unreachable"))
                 .when(groupStateStore).confirmPublished(RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", "g1", 0);
 
-        IntakeResult result = controller.run(RawSourceType.SLACK);
+        IntakeResult result = service.run(RawSourceType.SLACK);
 
         assertThat(result.published()).isZero();
         assertThat(result.rejected()).isEqualTo(1);
         verify(cursorStore, never()).save(any(), any(), any());
     }
 
-    // WHATSAPP stands in for "any source with no dedicated controller path" - EMAIL/CALENDAR/
+    // WHATSAPP stands in for "any source with no dedicated service path" - EMAIL/CALENDAR/
     // DRIVE all now have their own token-cursor paths (see the respective ...Cursor... tests
     // below).
     @Test
     void nonSlackCursorAdvancesEvenWhenTheRunHasRejectedRecords() {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.WHATSAPP);
+        UnstructuredIntakeService service = serviceFor(RawSourceType.WHATSAPP);
         when(cursorStore.load(RawSourceType.WHATSAPP, "00000000-0000-0000-0000-000000000001")).thenReturn(ReadCursor.full());
         when(sourceReader.read(any())).thenReturn(Stream.of(List.of(RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
         doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(any());
 
-        IntakeResult result = controller.run(RawSourceType.WHATSAPP);
+        IntakeResult result = service.run(RawSourceType.WHATSAPP);
 
         assertThat(result.rejected()).isEqualTo(1);
         verify(cursorStore).save(eq(RawSourceType.WHATSAPP), eq("00000000-0000-0000-0000-000000000001"), any());
@@ -207,17 +207,17 @@ class UnstructuredIntakeControllerTest {
 
     /**
      * Full/initial sync: no stored historyId, the read completes fully, and the reader reports
-     * the nextHistoryId it obtained - the controller must persist exactly that as the new cursor
+     * the nextHistoryId it obtained - the service must persist exactly that as the new cursor
      * once the whole run has succeeded. Mirrors calendarCursorPersistsTheNewSyncTokenWhenTheRunFullySucceeds.
      */
     @Test
     void emailCursorPersistsTheNewHistoryIdWhenTheRunFullySucceeds() {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.EMAIL);
+        UnstructuredIntakeService service = serviceFor(RawSourceType.EMAIL);
         when(cursorStore.load(RawSourceType.EMAIL, "00000000-0000-0000-0000-000000000001")).thenReturn(ReadCursor.full());
         when(emailSourceReader.read(any())).thenReturn(new EmailReadResult(List.of(RECORD), "history-2"));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
 
-        IntakeResult result = controller.run(RawSourceType.EMAIL);
+        IntakeResult result = service.run(RawSourceType.EMAIL);
 
         assertThat(result.rejected()).isEqualTo(0);
         ArgumentCaptor<ReadCursor> captor = ArgumentCaptor.forClass(ReadCursor.class);
@@ -227,19 +227,19 @@ class UnstructuredIntakeControllerTest {
 
     /**
      * Safe cursor advancement: if any record from the batch Gmail returned under the current
-     * historyId failed to publish, the controller must NOT persist the new historyId the reader
+     * historyId failed to publish, the service must NOT persist the new historyId the reader
      * obtained - doing so would permanently lose that record, since Gmail's history API would
      * never resend it under a later incremental sync. Mirrors calendarCursorIsNotAdvancedWhenTheRunHasRejectedRecords.
      */
     @Test
     void emailCursorIsNotAdvancedWhenTheRunHasRejectedRecords() {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.EMAIL);
+        UnstructuredIntakeService service = serviceFor(RawSourceType.EMAIL);
         when(cursorStore.load(RawSourceType.EMAIL, "00000000-0000-0000-0000-000000000001")).thenReturn(new ReadCursor(null, "history-1"));
         when(emailSourceReader.read(any())).thenReturn(new EmailReadResult(List.of(RECORD), "history-2"));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
         doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(any());
 
-        IntakeResult result = controller.run(RawSourceType.EMAIL);
+        IntakeResult result = service.run(RawSourceType.EMAIL);
 
         assertThat(result.rejected()).isEqualTo(1);
         verify(cursorStore, never()).save(any(), any(), any());
@@ -251,12 +251,12 @@ class UnstructuredIntakeControllerTest {
      */
     @Test
     void emailCursorIsUntouchedWhenTheReaderReportsNoNewHistoryId() {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.EMAIL);
+        UnstructuredIntakeService service = serviceFor(RawSourceType.EMAIL);
         when(cursorStore.load(RawSourceType.EMAIL, "00000000-0000-0000-0000-000000000001")).thenReturn(ReadCursor.full());
         when(emailSourceReader.read(any())).thenReturn(new EmailReadResult(List.of(RECORD), null));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
 
-        IntakeResult result = controller.run(RawSourceType.EMAIL);
+        IntakeResult result = service.run(RawSourceType.EMAIL);
 
         assertThat(result.rejected()).isEqualTo(0);
         verify(cursorStore, never()).save(any(), any(), any());
@@ -264,18 +264,18 @@ class UnstructuredIntakeControllerTest {
 
     /**
      * Full/initial sync: no stored syncToken, the read completes fully, and the reader reports
-     * the nextSyncToken it obtained from the final page - the controller must persist exactly
+     * the nextSyncToken it obtained from the final page - the service must persist exactly
      * that token as the new cursor once the whole run has succeeded.
      */
     @Test
     void calendarCursorPersistsTheNewSyncTokenWhenTheRunFullySucceeds() {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.CALENDAR);
+        UnstructuredIntakeService service = serviceFor(RawSourceType.CALENDAR);
         when(cursorStore.load(RawSourceType.CALENDAR, "00000000-0000-0000-0000-000000000001")).thenReturn(ReadCursor.full());
         when(calendarSourceReader.read(any()))
                 .thenReturn(new CalendarReadResult(List.of(CALENDAR_RECORD), "sync-token-2"));
         when(payloadMapper.map(any(), any())).thenReturn(CALENDAR_EVENT);
 
-        IntakeResult result = controller.run(RawSourceType.CALENDAR);
+        IntakeResult result = service.run(RawSourceType.CALENDAR);
 
         assertThat(result.rejected()).isEqualTo(0);
         ArgumentCaptor<ReadCursor> captor = ArgumentCaptor.forClass(ReadCursor.class);
@@ -285,21 +285,21 @@ class UnstructuredIntakeControllerTest {
 
     /**
      * Safe token advancement: if any record from the batch Google returned under the current
-     * syncToken failed to publish, the controller must NOT persist the new syncToken the reader
+     * syncToken failed to publish, the service must NOT persist the new syncToken the reader
      * obtained - doing so would permanently lose that record, since Google would never resend it
      * under a later incremental sync. The old stored token must stay in place so next run retries
      * the same window.
      */
     @Test
     void calendarCursorIsNotAdvancedWhenTheRunHasRejectedRecords() {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.CALENDAR);
+        UnstructuredIntakeService service = serviceFor(RawSourceType.CALENDAR);
         when(cursorStore.load(RawSourceType.CALENDAR, "00000000-0000-0000-0000-000000000001")).thenReturn(new ReadCursor(null, "sync-token-1"));
         when(calendarSourceReader.read(any()))
                 .thenReturn(new CalendarReadResult(List.of(CALENDAR_RECORD), "sync-token-2"));
         when(payloadMapper.map(any(), any())).thenReturn(CALENDAR_EVENT);
         doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(any());
 
-        IntakeResult result = controller.run(RawSourceType.CALENDAR);
+        IntakeResult result = service.run(RawSourceType.CALENDAR);
 
         assertThat(result.rejected()).isEqualTo(1);
         verify(cursorStore, never()).save(any(), any(), any());
@@ -311,12 +311,12 @@ class UnstructuredIntakeControllerTest {
      */
     @Test
     void calendarCursorIsUntouchedWhenTheReaderReportsNoNewSyncToken() {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.CALENDAR);
+        UnstructuredIntakeService service = serviceFor(RawSourceType.CALENDAR);
         when(cursorStore.load(RawSourceType.CALENDAR, "00000000-0000-0000-0000-000000000001")).thenReturn(ReadCursor.full());
         when(calendarSourceReader.read(any())).thenReturn(new CalendarReadResult(List.of(CALENDAR_RECORD), null));
         when(payloadMapper.map(any(), any())).thenReturn(CALENDAR_EVENT);
 
-        IntakeResult result = controller.run(RawSourceType.CALENDAR);
+        IntakeResult result = service.run(RawSourceType.CALENDAR);
 
         assertThat(result.rejected()).isEqualTo(0);
         verify(cursorStore, never()).save(any(), any(), any());
@@ -333,7 +333,7 @@ class UnstructuredIntakeControllerTest {
      */
     @Test
     void secondCalendarRunCannotLoadTheCursorWhileTheFirstRunStillHoldsTheLock() throws Exception {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.CALENDAR);
+        UnstructuredIntakeService service = serviceFor(RawSourceType.CALENDAR);
         AtomicReference<String> storedToken = new AtomicReference<>(null);
         when(cursorStore.load(RawSourceType.CALENDAR, "00000000-0000-0000-0000-000000000001"))
                 .thenAnswer(inv -> new ReadCursor(null, storedToken.get()));
@@ -359,10 +359,10 @@ class UnstructuredIntakeControllerTest {
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            Future<IntakeResult> runA = executor.submit(() -> controller.run(RawSourceType.CALENDAR));
+            Future<IntakeResult> runA = executor.submit(() -> service.run(RawSourceType.CALENDAR));
             assertThat(runAEnteredRead.await(5, TimeUnit.SECONDS)).isTrue();
 
-            Future<IntakeResult> runB = executor.submit(() -> controller.run(RawSourceType.CALENDAR));
+            Future<IntakeResult> runB = executor.submit(() -> service.run(RawSourceType.CALENDAR));
             // Run A is still blocked inside read(), holding the lock before its own save() - give
             // run B every chance to (incorrectly) race ahead and load the stale T0 cursor.
             Thread.sleep(200);
@@ -381,7 +381,7 @@ class UnstructuredIntakeControllerTest {
 
     @Test
     void calendarCursorLockIsReleasedAfterAReadFailureSoALaterRunIsNotBlocked() {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.CALENDAR);
+        UnstructuredIntakeService service = serviceFor(RawSourceType.CALENDAR);
         when(cursorStore.load(RawSourceType.CALENDAR, "00000000-0000-0000-0000-000000000001")).thenReturn(ReadCursor.full());
         AtomicInteger callCount = new AtomicInteger();
         when(calendarSourceReader.read(any())).thenAnswer(inv -> {
@@ -392,10 +392,10 @@ class UnstructuredIntakeControllerTest {
         });
         when(payloadMapper.map(any(), any())).thenReturn(CALENDAR_EVENT);
 
-        assertThatThrownBy(() -> controller.run(RawSourceType.CALENDAR)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> service.run(RawSourceType.CALENDAR)).isInstanceOf(IllegalStateException.class);
         verify(cursorStore, never()).save(any(), any(), any());
 
-        IntakeResult result = controller.run(RawSourceType.CALENDAR);
+        IntakeResult result = service.run(RawSourceType.CALENDAR);
 
         assertThat(result.rejected()).isEqualTo(0);
         verify(cursorStore).save(eq(RawSourceType.CALENDAR), eq("00000000-0000-0000-0000-000000000001"), any());
@@ -403,21 +403,21 @@ class UnstructuredIntakeControllerTest {
 
     @Test
     void calendarCursorLockIsReleasedWhenRecordsAreRejectedSoALaterRunIsNotBlocked() {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.CALENDAR);
+        UnstructuredIntakeService service = serviceFor(RawSourceType.CALENDAR);
         when(cursorStore.load(RawSourceType.CALENDAR, "00000000-0000-0000-0000-000000000001")).thenReturn(ReadCursor.full());
         when(calendarSourceReader.read(any()))
                 .thenReturn(new CalendarReadResult(List.of(CALENDAR_RECORD), "sync-token-2"));
         when(payloadMapper.map(any(), any())).thenReturn(CALENDAR_EVENT);
         doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(any());
 
-        IntakeResult firstResult = controller.run(RawSourceType.CALENDAR);
+        IntakeResult firstResult = service.run(RawSourceType.CALENDAR);
         assertThat(firstResult.rejected()).isEqualTo(1);
         verify(cursorStore, never()).save(any(), any(), any());
 
         // Second run must not be blocked by the first run's lock, which the rejection must have
         // released just like a successful run would.
         doNothing().when(payloadPublisher).publish(any());
-        IntakeResult secondResult = controller.run(RawSourceType.CALENDAR);
+        IntakeResult secondResult = service.run(RawSourceType.CALENDAR);
 
         assertThat(secondResult.rejected()).isEqualTo(0);
         verify(cursorStore).save(eq(RawSourceType.CALENDAR), eq("00000000-0000-0000-0000-000000000001"), any());
@@ -430,12 +430,12 @@ class UnstructuredIntakeControllerTest {
      */
     @Test
     void driveCursorPersistsTheNewTokenWhenTheRunFullySucceeds() {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.DRIVE);
+        UnstructuredIntakeService service = serviceFor(RawSourceType.DRIVE);
         when(cursorStore.load(RawSourceType.DRIVE, "00000000-0000-0000-0000-000000000001")).thenReturn(ReadCursor.full());
         when(driveSourceReader.read(any())).thenReturn(new DriveReadResult(List.of(DRIVE_RECORD), "page-token-2"));
         when(payloadMapper.map(any(), any())).thenReturn(DRIVE_EVENT);
 
-        IntakeResult result = controller.run(RawSourceType.DRIVE);
+        IntakeResult result = service.run(RawSourceType.DRIVE);
 
         assertThat(result.rejected()).isEqualTo(0);
         ArgumentCaptor<ReadCursor> captor = ArgumentCaptor.forClass(ReadCursor.class);
@@ -446,13 +446,13 @@ class UnstructuredIntakeControllerTest {
     /** Mirrors calendarCursorIsNotAdvancedWhenTheRunHasRejectedRecords. */
     @Test
     void driveCursorIsNotAdvancedWhenTheRunHasRejectedRecords() {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.DRIVE);
+        UnstructuredIntakeService service = serviceFor(RawSourceType.DRIVE);
         when(cursorStore.load(RawSourceType.DRIVE, "00000000-0000-0000-0000-000000000001")).thenReturn(new ReadCursor(null, "page-token-1"));
         when(driveSourceReader.read(any())).thenReturn(new DriveReadResult(List.of(DRIVE_RECORD), "page-token-2"));
         when(payloadMapper.map(any(), any())).thenReturn(DRIVE_EVENT);
         doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(any());
 
-        IntakeResult result = controller.run(RawSourceType.DRIVE);
+        IntakeResult result = service.run(RawSourceType.DRIVE);
 
         assertThat(result.rejected()).isEqualTo(1);
         verify(cursorStore, never()).save(any(), any(), any());
@@ -461,12 +461,12 @@ class UnstructuredIntakeControllerTest {
     /** Mirrors calendarCursorIsUntouchedWhenTheReaderReportsNoNewSyncToken. */
     @Test
     void driveCursorIsUntouchedWhenTheReaderReportsNoNewToken() {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.DRIVE);
+        UnstructuredIntakeService service = serviceFor(RawSourceType.DRIVE);
         when(cursorStore.load(RawSourceType.DRIVE, "00000000-0000-0000-0000-000000000001")).thenReturn(ReadCursor.full());
         when(driveSourceReader.read(any())).thenReturn(new DriveReadResult(List.of(DRIVE_RECORD), null));
         when(payloadMapper.map(any(), any())).thenReturn(DRIVE_EVENT);
 
-        IntakeResult result = controller.run(RawSourceType.DRIVE);
+        IntakeResult result = service.run(RawSourceType.DRIVE);
 
         assertThat(result.rejected()).isEqualTo(0);
         verify(cursorStore, never()).save(any(), any(), any());

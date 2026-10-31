@@ -158,3 +158,62 @@ export const ActivityUnavailable: Story = {
     await waitFor(() => expect(activityRequests).toBe(2));
   },
 };
+
+/** Acceptance: one PENDING + one SATISFIED constraint -> two rows that look different. */
+export const ConstraintsPendingAndSatisfied: Story = {
+  beforeEach: ({ msw }) => {
+    msw.use(
+      http.get(TASK_URL, () =>
+        HttpResponse.json({
+          ...task,
+          openConstraintCount: 1,
+          constraints: [
+            {
+              constraintId: 'c1',
+              type: 'APPROVAL_NEEDED',
+              status: 'PENDING',
+              reason: { approver: 'Legal' },
+              createdAt: '2026-10-20T09:15:30',
+            },
+            {
+              constraintId: 'c2',
+              type: 'DATE_WINDOW',
+              status: 'SATISFIED',
+              reason: {},
+              createdAt: '2026-10-21T10:00:00',
+            },
+          ],
+        } satisfies ApiTask),
+      ),
+    );
+  },
+  play: async ({ canvas }) => {
+    const list = within(await canvas.findByRole('list', { name: 'Task constraints' }));
+    const rows = list.getAllByRole('listitem').filter((el) => el.hasAttribute('data-open'));
+    await expect(rows).toHaveLength(2);
+    await expect(rows[0]).toHaveTextContent('Approval needed');
+    await expect(rows[0]).toHaveTextContent('Pending');
+    await expect(rows[0]).toHaveTextContent('approver: Legal');
+    await expect(rows[0]).toHaveAttribute('data-open', 'true');
+    await expect(rows[1]).toHaveTextContent('Date window');
+    await expect(rows[1]).toHaveTextContent('Satisfied');
+    await expect(rows[1]).toHaveAttribute('data-open', 'false');
+    // Read-only: no way to change a constraint's status
+    await expect(list.queryAllByRole('button')).toHaveLength(0);
+  },
+};
+
+/** Acceptance: a task with no constraints says so on its page. */
+export const NoConstraints: Story = {
+  beforeEach: ({ msw }) => {
+    msw.use(
+      http.get(TASK_URL, () =>
+        HttpResponse.json({ ...task, constraints: [], openConstraintCount: 0 } satisfies ApiTask),
+      ),
+    );
+  },
+  play: async ({ canvas }) => {
+    await expect(await canvas.findByText('No constraints on this task')).toBeInTheDocument();
+    await expect(canvas.queryByRole('list', { name: 'Task constraints' })).not.toBeInTheDocument();
+  },
+};

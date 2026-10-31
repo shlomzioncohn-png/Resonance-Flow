@@ -47,7 +47,7 @@ public record ChatMessage(
      * see SourceRecord), fileId never changes across a retry or an unrelated edit of the same
      * message, so it - paired with the owning message's id - is what GroupStateStore uses to
      * recognize "this exact attachment was already published" (see
-     * ChatGroupStateReconciler.mergeSnapshots and UnstructuredIntakeLane.afterPublish).
+     * GroupStateMutator.mergeSnapshots and UnstructuredIntakeLane.afterPublish).
      */
     public record Attachment(String fileId, String filename, String mimeType, byte[] content) {
 

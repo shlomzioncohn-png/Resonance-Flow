@@ -1,10 +1,10 @@
 /**
  * Work Insights API - typed wrapper around the Gateway's /api/work-insights endpoints.
- * Inbox serves them; the Gateway and BFF routes that forward to Inbox are not built yet.
+ * The Gateway and BFF forward them to Inbox.
  */
 import { api } from './api';
 
-type WorkInsightStatus ='READY' | 'NOT_ENOUGH_DATA' | 'NO_INSIGHT';
+type WorkInsightStatus = 'READY' | 'NOT_ENOUGH_DATA' | 'NO_INSIGHT';
 
 type InsightEvidence = {
   text: string;

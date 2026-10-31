@@ -1,4 +1,4 @@
-"""The analysis packages must never touch the generator's answer files."""
+"""The analysis packages must never touch the generator's answer files (only `evaluation` may, to score them)."""
 import re
 from pathlib import Path
 
@@ -7,7 +7,7 @@ FORBIDDEN = ("pathologies", "run_manifest", "manifest.json", "ground_truth", "he
 
 
 def _analysis_sources():
-    return [p for p in SRC.rglob("*.py") if "generator" not in p.relative_to(SRC).parts]
+    return [p for p in SRC.rglob("*.py") if not {"generator", "evaluation"} & set(p.relative_to(SRC).parts) and p.name != "run_all.py"]
 
 
 def test_analysis_code_exists_to_scan():
@@ -21,4 +21,9 @@ def test_no_analysis_module_mentions_an_answer_file():
 
 def test_no_analysis_module_imports_the_generator():
     hits = [p.name for p in _analysis_sources() if re.search(r"flow_health\.generator|from \.\.generator", p.read_text("utf-8"))]
+    assert not hits
+
+
+def test_no_analysis_module_imports_the_evaluation():
+    hits = [p.name for p in _analysis_sources() if re.search(r"flow_health\.evaluation|from \.\.evaluation|from \.evaluation", p.read_text("utf-8"))]
     assert not hits

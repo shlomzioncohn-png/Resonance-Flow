@@ -1,0 +1,32 @@
+# Thresholds of the detectors. Tuned on the dev set (seed 42) only. Final round (task 4): chosen by best F1 per detector on dev
+# (chronic_blocker min_active_ratio 8->12, min_dependents 1->3; slow_chain min_ratio_to_median 2->4); the heldout set was not opened.
+
+chronic_blocker:
+  ratio_column: active_ratio_to_tier_project   # task feature: work time against the usual of the task's tier inside its project
+  min_active_ratio: 12.0        # value of that feature from which a task is flagged
+  min_dependents: 3             # the most dependents the task ever had at the same time
+  medium_from_ratio: 16.0       # low: [min, medium); medium: [medium, high); high: [high, ...)
+  high_from_ratio: 32.0
+
+recurring_cycle:
+  min_transitions: 3            # ADDED<->REMOVED switches of one edge (the first ADDED is not a switch)
+  min_median_gap_days: 1.0      # opening value was 2; dev edges with >=3 switches have median gaps of 1.8-3.0 days
+  max_median_gap_days: 10.0
+  medium_min_transitions: 5     # severity: low below this
+  high_min_transitions: 8       # high from here, or from medium_min_transitions when the gaps are even (see tight_cv)
+  tight_cv: 0.3                 # coefficient of variation of the gaps (std / mean) at or below which gaps are "even"
+  pair_min_return_days: 1.0     # near-cycle: the removed edge must stay away at least this long before it returns
+  min_blocker_active_ratio: 4.0 # the task the edge points at must itself be this slow (active_ratio_to_tier_project): the blocker is stuck, not a healthy task that was re-planned
+
+slow_chain:
+  min_length: 4                 # paths of min_length..max_length tasks; windows of that size are cut from longer ones
+  max_length: 8
+  max_paths: 1000000            # guard against a graph with an exploding number of paths
+  max_overlap: 0.5              # of two overlapping flags on one stretch, the weaker is dropped if they share more than this
+  link_ratio_column: active_ratio_to_tier_project   # per-task feature: work time against the usual of the task's tier inside its project
+  min_group_size: 8             # fewer paths of one length: no baseline, nothing is flagged
+  min_ratio_to_median: 4.0      # median link ratio of the path / median of that value over paths of the same length
+  min_robust_z: 3.5             # 0.6745 * (x - median) / MAD, within the same length
+  max_link_share: 0.5           # no single link may account for more than this share of the total time
+  medium_from_ratio: 4.0        # severity bands on the ratio to the group median
+  high_from_ratio: 8.0

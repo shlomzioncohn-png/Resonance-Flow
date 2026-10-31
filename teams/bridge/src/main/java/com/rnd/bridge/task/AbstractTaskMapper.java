@@ -52,8 +52,8 @@ public abstract class AbstractTaskMapper<S> implements PayloadMapper<S, Task> {
      * Named {@code organizationId()}, not {@code tenantId()}, to match
      * {@link com.rnd.bridge.task.model.Task#organizationId()} - Task is
      * deliberately not renamed alongside Inbox's organization-to-tenant
-     * rename, see {@code CLAUDE.md} §4/§6. {@code BridgeTaskEventDto.from()}
-     * is what actually renames this value onto the wire as {@code tenantId}.
+     * rename, see {@code CLAUDE.md} §4/§6. {@link StructuredTaskEventMapper#from(Task)}
+     * is what actually renames this value onto the wire as {@code tenant_id}.
      */
     protected String organizationId() {
         return null;

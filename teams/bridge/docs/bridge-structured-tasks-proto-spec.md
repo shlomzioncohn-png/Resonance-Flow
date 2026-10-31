@@ -1,5 +1,11 @@
 # Field specification: `bridge.structured.tasks` → Protobuf
 
+> **Historical — migration completed.** This was the handoff spec for moving
+> `bridge.structured.tasks` from JSON to Protobuf. The JSON producer DTO it specifies,
+> `BridgeTaskEventDto`, has since been removed as unused (PR #1097); `shared/proto/structured-task-event.proto`
+> (built by `StructuredTaskEventMapper`) is now the sole source of truth for this topic's wire
+> shape. Kept here for the migration history, not as current guidance.
+
 Handoff document for whoever authors the `.proto` for this topic, per
 `teams/relay/docs/kafka-producer-consumer-guide.md` §2/§6 ("bring field names, types, and the
 topic name — you don't write the `.proto` yourself"). This is still a from-scratch schema: `main`
