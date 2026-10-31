@@ -15,6 +15,8 @@ import java.sql.SQLException;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Postgres-backed {@link FlowHealthFlagRepository}, plain JDBC like {@link PostgresConstraintHistoryRepository}.
@@ -33,10 +35,12 @@ public class PostgresFlowHealthFlagRepository implements FlowHealthFlagRepositor
     }
 
     @Override
-    public PageResponse<FlowHealthFlag> findPage(FlowHealthPattern pattern, FlowHealthSeverity severity,
-                                                 int page, int size) {
-        StringBuilder where = new StringBuilder(" WHERE 1 = 1");
+    public PageResponse<FlowHealthFlag> findPage(UUID tenantId, FlowHealthPattern pattern,
+                                                 FlowHealthSeverity severity, int page, int size) {
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
+        StringBuilder where = new StringBuilder(" WHERE tenant_id = ?");
         List<Object> args = new ArrayList<>();
+        args.add(tenantId);
         if (pattern != null) {
             where.append(" AND pattern = ?");
             args.add(pattern.name());

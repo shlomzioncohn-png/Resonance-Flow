@@ -2,6 +2,9 @@ package com.rnd.bff.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -14,6 +17,7 @@ import com.rnd.bff.dto.FlowHealthFlagDTO;
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.exception.ServiceUnavailableException;
 import java.util.List;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -25,6 +29,7 @@ import org.springframework.web.client.ResourceAccessException;
 class FlowHealthServiceTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String TENANT = "aaaaaaaa-0000-0000-0000-000000000001";
     private static final String T1 = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
     private static final String T2 = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
     private static final String T3 = "cccccccc-cccc-cccc-cccc-cccccccccccc";
@@ -34,7 +39,13 @@ class FlowHealthServiceTest {
 
     @Mock private ChainClient chainClient;
     @Mock private InboxClient inboxClient;
+    @Mock private UserTenantResolver tenantResolver;
     @InjectMocks private FlowHealthService service;
+
+    @BeforeEach
+    void managerBelongsToTenant() {
+        lenient().when(tenantResolver.tenantOf("mgr")).thenReturn(TENANT);
+    }
 
     private static TaskDTO task(String id, String title, String projectId, String projectName) {
         return TaskDTO.builder().id(id).title(title).projectId(projectId).project(projectName).build();
@@ -52,7 +63,7 @@ class FlowHealthServiceTest {
 
     @Test
     void getFlowHealth_namesTasksForTaskEdgeAndChainEntities() {
-        when(chainClient.getFlowHealthFlags()).thenReturn(List.of(
+        when(chainClient.getFlowHealthFlags(TENANT)).thenReturn(List.of(
                 flag("CHRONIC_BLOCKER:1", "CHRONIC_BLOCKER", "task", List.of(T1), 1, "2026-10-28T10:00:00Z", "{}"),
                 flag("RECURRING_CYCLE:2", "RECURRING_CYCLE", "edge", List.of(T2 + ">" + T1), 2,
                         "2026-10-28T10:00:00Z", "{}"),
@@ -76,7 +87,7 @@ class FlowHealthServiceTest {
 
     @Test
     void getFlowHealth_unknownTaskFallsBackToItsId() {
-        when(chainClient.getFlowHealthFlags()).thenReturn(List.of(
+        when(chainClient.getFlowHealthFlags(TENANT)).thenReturn(List.of(
                 flag("CHRONIC_BLOCKER:1", "CHRONIC_BLOCKER", "task", List.of(UNKNOWN), 1, "2026-10-28T10:00:00Z", "{}")));
         when(inboxClient.getTenantTasks("mgr")).thenReturn(List.of());
 
@@ -88,7 +99,7 @@ class FlowHealthServiceTest {
 
     @Test
     void getFlowHealth_countsEveryPatternAndTakesTheNewestRunDate() {
-        when(chainClient.getFlowHealthFlags()).thenReturn(List.of(
+        when(chainClient.getFlowHealthFlags(TENANT)).thenReturn(List.of(
                 flag("a", "CHRONIC_BLOCKER", "task", List.of(T1), 1, "2026-10-27T10:00:00Z", "{}"),
                 flag("b", "CHRONIC_BLOCKER", "task", List.of(T2), 2, "2026-10-28T10:00:00Z", "{}"),
                 flag("c", "SLOW_CHAIN", "chain", List.of(T1, T2), 3, "2026-10-26T10:00:00Z", "{}")));
@@ -103,7 +114,7 @@ class FlowHealthServiceTest {
 
     @Test
     void getFlowHealth_collectsProjectsPerFlagAndOverall() {
-        when(chainClient.getFlowHealthFlags()).thenReturn(List.of(
+        when(chainClient.getFlowHealthFlags(TENANT)).thenReturn(List.of(
                 flag("a", "SLOW_CHAIN", "chain", List.of(T1, T3), 1, "2026-10-28T10:00:00Z", "{}"),
                 flag("b", "CHRONIC_BLOCKER", "task", List.of(T2), 2, "2026-10-28T10:00:00Z", "{}")));
         when(inboxClient.getTenantTasks("mgr")).thenReturn(List.of(
@@ -119,7 +130,7 @@ class FlowHealthServiceTest {
 
     @Test
     void getFlowHealth_taskNamesAlsoCoverTaskIdsInsideTheEvidence() {
-        when(chainClient.getFlowHealthFlags()).thenReturn(List.of(
+        when(chainClient.getFlowHealthFlags(TENANT)).thenReturn(List.of(
                 flag("a", "CHRONIC_BLOCKER", "task", List.of(T1), 1, "2026-10-28T10:00:00Z",
                         "{\"blocked\": [{\"taskId\": \"" + T2 + "\", \"days\": 4}], \"note\": \"no id here\"}")));
         when(inboxClient.getTenantTasks("mgr")).thenReturn(List.of(
@@ -133,7 +144,7 @@ class FlowHealthServiceTest {
 
     @Test
     void getFlowHealth_noFlags_returnsEmptyStateWithoutCallingInbox() {
-        when(chainClient.getFlowHealthFlags()).thenReturn(List.of());
+        when(chainClient.getFlowHealthFlags(TENANT)).thenReturn(List.of());
 
         FlowHealthDTO result = service.getFlowHealth("mgr");
 
@@ -145,15 +156,35 @@ class FlowHealthServiceTest {
 
     @Test
     void getFlowHealth_chainUnavailable_propagatesServiceUnavailable() {
-        when(chainClient.getFlowHealthFlags()).thenThrow(new ServiceUnavailableException("chain", "down"));
+        when(chainClient.getFlowHealthFlags(TENANT)).thenThrow(new ServiceUnavailableException("chain", "down"));
 
         assertThatThrownBy(() -> service.getFlowHealth("mgr")).isInstanceOf(ServiceUnavailableException.class);
         verifyNoInteractions(inboxClient);
     }
 
     @Test
+    void getFlowHealth_asksChainForTheManagersOwnTenantOnly() {
+        when(tenantResolver.tenantOf("other-mgr")).thenReturn("aaaaaaaa-0000-0000-0000-000000000002");
+        when(chainClient.getFlowHealthFlags("aaaaaaaa-0000-0000-0000-000000000002")).thenReturn(List.of());
+
+        service.getFlowHealth("other-mgr");
+
+        verify(chainClient).getFlowHealthFlags("aaaaaaaa-0000-0000-0000-000000000002");
+        verify(chainClient, never()).getFlowHealthFlags(TENANT);
+    }
+
+    @Test
+    void getFlowHealth_tenantUnknown_neverCallsChain() {
+        when(tenantResolver.tenantOf("ghost"))
+                .thenThrow(new ServiceUnavailableException("inbox", "Inbox didn't return the user's tenant"));
+
+        assertThatThrownBy(() -> service.getFlowHealth("ghost")).isInstanceOf(ServiceUnavailableException.class);
+        verifyNoInteractions(chainClient, inboxClient);
+    }
+
+    @Test
     void getFlowHealth_inboxUnreachable_becomesServiceUnavailable() {
-        when(chainClient.getFlowHealthFlags()).thenReturn(List.of(
+        when(chainClient.getFlowHealthFlags(TENANT)).thenReturn(List.of(
                 flag("a", "SLOW_CHAIN", "chain", List.of(T1), 1, "2026-10-28T10:00:00Z", "{}")));
         when(inboxClient.getTenantTasks("mgr")).thenThrow(new ResourceAccessException("timeout"));
 

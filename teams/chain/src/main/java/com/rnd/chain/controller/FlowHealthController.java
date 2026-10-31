@@ -5,6 +5,7 @@ import com.rnd.chain.dto.FlowHealthSeverity;
 import com.rnd.chain.dto.PageResponse;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.service.FlowHealthFlagService;
+import com.rnd.chain.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,8 +20,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class FlowHealthController {
 
     private final FlowHealthFlagService flowHealthFlagService;
+    private final TenantContext tenantContext;
 
-    /** {@code pattern} is the enum name (e.g. CHRONIC_BLOCKER), {@code severity} is low/medium/high; omitted means any. */
+    /**
+     * Only the caller's tenant's flags (header {@code X-Tenant-Id}, required). {@code pattern} is the
+     * enum name (e.g. CHRONIC_BLOCKER), {@code severity} is low/medium/high; omitted means any.
+     */
     @GetMapping("/flags")
     public ResponseEntity<PageResponse<FlowHealthFlagResponse>> getFlags(
             @RequestParam(required = false) FlowHealthPattern pattern,
@@ -29,7 +34,8 @@ public class FlowHealthController {
             @RequestParam(defaultValue = "20") int size) {
 
         return ResponseEntity.ok(
-                flowHealthFlagService.getFlags(pattern, parseSeverity(severity), page, size)
+                flowHealthFlagService.getFlags(tenantContext.requireTenantId(), pattern,
+                                parseSeverity(severity), page, size)
                         .map(FlowHealthFlagResponse::from));
     }
 

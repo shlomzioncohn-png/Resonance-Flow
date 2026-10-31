@@ -133,7 +133,7 @@ src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_
                                   # V12 constraint_history - issue #815,
                                   # V13 drops unresolved_dependencies - replaced by placeholder tasks,
                                   # V14 task.tier - issue #864,
-                                  # V18 flow_health_flag - written only by the flow-health analytics job)
+                                  # V18 flow_health_flag (per tenant) - written only by the flow-health analytics job)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskDependencyServicePostgresIntegrationTest,
@@ -168,7 +168,7 @@ Ancestors has no `/transitive` variant - the ancestor chain already is the trans
 | GET | `/tasks/state-history` | Tenant-wide state history, `from`/`to` required (max 90 days), cursor-paged oldest first |
 | GET | `/tasks/blocked-since` | Currently blocked tasks of the tenant with `blockedSince`, optional `taskIds` |
 | GET | `/tasks/{taskId}/constraints/history` | Constraint history, filterable by time range |
-| GET | `/flow-health/flags` | Flow-health flags (read-only): filter by `pattern` (CHRONIC_BLOCKER, RECURRING_CYCLE, SLOW_CHAIN) and `severity` (low, medium, high); paged with `page`/`size` (max 100), ordered by rank |
+| GET | `/flow-health/flags` | The caller's tenant's flow-health flags (read-only; `X-Tenant-Id` required, 400 without): filter by `pattern` (CHRONIC_BLOCKER, RECURRING_CYCLE, SLOW_CHAIN) and `severity` (low, medium, high); paged with `page`/`size` (max 100), ordered by rank |
 | GET | `/tasks/{taskId}/dependents` | Direct dependents |
 | GET | `/tasks/{taskId}/dependents/transitive` | All (transitive) dependents |
 | GET | `/tasks/{taskId}/ancestors` | Full ancestor chain (hierarchy) |

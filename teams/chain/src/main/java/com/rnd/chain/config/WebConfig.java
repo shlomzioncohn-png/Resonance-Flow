@@ -18,7 +18,7 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(tenantInterceptor)
-                .addPathPatterns("/tasks/**")
+                .addPathPatterns("/tasks/**", "/flow-health/**")
                 .excludePathPatterns(TENANT_EXEMPT_PATHS);
     }
 }

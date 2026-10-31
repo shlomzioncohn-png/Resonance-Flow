@@ -100,14 +100,15 @@ public class ChainClient {
     }
 
     /**
-     * Every flow-health flag Chain holds (all pages), ordered by rank. Read-only. The flags are
-     * not tenant-scoped in Chain, so no tenant header is sent; the BFF only names the tasks
-     * Inbox knows for the acting user's tenant.
+     * Every flow-health flag Chain holds for {@code tenantId} (all pages), ordered by rank. Read-only.
+     * Chain scopes the flags by the {@code X-Tenant-Id} header and answers 400 without a valid one.
      *
      * @throws ServiceUnavailableException if Chain is unreachable or answers with an error or an empty body;
      *                                     the cause is logged, never sent to the caller
      */
-    public List<ChainFlowHealthFlagDTO> getFlowHealthFlags() {
+    public List<ChainFlowHealthFlagDTO> getFlowHealthFlags(String tenantId) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(TENANT_HEADER, tenantId);
         List<ChainFlowHealthFlagDTO> flags = new ArrayList<>();
         try {
             int page = 0;
@@ -119,7 +120,8 @@ public class ChainClient {
                         .queryParam("size", FLAGS_PAGE_SIZE)
                         .build()
                         .toUri();
-                current = restTemplate.getForObject(uri, ChainFlowHealthPageDTO.class);
+                current = restTemplate.exchange(uri, HttpMethod.GET, new HttpEntity<>(headers),
+                        ChainFlowHealthPageDTO.class).getBody();
                 if (current == null || current.getContent() == null) {
                     throw new ServiceUnavailableException("chain", "Chain returned an empty response");
                 }

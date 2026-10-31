@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -22,6 +23,9 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class FlowHealthFlagServiceTest {
+
+    private static final UUID TENANT = UUID.fromString("aaaaaaaa-0000-0000-0000-000000000001");
+    private static final UUID OTHER_TENANT = UUID.fromString("aaaaaaaa-0000-0000-0000-000000000002");
 
     private final PageResponse<FlowHealthFlag> emptyPage = new PageResponse<>(List.of(), 0, 20, 0, 0);
 
@@ -40,11 +44,12 @@ class FlowHealthFlagServiceTest {
     }
 
     @Test
-    void getFlags_delegatesFiltersAndPagingInAReadOnlyTransaction() {
-        when(repository.findPage(FlowHealthPattern.SLOW_CHAIN, FlowHealthSeverity.HIGH, 2, 5)).thenReturn(emptyPage);
+    void getFlags_delegatesTenantFiltersAndPagingInAReadOnlyTransaction() {
+        when(repository.findPage(TENANT, FlowHealthPattern.SLOW_CHAIN, FlowHealthSeverity.HIGH, 2, 5))
+                .thenReturn(emptyPage);
 
         PageResponse<FlowHealthFlag> result =
-                service.getFlags(FlowHealthPattern.SLOW_CHAIN, FlowHealthSeverity.HIGH, 2, 5);
+                service.getFlags(TENANT, FlowHealthPattern.SLOW_CHAIN, FlowHealthSeverity.HIGH, 2, 5);
 
         assertThat(result).isSameAs(emptyPage);
         verify(transactionRunner).runInReadOnlyTransaction(any());
@@ -52,30 +57,49 @@ class FlowHealthFlagServiceTest {
 
     @Test
     void getFlags_nullFilters_meanAny() {
-        when(repository.findPage(null, null, 0, 20)).thenReturn(emptyPage);
+        when(repository.findPage(TENANT, null, null, 0, 20)).thenReturn(emptyPage);
 
-        assertThat(service.getFlags(null, null, 0, 20)).isSameAs(emptyPage);
+        assertThat(service.getFlags(TENANT, null, null, 0, 20)).isSameAs(emptyPage);
+    }
+
+    @Test
+    void getFlags_asksTheStoreForTheCallersTenantOnly() {
+        when(repository.findPage(TENANT, null, null, 0, 20)).thenReturn(emptyPage);
+
+        service.getFlags(TENANT, null, null, 0, 20);
+
+        verify(repository).findPage(TENANT, null, null, 0, 20);
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never())
+                .findPage(org.mockito.ArgumentMatchers.eq(OTHER_TENANT), any(), any(),
+                        org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test
     void getFlags_maxPageSizeIsAccepted() {
-        when(repository.findPage(null, null, 0, 100)).thenReturn(emptyPage);
+        when(repository.findPage(TENANT, null, null, 0, 100)).thenReturn(emptyPage);
 
-        assertThat(service.getFlags(null, null, 0, 100)).isSameAs(emptyPage);
+        assertThat(service.getFlags(TENANT, null, null, 0, 100)).isSameAs(emptyPage);
+    }
+
+    @Test
+    void getFlags_noTenant_isRejectedBeforeTouchingTheStore() {
+        assertThatThrownBy(() -> service.getFlags(null, null, null, 0, 20))
+                .isInstanceOf(NullPointerException.class);
+        verifyNoInteractions(repository, transactionRunner);
     }
 
     @Test
     void getFlags_negativePage_isRejectedBeforeTouchingTheStore() {
-        assertThatThrownBy(() -> service.getFlags(null, null, -1, 20))
+        assertThatThrownBy(() -> service.getFlags(TENANT, null, null, -1, 20))
                 .isInstanceOf(InvalidRequestException.class);
         verifyNoInteractions(repository, transactionRunner);
     }
 
     @Test
     void getFlags_sizeOutOfRange_isRejected() {
-        assertThatThrownBy(() -> service.getFlags(null, null, 0, 0))
+        assertThatThrownBy(() -> service.getFlags(TENANT, null, null, 0, 0))
                 .isInstanceOf(InvalidRequestException.class);
-        assertThatThrownBy(() -> service.getFlags(null, null, 0, 101))
+        assertThatThrownBy(() -> service.getFlags(TENANT, null, null, 0, 101))
                 .isInstanceOf(InvalidRequestException.class);
         verifyNoInteractions(repository);
     }

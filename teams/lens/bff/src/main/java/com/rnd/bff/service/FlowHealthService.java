@@ -42,15 +42,17 @@ public class FlowHealthService {
 
     private final ChainClient chainClient;
     private final InboxClient inboxClient;
+    private final UserTenantResolver tenantResolver;
 
-    public FlowHealthService(ChainClient chainClient, InboxClient inboxClient) {
+    public FlowHealthService(ChainClient chainClient, InboxClient inboxClient, UserTenantResolver tenantResolver) {
         this.chainClient = chainClient;
         this.inboxClient = inboxClient;
+        this.tenantResolver = tenantResolver;
     }
 
-    /** @param userId the acting manager (X-User-Id); Inbox scopes the tasks to their tenant */
+    /** @param userId the acting manager (X-User-Id); their own tenant (from Inbox) scopes both the flags and the task names */
     public FlowHealthDTO getFlowHealth(String userId) {
-        List<ChainFlowHealthFlagDTO> chainFlags = chainClient.getFlowHealthFlags();
+        List<ChainFlowHealthFlagDTO> chainFlags = chainClient.getFlowHealthFlags(tenantResolver.tenantOf(userId));
 
         Map<String, TaskDTO> tasksById = chainFlags.isEmpty() ? Map.of() : loadTasks(userId);
 

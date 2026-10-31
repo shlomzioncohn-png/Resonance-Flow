@@ -2,6 +2,7 @@ package com.rnd.bff.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.queryParam;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
@@ -21,6 +22,7 @@ import org.springframework.web.client.RestTemplate;
 class ChainFlowHealthClientTest {
 
     private static final String BASE = "http://chain.test";
+    private static final String TENANT = "aaaaaaaa-0000-0000-0000-000000000001";
 
     private MockRestServiceServer server;
     private ChainClient client;
@@ -51,9 +53,10 @@ class ChainFlowHealthClientTest {
     @Test
     void getFlowHealthFlags_mapsChainsJsonIgnoringUnknownFields() {
         server.expect(requestTo(BASE + "/flow-health/flags?page=0&size=100"))
+                .andExpect(header("X-Tenant-Id", TENANT))
                 .andRespond(withSuccess(page(0, 1, "f1"), MediaType.APPLICATION_JSON));
 
-        List<ChainFlowHealthFlagDTO> flags = client.getFlowHealthFlags();
+        List<ChainFlowHealthFlagDTO> flags = client.getFlowHealthFlags(TENANT);
 
         assertThat(flags).hasSize(1);
         ChainFlowHealthFlagDTO flag = flags.get(0);
@@ -66,10 +69,10 @@ class ChainFlowHealthClientTest {
 
     @Test
     void getFlowHealthFlags_readsEveryPage() {
-        server.expect(queryParam("page", "0")).andRespond(withSuccess(page(0, 2, "f1"), MediaType.APPLICATION_JSON));
-        server.expect(queryParam("page", "1")).andRespond(withSuccess(page(1, 2, "f2"), MediaType.APPLICATION_JSON));
+        server.expect(queryParam("page", "0")).andExpect(header("X-Tenant-Id", TENANT)).andRespond(withSuccess(page(0, 2, "f1"), MediaType.APPLICATION_JSON));
+        server.expect(queryParam("page", "1")).andExpect(header("X-Tenant-Id", TENANT)).andRespond(withSuccess(page(1, 2, "f2"), MediaType.APPLICATION_JSON));
 
-        assertThat(client.getFlowHealthFlags()).extracting(ChainFlowHealthFlagDTO::getFlagId)
+        assertThat(client.getFlowHealthFlags(TENANT)).extracting(ChainFlowHealthFlagDTO::getFlagId)
                 .containsExactly("f1", "f2");
         server.verify();
     }
@@ -78,7 +81,7 @@ class ChainFlowHealthClientTest {
     void getFlowHealthFlags_chainError_becomesServiceUnavailableWithoutInternalDetails() {
         server.expect(requestTo(BASE + "/flow-health/flags?page=0&size=100")).andRespond(withServerError());
 
-        assertThatThrownBy(() -> client.getFlowHealthFlags())
+        assertThatThrownBy(() -> client.getFlowHealthFlags(TENANT))
                 .isInstanceOf(ServiceUnavailableException.class)
                 .hasMessageNotContaining("500")
                 .hasMessageNotContaining(BASE);

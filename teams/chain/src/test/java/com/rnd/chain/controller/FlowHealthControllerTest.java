@@ -9,6 +9,8 @@ import com.rnd.chain.dto.PageResponse;
 import com.rnd.chain.exception.GlobalExceptionHandler;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.service.FlowHealthFlagService;
+import com.rnd.chain.tenant.TenantContext;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -18,7 +20,9 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -29,12 +33,21 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class FlowHealthControllerTest {
 
     private static final String URL = "/flow-health/flags";
+    private static final UUID TENANT = UUID.fromString("aaaaaaaa-0000-0000-0000-000000000001");
 
     @Autowired
     private MockMvc mockMvc;
 
     @MockBean
     private FlowHealthFlagService service;
+
+    @MockBean
+    private TenantContext tenantContext;
+
+    @BeforeEach
+    void setUp() {
+        when(tenantContext.requireTenantId()).thenReturn(TENANT);
+    }
 
     private static FlowHealthFlag flag() {
         return new FlowHealthFlag("SLOW_CHAIN:abc", FlowHealthPattern.SLOW_CHAIN, FlowHealthEntityType.CHAIN,
@@ -44,7 +57,7 @@ class FlowHealthControllerTest {
 
     @Test
     void getFlags_returnsPageWithDefaultsAndNoFilters() throws Exception {
-        when(service.getFlags(null, null, 0, 20)).thenReturn(new PageResponse<>(List.of(flag()), 0, 20, 1, 1));
+        when(service.getFlags(TENANT, null, null, 0, 20)).thenReturn(new PageResponse<>(List.of(flag()), 0, 20, 1, 1));
 
         mockMvc.perform(get(URL))
                 .andExpect(status().isOk())
@@ -59,7 +72,7 @@ class FlowHealthControllerTest {
 
     @Test
     void getFlags_passesFiltersAndPagingToTheService() throws Exception {
-        when(service.getFlags(FlowHealthPattern.CHRONIC_BLOCKER, FlowHealthSeverity.LOW, 2, 5))
+        when(service.getFlags(TENANT, FlowHealthPattern.CHRONIC_BLOCKER, FlowHealthSeverity.LOW, 2, 5))
                 .thenReturn(new PageResponse<>(List.of(), 2, 5, 0, 0));
 
         mockMvc.perform(get(URL).param("pattern", "CHRONIC_BLOCKER").param("severity", "low")
@@ -67,6 +80,16 @@ class FlowHealthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.length()").value(0))
                 .andExpect(jsonPath("$.page").value(2));
+    }
+
+    @Test
+    void getFlags_missingTenantHeader_is400AndNeverReachesTheService() throws Exception {
+        when(tenantContext.requireTenantId())
+                .thenThrow(new InvalidRequestException("Missing required header: X-Tenant-Id"));
+
+        mockMvc.perform(get(URL))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(service);
     }
 
     @Test
@@ -83,7 +106,7 @@ class FlowHealthControllerTest {
 
     @Test
     void getFlags_invalidPaging_is400() throws Exception {
-        when(service.getFlags(null, null, 0, 500)).thenThrow(new InvalidRequestException("bad paging"));
+        when(service.getFlags(TENANT, null, null, 0, 500)).thenThrow(new InvalidRequestException("bad paging"));
 
         mockMvc.perform(get(URL).param("size", "500"))
                 .andExpect(status().isBadRequest());
