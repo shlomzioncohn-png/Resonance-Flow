@@ -34,6 +34,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", type=Path, default=None, help="flags file (default: <features>/flags.json)")
     p.add_argument("--config", type=Path, default=None, help="thresholds file (default: detectors/config.yaml)")
     p.add_argument("--seed", type=int, default=None, help="seed of the data set, recorded in the file for reference")
+    p.add_argument("--tenant", default=None,
+                   help="uuid of the tenant this data belongs to, recorded as meta.tenant_id (needed to publish the flags)")
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -47,8 +49,11 @@ def main(argv: list[str] | None = None) -> int:
     chains = extract_paths(timeline, cfg.slow_chain)
     flags = run_detectors(tasks, ds.dependency_history, chains, cfg, clusters, finish_times(timeline))
     out = args.out or args.features / "flags.json"
-    write_flags(flags, out, {"seed": args.seed, "as_of": ds.as_of.isoformat(), "data": str(args.data),
-                             "counts": {pattern: sum(f.pattern == pattern for f in flags) for pattern in PATTERNS}})
+    meta = {"seed": args.seed, "as_of": ds.as_of.isoformat(), "data": str(args.data),
+            "counts": {pattern: sum(f.pattern == pattern for f in flags) for pattern in PATTERNS}}
+    if args.tenant:
+        meta["tenant_id"] = args.tenant
+    write_flags(flags, out, meta)
     print(f"{len(flags)} flags -> {out}")
     return 0
 

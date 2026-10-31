@@ -4,17 +4,16 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from ..detectors.common import SEVERITIES, Flag
+from ..detectors.common import Flag, rank_order
 from .matching import flag_tasks
 
 COLUMNS = ["rank", "pattern", "entity", "severity", "score", "explanation", "related", "flag_id"]
-_SEVERITY_ORDER = {s: i for i, s in enumerate(reversed(SEVERITIES))}   # high first
 
 
 def rank_flags(flags: list[Flag]) -> list[dict]:
     """Severity (high, medium, low), then score descending; ties by flag_id so runs agree.
     `related`: ranks of the rows from another detector that share a task with this one."""
-    ordered = sorted(flags, key=lambda f: (_SEVERITY_ORDER[f.severity], -f.score, f.flag_id))
+    ordered = rank_order(flags)
     rows = [{"rank": i, "pattern": f.pattern, "entity": ";".join(f.entity_ids), "severity": f.severity,
              "score": f.score, "explanation": f.explanation, "related": "", "flag_id": f.flag_id}
             for i, f in enumerate(ordered, start=1)]
