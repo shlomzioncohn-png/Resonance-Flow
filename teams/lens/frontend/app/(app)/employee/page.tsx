@@ -65,8 +65,6 @@ export default function EmployeeWorkspacePage() {
   // The minutes the shown recommendation was asked for - `minutes` can change after it arrives
   const [searchedMinutes, setSearchedMinutes] = useState(minutes);
   const [starting, setStarting] = useState(false);
-  // Design only: Reject isn't wired yet
-  const [preview, setPreview] = useState<string | null>(null);
   // Short confirmation after a status change, e.g. "Snoozed until tomorrow 09:00"
   const [notice, setNotice] = useState<string | null>(null);
   // The Project filter lists the projects of the employee's own tasks
@@ -97,15 +95,20 @@ export default function EmployeeWorkspacePage() {
     }
   };
 
-  // Start task -> IN_PROGRESS, Mark as done -> DONE, Can't do it now -> SNOOZED
-  const changeStatus = async (status: 'IN_PROGRESS' | 'DONE' | 'SNOOZED', snoozedUntil?: Date) => {
+  // Start task -> IN_PROGRESS, Mark as done -> DONE, Can't do it now -> SNOOZED, Reject -> REJECTED
+  const changeStatus = async (
+    status: 'IN_PROGRESS' | 'DONE' | 'SNOOZED' | 'REJECTED',
+    snoozedUntil?: Date,
+    feedbackText?: string,
+  ) => {
     if (!recommendation?.task) return;
     setError(null); // an older error must not stay on screen after a successful change
     setStarting(true);
     try {
-      const updated = await updateTaskStatus(recommendation.task.id, status, snoozedUntil);
+      const updated = await updateTaskStatus(recommendation.task.id, status, snoozedUntil, feedbackText);
       if (status === 'DONE') setNotice('Task marked as done.');
       if (status === 'SNOOZED') setNotice('Snoozed until tomorrow 09:00.');
+      if (status === 'REJECTED') setNotice('Task rejected.');
       // Reflect the new status in the displayed recommendation
       setRecommendation((prev) => (prev ? { ...prev, task: updated } : prev));
     } catch (err) {
@@ -324,8 +327,13 @@ export default function EmployeeWorkspacePage() {
                       // Inbox has no "blocked" status or reason field - the task is
                       // snoozed until tomorrow morning, and the reason isn't saved yet
                       onBlock={() => changeStatus('SNOOZED', tomorrowMorning())}
+                      // Inbox has no category field, so the category goes at the start of the text
                       onReject={(details) =>
-                        setPreview(`Reject task: ${REJECT_CATEGORY_LABELS[details.category]}`)
+                        changeStatus(
+                          'REJECTED',
+                          undefined,
+                          `${REJECT_CATEGORY_LABELS[details.category]}: ${details.reason}`,
+                        )
                       }
                     />
                   </Box>
@@ -423,16 +431,6 @@ export default function EmployeeWorkspacePage() {
           </Stack>
         )}
       </Stack>
-      <Snackbar
-        open={preview !== null}
-        autoHideDuration={4000}
-        onClose={() => setPreview(null)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert severity="info" variant="filled" onClose={() => setPreview(null)}>
-          Preview only - not saved yet. {preview}
-        </Alert>
-      </Snackbar>
       <Snackbar
         open={notice !== null}
         autoHideDuration={4000}

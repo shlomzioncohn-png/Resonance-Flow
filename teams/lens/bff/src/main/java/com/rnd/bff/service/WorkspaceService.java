@@ -441,10 +441,11 @@ public class WorkspaceService {
     }
 
     /** "Start task" / manual status changes from the task details panel. */
-    public TaskDTO updateTaskStatus(String userId, String taskId, String newStatus, Instant snoozedUntil) {
+    public TaskDTO updateTaskStatus(String userId, String taskId, String newStatus, Instant snoozedUntil,
+                                    String feedbackText) {
         TaskDTO updated;
         try {
-            updated = inboxClient.updateStatus(userId, taskId, newStatus, snoozedUntil);
+            updated = inboxClient.updateStatus(userId, taskId, newStatus, snoozedUntil, feedbackText);
         } catch (InboxRejectedException ex) {
             // Inbox is up and said no (401/403/400) - not an outage, pass it on as-is
             throw ex;

@@ -40,8 +40,9 @@ export const BLOCK_REASON_LABELS: Record<BlockReason, string> = {
 };
 
 /**
- * Why the employee rejects a task. Inbox asked for a category plus a
- * free-text reason on every rejection. DRAFT list - to be confirmed with Inbox.
+ * Why the employee rejects a task. Inbox saves only a free text
+ * (feedback_text) and has no category field, so the page puts the category
+ * at the start of that text.
  */
 export type RejectCategory =
   'NOT_MY_RESPONSIBILITY' | 'DUPLICATE' | 'ALREADY_DONE' | 'NO_LONGER_RELEVANT' | 'OTHER';
