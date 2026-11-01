@@ -44,6 +44,10 @@ register them once after it starts (again after a registry restart):
 docker compose --profile seed run --rm schema-seed
 ```
 
+For a small dependency graph in Chain (the Manager's Bottlenecks screen), load Inbox's seed
+(`teams/inbox/seeds/load-seeds.sql`) and then `teams/chain/seeds/load-chain-demo-seed.sql`, which
+reuses its task ids and tenant.
+
 To publish a test event, open Kafka UI, pick the topic, choose `SchemaRegistry` as the value serde
 and send JSON. Each team's own `docker-compose.yml` runs a broker of its own on the same ports, so
 stop it before starting this one.
