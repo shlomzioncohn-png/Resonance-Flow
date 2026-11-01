@@ -1,0 +1,157 @@
+{
+  "model": "gemini-3.6-flash",
+  "transcripts": "AMI human transcripts (ami_transcripts.py)",
+  "similarity_backend": "embedding_similarity",
+  "threshold": 0.7,
+  "report": {
+    "meetings": [
+      {
+        "meeting_id": "IB4003",
+        "true_positives": 4,
+        "false_positives": 1,
+        "false_negatives": 4,
+        "precision": 0.8,
+        "recall": 0.5,
+        "f1": 0.6153846153846154,
+        "failed": false,
+        "report": {
+          "n_extracted": 5,
+          "n_annotated": 8,
+          "precision": 0.8,
+          "recall": 0.5,
+          "f1": 0.6153846153846154,
+          "matched": [
+            {
+              "extracted": "Ask Maggie and Pierrette about their office preferences. Susan (C) offered to ask Maggie and Pierrette for their office preferences since they were absent.",
+              "annotated": "One team member will ask Maggie and Pierrette about their preferences on the arrangement of people.",
+              "similarity": 0.8237234338666286
+            },
+            {
+              "extracted": "Find out if office rooms can be separated or split. Andre (A) needs to check building regulations and possibilities regarding room separations and splitting.",
+              "annotated": "The project manager will find out if it is possible to split up offices by putting up walls and doors.",
+              "similarity": 0.8027988154821856
+            },
+            {
+              "extracted": "Prepare a concrete proposal for office space arrangement. Everyone should state their preferences or gather feedback to bring a concrete proposal with names to the next meeting.",
+              "annotated": "The group members will come up with their own preferences regarding the arrangement of people in the space.",
+              "similarity": 0.7564830016494714
+            },
+            {
+              "extracted": "Find out if Gisella can share office space with the school's admin. Check options for accommodating Gisella in the admin space to avoid noise issues in research offices.",
+              "annotated": "The project manager will find out whether putting Gisella with the other admin of the school is an option.",
+              "similarity": 0.7389042913358261
+            }
+          ],
+          "missed": [
+            "The group members will poll other people regarding preferences regarding the arrangement of people in the space.",
+            "The team will try to build a proposal on the arrangement of people based on personal preferences.",
+            "The team will merge their proposal on the arrangement of people in the space with that of a different team.",
+            "The team will meet next Tuesday at two o'clock"
+          ],
+          "false_positives": [
+            "Find out if four people can fit in the three-person room. Check space constraints and furniture arrangements for extra capacity."
+          ],
+          "true_positives": 4
+        }
+      },
+      {
+        "meeting_id": "IS1008b",
+        "true_positives": 4,
+        "false_positives": 3,
+        "false_negatives": 0,
+        "precision": 0.5714285714285714,
+        "recall": 1.0,
+        "f1": 0.7272727272727273,
+        "failed": false,
+        "report": {
+          "n_extracted": 7,
+          "n_annotated": 4,
+          "precision": 0.5714285714285714,
+          "recall": 1.0,
+          "f1": 0.7272727272727273,
+          "matched": [
+            {
+              "extracted": "Work on the user interface concept. Individual action item for the UI designer following the functional design meeting.",
+              "annotated": "The User Interface Designer will make a presentation on the user interface concept.",
+              "similarity": 0.8518216835006526
+            },
+            {
+              "extracted": "Work on the components concept. Individual action item for the industrial designer following the functional design meeting.",
+              "annotated": "The Industrial Designer will make a presentation on the components concept for the product.",
+              "similarity": 0.8380111773465422
+            },
+            {
+              "extracted": "Keep watching market trends. Individual action item for the marketing expert.",
+              "annotated": "The Marketing Expert will present the marketing concept.",
+              "similarity": 0.7557329503725582
+            },
+            {
+              "extracted": "Coordinate technical support for speech recognition integration. Offer technical backup and coordination with companies like Intel or IBM if requested by the design team.",
+              "annotated": "The Project Manager will research companies that can provide the Industrial Designer with help on integrating voice recognition into her design.",
+              "similarity": 0.7380513272073221
+            }
+          ],
+          "missed": [],
+          "false_positives": [
+            "Send the project aim details by email. Includes details about the company's financial goals for the project.",
+            "Send the minutes of the meeting",
+            "Put all information in the sharing folder. Share all relevant meeting information in the shared folder for the team."
+          ],
+          "true_positives": 4
+        }
+      },
+      {
+        "meeting_id": "IS1008d",
+        "true_positives": 3,
+        "false_positives": 4,
+        "false_negatives": 1,
+        "precision": 0.42857142857142855,
+        "recall": 0.75,
+        "f1": 0.5454545454545454,
+        "failed": false,
+        "report": {
+          "n_extracted": 7,
+          "n_annotated": 4,
+          "precision": 0.42857142857142855,
+          "recall": 0.75,
+          "f1": 0.5454545454545454,
+          "matched": [
+            {
+              "extracted": "Negotiate with vendors to reduce production costs. The Project Manager will speak to vendors to get the production cost lower so saved money can be put into marketing and promotions.",
+              "annotated": "The Project Manager will negotiate with production companies and with management to decrease the cost of production.",
+              "similarity": 0.8932119075431558
+            },
+            {
+              "extracted": "Start real production. Begin production after the prototype product evaluation is completed and approved by technical and management teams.",
+              "annotated": "The group will evaluate the product after real units have been produced.",
+              "similarity": 0.7633204448490588
+            },
+            {
+              "extracted": "Launch product in the market. Launch the remote control in the market after production is approved.",
+              "annotated": "The Marketing Expert will begin his marketing plan after production has begun.",
+              "similarity": 0.7101332607296617
+            }
+          ],
+          "missed": [
+            "He will also present the new promotion plan to management."
+          ],
+          "false_positives": [
+            "Speak to management about getting costs down. The Project Manager will talk to management regarding ways to reduce costs.",
+            "Perform prototype product evaluation. The team will evaluate the prototype product outside the factory, taking between two to four weeks.",
+            "Conduct market tests with prototypes. Run market tests and place orders once prototypes are available.",
+            "Convince management to align launch with a major sports event or tie-in campaign. The Project Manager will try to convince management to synchronise the product launch with a major sports event or movie tie-in."
+          ],
+          "true_positives": 3
+        }
+      }
+    ],
+    "failures": [],
+    "micro_precision": 0.5789473684210527,
+    "micro_recall": 0.6875,
+    "micro_f1": 0.6285714285714286,
+    "macro_precision": 0.6,
+    "macro_recall": 0.75,
+    "macro_f1": 0.6293706293706294,
+    "failure_reasons": {}
+  }
+}

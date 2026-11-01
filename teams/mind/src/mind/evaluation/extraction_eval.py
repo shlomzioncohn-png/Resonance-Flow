@@ -24,6 +24,11 @@ instead: it takes `ExtractedItem`s (`extraction_contract.py`), so the extracted
 side has to go through the contract before it is scored. `evaluate_extraction`
 stays the string-level engine underneath it (the CLI and the fixture use it).
 
+For a whole eval slice, call `evaluate_meetings(outcomes, gold_by_meeting, ...)`:
+it takes the extractor's outcomes as they come, groups them by `item_key` (the
+meeting id), scores each meeting with `evaluate_extracted_items`, and reports
+micro- and macro-averaged P/R/F1 (§3.5) plus a separate list of failed outcomes.
+
 `similarity` and `threshold` are **parameters, never hardcoded** (issue
 requirement): when Ayala's embedding-similarity function lands it is swapped in at
 the call site with no change here, and the locked lexical threshold
@@ -38,11 +43,13 @@ approaches on a fixed reference, not to certify an absolute quality score. See
 """
 
 import numbers
-from collections.abc import Callable, Sequence
+from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from mind.evaluation.extraction_contract import ExtractedItem
+from mind.extraction.extractor import ExtractionFailure, ExtractionSuccess
 
 
 class MatchedPair(BaseModel):
@@ -273,4 +280,170 @@ def evaluate_extracted_items(
         annotated,
         similarity=similarity,
         threshold=threshold,
+    )
+
+
+class MeetingResult(BaseModel):
+    """One meeting's counts and metrics, per `extraction_eval_design.md` §3.5.
+
+    Unlike `ExtractionEvalReport`, a metric whose denominator is 0 is `None`
+    (undefined), not 1.0 or 0.0: a meeting with no gold items has no recall to
+    report, and the macro average must skip it rather than count it as perfect.
+    `failed` is True when at least one of the meeting's outcomes was an
+    `ExtractionFailure`; its items then simply are not there (zero extracted when
+    every outcome failed), so its gold items all count as missed.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    meeting_id: str
+    true_positives: int = Field(ge=0)
+    false_positives: int = Field(ge=0)
+    false_negatives: int = Field(ge=0)
+    precision: float | None = Field(ge=0.0, le=1.0)
+    recall: float | None = Field(ge=0.0, le=1.0)
+    f1: float | None = Field(ge=0.0, le=1.0)
+    failed: bool
+    report: ExtractionEvalReport
+
+
+class MeetingFailure(BaseModel):
+    """One `ExtractionFailure`, kept apart so an outage is not read as a quality drop."""
+
+    model_config = ConfigDict(frozen=True)
+
+    meeting_id: str
+    reason: str
+
+
+class ExtractionSliceReport(BaseModel):
+    """The whole eval slice: per-meeting results, micro/macro averages, failures.
+
+    - `micro_*` (the headline; the CI check keys off `micro_f1`): `Σ TP / Σ (TP + FP)`
+      and `Σ TP / Σ (TP + FN)` over every meeting, so each action item weighs the
+      same. `None` when the denominator is 0.
+    - `macro_*`: mean of the meetings' *defined* values. `None` when no meeting
+      has one. A gap between micro and macro means the extractor behaves
+      differently on small and large meetings.
+    - `failures`: every failed outcome with its `reason`. Its meetings stay in
+      `meetings` and in both averages — skipping them would inflate the score.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    meetings: list[MeetingResult]
+    failures: list[MeetingFailure]
+    micro_precision: float | None = Field(ge=0.0, le=1.0)
+    micro_recall: float | None = Field(ge=0.0, le=1.0)
+    micro_f1: float | None = Field(ge=0.0, le=1.0)
+    macro_precision: float | None = Field(ge=0.0, le=1.0)
+    macro_recall: float | None = Field(ge=0.0, le=1.0)
+    macro_f1: float | None = Field(ge=0.0, le=1.0)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def failure_reasons(self) -> dict[str, int]:
+        """How many outcomes failed for each `reason` (`provider_error`, `invalid_output`)."""
+        return dict(Counter(failure.reason for failure in self.failures))
+
+
+def _ratio(numerator: int, denominator: int) -> float | None:
+    return numerator / denominator if denominator else None
+
+
+def _f1(precision: float | None, recall: float | None) -> float | None:
+    if precision is None or recall is None:
+        return None
+    if precision + recall == 0:
+        return 0.0
+    return 2 * precision * recall / (precision + recall)
+
+
+def _mean(values: Sequence[float | None]) -> float | None:
+    defined = [value for value in values if value is not None]
+    return sum(defined) / len(defined) if defined else None
+
+
+def evaluate_meetings(
+    outcomes: Sequence[ExtractionSuccess | ExtractionFailure],
+    gold_by_meeting: Mapping[str, Sequence[str]],
+    *,
+    similarity: Callable[[str, str], float],
+    threshold: float,
+) -> ExtractionSliceReport:
+    """Score the extractor's outcomes for a slice of meetings against their gold items.
+
+    Each outcome's `item_key` is the meeting id the eval passed to the extractor
+    (`extraction_contract.py`, "Which field carries the meeting id"). A meeting
+    may have more than one outcome; the tasks of all its successes are scored
+    together. Each `ExtractedTask` goes through `ExtractedItem`, so the contract
+    is checked here too.
+
+    Raises `ValueError`, rather than guess, when an outcome has no `item_key`,
+    names a meeting not in `gold_by_meeting`, or a gold meeting has no outcome at
+    all: each would otherwise drop or invent a meeting and move the score
+    silently.
+    """
+    items_by_meeting: dict[str, list[ExtractedItem]] = {}
+    failed_meetings: set[str] = set()
+    failures: list[MeetingFailure] = []
+    for outcome in outcomes:
+        meeting_id = outcome.item_key
+        if meeting_id is None:
+            raise ValueError("an extraction outcome has no item_key; it cannot be paired with a meeting")
+        if meeting_id not in gold_by_meeting:
+            raise ValueError(f"outcome for meeting {meeting_id!r}, which has no gold items entry")
+        items = items_by_meeting.setdefault(meeting_id, [])
+        if isinstance(outcome, ExtractionFailure):
+            failed_meetings.add(meeting_id)
+            failures.append(MeetingFailure(meeting_id=meeting_id, reason=outcome.reason))
+            continue
+        items.extend(
+            ExtractedItem(title=task.fields.title, description=task.fields.description)
+            for task in outcome.tasks
+        )
+
+    missing = sorted(set(gold_by_meeting) - set(items_by_meeting))
+    if missing:
+        raise ValueError(f"no extraction outcome for meeting(s) {missing}")
+
+    meetings: list[MeetingResult] = []
+    for meeting_id in sorted(gold_by_meeting):
+        report = evaluate_extracted_items(
+            items_by_meeting[meeting_id],
+            gold_by_meeting[meeting_id],
+            similarity=similarity,
+            threshold=threshold,
+        )
+        tp = report.true_positives
+        fp = len(report.false_positives)
+        fn = len(report.missed)
+        precision = _ratio(tp, tp + fp)
+        recall = _ratio(tp, tp + fn)
+        meetings.append(
+            MeetingResult(
+                meeting_id=meeting_id,
+                true_positives=tp,
+                false_positives=fp,
+                false_negatives=fn,
+                precision=precision,
+                recall=recall,
+                f1=_f1(precision, recall),
+                failed=meeting_id in failed_meetings,
+                report=report,
+            )
+        )
+
+    total_tp = sum(m.true_positives for m in meetings)
+    micro_precision = _ratio(total_tp, total_tp + sum(m.false_positives for m in meetings))
+    micro_recall = _ratio(total_tp, total_tp + sum(m.false_negatives for m in meetings))
+    return ExtractionSliceReport(
+        meetings=meetings,
+        failures=failures,
+        micro_precision=micro_precision,
+        micro_recall=micro_recall,
+        micro_f1=_f1(micro_precision, micro_recall),
+        macro_precision=_mean([m.precision for m in meetings]),
+        macro_recall=_mean([m.recall for m in meetings]),
+        macro_f1=_mean([m.f1 for m in meetings]),
     )

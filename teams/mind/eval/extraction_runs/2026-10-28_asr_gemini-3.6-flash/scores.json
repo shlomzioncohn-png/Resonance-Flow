@@ -1,0 +1,209 @@
+{
+  "model": "gemini-3.6-flash",
+  "transcripts": "eval/extraction_runs/asr_transcripts_2026-10-28/<meeting>.txt",
+  "backends": {
+    "lexical": {
+      "similarity_backend": "lexical_similarity",
+      "threshold": 0.6,
+      "report": {
+        "meetings": [
+          {
+            "meeting_id": "IB4003",
+            "true_positives": 2,
+            "false_positives": 2,
+            "false_negatives": 6,
+            "precision": 0.5,
+            "recall": 0.25,
+            "f1": 0.3333333333333333,
+            "failed": false,
+            "report": {
+              "n_extracted": 4,
+              "n_annotated": 8,
+              "precision": 0.5,
+              "recall": 0.25,
+              "f1": 0.3333333333333333,
+              "matched": [
+                {
+                  "extracted": "Ask Perret and Maggie about their preferences. Ask them since they were not at the meeting and have students to see.",
+                  "annotated": "One team member will ask Maggie and Pierrette about their preferences on the arrangement of people.",
+                  "similarity": 0.6764705882352942
+                },
+                {
+                  "extracted": "Come with a concrete proposal with names on it. Bring a sketch or concrete proposal for office room arrangements to the next meeting.",
+                  "annotated": "The team will merge their proposal on the arrangement of people in the space with that of a different team.",
+                  "similarity": 0.6122448979591837
+                }
+              ],
+              "missed": [
+                "The project manager will find out if it is possible to split up offices by putting up walls and doors.",
+                "The project manager will find out whether putting Gisella with the other admin of the school is an option.",
+                "The group members will come up with their own preferences regarding the arrangement of people in the space.",
+                "The group members will poll other people regarding preferences regarding the arrangement of people in the space.",
+                "The team will try to build a proposal on the arrangement of people based on personal preferences.",
+                "The team will meet next Tuesday at two o'clock"
+              ],
+              "false_positives": [
+                "Ask about separating one of the rooms. Find out whether one of the rooms can be split to provide individual office space.",
+                "Ask about squeezing four places into the three P room"
+              ],
+              "true_positives": 2
+            }
+          },
+          {
+            "meeting_id": "IS1008b",
+            "true_positives": 2,
+            "false_positives": 6,
+            "false_negatives": 2,
+            "precision": 0.25,
+            "recall": 0.5,
+            "f1": 0.3333333333333333,
+            "failed": false,
+            "report": {
+              "n_extracted": 8,
+              "n_annotated": 4,
+              "precision": 0.25,
+              "recall": 0.5,
+              "f1": 0.3333333333333333,
+              "matched": [
+                {
+                  "extracted": "Work on the user interface concept. Individual action assigned based on the closing slide.",
+                  "annotated": "The User Interface Designer will make a presentation on the user interface concept.",
+                  "similarity": 0.6666666666666665
+                },
+                {
+                  "extracted": "Work on the components concept. Individual action noted in the closing slide.",
+                  "annotated": "The Industrial Designer will make a presentation on the components concept for the product.",
+                  "similarity": 0.6143790849673203
+                }
+              ],
+              "missed": [
+                "The Marketing Expert will present the marketing concept.",
+                "The Project Manager will research companies that can provide the Industrial Designer with help on integrating voice recognition into her design."
+              ],
+              "false_positives": [
+                "Send details of technical details required for speech recognition. Provide the details needed to add speech recognition so technical coordination/backup can be arranged.",
+                "Find out the time frame needed to develop the speech recognition feature. Determine how much development time is required beyond what is currently planned.",
+                "Clarify management expectations on product risk and pricing. Go back to management to get precise feedback on taking market risks for a higher-priced, feature-rich product.",
+                "Keep watching market trends. Follow market trends as indicated in the meeting's closing action items.",
+                "Send the minutes of the meeting. Document and distribute the meeting minutes to attendees.",
+                "Put all information in the sharing folder. Place meeting materials and relevant details into the shared folder for everyone to access."
+              ],
+              "true_positives": 2
+            }
+          }
+        ],
+        "failures": [],
+        "micro_precision": 0.3333333333333333,
+        "micro_recall": 0.3333333333333333,
+        "micro_f1": 0.3333333333333333,
+        "macro_precision": 0.375,
+        "macro_recall": 0.375,
+        "macro_f1": 0.3333333333333333,
+        "failure_reasons": {}
+      }
+    },
+    "embedding": {
+      "similarity_backend": "embedding_similarity",
+      "threshold": 0.7,
+      "report": {
+        "meetings": [
+          {
+            "meeting_id": "IB4003",
+            "true_positives": 3,
+            "false_positives": 1,
+            "false_negatives": 5,
+            "precision": 0.75,
+            "recall": 0.375,
+            "f1": 0.5,
+            "failed": false,
+            "report": {
+              "n_extracted": 4,
+              "n_annotated": 8,
+              "precision": 0.75,
+              "recall": 0.375,
+              "f1": 0.5,
+              "matched": [
+                {
+                  "extracted": "Ask Perret and Maggie about their preferences. Ask them since they were not at the meeting and have students to see.",
+                  "annotated": "One team member will ask Maggie and Pierrette about their preferences on the arrangement of people.",
+                  "similarity": 0.7793684316734281
+                },
+                {
+                  "extracted": "Ask about separating one of the rooms. Find out whether one of the rooms can be split to provide individual office space.",
+                  "annotated": "The project manager will find out if it is possible to split up offices by putting up walls and doors.",
+                  "similarity": 0.7709539019161941
+                },
+                {
+                  "extracted": "Come with a concrete proposal with names on it. Bring a sketch or concrete proposal for office room arrangements to the next meeting.",
+                  "annotated": "The team will merge their proposal on the arrangement of people in the space with that of a different team.",
+                  "similarity": 0.7387131764885476
+                }
+              ],
+              "missed": [
+                "The project manager will find out whether putting Gisella with the other admin of the school is an option.",
+                "The group members will come up with their own preferences regarding the arrangement of people in the space.",
+                "The group members will poll other people regarding preferences regarding the arrangement of people in the space.",
+                "The team will try to build a proposal on the arrangement of people based on personal preferences.",
+                "The team will meet next Tuesday at two o'clock"
+              ],
+              "false_positives": [
+                "Ask about squeezing four places into the three P room"
+              ],
+              "true_positives": 3
+            }
+          },
+          {
+            "meeting_id": "IS1008b",
+            "true_positives": 2,
+            "false_positives": 6,
+            "false_negatives": 2,
+            "precision": 0.25,
+            "recall": 0.5,
+            "f1": 0.3333333333333333,
+            "failed": false,
+            "report": {
+              "n_extracted": 8,
+              "n_annotated": 4,
+              "precision": 0.25,
+              "recall": 0.5,
+              "f1": 0.3333333333333333,
+              "matched": [
+                {
+                  "extracted": "Work on the user interface concept. Individual action assigned based on the closing slide.",
+                  "annotated": "The User Interface Designer will make a presentation on the user interface concept.",
+                  "similarity": 0.774849745187597
+                },
+                {
+                  "extracted": "Work on the components concept. Individual action noted in the closing slide.",
+                  "annotated": "The Industrial Designer will make a presentation on the components concept for the product.",
+                  "similarity": 0.7048818889746067
+                }
+              ],
+              "missed": [
+                "The Marketing Expert will present the marketing concept.",
+                "The Project Manager will research companies that can provide the Industrial Designer with help on integrating voice recognition into her design."
+              ],
+              "false_positives": [
+                "Send details of technical details required for speech recognition. Provide the details needed to add speech recognition so technical coordination/backup can be arranged.",
+                "Find out the time frame needed to develop the speech recognition feature. Determine how much development time is required beyond what is currently planned.",
+                "Clarify management expectations on product risk and pricing. Go back to management to get precise feedback on taking market risks for a higher-priced, feature-rich product.",
+                "Keep watching market trends. Follow market trends as indicated in the meeting's closing action items.",
+                "Send the minutes of the meeting. Document and distribute the meeting minutes to attendees.",
+                "Put all information in the sharing folder. Place meeting materials and relevant details into the shared folder for everyone to access."
+              ],
+              "true_positives": 2
+            }
+          }
+        ],
+        "failures": [],
+        "micro_precision": 0.4166666666666667,
+        "micro_recall": 0.4166666666666667,
+        "micro_f1": 0.4166666666666667,
+        "macro_precision": 0.5,
+        "macro_recall": 0.4375,
+        "macro_f1": 0.41666666666666663,
+        "failure_reasons": {}
+      }
+    }
+  }
+}

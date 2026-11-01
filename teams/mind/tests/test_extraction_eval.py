@@ -30,6 +30,7 @@ from mind.evaluation.extraction_fixture import (
     FIXTURE_THRESHOLD,
 )
 from mind.evaluation.run_extraction_eval import _load_input
+from mind.evaluation.similarity import LEXICAL_THRESHOLD, lexical_similarity
 
 
 def _exact(a: str, b: str) -> float:
@@ -304,6 +305,22 @@ def test_every_valid_score_grid_satisfies_the_matching_invariants(shape):
             assert len({pair.annotated for pair in report.matched}) == tp
             assert tp + len(report.false_positives) == n_extracted
             assert tp + len(report.missed) == n_annotated
+
+
+def test_fixture_scores_the_same_with_the_clis_lexical_backend():
+    # The CLI runs the fixture with lexical_similarity at its locked tau, not the
+    # Jaccard placeholder the fixture's arithmetic was worked out for.
+    report = evaluate_extraction(
+        FIXTURE_EXTRACTED,
+        FIXTURE_ANNOTATED,
+        similarity=lexical_similarity,
+        threshold=LEXICAL_THRESHOLD,
+    )
+
+    assert report.true_positives == 3
+    assert (len(report.false_positives), len(report.missed)) == (1, 1)
+    assert report.precision == pytest.approx(FIXTURE_EXPECTED_PRECISION)
+    assert report.recall == pytest.approx(FIXTURE_EXPECTED_RECALL)
 
 
 # --- the report is a pydantic model ---------------------------------------------------

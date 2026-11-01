@@ -4,8 +4,15 @@
 > (#177).** Design for the *second* harness: "did the pipeline extract the right
 > action items from a meeting at all?" — precision / recall against AMI's
 > human-tagged action items. The matching core is `extraction_eval.py`
-> (`evaluate_extraction`), with a fixture and a CLI; per-meeting grouping, micro/macro
-> aggregation and the owner-match diagnostic (§3.7) are not built yet — see §9.
+> (`evaluate_extraction`), with a fixture and a CLI; per-meeting grouping and
+> micro/macro aggregation are `evaluate_meetings` (#178); the owner-match
+> diagnostic (§3.7) is not built yet — see §9.
+>
+> **First real run, 2026-10-25 (#178):** the v1 slice through main's extraction,
+> micro P 31.6% / R 37.5% / F1 34.3% at τ = 0.60 — results, hand review and
+> findings in the README, "Real-data validation (#178)". The lexical backend
+> missed four right pairs on real output; that is the case for the embedding
+> backend (§4.3), not for changing τ after the fact.
 >
 > Lives next to the code in `src/mind/evaluation/`; the README's "Extraction-quality
 > eval" section is the short version of this note.
@@ -14,6 +21,7 @@
 > - **`TODO(Ayala)`** — does she expose a reusable `similarity(a,b)->float` over
 >   her embeddings? If not within a few days, the lexical baseline (§4.2, fully
 >   specified) ships instead. Either way the harness is unblocked.
+>   **2026-10-25:** the lexical baseline is built (`similarity.py`, §4.2).
 >
 > Settled with Yonit (2026-10-14, #233): `title` + `description` is the
 > comparison text, and the meeting id travels as the extractor's `item_key`, not
@@ -222,6 +230,16 @@ model? score range? version-pinned (so eval numbers reproduce)? *(question sent)
 - **Do not build it until Ayala answers** (issue step 8: "ask her first — do
   not assume either way"). The design here is so it can be built in an hour once
   she does.
+- **Built 2026-10-25 (#178)** as `similarity.lexical_similarity` +
+  `LEXICAL_THRESHOLD`, under issue step 8: as of that date `mind.embeddings`
+  exposes `embed` / `embed_batch` but no reusable `similarity(a, b)`. Questions
+  on an embedding backend were sent to Ayala the same week; they do not block
+  this baseline. Two details beyond the lines above: `processor=default_process`
+  (lowercase, punctuation to spaces — `_normalize` deliberately leaves internal
+  punctuation to the backend), and no stemming yet (Finding 1 in §5.5 asks for
+  it; whether τ = 0.60 needs it is checked on the §5 pairs before any real
+  run). `rapidfuzz` is in the `dev` extra, not a separate `eval` group, because
+  CI installs `.[dev]` only.
 
 ### 4.3 Swap plan
 
@@ -229,6 +247,14 @@ When Ayala's function exists: the `embedding` backend calls it, the default
 flips to `embedding`, and `lexical` stays available — for CI runs without the
 model loaded, and as a published comparison point. No harness change; only the
 default backend constant in `similarity.py`.
+
+**Revised 2026-10-28 (mentor's decision): the default does not flip.** On the
+#178 run neither backend was better (README, "Embedding backend"): embedding
+found more of the right pairs (7 of 16 against 5) and added more wrong ones
+(4 against 1). So the default stays `lexical`, and every report shows both
+backends side by side, each with its right and wrong matches, next to the hand
+review as the ground truth. `scripts/run_ami_extraction_eval.py --backend both`
+prints them together.
 
 ---
 
@@ -370,12 +396,61 @@ If the §5 numbers redone with code (an Open TODO) contradict this, `τ` is
 re-derived **from those pairs**, still before any harness run, and the reasoning
 here is rewritten.
 
-### Embedding backend — `τ = TODO(Ayala)`, method LOCKED
+**Redone with code, 2026-10-25 (#178) — `τ = 0.60` kept, reasoning point 2
+corrected.** Before any real extraction went through the eval, every gold ×
+extracted pair of §5.1 (IS1008b) and §5.3 (ES2002a) was scored with
+`similarity.lexical_similarity` (29 pairs: 7 the same task, 22 not, labels as
+written in §5):
 
-Cannot be a number yet (depends on her model). The **method** is fixed: take
-the ~20 §5 accept/reject pairs as a labelled dev set, pick the `τ` that best
-separates accept from reject for her model, freeze it. Never adjusted against
-precision/recall output.
+- **Point 2 was wrong.** Different-task pairs from the same meeting do not sit at
+  ~0.33–0.40; with `token_set_ratio` they reach **0.72** (ES2002a G1–E2), and 8
+  of the 22 score ≥ 0.60. The meetings repeat the same words ("designer",
+  "present", "concept", "work on … the remote"), and `token_set_ratio` credits
+  them. The hand numbers were Jaccard and approximate.
+- Same-task pairs score **0.69** and up (lowest ES2002a G3–E3; the paraphrase
+  G4–E4 scores 0.87). So no single `τ` separates the two groups pair by pair:
+  0.70 drops G3–E3 and still lets G1–E2 through.
+- **Why 0.60 holds anyway:** the eval matches one-to-one, highest score first,
+  and in both meetings each true pair outscores every wrong pair that shares a
+  side with it. At 0.60 the matching returns exactly the hand-labelled pairs —
+  also in each of the 7 runs with one true extracted item removed (0 wrong
+  matches, 0 true pairs lost). Pinned in `tests/test_similarity_threshold.py`.
+- **Stemming (Finding 1) is not needed** on these pairs: every same-task pair
+  already clears 0.60 without it.
+- **Remaining risk:** a wrong match needs the true partner to be missing *and* an
+  unmatched extracted item that happens to score ≥ 0.60 against the orphaned
+  gold sentence — most likely in a meeting with repeated wording. The real run
+  therefore reviews every matched pair scoring **0.60–0.75** by hand (#178 step
+  4).
+- **Caveat:** 29 pairs, 7 positive, and the extracted side is invented. This
+  shows 0.60 is reasonable; the hand review on real output is the real test.
+
+### Embedding backend — `τ = 0.70`, LOCKED 2026-10-28
+
+The method: take the §5 accept/reject pairs as a labelled dev set, pick the `τ`
+that best separates accept from reject for her model, freeze it. Never adjusted
+against precision/recall output.
+
+**Set 2026-10-28**, with `mind.embeddings.similarity` (Ayala; cosine over
+bge-small-en-v1.5, clamped to [0, 1]) as `similarity.embedding_similarity`, by
+`scripts/derive_embedding_threshold.py` on the 29 pairs in
+`threshold_pairs.py`, before any real output was scored with this backend:
+
+- Same-task pairs score **0.751–0.958**, different-task pairs **0.507–0.793**.
+  As with the lexical backend, no `τ` separates them pair by pair: two wrong
+  pairs (ES2002a G1–E2 0.793, IS1008b G2–E1 0.789) outscore three true ones
+  (0.774, 0.762, 0.751).
+- **"Best separates" is read through the matching, as for lexical:** every `τ`
+  from **0.643 to 0.750** makes one-to-one matching return exactly the
+  hand-labelled pairs, also with each true extracted item left out. `τ` is the
+  middle, **0.70**.
+- **Deviation, recorded:** the script's first rule chose `τ` pair by pair (the
+  most pairs on the right side). It gave 0.83, which drops the three weak true
+  pairs and fails 8 of the 9 matching checks. The rule was changed to the
+  matching criterion the lexical `τ` was already held to, on the §5 pairs only;
+  no real-run number was seen with this backend before the change.
+- Pinned in `tests/test_similarity_threshold.py` (skipped where the model is not
+  downloaded).
 
 ### Lock discipline
 
@@ -481,8 +556,11 @@ of the text it came from, and the eval groups by it. Content past
 
 ### Still open
 
-- **Who loads AMI transcripts:** `src/mind/ingestion/` has no AMI loader; #348
-  covers FUNSD only. Needed before #178 can run.
+- ~~**Who loads AMI transcripts**~~ — resolved by #784:
+  `src/mind/ingestion/ami_transcripts.py` loads AMI's human transcripts as
+  speaker turns. They are the manual transcripts, not ASR output, while #178
+  step 1 asks for meetings "that went through ayala's ASR" — which of the two
+  the real run uses is still to be decided.
 
 ---
 
@@ -541,15 +619,17 @@ owner-match diagnostic are still to build on top of it.
 ## Open items
 
 **Blocking (external):**
-- [ ] `TODO(Ayala)` — reusable `similarity(a,b)->float`? model? range? pinned?
+- [x] `TODO(Ayala)` — reusable `similarity(a,b)->float`: `mind.embeddings.similarity`
+      (on main 2026-10-28), cosine over bge-small-en-v1.5, [0, 1]. Backend wired,
+      `τ = 0.70` (§6).
       If no within a few days → build the §4.2 lexical baseline.
 - [x] ~~`TODO(Yonit)` — confirm corpus-loader `source_ref = records[].id`~~ —
       superseded: the meeting id travels as the extractor's `item_key`, held by
       the eval (§"Meeting IDs", revised 2026-10-12, #233 / PR #338).
 - [x] `TODO(Yonit)` — confirm `title` + `description` (§3.3) is the right
       comparison text. Confirmed 2026-10-14 (#233 step 4).
-- [ ] An AMI transcript loader — `src/mind/ingestion/` has none, and #348 is
-      FUNSD only. Owner to be decided; blocks #178.
+- [x] An AMI transcript loader — `ingestion/ami_transcripts.py` (#784), human
+      transcripts. Open: human transcript or ASR output for the #178 run.
 - [x] #690 — extraction returns a list of tasks per text; per-meeting recall is
       no longer capped at `1/n`. Long meetings can still be truncated.
 
@@ -561,8 +641,11 @@ owner-match diagnostic are still to build on top of it.
       grouping, micro/macro F1, the owner-match diagnostic.
 - [x] The eval-side contract for an extracted item (`ExtractedItem`) and the
       entry point that enforces it (`evaluate_extracted_items`) — #233 / PR #338.
-- [ ] Per-meeting grouping by `item_key`, micro-F1, and a separate failures line
-      (count + `reason`) in the run report — #178.
+- [x] Per-meeting grouping by `item_key`, micro-F1, and a separate failures line
+      (count + `reason`) in the run report — #178: `evaluate_meetings` →
+      `ExtractionSliceReport` (micro + macro, `None` for undefined per §3.5), and
+      `run_extraction_eval.slice_summary_lines`. The CLI still reads a single
+      pair; reading a slice from a file comes with the real run.
 - [ ] Wire the CI regression check to micro-F1 — #175.
 
 **Housekeeping:**
