@@ -365,7 +365,8 @@ class TaskEligibilityServiceTest {
         UUID taskId = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(), List.of());
 
-        assertThrows(TaskNotFoundException.class,
+        // No task_readiness row for an unknown task: the readiness lookup runs before the task lookup.
+        assertThrows(IllegalStateException.class,
                 () -> fixture.service().recalculateTaskEligibility(taskId));
     }
 
