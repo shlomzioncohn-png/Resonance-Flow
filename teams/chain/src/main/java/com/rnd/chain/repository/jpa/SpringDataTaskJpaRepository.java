@@ -1,5 +1,6 @@
 package com.rnd.chain.repository.jpa;
 
+import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.entity.TaskEntity;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -21,6 +22,7 @@ public interface SpringDataTaskJpaRepository extends JpaRepository<TaskEntity, U
 
     List<TaskEntity> findByParentTaskIdAndDeletedAtIsNull(UUID parentTaskId);
     List<TaskEntity> findByTenantIdAndDeletedAtIsNull(UUID tenantId);
+    List<TaskEntity> findByTenantIdAndStatusNotAndDeletedAtIsNull(UUID tenantId, TaskStatus status);
 
     /** Deliberately not filtering deleted_at here - the soft-delete check happens in
      * {@link com.rnd.chain.repository.PostgresTaskRepository}, against the already-locked row. */

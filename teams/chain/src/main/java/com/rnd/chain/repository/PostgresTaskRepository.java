@@ -1,6 +1,7 @@
 package com.rnd.chain.repository;
 
 import com.rnd.chain.dto.Task;
+import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.entity.TaskEntity;
 import com.rnd.chain.repository.jpa.SpringDataTaskJpaRepository;
 import lombok.RequiredArgsConstructor;
@@ -54,6 +55,16 @@ public class PostgresTaskRepository implements TaskRepository {
             .map(PostgresTaskRepository::toDto)
             .toList();
    }
+
+    @Override
+    public List<Task> findByTenantIdAndStatusNot(UUID tenantId, TaskStatus excludedStatus) {
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
+        Objects.requireNonNull(excludedStatus, "excludedStatus must not be null");
+
+        return jpaRepository.findByTenantIdAndStatusNotAndDeletedAtIsNull(tenantId, excludedStatus).stream()
+            .map(PostgresTaskRepository::toDto)
+            .toList();
+    }
 
     @Override
     @Transactional

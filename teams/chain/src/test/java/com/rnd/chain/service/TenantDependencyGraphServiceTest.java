@@ -61,7 +61,7 @@ class TenantDependencyGraphServiceTest {
     void emptyTenant_returnsEmptyGraph() {
         UUID tenantId = UUID.randomUUID();
 
-        when(taskRepository.findByTenantId(tenantId))
+        when(taskRepository.findByTenantIdAndStatusNot(tenantId, TaskStatus.DONE))
                 .thenReturn(List.of());
 
         TenantDependencyGraphResponse response =
@@ -87,7 +87,7 @@ class TenantDependencyGraphServiceTest {
         List<UUID> taskIds =
                 List.of(taskAId, taskBId, taskCId);
 
-        when(taskRepository.findByTenantId(tenantId))
+        when(taskRepository.findByTenantIdAndStatusNot(tenantId, TaskStatus.DONE))
                 .thenReturn(List.of(taskA, taskB, taskC));
 
         when(taskDependencyRepository.findByTaskIds(taskIds))
@@ -159,7 +159,7 @@ class TenantDependencyGraphServiceTest {
         List<UUID> taskIds =
                 List.of(taskAId, taskBId, taskCId);
 
-        when(taskRepository.findByTenantId(tenantId))
+        when(taskRepository.findByTenantIdAndStatusNot(tenantId, TaskStatus.DONE))
                 .thenReturn(List.of(taskA, taskB, taskC));
 
         when(taskDependencyRepository.findByTaskIds(taskIds))
@@ -247,7 +247,7 @@ class TenantDependencyGraphServiceTest {
                         .map(Task::getId)
                         .toList();
 
-        when(taskRepository.findByTenantId(tenantId))
+        when(taskRepository.findByTenantIdAndStatusNot(tenantId, TaskStatus.DONE))
                 .thenReturn(tasks);
 
         when(taskDependencyRepository.findByTaskIds(taskIds))
@@ -320,7 +320,7 @@ class TenantDependencyGraphServiceTest {
                         .map(Task::getId)
                         .toList();
 
-        when(taskRepository.findByTenantId(tenantId))
+        when(taskRepository.findByTenantIdAndStatusNot(tenantId, TaskStatus.DONE))
                 .thenReturn(tasks);
 
         when(taskDependencyRepository.findByTaskIds(taskIds))
@@ -351,14 +351,145 @@ class TenantDependencyGraphServiceTest {
                 taskCount - 1,
                 highestImpact.transitiveDependentsCount());
     }
+
+    @Test
+    void doneTask_isNotReturnedAsNodeOrEdgeEndpoint() {
+        UUID tenantId = UUID.randomUUID();
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+
+        // A depends on B, B is DONE
+        stubGraph(tenantId,
+                List.of(task(a, tenantId), task(b, tenantId, TaskStatus.DONE)),
+                List.of(new TaskDependency(a, b)));
+
+        TenantDependencyGraphResponse response =
+                service.getDependencyGraph(tenantId, 500);
+
+        assertEquals(1, response.nodes().size());
+        assertEquals(a, response.nodes().get(0).taskId());
+        assertTrue(response.edges().isEmpty());
+    }
+
+    @Test
+    void edgeTouchingDoneTask_isDropped_otherEdgesKept() {
+        UUID tenantId = UUID.randomUUID();
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+        UUID c = UUID.randomUUID();
+
+        // A -> B -> C, C is DONE
+        stubGraph(tenantId,
+                List.of(task(a, tenantId), task(b, tenantId),
+                        task(c, tenantId, TaskStatus.DONE)),
+                List.of(new TaskDependency(a, b), new TaskDependency(b, c)));
+
+        TenantDependencyGraphResponse response =
+                service.getDependencyGraph(tenantId, 500);
+
+        assertEquals(2, response.nodes().size());
+        assertEquals(1, response.edges().size());
+        assertEquals(a, response.edges().get(0).taskId());
+        assertEquals(b, response.edges().get(0).dependsOnTaskId());
+    }
+
+    @Test
+    void transitiveDependentsCount_ignoresPathsThroughDoneTask() {
+        UUID tenantId = UUID.randomUUID();
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+        UUID c = UUID.randomUUID();
+
+        // C depends on B, B depends on A, B is DONE: A has no live dependents
+        stubGraph(tenantId,
+                List.of(task(a, tenantId), task(b, tenantId, TaskStatus.DONE),
+                        task(c, tenantId)),
+                List.of(new TaskDependency(c, b), new TaskDependency(b, a)));
+
+        TenantDependencyGraphResponse response =
+                service.getDependencyGraph(tenantId, 500);
+
+        assertEquals(2, response.nodes().size());
+        for (TenantDependencyGraphNode node : response.nodes()) {
+            assertEquals(0, node.transitiveDependentsCount());
+        }
+    }
+
+    @Test
+    void tenantWithOnlyDoneTasks_returnsEmptyGraph() {
+        UUID tenantId = UUID.randomUUID();
+
+        when(taskRepository.findByTenantIdAndStatusNot(tenantId, TaskStatus.DONE))
+                .thenReturn(List.of(task(UUID.randomUUID(), tenantId, TaskStatus.DONE)));
+
+        TenantDependencyGraphResponse response =
+                service.getDependencyGraph(tenantId, 500);
+
+        assertTrue(response.nodes().isEmpty());
+        assertTrue(response.edges().isEmpty());
+        assertFalse(response.hasMore());
+    }
+
+    @Test
+    void limitAndHasMore_areComputedAfterDoneFiltering() {
+        UUID tenantId = UUID.randomUUID();
+
+        // 2 live tasks + 2 DONE tasks: only the live ones count toward hasMore
+        List<Task> tasks = List.of(
+                task(UUID.randomUUID(), tenantId),
+                task(UUID.randomUUID(), tenantId),
+                task(UUID.randomUUID(), tenantId, TaskStatus.DONE),
+                task(UUID.randomUUID(), tenantId, TaskStatus.DONE));
+
+        stubGraph(tenantId, tasks, List.of());
+
+        TenantDependencyGraphResponse response =
+                service.getDependencyGraph(tenantId, 2);
+
+        assertEquals(2, response.nodes().size());
+        assertFalse(response.hasMore());
+    }
+
+    /** Stubs the repositories as if the DB query leaked DONE tasks; only live ones are expected downstream. */
+    private void stubGraph(
+            UUID tenantId,
+            List<Task> allTasks,
+            List<TaskDependency> dependencies) {
+
+        List<Task> liveTasks = allTasks.stream()
+                .filter(t -> t.getStatus() != TaskStatus.DONE)
+                .toList();
+
+        List<UUID> liveIds = liveTasks.stream()
+                .map(Task::getId)
+                .toList();
+
+        when(taskRepository.findByTenantIdAndStatusNot(tenantId, TaskStatus.DONE))
+                .thenReturn(allTasks);
+        when(taskDependencyRepository.findByTaskIds(liveIds))
+                .thenReturn(dependencies);
+        when(taskReadinessRepository.findByIds(liveIds))
+                .thenReturn(readiness(liveTasks));
+        when(taskStateHistoryRepository.findLatestBlockedSinceByTaskIds(liveIds))
+                .thenReturn(Map.of());
+    }
+
     private Task task(
         UUID taskId,
         UUID tenantId) {
 
+        return task(taskId, tenantId, TaskStatus.ACTIVE);
+    }
+
+    private Task task(
+        UUID taskId,
+        UUID tenantId,
+        TaskStatus status) {
+
         return Task.builder()
             .id(taskId)
             .tenantId(tenantId)
-            .status(TaskStatus.ACTIVE)
+            .status(status)
             .createdAt(LocalDateTime.now())
             .updatedAt(LocalDateTime.now())
             .build();
