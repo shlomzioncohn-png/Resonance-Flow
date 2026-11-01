@@ -2,7 +2,7 @@ package com.rnd.bridge.intake.scheduler;
 
 import com.rnd.bridge.core.IntakeResult;
 import com.rnd.bridge.core.sync.SyncJob;
-import com.rnd.bridge.intake.controller.UnstructuredIntakeController;
+import com.rnd.bridge.intake.service.UnstructuredIntakeService;
 import com.rnd.bridge.raw.model.RawSourceType;
 import org.junit.jupiter.api.Test;
 
@@ -22,27 +22,27 @@ import static org.mockito.Mockito.when;
  */
 class IntakeSyncJobsTest {
 
-    private final UnstructuredIntakeController controller = mock(UnstructuredIntakeController.class);
+    private final UnstructuredIntakeService intakeService = mock(UnstructuredIntakeService.class);
     private final IntakeSyncJobs jobs = new IntakeSyncJobs();
 
     @Test
     void emailJobReflectsItsConfigAndCallsTheControllerWithEmail() {
-        SyncJob job = jobs.emailSyncJob(controller, false, "0 */15 * * * ?");
+        SyncJob job = jobs.emailSyncJob(intakeService, false, "0 */15 * * * ?");
 
         assertEquals("email", job.name());
         assertFalse(job.enabled());
         assertEquals("0 */15 * * * ?", job.cron());
 
         IntakeResult expected = new IntakeResult(1, 1, 0, List.of());
-        when(controller.run(RawSourceType.EMAIL)).thenReturn(expected);
+        when(intakeService.run(RawSourceType.EMAIL)).thenReturn(expected);
 
         assertEquals(expected, job.runOnce());
-        verify(controller).run(RawSourceType.EMAIL);
+        verify(intakeService).run(RawSourceType.EMAIL);
     }
 
     @Test
     void calendarJobReflectsItsConfigAndCallsTheControllerWithCalendar() {
-        SyncJob job = jobs.calendarSyncJob(controller, true, "0 0 * * * ?");
+        SyncJob job = jobs.calendarSyncJob(intakeService, true, "0 0 * * * ?");
 
         assertEquals("calendar", job.name());
         assertTrue(job.enabled());
@@ -50,12 +50,12 @@ class IntakeSyncJobsTest {
 
         job.runOnce();
 
-        verify(controller).run(RawSourceType.CALENDAR);
+        verify(intakeService).run(RawSourceType.CALENDAR);
     }
 
     @Test
     void driveJobReflectsItsConfigAndCallsTheControllerWithDrive() {
-        SyncJob job = jobs.driveSyncJob(controller, true, "0 30 * * * ?");
+        SyncJob job = jobs.driveSyncJob(intakeService, true, "0 30 * * * ?");
 
         assertEquals("drive", job.name());
         assertTrue(job.enabled());
@@ -63,6 +63,6 @@ class IntakeSyncJobsTest {
 
         job.runOnce();
 
-        verify(controller).run(RawSourceType.DRIVE);
+        verify(intakeService).run(RawSourceType.DRIVE);
     }
 }

@@ -4,10 +4,20 @@ topics by index_consumer_runner.
 A handler must let unexpected exceptions propagate (ProtobufConsumer only
 commits after it returns) -- only empty/whitespace text is caught here.
 Completion comes from task.updated's status, not task.completed (Inbox
-has no real caller for that topic)."""
+has no real caller for that topic).
+
+#918: `handle_task_created` also takes a list of `on_indexed` callbacks,
+run after the row is confirmed in the index -- whether it was written
+just now or was already there, since a retry only needs the row
+searchable, not freshly written. A list, not one callback, so more than
+one concern can hook in (today: #918's own dependency-mention retry);
+a callback that raises is logged and does not stop the others, because
+each one's own state (if any) is durable and will be retried on the next
+indexed task regardless."""
 
 import hashlib
 import logging
+from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from mind.embeddings.base import VectorIndex, VectorStore
@@ -17,6 +27,10 @@ from mind.messaging.task_created_event_pb2 import TaskCreatedEvent, TaskStatus
 from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
 
 logger = logging.getLogger(__name__)
+
+#: task_id, tenant_id, the event -- called once a task.created's row is in
+#: the index.
+OnIndexed = Callable[[str, str, TaskCreatedEvent], Awaitable[None]]
 
 # None of these are "active" -- a search shouldn't surface them as live.
 _FINISHED_STATUSES = frozenset(
@@ -54,7 +68,9 @@ async def _sync_status(store: VectorStore, task_id: str, status: TaskStatus) -> 
         await store.mark_incomplete(task_id)  # handles reopen: DONE -> back to e.g. IN_PROGRESS.
 
 
-async def handle_task_created(index: VectorIndex, event: TaskCreatedEvent) -> None:
+async def handle_task_created(
+    index: VectorIndex, event: TaskCreatedEvent, on_indexed: list[OnIndexed] | None = None
+) -> None:
     store = _tenant_store(index, event.tenant_id, event.id)
     if store is None:
         return
@@ -64,10 +80,18 @@ async def handle_task_created(index: VectorIndex, event: TaskCreatedEvent) -> No
         return
     # upsert_if_absent: a task already indexed via #353 must not be overwritten.
     inserted = await store.upsert_if_absent(event.id, vector, content_hash=_content_hash(text))
-    if not inserted:
+    if inserted:
+        await _sync_status(store, event.id, event.status)
+    else:
         logger.debug("index_consumer: task %s already indexed, skipping", event.id)
-        return
-    await _sync_status(store, event.id, event.status)
+
+    for callback in on_indexed or ():
+        try:
+            await callback(event.id, event.tenant_id, event)
+        except Exception:
+            logger.exception(
+                "index_consumer: on_indexed callback failed for task %s", event.id
+            )
 
 
 async def handle_task_updated(index: VectorIndex, event: TaskUpdatedEvent) -> None:

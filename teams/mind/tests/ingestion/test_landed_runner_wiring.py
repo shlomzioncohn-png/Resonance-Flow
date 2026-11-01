@@ -120,7 +120,11 @@ class World:
         # Restored after the test: main() installs its own.
         monkeypatch.setattr(threading, "excepthook", threading.excepthook)
         monkeypatch.setattr("mind.embeddings.index_consumer.embed", lambda _text: [0.1, 0.2, 0.3])
-        monkeypatch.setattr(runner, "get_settings", lambda: SimpleNamespace(vector_store="vs"))
+        monkeypatch.setattr(
+            runner,
+            "get_settings",
+            lambda: SimpleNamespace(vector_store="vs", pending_store_backend="memory"),
+        )
         monkeypatch.setattr(runner, "minio_reader", lambda: _read)
         monkeypatch.setattr(runner, "build_provider", lambda: self.provider)
         monkeypatch.setattr(runner.asr, "warm_up", lambda: True)

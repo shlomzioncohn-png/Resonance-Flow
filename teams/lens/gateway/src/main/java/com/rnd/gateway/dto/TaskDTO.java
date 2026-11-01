@@ -92,11 +92,13 @@ public class TaskDTO {
     private List<String> dependencies;
 
     /**
-     * List of constraints/blockers preventing task completion
-     * Example: ["approval_needed", "waiting_for_customer"]
-     * Empty list means no constraints
+     * Chain's constraints on this task (all statuses), each with type, status and reason.
+     * Empty list means no constraints; null means unknown.
      */
-    private List<String> constraints;
+    private List<ConstraintDTO> constraints;
+
+    /** How many of `constraints` are still open (status PENDING). Null means unknown. */
+    private Integer openConstraintCount;
 
     /**
      * External source of this task

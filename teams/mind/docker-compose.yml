@@ -72,9 +72,11 @@ services:
         condition: service_completed_successfully
 
   # #919: bridge.raw.landed -> extraction -> dedup -> task.creation.requested,
-  # with the task.created listener in the same process (one in-memory pending
-  # store). Kafka, the vector store and the LLM provider come from the config
-  # files (#481), like the consumers above; MinIO from MIND_OBJECT_STORAGE__* in .env.
+  # with the task.created listener in the same process (one pending store,
+  # shared by both -- Postgres by default since #918, see
+  # MIND_PENDING_STORE_BACKEND). Kafka, the vector store and the LLM provider
+  # come from the config files (#481), like the consumers above; MinIO from
+  # MIND_OBJECT_STORAGE__* in .env.
   mind-landed-consumer:
     build:
       context: .

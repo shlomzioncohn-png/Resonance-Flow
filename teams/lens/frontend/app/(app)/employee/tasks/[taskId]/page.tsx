@@ -31,6 +31,7 @@ import { getErrorMessage } from '@/services/api';
 import { useTaskActivity } from '@/hooks/useTaskActivity';
 import { useTaskDetails } from '@/hooks/useTaskDetails';
 import TaskActivity from './TaskActivity';
+import TaskConstraints from './TaskConstraints';
 
 type TabValue = 'overview' | 'activity';
 
@@ -148,7 +149,7 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
           <Card sx={{ flex: 1, minWidth: 0, width: '100%' }}>
             <CardContent>
               <>
-                <Typography variant="subtitle2" color="text.secondary">
+                <Typography variant="subtitle2" color="text.secondary" component="h2">
                   Description
                 </Typography>
                 <Typography variant="body1" sx={{ mb: 3 }}>
@@ -200,10 +201,9 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
                   {task.snoozedUntil && (
                     <DetailRow label="Snoozed until" value={task.snoozedUntil} />
                   )}
-                  {(task.constraints ?? []).length > 0 && (
-                    <DetailRow label="Constraints" value={(task.constraints ?? []).join(', ')} />
-                  )}
                 </Box>
+
+                <TaskConstraints constraints={task.constraints} />
               </>
             </CardContent>
           </Card>

@@ -118,7 +118,13 @@ def migrated_db() -> None:
 
     with psycopg.connect(os.environ["MIND_VECTOR_STORE__DSN"], autocommit=True) as conn:
         conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-    alembic_command.upgrade(Config(str(_ROOT / "alembic.ini")), "head")
+    # configure_logger=False: env.py's fileConfig(alembic.ini) would otherwise
+    # disable every mind.* logger already created in this process (Python's
+    # fileConfig default disable_existing_loggers=True, and alembic.ini's own
+    # [loggers] section only lists root/sqlalchemy/alembic) -- breaking every
+    # later test's caplog assertions for the rest of the session.
+    config = Config(str(_ROOT / "alembic.ini"), attributes={"configure_logger": False})
+    alembic_command.upgrade(config, "head")
 
 
 # Always regenerate (not "if missing") -- a proto edit with the old pb2

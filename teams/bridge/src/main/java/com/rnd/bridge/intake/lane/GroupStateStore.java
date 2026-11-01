@@ -115,7 +115,7 @@ public class GroupStateStore {
      * revision no longer matches, marking it published now would incorrectly claim a NEWER,
      * not-yet-actually-published revision was confirmed. This still works with revision numbers
      * that collapse across multiple pre-publish edits (see ChatGroupStateReconciler.
-     * mergeIntoGroupState): an edit landing while a revision is actively claimed for publication
+     * GroupStateMutator.rebuild): an edit landing while a revision is actively claimed for publication
      * always advances to a new revision number rather than collapsing (see that method's
      * javadoc), so a stale ack for the claimed revision still mismatches the edited content's now
      * newly-advanced revision, exactly as before.
@@ -290,7 +290,7 @@ public class GroupStateStore {
      * is always exactly the thread's root (see GroupState's javadoc: groupId equals threadId for
      * threaded groups, and a message's threadId is that root's own ts), never any other member.
      * This matters for the live Slack root -> first-reply case (see
-     * ChatGroupStateReconciler.newThreadGroupState): when a root that was already ingested into
+     * ChatGroupFactory.newThreadGroupState): when a root that was already ingested into
      * its own non-thread group is copied into a newly-created thread group, that thread group's
      * own persist must never re-point the root's existing index entry at itself - the original
      * non-thread group must stay that messageId's permanent index owner. Harmless for the

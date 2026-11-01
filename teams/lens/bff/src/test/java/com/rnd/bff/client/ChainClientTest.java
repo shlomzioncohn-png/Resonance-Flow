@@ -3,6 +3,7 @@ package com.rnd.bff.client;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withBadRequest;
@@ -10,8 +11,11 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import com.rnd.bff.dto.ConstraintDTO;
+import com.rnd.bff.dto.TaskDependenciesDTO;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
@@ -22,7 +26,7 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestTemplate;
 
-/** The wire format of the Chain calls - above all, that X-Tenant-Id is always sent. */
+/** The wire format of the Chain calls (task histories, constraints) - above all, that X-Tenant-Id is always sent. */
 class ChainClientTest {
 
     private static final String CHAIN = "http://chain.test";
@@ -35,7 +39,8 @@ class ChainClientTest {
     @BeforeEach
     void setUp() {
         RestTemplate restTemplate = new RestTemplate();
-        chain = MockRestServiceServer.bindTo(restTemplate).build();
+        // Constraint calls run in parallel, so they may arrive in any order.
+        chain = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
         client = new ChainClient(restTemplate);
         ReflectionTestUtils.setField(client, "chainServiceUrl", CHAIN);
     }
@@ -104,6 +109,89 @@ class ChainClientTest {
 
         assertThatThrownBy(() -> client.getDependencyHistory(TASK, TENANT))
                 .isInstanceOf(HttpClientErrorException.BadRequest.class);
+    }
+
+    @Test
+    void feasibilityFetchesConstraintsPerTaskWithOnlyTheTenantHeader() {
+        chain.expect(requestTo(CHAIN + "/tasks/" + TASK + "/constraints"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("X-Tenant-Id", TENANT))
+                // Chain reads no identity header besides the tenant
+                .andExpect(headerDoesNotExist("X-Actor-Id"))
+                .andRespond(withSuccess("""
+                        [
+                          {"constraintId":"c1","taskId":"%s","type":"APPROVAL_NEEDED","status":"PENDING",
+                           "reason":{"note":"Legal sign-off"},"sourceRef":null,
+                           "createdAt":"2026-10-20T09:15:30","updatedAt":"2026-10-20T09:15:30"},
+                          {"constraintId":"c2","taskId":"%s","type":"DATE_WINDOW","status":"SATISFIED",
+                           "reason":{},"createdAt":"2026-10-21T10:00:00"}
+                        ]
+                        """.formatted(TASK, TASK), MediaType.APPLICATION_JSON));
+
+        Map<String, TaskDependenciesDTO> result = client.getFeasibility(TENANT, List.of(TASK));
+
+        chain.verify();
+        TaskDependenciesDTO feasibility = result.get(TASK);
+        assertThat(feasibility.getDependencies()).isEmpty();
+        assertThat(feasibility.getConstraints()).hasSize(2);
+        ConstraintDTO first = feasibility.getConstraints().get(0);
+        assertThat(first.getConstraintId()).isEqualTo("c1");
+        assertThat(first.getType()).isEqualTo("APPROVAL_NEEDED");
+        assertThat(first.getStatus()).isEqualTo("PENDING");
+        assertThat(first.getReason()).containsEntry("note", "Legal sign-off");
+        assertThat(first.getCreatedAt()).isEqualTo("2026-10-20T09:15:30");
+    }
+
+    @Test
+    void feasibilityGivesAFailingTaskAnEmptyListWithoutFailingTheOthers() {
+        String other = "7b1f4c7e-2c1a-4a55-9d0e-5f1f6a3b0c02";
+        String missing = "7b1f4c7e-2c1a-4a55-9d0e-5f1f6a3b0c03";
+        chain.expect(requestTo(CHAIN + "/tasks/" + TASK + "/constraints")).andRespond(withServerError());
+        chain.expect(requestTo(CHAIN + "/tasks/" + other + "/constraints"))
+                .andRespond(withSuccess("""
+                        [{"constraintId":"c9","type":"BLOCKED_BY_INFO","status":"PENDING","reason":{}}]
+                        """, MediaType.APPLICATION_JSON));
+        chain.expect(requestTo(CHAIN + "/tasks/" + missing + "/constraints")).andRespond(withResourceNotFound());
+
+        Map<String, TaskDependenciesDTO> result =
+                client.getFeasibility(TENANT, List.of(TASK, other, missing));
+
+        chain.verify();
+        assertThat(result).containsOnlyKeys(TASK, other, missing);
+        assertThat(result.get(TASK).getConstraints()).isEmpty();
+        assertThat(result.get(other).getConstraints()).extracting(ConstraintDTO::getConstraintId).containsExactly("c9");
+        assertThat(result.get(missing).getConstraints()).isEmpty();
+    }
+
+    @Test
+    void feasibilityWithChainReturningAnEmptyListGivesNoConstraints() {
+        chain.expect(requestTo(CHAIN + "/tasks/" + TASK + "/constraints"))
+                .andExpect(header("X-Tenant-Id", TENANT))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        Map<String, TaskDependenciesDTO> result = client.getFeasibility(TENANT, List.of(TASK));
+
+        chain.verify();
+        assertThat(result.get(TASK).getConstraints()).isNotNull().isEmpty();
+        assertThat(ConstraintDTO.countOpen(result.get(TASK).getConstraints())).isZero();
+    }
+
+    @Test
+    void feasibilityWithChainFailingGivesAnEmptyListInsteadOfThrowing() {
+        chain.expect(requestTo(CHAIN + "/tasks/" + TASK + "/constraints")).andRespond(withBadRequest());
+
+        Map<String, TaskDependenciesDTO> result = client.getFeasibility(TENANT, List.of(TASK));
+
+        chain.verify();
+        assertThat(result.get(TASK).getConstraints()).isEmpty();
+    }
+
+    @Test
+    void feasibilityWithoutATenantMakesNoCallsAndShowsNoConstraints() {
+        Map<String, TaskDependenciesDTO> result = client.getFeasibility(null, List.of(TASK));
+
+        chain.verify(); // no expectations -> fails if any request was made
+        assertThat(result.get(TASK).getConstraints()).isEmpty();
     }
 
     @Test

@@ -9,7 +9,7 @@ import java.util.List;
  * SAME sync (see RealCalendarSourceReader). Carrying both together, as one per-call return
  * value, is what makes the token safe under concurrent calls: it belongs to whichever read
  * produced it, not to shared reader state that a second concurrent call could overwrite before
- * the first caller reads it back (see UnstructuredIntakeController, which persists
+ * the first caller reads it back (see UnstructuredIntakeService, which persists
  * nextSyncToken only after this same call's records have all been processed/published
  * successfully).
  * nextSyncToken is null when this read produced no new cursor to advance to -

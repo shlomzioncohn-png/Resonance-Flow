@@ -346,7 +346,7 @@ class SlackSessionSchedulerTest {
 
     /**
      * Regression test for docs/plans/slack-superseded-fix.md: once a non-thread (channel) group's
-     * root has been adopted into a new thread group (ChatGroupStateReconciler.
+     * root has been adopted into a new thread group (ChatGroupFactory.
      * newThreadGroupState), the channel group's own pending inactivity timer - scheduled before
      * the migration ever happened - must still fire normally and publish, since the channel group
      * keeps living (its own copy of the root, plus whatever else landed in it) rather than being
@@ -369,7 +369,7 @@ class SlackSessionSchedulerTest {
         scheduler.scheduleOrReschedule(rootResult.groupState());
 
         // A reply names the root via thread_ts, migrating its content into a brand-new thread
-        // group - the channel group keeps living (see ChatGroupStateReconciler.
+        // group - the channel group keeps living (see ChatGroupFactory.
         // newThreadGroupState/migratedRootSnapshot).
         ChatMessage reply = new ChatMessage(
                 RawSourceType.SLACK, "00000000-0000-0000-0000-000000000001", "chat-a", "ruth", Instant.parse("2026-08-18T09:05:00Z"), "reply",

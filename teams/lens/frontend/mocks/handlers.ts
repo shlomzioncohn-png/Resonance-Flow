@@ -40,6 +40,7 @@ import type {
   UserStatus,
 } from '@/services/managerUsersApi';
 import type { FlowHealth } from '@/services/flowHealthApi';
+import type { WorkInsight, InsightFeedbackRequest } from '@/services/workInsightsApi';
 import { sampleProjectTaskCounts } from './dashboardChartsData';
 import { emptyGraph, sampleGraph, sampleGraphForProject } from './dependencyGraphData';
 import { emptyFlowHealth, sampleFlowHealth } from './flowHealthData';
@@ -48,6 +49,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8
 export const USERS_URL = `${API_BASE_URL}/api/manager/users`;
 export const BOTTLENECKS_GRAPH_URL = `${API_BASE_URL}/api/manager/bottlenecks/graph`;
 export const FLOW_HEALTH_URL = `${API_BASE_URL}/api/manager/flow-health`;
+export const WORK_INSIGHTS_URL = `${API_BASE_URL}/api/work-insights`;
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -100,6 +102,18 @@ export function resetMockUsers() {
   users = INITIAL_USERS.map((user) => ({ ...user }));
 }
 resetMockUsers();
+
+// Work Insights mock data and state
+interface MockInsightFeedback {
+  [insightId: string]: boolean;
+}
+
+let mockInsightFeedback: MockInsightFeedback = {};
+
+/** Reset work insights state - called before every story */
+export function resetMockWorkInsights() {
+  mockInsightFeedback = {};
+}
 
 // Same users and passwords as the Keycloak realm (teams/lens/keycloak/realm-lens.json).
 const MOCK_ACCOUNTS: (LoginRequest & { password: string; id: string; displayName: string; role: AuthRole })[] = [
@@ -315,6 +329,51 @@ export const handlers = [
       });
     },
   ),
+
+  // GET /api/work-insights - Get today's work insight
+  // Returns READY status with insight and evidence on first call,
+  // NOT_ENOUGH_DATA on subsequent calls (simulating caching)
+  http.get(WORK_INSIGHTS_URL, async ({ request }) => {
+    await delay(800); // Simulate AI processing delay
+
+    const isFirstCall = Object.keys(mockInsightFeedback).length === 0;
+
+    if (isFirstCall) {
+      return HttpResponse.json<WorkInsight>({
+        insightId: crypto.randomUUID(),
+        status: 'READY',
+        periodDays: 30,
+        insight: 'You have been consistently completing your tasks on time. In the past 30 days, you completed 87% of your deadline-based tasks before their due date.',
+        recommendation: 'Continue maintaining your current pace. Consider taking on one additional high-priority task this week to further boost team velocity.',
+        evidence: {
+          text: '26 out of 30 tasks with deadlines were completed on time in the last 30 days',
+          achieved: 26,
+          total: 30,
+        },
+      });
+    }
+
+    // Subsequent calls return less data
+    return HttpResponse.json<WorkInsight>({
+      insightId: crypto.randomUUID(),
+      status: 'NOT_ENOUGH_DATA',
+      periodDays: 30,
+    });
+  }),
+
+  // POST /api/work-insights/:insightId/feedback - Send feedback on an insight
+  http.post(`${WORK_INSIGHTS_URL}/:insightId/feedback`, async ({ params, request }) => {
+    await delay(300);
+    
+    const { helpful } = (await request.json()) as InsightFeedbackRequest;
+    const insightId = params.insightId as string;
+
+    // Store feedback in mock state
+    mockInsightFeedback[insightId] = helpful;
+
+    // Return 204 No Content (success, no body)
+    return new HttpResponse(null, { status: 204 });
+  }),
 
   // POST /auth/logout - the real Gateway clears the token cookie; the mock has none to clear.
   http.post(`${API_BASE_URL}/auth/logout`, () => new HttpResponse(null, { status: 204 })),

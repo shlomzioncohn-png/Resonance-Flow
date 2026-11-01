@@ -154,7 +154,7 @@ def test_a_directory_without_a_seal_does_not_verify(tmp_path):
 # ---- the generator version ----
 
 GOLDEN_VERSION = "1.0.1"
-GOLDEN_DIGEST = "2b67f3359e2c5b52b91ab73aa8035b99247b9b3fa21740cf21ee5d35c790bdb0"  # of the SMALL dataset below
+GOLDEN_DIGEST = "38d7a5e42c3518bb8beefe5bb21938e9ef5bdfda78183e2e7f1e82b6ca544126"  # of the SMALL dataset below
 
 
 def test_manifest_and_seal_record_the_generator_version(tmp_path):

@@ -128,7 +128,7 @@ public class ChatSourceRecordMapper {
      * bookkeeping only (see SourceRecord's javadoc), letting UnstructuredIntakeLane.afterPublish
      * confirm the exact group these records came from without a reverse messageId-index lookup.
      * A message snapshot NOT in newMessagesThisBatch can still carry its own landedAttachments
-     * (today: only a migrated thread root - see ChatGroupStateReconciler.newThreadGroupState) -
+     * (today: only a migrated thread root - see ChatGroupFactory.newThreadGroupState) -
      * those are emitted here too, as precomputedRef attachment records (see SourceRecord's
      * javadoc), so a root's already-landed attachment is never silently dropped from the thread's
      * own logical object just because the root itself was never "incoming" for this group.

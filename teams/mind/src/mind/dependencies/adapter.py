@@ -2,9 +2,11 @@
 TaskCreationFlow.
 
 Pass `.on_task_created` as `TaskCreationFlow`'s `on_matched`: publishes
-whatever of a task's dependency mentions resolve right now, once, when
-Inbox confirms the task exists. No retry, no state held between calls --
-see DependencyPublisher's module docstring and README.md for why.
+whatever of a task's dependency mentions resolve right now, when Inbox
+confirms the task exists. A mention that doesn't resolve yet is not lost
+(#918): if `publisher` was given a `pending` store, it registers the
+mention there, and the index consumer's `on_indexed` hook retries it
+later -- see `publisher.py`'s module docstring and README.md.
 """
 
 from __future__ import annotations

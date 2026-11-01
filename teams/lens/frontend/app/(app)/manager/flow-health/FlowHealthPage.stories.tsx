@@ -53,7 +53,7 @@ export const OpenFlag: Story = {
   play: async ({ canvas, userEvent }) => {
     await userEvent.click(await canvas.findByRole('button', { name: /Open details: Finalize auth token service/ }));
     await waitFor(() =>
-      expect(getRouter().replace).toHaveBeenCalledWith(expect.stringContaining(`flagId=${FIRST_FLAG_ID}`), {
+      expect(getRouter().replace).toHaveBeenCalledWith(expect.stringContaining(`flagId=${encodeURIComponent(FIRST_FLAG_ID)}`), {
         scroll: false,
       }),
     );

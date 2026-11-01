@@ -160,23 +160,34 @@ A Postgres store gets the same guarantees from single statements
 
 `ingestion/landed_consumer_runner.py` (#919) is the process that does this:
 the #349 pipeline calls `send`, and it composes one `TaskCreationFlow` and
-runs the listener and the timer beside it, **in the same process**. The
+runs the listener and the timer beside it, **in the same process**. Needs
+migration `0005` run first (`pending_creation_requests`,
+`pending_dependencies`) whenever `pending_store_backend` is `"postgres"`
+(the default since #918) -- the runner fails fast on start-up if the table
+is missing, same as `PgVectorStore` does for `task_embeddings`. The
 composition, in short:
 
 ```python
-loop = asyncio.new_event_loop()      # the listener calls run_until_complete on this, per message
+# SelectorEventLoop, not new_event_loop(): psycopg's async mode rejects
+# Windows' default ProactorEventLoop.
+loop = asyncio.SelectorEventLoop()   # the listener calls run_until_complete on this, per message
 index = PgVectorStore(get_settings().vector_store)
 loop.run_until_complete(index.open())   # on the loop that will use it
 
 producer = ProtobufProducer()
-pending = PendingRequests()          # one store, shared by everything below
+# Postgres by default (#918) -- one pool per loop that touches it, so this
+# same `pending` is safe to share with the listener's and the timer's loops
+# below despite each being on its own thread. PendingRequests() in memory
+# instead if pending_store_backend == "memory".
+pending = PostgresPendingStore(dsn)
 
-# #355: resolves dependency_mentions and publishes task.dependencies.proposed,
-# once, when task.created confirms the task exists. No retry -- see
-# dependencies/README.md. Shares this same producer and index -- no second
-# store or connection needed.
+# #355: resolves dependency_mentions and publishes task.dependencies.proposed
+# for whatever resolves right now. A mention that doesn't yet is registered
+# in its own pending store (#918) and retried later from the index
+# consumer's on_indexed hook, not from here. Shares this same producer and
+# index -- no second store or connection needed, beyond the pending one.
 sink = KafkaDependencySink(producer)
-publisher = DependencyPublisher(store=index, sink=sink)
+publisher = DependencyPublisher(store=index, sink=sink, pending=dependency_pending)
 adapter = DependencyAdapter(publisher)
 
 flow = TaskCreationFlow(
@@ -199,12 +210,13 @@ await flow.send(proposal, bridge_correlation_id=event.correlation_id, revision=e
 ```
 
 - **The listener and the timer each have their own loop and thread,
-  entirely independent of each other.** They do share `pending`
-  (`PendingRequests`), from two threads -- but that's `PendingRequests`'
-  own job: every method takes its own lock (see "Three threads, one
-  store" above), so this was already safe before either of them had a
-  loop of its own. Neither's *async* work depends on the other's anymore,
-  so neither can delay the other's handling. `on_task_created`
+  entirely independent of each other.** They do share `pending`, from two
+  threads -- but that's `pending`'s own job either way: `PendingRequests`
+  takes its own lock per method, `PostgresPendingStore` opens its own pool
+  per loop (see "Three threads, one store" above), so this was already
+  safe before either had a loop of its own. Neither's *async* work
+  depends on the other's anymore, so neither can delay the other's
+  handling. `on_task_created`
   (`adapter.on_task_created`, via `on_matched`) does all of #355's work
   inline, synchronously, as part of handling that one message — nothing is
   scheduled to run afterward, so the listener's loop never needs to keep
@@ -218,13 +230,16 @@ await flow.send(proposal, bridge_correlation_id=event.correlation_id, revision=e
 - **A failure in the listener is retried, then fatal.** `ProtobufConsumer.run`
   closes the consumer on an error, so the listener reconnects itself — waits
   doubling from 1 s to 60 s — and Kafka hands the uncommitted message to the
-  new connection, while the in-memory store survives to match it. The limit
-  is **time, not a count**: no message succeeds during an outage, so a count
-  ran out in seconds and the restart wiped the store. Only after failing for
-  15 minutes (`MAX_OUTAGE`; a handled message ends the outage) does it let the
-  error out, for the excepthook above to exit the process and have it
-  restarted. A message that fails every time therefore ends in a visible crash
-  loop, not silence. A connection that was **quiet** — up, with no message —
+  new connection, while `pending` survives to match it (always true with
+  `PostgresPendingStore`; true for `PendingRequests` only as long as the
+  *process* itself doesn't restart, since that store is in memory). The
+  limit is **time, not a count**: no message succeeds during an outage, so
+  a count would run out in seconds, and — with the in-memory backend — a
+  process restart during that outage wipes the store entirely. Only after
+  failing for 15 minutes (`MAX_OUTAGE`; a handled message ends the outage)
+  does it let the error out, for the excepthook above to exit the process
+  and have it restarted. A message that fails every time therefore ends in
+  a visible crash loop, not silence. A connection that was **quiet** — up, with no message —
   for longer than the longest wait (60 s) was a recovery even with no message
   to say so, so its failure starts a new outage. Time spent handling the message
   that failed does not count as quiet: a message that takes 90 s to fail every

@@ -24,7 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Tests the HTTP layer only, with {@link CrmSyncService} mocked. {@code CrmSyncServiceTest}
  * already covers a real multi-source run; repeating that through HTTP would add nothing.
  */
-@WebMvcTest(CrmBridgeController.class)
+@WebMvcTest(controllers = CrmBridgeController.class, properties = "bridge.manual-triggers.enabled=true")
 class CrmBridgeControllerTest {
 
     @Autowired

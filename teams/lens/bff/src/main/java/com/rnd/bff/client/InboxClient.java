@@ -35,9 +35,9 @@ import java.util.UUID;
  * docs/lens-architecture-design.md).
  *
  * Two modes, switched by inbox.mock-enabled (INBOX_MOCK_ENABLED):
- * - true (default): an in-memory mock task set, no network calls — so the
+ * - true: an in-memory mock task set, no network calls — so the
  *   team can keep working without running Inbox locally.
- * - false: real HTTP calls to Inbox's Task API (/api/v1/tasks, currently on
+ * - false (default): real HTTP calls to Inbox's Task API (/api/v1/tasks, currently on
  *   Inbox's inbox-team branch) at inbox.service.url. See
  *   lens/frontend/docs/api-integration-status.md for how to run Inbox locally.
  *
@@ -94,7 +94,7 @@ public class InboxClient {
     @Autowired
     public InboxClient(
             @Value("${inbox.service.url:http://inbox-service:8080}") String inboxServiceUrl,
-            @Value("${inbox.mock-enabled:true}") boolean mockEnabled,
+            @Value("${inbox.mock-enabled:false}") boolean mockEnabled,
             @Value("${inbox.dev-actor-id:}") String devActorId,
             @Value("${inbox.connect-timeout-ms:2000}") long connectTimeoutMs,
             @Value("${inbox.read-timeout-ms:10000}") long readTimeoutMs) {
@@ -177,7 +177,6 @@ public class InboxClient {
                 .updatedAt(LocalDateTime.of(2026, 8, 25, 14, 0))
                 .owner("Alex Morgan")
                 .project("Customer Success")
-                .constraints(List.of("approval_needed"))
                 .build());
         // task_003: APPROVED status, snoozed/unavailable with deadline
         seed(InboxTaskRecord.builder()
@@ -206,7 +205,6 @@ public class InboxClient {
                 .updatedAt(LocalDateTime.of(2026, 8, 27, 16, 0))
                 .owner("Alex Morgan")
                 .project("Customer Success")
-                .constraints(List.of("waiting_for_customer"))
                 .build());
         // task_004: IN_PROGRESS status, available
         seed(InboxTaskRecord.builder()
@@ -311,7 +309,6 @@ public class InboxClient {
                 .updatedAt(LocalDateTime.of(2026, 9, 8, 11, 30))
                 .owner("Alex Morgan")
                 .project("Platform Service")
-                .constraints(List.of("out_of_scope"))
                 .build());
         // task_008: CANCELLED status (cancelled before completion), unavailable
         seed(InboxTaskRecord.builder()
@@ -467,9 +464,12 @@ public class InboxClient {
 
     /**
      * @param snoozedUntil when a SNOOZED task wakes up; null for any other status
+     * @param feedbackText why a REJECTED task was rejected; null for any other status
+     *                     (Inbox answers 400 if it comes with another status)
      * @return the updated task, or null if Inbox doesn't have it
      */
-    public TaskDTO updateStatus(String userId, String taskId, String newStatus, Instant snoozedUntil) {
+    public TaskDTO updateStatus(String userId, String taskId, String newStatus, Instant snoozedUntil,
+                                String feedbackText) {
         if (mockEnabled) {
             InboxTaskRecord record = tasksById.get(taskId);
             if (record == null) {
@@ -490,7 +490,7 @@ public class InboxClient {
         try {
             InboxTaskResponse task = restTemplate.exchange(
                     URI.create(taskUri(taskId) + "/status"), HttpMethod.PATCH,
-                    new HttpEntity<>(statusBody(newStatus, snoozedUntil), headers),
+                    new HttpEntity<>(statusBody(newStatus, snoozedUntil, feedbackText), headers),
                     InboxTaskResponse.class)
                     .getBody();
             return task == null ? null : toTaskDTO(task);
@@ -585,12 +585,15 @@ public class InboxClient {
         return devActorId.isBlank() ? userId : devActorId;
     }
 
-    /** Inbox's PATCH .../status body - snoozed_until only when there is one. */
-    private static Map<String, Object> statusBody(String newStatus, Instant snoozedUntil) {
+    /** Inbox's PATCH .../status body - snoozed_until and feedback_text only when there is one. */
+    private static Map<String, Object> statusBody(String newStatus, Instant snoozedUntil, String feedbackText) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("status", newStatus.toUpperCase());
         if (snoozedUntil != null) {
             body.put("snoozed_until", snoozedUntil.toString());
+        }
+        if (feedbackText != null && !feedbackText.isBlank()) {
+            body.put("feedback_text", feedbackText);
         }
         return body;
     }
@@ -686,7 +689,7 @@ public class InboxClient {
                 .owner(record.getOwner())
                 .project(record.getProject())
                 .dependencies(record.getDependencies())
-                .constraints(record.getConstraints())
+                // No constraints here: they're Chain's, attached by WorkspaceService.
                 // Real schema fields, surfaced as-is alongside their derived
                 // equivalents above - see TaskDTO's javadoc.
                 .tenantId(record.getTenantId())
