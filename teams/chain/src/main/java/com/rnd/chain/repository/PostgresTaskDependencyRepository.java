@@ -79,6 +79,11 @@ public class PostgresTaskDependencyRepository implements TaskDependencyRepositor
     public boolean delete(UUID taskId, UUID dependsOnTaskId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
         Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
-        return jpaRepository.deleteByIdTaskIdAndIdDependsOnTaskId(taskId, dependsOnTaskId) > 0;
+        boolean deleted = jpaRepository.deleteByIdTaskIdAndIdDependsOnTaskId(taskId, dependsOnTaskId) > 0;
+        // The derived delete only schedules the removal; callers re-read the task_readiness view
+        // through JDBC right afterwards, which Hibernate would not flush for, so they would
+        // still see the edge.
+        jpaRepository.flush();
+        return deleted;
     }
 }

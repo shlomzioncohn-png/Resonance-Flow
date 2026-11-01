@@ -56,7 +56,8 @@ import static org.junit.jupiter.api.Assertions.*;
 @SpringBootTest
 @EmbeddedKafka(partitions = 1, bootstrapServersProperty = "spring.kafka.bootstrap-servers")
 @TestPropertySource(properties = {
-        "chain.kafka.schema-registry-url=mock://task-updated-handler-test"
+        "chain.kafka.schema-registry-url=mock://task-updated-handler-test",
+        "spring.kafka.admin.auto-create=true"
 })
 class TaskUpdatedEventHandlerIntegrationTest {
 

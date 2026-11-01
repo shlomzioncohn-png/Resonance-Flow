@@ -10,7 +10,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import com.rnd.chain.events.SchedulingUpdatePublisher;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.UUID;
@@ -27,6 +29,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Tag("postgres")
 @SpringBootTest
 class TaskDependencyServicePostgresConcurrencyTest {
+
+    // Not about Kafka: a mock keeps the afterCommit scheduling publish from blocking on a broker.
+    @MockBean
+    private SchedulingUpdatePublisher schedulingUpdatePublisher;
 
     private static final int THREAD_COUNT = 20;
 
