@@ -126,6 +126,8 @@ shared cluster turns it on in [`environments/shared.yaml`](environments/shared.y
 which ArgoCD loads after `values.yaml` and CI never loads. That file sets
 `ingress.host`, `ingress.className` (`traefik`, from
 [`apps/traefik.yaml`](../../argocd/apps/traefik.yaml)) and `ingress.tlsSecretName`.
+Its `grafana:` block isn't this chart's - it's Grafana's Ingress, read by the
+kube-prometheus-stack app (`teams/relay/argocd/README.md` "Monitoring").
 The chart doesn't install an ingress
 controller or issue the certificate; cert-manager is wired in through
 `ingress.annotations` (e.g. `cert-manager.io/cluster-issuer`). Traefik redirects
@@ -158,6 +160,180 @@ kubelet probes and `kubectl port-forward` aren't affected, because traffic from
 the pod's own node is always allowed. The rules only take effect if the cluster's
 CNI enforces NetworkPolicy. On a CNI that doesn't, they render but block nothing.
 The policy applies to the whole pod, not to individual paths.
+
+## Metrics scraping (`metrics`)
+
+Prometheus (installed by `teams/relay/argocd/apps/kube-prometheus-stack.yaml`)
+scrapes a component once it opts in:
+
+```yaml
+components:
+  bridge:
+    metrics:
+      enabled: true
+      path: /prometheus        # default /actuator/prometheus
+      interval: 30s            # default
+      team: bridge             # default: components.bridge.team, else the component name
+```
+
+`templates/servicemonitor.yaml` then renders a ServiceMonitor for the component's
+Service, on its `http` port. Every series gets two labels: `component` (the
+`components.<name>` key) and `team` (`components.<name>.team`, else
+`metrics.team`, else the component name), for per-team dashboards and alert
+routing. Set `components.<name>.team` on a component that isn't scraped but whose
+alerts should still reach its team (e.g. `lens-frontend`) - see "Alerting".
+
+- **The app must expose the endpoint first.** For Spring Boot that's
+  `io.micrometer:micrometer-registry-prometheus` plus `prometheus` in
+  `management.endpoints.web.exposure.include`. A component that sets
+  `management.endpoints.web.base-path: /` (bridge, chain) serves it at
+  `/prometheus`, not `/actuator/prometheus`.
+- **Skipped without the CRD.** The template only renders when the cluster has the
+  `monitoring.coreos.com/v1` CRDs. Teams' kind CI clusters don't, so CI is
+  unaffected. `helm template` skips it too, unless you pass
+  `--api-versions monitoring.coreos.com/v1/ServiceMonitor`.
+- **NetworkPolicy.** If the component also has `networkPolicy`, Prometheus pods
+  in `monitoring.namespace` (default `monitoring`) are allowed in on its `http` port.
+- **Kafka, PostgreSQL, MinIO.** Their exporters are on only in
+  `environments/shared.yaml`, so not in CI. `templates/infra-servicemonitors.yaml`
+  scrapes them, with the same CRD check, labelled `team: relay`. Don't turn on the
+  subcharts' own `metrics.serviceMonitor.enabled`: theirs skip the CRD check, and
+  on a fresh cluster the failed apply would block every team's sync.
+- **Kafka consumer-group lag.** The `kafka-exporter` subchart
+  (prometheus-kafka-exporter), also on only in `environments/shared.yaml`. It logs
+  in as the first `kafka.sasl.client.users` (`templates/kafka-exporter-sasl-secret.yaml`)
+  with the password from `resonance-flow-kafka-sasl-credentials`, the same Secret
+  every other Kafka client reads, passed through its `env` and `extraArgs`. Keep
+  its `sasl.scram` off: that reads both from one Secret, and never set a password in
+  values. Same as above: its own ServiceMonitor stays off,
+  `infra-servicemonitors.yaml` scrapes it.
+
+## Alerting
+
+`templates/prometheusrules.yaml` renders one PrometheusRule,
+`resonance-flow-alerts`, with the same CRD check as the ServiceMonitors (so not in
+teams' kind CI; `helm template` needs
+`--api-versions monitoring.coreos.com/v1/PrometheusRule`). Every alert carries
+`severity` (`critical` / `warning`) and `team`, which Alertmanager routes on.
+
+| Alert | Severity | Team | Fires when |
+|---|---|---|---|
+| `PodCrashLooping` | critical | owning team | a container in the namespace has been in CrashLoopBackOff for 5m |
+| `PodOOMKilled` | warning | owning team | a container restarted in the last 10m after an OOMKill |
+| `BridgeTasksConsumerLagHigh` | warning | `alerts.bridgeTasksLag.team` (inbox) | a consumer group's total lag on `bridge.structured.tasks` is above `alerts.bridgeTasksLag.threshold` for 5m |
+| `KafkaBrokerDown` | critical | relay | the broker's JMX target has been missing or down for 2m |
+| `KafkaOfflinePartitions` | critical | relay | any partition has had no leader for 1m |
+| `KafkaUnderReplicatedPartitions` | warning | relay | any partition has been under-replicated for 5m |
+| `PersistentVolumeFillingUp` | warning | relay | a Postgres or MinIO PVC has been over 85% full for 5m |
+
+- **Pod alerts and `team`.** kube-state-metrics exports no pod labels, but each
+  component's container is named after the component, so the template renders
+  one rule per team matching `container=~"<its components>"`, with `team` set
+  from `components.<name>.team` / `metrics.team` / the name (as for metrics).
+  relay gets everything else in the namespace: its own components, the
+  Kafka/Postgres/MinIO pods and sidecars, hook Jobs.
+- **Kafka rules** need the exporters, which are on only in
+  `environments/shared.yaml`: the lag rule `kafka-exporter`, the broker and
+  partition rules `kafka.metrics.jmx`.
+- **`KafkaUnderReplicatedPartitions` can't fire today.** Kafka runs a single
+  broker with replication factor 1, so no partition can be under-replicated.
+  The rule is there for when brokers are added.
+- **`PersistentVolumeFillingUp` is inactive today.** `postgresql.primary.persistence`
+  and `minio.persistence` are off, so there's no PVC and no
+  `kubelet_volume_stats_*` series to match. It starts working once either is
+  turned on - no rule change needed.
+- **Default rules.** kube-prometheus-stack only renders its rules for a
+  component it scrapes, so with `kubeEtcd`, `kubeScheduler`,
+  `kubeControllerManager` and `kubeProxy` off in
+  `teams/relay/argocd/apps/kube-prometheus-stack.yaml` (and Windows monitoring
+  off by default) their rules don't exist - turning a component on brings its
+  rules back. Its other defaults (e.g. `KubePodCrashLooping`) stay on
+  cluster-wide, with no `team` label.
+
+### Viewing alerts in Grafana
+
+Grafana (`teams/relay/argocd/README.md` "Monitoring" for access) shows them in
+two places:
+
+- **Alerting → Alert rules**, data source *Prometheus*: every rule from
+  `resonance-flow-alerts`, with its state (Normal / Pending / Firing), labels,
+  `summary` annotation, query and `for`. Grafana reads these from Prometheus;
+  nothing is copied into Grafana.
+- **Dashboards → platform → Resonance-Flow / Platform alerts**
+  (`dashboards/platform/platform-alerts.json` - see [Dashboards](#dashboards)): firing and
+  pending counts, a state timeline per alert, and a table of active alerts
+  with their labels, filterable by `team`. It's built on Prometheus's `ALERTS`
+  series filtered to `team!=""`, so it shows exactly the rules here (the
+  kube-prometheus-stack defaults have no `team`) and picks up new ones with
+  no dashboard change. An alert drops out of `ALERTS` once it resolves - a
+  gap in the timeline.
+
+### Testing a rule by hand
+
+On the shared cluster, after the rule is merged to `main`. Watch it go
+pending → firing, then back to Normal once you undo the trigger, in Grafana
+(above) or at `http://localhost:9090/alerts` (port-forward in
+`teams/relay/argocd/README.md` "Monitoring"). For anything that changes a
+resource ArgoCD manages (scaling inbox or Kafka), turn off auto-sync first -
+on `root` too, or it restores `resonance-flow`'s sync policy:
+
+```bash
+kubectl -n argocd patch application root --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'
+kubectl -n argocd patch application resonance-flow --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'
+```
+
+and turn it back on afterwards (patching `root` back restores `resonance-flow`).
+
+- **`PodCrashLooping`** - `kubectl -n resonance-flow run crash-test --image=busybox --restart=Always -- sh -c 'exit 1'`
+  (team relay; name the pod after a component, e.g. `bridge`, to test that
+  team). Delete it afterwards.
+- **`PodOOMKilled`** - a pod with a `16Mi` memory limit running
+  `tail /dev/zero`.
+- **`BridgeTasksConsumerLagHigh`** - scale `resonance-flow-inbox` to 0 and let
+  bridge publish more than the threshold (or lower the threshold for the test).
+- **`KafkaBrokerDown`** / **`KafkaOfflinePartitions`** - scale the
+  `resonance-flow-kafka-controller` StatefulSet to 0. With one broker, only
+  `KafkaBrokerDown` fires: the controller exposing `OfflinePartitionsCount` goes
+  down with it.
+- **`KafkaUnderReplicatedPartitions`** / **`PersistentVolumeFillingUp`** - not
+  testable until there's a second broker / a PVC (see above).
+
+## Dashboards
+
+Grafana dashboards are JSON files in `dashboards/<folder>/`, one Grafana folder
+per directory. `templates/grafana-dashboards.yaml` renders one ConfigMap per
+folder, `resonance-flow-grafana-dashboards-<folder>`, labelled
+`grafana_dashboard: "1"` and annotated `grafana_folder: <folder>`;
+kube-prometheus-stack's Grafana sidecar loads it into that folder (Grafana
+access: `teams/relay/argocd/README.md` "Monitoring"). Same CRD check as the
+PrometheusRules, so not in teams' kind CI (`helm template` needs
+`--api-versions monitoring.coreos.com/v1/PrometheusRule`).
+
+| Folder | Owner | Dashboards |
+|---|---|---|
+| `platform` | relay | **System overview** (`system-overview.json`): ready/desired replicas per Deployment and StatefulSet, scrape targets up per `component`, restarts, CPU and memory per container; Kafka broker, offline partitions, consumer lag and produce rate per topic; PostgreSQL, MinIO and PVC usage. **Platform alerts** (`platform-alerts.json`) - see [Viewing alerts in Grafana](#viewing-alerts-in-grafana). |
+| `kubernetes` | upstream | kube-prometheus-stack's own dashboards (cluster, nodes, pods, ...). |
+
+**Adding your team's dashboards.** Build it in Grafana, then *Share → Export →
+Export for sharing externally* off, save the JSON as
+`dashboards/<your-team>/<name>.json` (lowercase team name - the folder name is
+part of the ConfigMap name), and open a PR. Before you commit:
+
+- Give it a fixed top-level `uid`, e.g. `<team>-<name>`, unique across all
+  folders. The sidecar keys dashboards by `uid`; the render fails on a missing
+  or repeated one, or on invalid JSON.
+- Use the `prometheus` datasource uid (`{"type": "prometheus", "uid": "prometheus"}`),
+  not one from your Grafana's export.
+- Drop the exported `id` and set `"editable": false`.
+- Filter on `namespace="resonance-flow"` and your `component` / `team` labels
+  (from [Metrics scraping](#metrics-scraping-metrics)).
+
+A file directly in `dashboards/` fails the render. Dashboards change only
+through git: the sidecar provider refuses saves from the UI
+(`allowUiUpdates: false`) and the sidecar reloads the file on every change. The
+ConfigMaps are applied server-side (`argocd.argoproj.io/sync-options`), so a
+folder isn't held to client-side apply's 256KiB annotation limit; a ConfigMap
+still caps at 1MiB.
 
 ## Component configuration (`config` / `secret`)
 
@@ -260,6 +436,15 @@ from `dependencies`, so they follow the release and namespace:
 | `kafka.bootstrap_servers` | top-level `dependencies` (`kafka`) | `host:9092` |
 | `kafka.schema_registry_url` | `dependencies` (`schema-registry`) | `http://host/apis/ccompat/v6` |
 | `kafka.producer.task_creation_requested_topic` | `components.mind.config.kafka` | `task.creation.requested` |
+| `inbox.url` | `components.mind.config.inbox` | `http://resonance-flow-inbox:80` |
+
+MIND's Kafka consumers run as their own Deployments, from the same image:
+`components.mind-landed-consumer` (`bridge.raw.landed` → task creation) and
+`components.mind-index-consumer` (task events → the vector store). They have no HTTP, so no
+port, probes or Service. `shareFrom: mind` gives them mind's image, config, secret and
+volumes, so mind's tag bump updates them too; only `command`, `dependencies` and `resources`
+are their own. The landed consumer keeps pending requests in memory, so it stays at one
+replica with `Recreate`.
 
 ### MIND's DB and app credentials (`components.mind`)
 
@@ -275,7 +460,9 @@ the cluster:
   password. It also includes `kafka.sasl` (user and password from `kafka.sasl.client` in
   `values.yaml`) only when `components.mind.kafkaSasl` is `true`. That is the default, for
   shared clusters. `values/values-mind.yaml` sets it to `false`, because CI's Kafka broker
-  runs PLAINTEXT and MIND fails the handshake if it sends SASL.
+  runs PLAINTEXT and MIND fails the handshake if it sends SASL. It also includes
+  `inbox.actor_id` from `components.mind.inboxActorId`, the Inbox user MIND acts as. It's
+  a Secret, not config: Inbox trusts that header without checking it.
 
 The hook creates the app Secret only when the DB Secret is newly created. If the DB Secret
 already exists but the app Secret is missing, create the app Secret by hand with the same
@@ -285,5 +472,19 @@ password.
 Secret's `kafka.sasl` uses the dev credentials in `values.yaml`. A cluster with different
 Kafka credentials must change them there, or recreate the Secret.
 
-Still open: the MinIO credentials (`object_storage.access_key` / `secret_key`, empty), the
-LLM key (`llm.api_key`, empty), and the LLM, OCR, and ASR providers (`local` for now).
+### MIND's LLM key
+
+The chart doesn't create the LLM key, since it comes from the provider. The keys are the
+repository secrets `GEMINI_API_KEY` and `DEEPSEEK_API_KEY`, and the
+`.github/workflows/mind-llm-secret.yaml` workflow (run by hand, "Run workflow") writes the
+ones that are set into the `resonance-flow-mind-llm` Secret on the shared cluster, through
+the `KUBECONFIG` repository secret, then restarts MIND. Run it again after changing a key.
+The shared cluster's provider is set in `environments/shared.yaml`.
+
+Only the chosen provider's key is needed. The Secret is mounted optionally at
+`/etc/resonance-flow/secrets/llm/`, and MIND reads `<provider>-api-key` from there. When a
+provider is set and its key is missing, MIND's landed consumer fails at startup naming the
+missing key. CI leaves `llm.provider` empty and needs no key.
+
+Still open: the MinIO credentials (`object_storage.access_key` / `secret_key`, empty), and
+the OCR and ASR providers (`local` for now).

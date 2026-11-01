@@ -11,6 +11,9 @@ on:
     paths:
       - "teams/relay/notification_delivery/**"
       - "shared/proto/task-notification.proto"
+      # round-trip registers schemas from this list - see scripts/e2e.sh
+      - "teams/relay/ci/schema-subjects.tsv"
+      - ".github/workflows/notification-delivery-ci.yaml"
   workflow_dispatch: {}
 
 jobs:
@@ -23,13 +26,13 @@ jobs:
       service_name: notification-delivery
       service_dir: teams/relay/notification_delivery
 
-  cd:
+  release:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
       packages: write
       pull-requests: write
-    uses: ./.github/workflows/service-cd.yaml
+    uses: ./.github/workflows/service-release.yaml
     secrets: inherit
     with:
       service_name: notification-delivery
@@ -37,3 +40,97 @@ jobs:
       language: java
       container_port: 8082
       extra_build_contexts: shared=shared
+
+  # Deploys Kafka/Schema Registry/notification-delivery via the real Helm chart, then
+  # scripts/e2e.sh drives Kafka -> WebSocket/sync from a pod inside the cluster.
+  round-trip:
+    if: github.event_name == 'pull_request'
+    runs-on: self-hosted
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    concurrency:
+      group: notification-delivery-round-trip-${{ github.ref }}
+      cancel-in-progress: true
+
+    env:
+      CHART_DIR: teams/relay/helm/resonance-flow
+      SERVICE: notification-delivery
+      # Unique per run: several branches/PRs (and the ci job's setup-service-infra cluster) may
+      # be running on the same self-hosted machine, which shares one Docker daemon. The image
+      # tags are per-run for the same reason - a concurrent build would overwrite a shared tag
+      # before `kind load` picks it up.
+      KIND_CLUSTER: nd-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+      IMAGE_TAG: e2e-${{ github.run_id }}-${{ github.run_attempt }}
+      E2E_IMAGE: notification-delivery-e2e:e2e-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/free-runner-disk
+
+      - uses: azure/setup-helm@v5
+
+      - uses: ./.github/actions/install-yq
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER }}
+
+      - name: Fetch chart dependencies
+        run: helm dependency build "$CHART_DIR"
+
+      # Same opt-in overlay as setup-service-infra: only what values-notification-delivery.yaml enables.
+      - name: Build all-components-off overlay
+        run: |
+          yq '{"components": (.components | map_values({"enabled": false}))}' "$CHART_DIR/values.yaml" > "$RUNNER_TEMP/components-all-off.yaml"
+
+      # Phase 1: infra only, the image isn't built yet (two-phase, like setup-service-infra).
+      - name: Deploy chart with notification-delivery disabled (infra only)
+        run: |
+          helm upgrade --install "$SERVICE" "$CHART_DIR" \
+            -f "$CHART_DIR/values.yaml" \
+            -f "$RUNNER_TEMP/components-all-off.yaml" \
+            -f "$CHART_DIR/values/values-${SERVICE}.yaml" \
+            --set "components.${SERVICE}.enabled=false" \
+            --namespace "$SERVICE" --create-namespace \
+            --wait --timeout 420s
+
+      - name: Build and load the notification-delivery image
+        run: |
+          docker build --build-context shared=shared -t "$SERVICE:$IMAGE_TAG" teams/relay/notification_delivery
+          kind load docker-image "$SERVICE:$IMAGE_TAG" --name "$KIND_CLUSTER"
+
+      - name: Deploy chart with notification-delivery enabled
+        run: |
+          helm upgrade --install "$SERVICE" "$CHART_DIR" \
+            -f "$CHART_DIR/values.yaml" \
+            -f "$RUNNER_TEMP/components-all-off.yaml" \
+            -f "$CHART_DIR/values/values-${SERVICE}.yaml" \
+            --set "components.${SERVICE}.image.repository=${SERVICE}" \
+            --set "components.${SERVICE}.image.tag=${IMAGE_TAG}" \
+            --set "components.${SERVICE}.image.pullPolicy=Never" \
+            --namespace "$SERVICE" \
+            --wait --timeout 420s
+
+      - name: Round trip
+        run: bash teams/relay/notification_delivery/scripts/e2e.sh "$SERVICE"
+
+      - name: Diagnose failure
+        if: failure()
+        run: |
+          kubectl -n "$SERVICE" get pods -o wide
+          kubectl -n "$SERVICE" get events --sort-by=.lastTimestamp | tail -40
+          for pod in $(kubectl -n "$SERVICE" get pods -l "app.kubernetes.io/component=$SERVICE" -o jsonpath='{.items[*].metadata.name}'); do
+            echo "::group::logs $pod"
+            kubectl -n "$SERVICE" logs "$pod" --all-containers --tail=200 || true
+            kubectl -n "$SERVICE" logs "$pod" --all-containers --previous --tail=100 || true
+            echo "::endgroup::"
+          done
+
+      # Per-run tags would otherwise pile up on the self-hosted runner's Docker daemon
+      # (helm/kind-action's post step already deletes the cluster).
+      - name: Remove per-run images
+        if: always()
+        run: docker image rm -f "$SERVICE:$IMAGE_TAG" "$E2E_IMAGE" >/dev/null 2>&1 || true

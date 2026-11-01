@@ -47,6 +47,10 @@ export const projectKeys = {
  * view): both read the same cache entry, so moving between them doesn't refetch.
  * Includes projectId filter when querying a subset.
  */
+export const flowHealthKeys = {
+  all: ['manager', 'flow-health'] as const,
+};
+
 export const bottleneckKeys = {
   all: ['manager', 'bottlenecks'] as const,
   /** Every project's graph - invalidate this after a change that can block or unblock a task. */

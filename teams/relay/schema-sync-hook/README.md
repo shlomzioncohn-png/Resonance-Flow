@@ -16,70 +16,32 @@ Subjects marked `# reset: <subject>` in that tsv are hard-deleted (soft, then
 `?permanent=true`) before the check/register loop — see
 [`../ci/README.md`](../ci/README.md#reset-subject--pre-production-escape-hatch).
 
-Wired into ArgoCD as [`../argocd/apps/schema-sync-hook.yaml`](../argocd/apps/schema-sync-hook.yaml)
-(moved there 2026-09-09 so `root-app.yaml` actually picks it up — it used to sit
-in this directory as an inert, unwatched file).
+Wired into ArgoCD as [`../argocd/apps/schema-sync-hook.yaml`](../argocd/apps/schema-sync-hook.yaml).
 
-## Schema Registry is now deployed — as part of `resonance-flow`, not standalone
+## Where the Schema Registry runs
 
-Resolved in c3908262: Schema Registry is deployed as a `components.schema-registry`
-block in the shared [`resonance-flow`](../helm/resonance-flow) Helm chart —
-same pattern every other team's service uses, in the same release/namespace —
-not as its own chart or Application. `values.yaml`'s `schemaRegistryUrl` here
-points at it via its cross-namespace FQDN accordingly. It's still only reachable
-from inside the cluster; `teams/relay/notification_delivery/docker-compose.yml`'s copy remains the
-one used for local dev.
+It's the `components.schema-registry` block in the shared
+[`resonance-flow`](../helm/resonance-flow) chart, in the `resonance-flow` namespace, so
+`values.yaml`'s `schemaRegistryUrl` uses its cross-namespace FQDN. It's only reachable from
+inside the cluster; for local runs see [`../ci/README.md`](../ci/README.md#running-it-locally).
 
-## Why not a PreSync hook (the earlier version of this chart used one)
+## Why its own Application, not a PreSync hook
 
-ArgoCD hooks only run within their *own* Application's sync — and relay is
-deployed as part of the shared `resonance-flow` Application (all teams'
-services, one Helm release). A hook here would never actually block relay's
+ArgoCD hooks only run within their *own* Application's sync, and the registry lives in the
+`resonance-flow` Application. So this chart is a separate Application at `sync-wave: "1"`,
+after `resonance-flow`'s `"0"` (gated on health via
+[`../argocd/argocd-cm-patch.yaml`](../argocd/argocd-cm-patch.yaml)).
+
+The services are in that same wave `0`, so they're already deployed when this Job runs. A
+failed Job stops only the later waves (Traefik, wave `2`); it doesn't hold back a service
 rollout.
 
-**What actually works, and is already used in this repo:** `sync-wave`. Real
-example — `argocd/apps/resonance-flow.yaml` has `sync-wave: "0"`; this chart's
-own `argocd/apps/schema-sync-hook.yaml` uses `"1"`, so resonance-flow (which
-now renders Schema Registry itself, see above) must finish and be healthy
-before this Job's Application starts syncing. (There used to be a separate,
-earlier-waved `apps/kafka.yaml` this pattern was modeled on — it no longer
-exists; Kafka is now a subchart dependency of `resonance-flow` itself, see
-`../argocd/README.md`.)
+## `files/` is a generated mirror
 
-Confirmed with Avigail directly: her CI never touches the real cluster's live
-data — only spins up a throwaway local `kind` cluster for smoke tests.
-
-## What's a temporary placeholder right now
-
-- **Everything under `files/`** — `schemas/*.proto`, `ci/check-schema-compatibility.sh`
-  / `register-schema.sh`, and `schema-subjects.tsv` — are **copies**, not the
-  source of truth, even though they now sit right next to the real ones
-  (`../../../shared/proto/`, `../ci/`) — Helm's `.Files.Get` still can't read outside
-  its own chart directory, no matter how close. **Fixed by automation, not
-  manual discipline:**
-  [`.github/workflows/relay-schema-sync.yaml`](../../../.github/workflows/relay-schema-sync.yaml)
-  re-copies the real files in here on every push to `main` that touches them,
-  and commits the result itself (same pattern as `service-update-manifest.yaml`
-  auto-committing image tag bumps). Nobody should ever
-  hand-edit anything under `files/` — it's a generated mirror.
-- Two of the schemas in `../ci/schema-subjects.tsv`
-  (`task-created-event.proto`, `raw-object-event.proto`)
-  are **still unconfirmed drafts** — Inbox/Bridge haven't signed off on them.
-  (The two added 2026-09-09,
-  `task-updated-event.proto` / `task-completed-event.proto` — are mechanical
-  mirrors of already-existing Java payload classes, not independent drafts,
-  but haven't gone through an explicit sign-off round either.) Being in this
-  list is what proves it handles more than one schema, not a signal any of
-  them are ready to actually register against a live FULL-compatibility
-  registry.
-
-## What's left before this goes live
-
-- ~~Who deploys Schema Registry for real, and where~~ — **resolved** (c3908262):
-  as `components.schema-registry` inside `resonance-flow` itself.
-- ~~Once it exists, what sync-wave does this chart get~~ — **resolved**:
-  `"1"`, after `resonance-flow`'s `"0"` (see `argocd/apps/schema-sync-hook.yaml`).
-- Still open: none of the schemas above have an unambiguous sign-off record —
-  worth closing out before flipping this Job on for real, since registering
-  against a live FULL-compatibility registry is effectively one-way (see the
-  compatibility notes in `task-created-event.proto`'s own header).
+Everything under `files/` (`schemas/*.proto`, `ci/check-schema-compatibility.sh`,
+`ci/register-schema.sh`, `ci/_schema-references.sh`, `schema-subjects.tsv`) is a copy, because
+Helm's `.Files.Get` can't read outside the chart directory. The sources are
+[`../../../shared/proto/`](../../../shared/proto) and [`../ci/`](../ci).
+[`relay-schema-sync.yaml`](../../../.github/workflows/relay-schema-sync.yaml) regenerates them
+on every push to `main` that touches the sources and opens a PR (branch `ci/relay-schema-sync`)
+with the result. Never edit anything under `files/` by hand.

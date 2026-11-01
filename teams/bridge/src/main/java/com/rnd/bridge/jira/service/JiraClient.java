@@ -63,13 +63,12 @@ public class JiraClient {
     public Flux<Task> searchIssues(String jql) {
         log.info("Searching Jira issues with JQL: {}", jql);
 
-        return fetchPage(jql, 0)
-                .expand(page -> {
-                    int consumed = page.startAt() + page.issues().size();
-                    return consumed < page.total() && !page.issues().isEmpty()
-                            ? fetchPage(jql, consumed)
-                            : Mono.empty();
-                })
+        return fetchPage(jql, null)
+                .expand(page -> !page.isLast()
+                        && StringUtils.hasText(page.nextPageToken())
+                        && !page.issues().isEmpty()
+                        ? fetchPage(jql, page.nextPageToken())
+                        : Mono.empty())
                 .concatMapIterable(JiraPage::issues)
                 .map(issue -> jiraIssueMapper.map(issue, Instant.now()))
                 .concatMap(this::validateOrSkip)
@@ -77,28 +76,39 @@ public class JiraClient {
     }
 
     /**
-     * Fetches one page of search results. Jira returns total/startAt so we
-     * keep paging while consumed (startAt + page size) is below total.
+     * Fetches one page of search results via the enhanced JQL endpoint.
+     * Jira returns {@code isLast}/{@code nextPageToken} instead of
+     * {@code total}/{@code startAt}: we keep paging while the response
+     * reports a next page, passing the token back verbatim. The first
+     * page is requested with no token.
      */
-    private Mono<JiraPage> fetchPage(String jql, int startAt) {
+    private Mono<JiraPage> fetchPage(String jql, String nextPageToken) {
         return webClient.get()
-                .uri(uriBuilder -> uriBuilder.path("/rest/api/2/search")
-                        .queryParam("jql", jql)
-                        .queryParam("startAt", startAt)
-                        .queryParam("maxResults", pageSize)
-                        .build())
+                .uri(uriBuilder -> {
+                    var builder = uriBuilder.path("/rest/api/2/search/jql")
+                            .queryParam("jql", jql)
+                            .queryParam("maxResults", pageSize)
+                            // v3 returns description as an ADF object the String-typed
+                            // DTO can't bind - the v2 endpoint keeps it plain text. List
+                            // every field the mapper reads, or Jira returns all of them.
+                            .queryParam("fields", "summary,description,status,issuetype,created,updated");
+                    if (StringUtils.hasText(nextPageToken)) {
+                        builder.queryParam("nextPageToken", nextPageToken);
+                    }
+                    return builder.build();
+                })
                 .retrieve()
                 .bodyToMono(JiraSearchResult.class)
                 .map(result -> new JiraPage(
-                        startAt,
                         result != null && result.getIssues() != null ? result.getIssues() : List.of(),
-                        result != null ? result.getTotal() : 0))
+                        result != null ? result.getNextPageToken() : null,
+                        result == null || result.isLast()))
                 .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
                         .filter(this::isRetryableException)
                         .doBeforeRetry(retrySignal -> log.warn("Retrying Jira API call, attempt: {}", retrySignal.totalRetries() + 1)));
     }
 
-    private record JiraPage(int startAt, List<JiraIssue> issues, int total) {
+    private record JiraPage(List<JiraIssue> issues, String nextPageToken, boolean isLast) {
     }
 
     /**

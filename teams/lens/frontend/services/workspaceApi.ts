@@ -224,15 +224,19 @@ export type TaskStatus =
 /**
  * @param snoozedUntil required when status is 'SNOOZED' (Inbox rejects the change
  *   with 400 without it): when the task wakes up again. Ignored for other statuses.
+ * @param feedbackText why the task is rejected - only with 'REJECTED' (Inbox answers
+ *   400 if it comes with any other status).
  */
 export function updateTaskStatus(
   taskId: string,
   status: TaskStatus,
   snoozedUntil?: Date,
+  feedbackText?: string,
 ): Promise<ApiTask> {
   return api.patch<ApiTask>(`/api/workspace/tasks/${taskId}/status`, {
     status,
     ...(snoozedUntil && { snoozedUntil: snoozedUntil.toISOString() }),
+    ...(feedbackText && { feedbackText }),
   });
 }
 

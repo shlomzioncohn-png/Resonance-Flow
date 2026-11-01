@@ -1,0 +1,91 @@
+[
+  {
+    "partition": 0,
+    "offset": 0,
+    "timestamp_ms": 1793015931950,
+    "key": "ae1bba81-af79-452c-8ba3-6937ab09f474",
+    "headers": {
+      "event_id": "b05d779c-b67d-483b-a2cf-309da0a57af2",
+      "event_type": "task.created",
+      "timestamp": "2026-10-26T11:58:49.077406Z",
+      "source_service": "inbox",
+      "correlation_id": "75578123-008b-5b07-9146-b70d250e2080"
+    },
+    "value": {
+      "id": "ae1bba81-af79-452c-8ba3-6937ab09f474",
+      "title": "Get pricing proposal over to Northwind",
+      "tenant_id": "00000000-0000-0000-0000-000000000001",
+      "source_type": "SOURCE_TYPE_SLACK",
+      "source_ref": "bridge:63c85032-8e44-4d0f-88e7-5571cfba230f",
+      "is_available": true,
+      "tier": "TASK_TIER_TACTICAL",
+      "role_context": "TASK_ROLE_CONTEXT_SALESPERSON",
+      "urgency": 3,
+      "deadline": "2026-10-29T15:00:00Z",
+      "status": "TASK_STATUS_NEW",
+      "extraction_provenance": "EXTRACTION_PROVENANCE_ML_INFERRED",
+      "confidence": 0.7695,
+      "created_at": "2026-10-26T11:58:48.842Z"
+    }
+  },
+  {
+    "partition": 0,
+    "offset": 1,
+    "timestamp_ms": 1793015962203,
+    "key": "36dd9c2c-6e15-4de2-9fa6-7afebd09d50c",
+    "headers": {
+      "event_id": "15ed634b-2b30-4579-a271-0602010fd177",
+      "event_type": "task.created",
+      "timestamp": "2026-10-26T11:59:21.574918Z",
+      "source_service": "inbox",
+      "correlation_id": "b8c317c5-5d6d-54dc-a885-edc8b96dcfad"
+    },
+    "value": {
+      "id": "36dd9c2c-6e15-4de2-9fa6-7afebd09d50c",
+      "title": "Finish the updated cost sheet",
+      "description": "Hardware prices went up last month, so the old cost sheet is out of date.",
+      "tenant_id": "00000000-0000-0000-0000-000000000001",
+      "source_type": "SOURCE_TYPE_MEETING",
+      "source_ref": "GMizrOcERvKq6SDAvmLNBQ==",
+      "is_available": true,
+      "tier": "TASK_TIER_OPERATIONAL",
+      "urgency": 3,
+      "effort_estimate_minutes": 240,
+      "deadline": "2026-10-28T15:00:00Z",
+      "status": "TASK_STATUS_NEW",
+      "extraction_provenance": "EXTRACTION_PROVENANCE_ML_INFERRED",
+      "confidence": 0.95,
+      "created_at": "2026-10-26T11:59:21.563Z"
+    }
+  },
+  {
+    "partition": 0,
+    "offset": 2,
+    "timestamp_ms": 1793015967219,
+    "key": "a31e7d3a-db76-4ce0-ae46-3820eb5921c3",
+    "headers": {
+      "event_id": "64b9cf58-b5c8-42b1-b8dc-70a763a9526b",
+      "event_type": "task.created",
+      "timestamp": "2026-10-26T11:59:25.314800Z",
+      "source_service": "inbox",
+      "correlation_id": "273416a7-d268-59bb-81dc-060b7d706e83"
+    },
+    "value": {
+      "id": "a31e7d3a-db76-4ce0-ae46-3820eb5921c3",
+      "title": "Complete, sign and return the supplier registration form",
+      "description": "Form NW-SR-14 needed to set Brightline Sensors up in Northwind Traders' vendor system. Email completed form to procurement@northwind.example.",
+      "tenant_id": "00000000-0000-0000-0000-000000000001",
+      "source_type": "SOURCE_TYPE_EMAIL",
+      "source_ref": "bridge:e02505da-b28b-46d7-a40f-9487cc487697",
+      "is_available": true,
+      "tier": "TASK_TIER_OPERATIONAL",
+      "urgency": 3,
+      "effort_estimate_minutes": 15,
+      "deadline": "2026-10-30T15:00:00Z",
+      "status": "TASK_STATUS_NEW",
+      "extraction_provenance": "EXTRACTION_PROVENANCE_ML_INFERRED",
+      "confidence": 0.855,
+      "created_at": "2026-10-26T11:59:25.306Z"
+    }
+  }
+]

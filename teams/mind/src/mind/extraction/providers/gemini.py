@@ -94,8 +94,9 @@ class GeminiProvider:
 
         if not self._settings.configured:
             raise ValueError(
-                "Gemini api_key is not configured: expected llm.gemini.api_key in the "
-                "mounted secrets.yaml (see mind.extraction.providers.settings)"
+                "Gemini api_key is not configured: expected gemini-api-key in the "
+                "resonance-flow-mind-llm Secret, or llm.gemini.api_key in the mounted "
+                "secrets.yaml (see mind.extraction.providers.settings)"
             )
 
         self._owns_client = client is None

@@ -51,4 +51,10 @@ public class TaskStatusUpdateDTO {
      * Inbox enforces the "required" rule and answers 400 without it.
      */
     private Instant snoozedUntil;
+
+    /**
+     * Why the task was rejected - only with status REJECTED, optional there.
+     * Inbox answers 400 if it comes with any other status.
+     */
+    private String feedbackText;
 }

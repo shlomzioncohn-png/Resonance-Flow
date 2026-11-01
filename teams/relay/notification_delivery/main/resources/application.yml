@@ -28,7 +28,10 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,metrics
+        include: health,metrics,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
 
 relay:
   kafka:

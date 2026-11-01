@@ -7,6 +7,7 @@ import com.rnd.bridge.github.mapper.GitHubPullRequestMapper;
 import com.rnd.bridge.task.TaskValidator;
 import com.rnd.bridge.task.enrichment.EnrichmentProperties;
 import com.rnd.bridge.task.enrichment.NoOpTaskEnricher;
+import com.rnd.bridge.task.model.RoleContext;
 import com.rnd.bridge.task.model.SourceType;
 import com.rnd.bridge.task.model.Task;
 import com.rnd.bridge.task.model.TaskStatus;
@@ -19,8 +20,10 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpHeaders;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
 
 import java.time.Instant;
@@ -28,7 +31,10 @@ import java.util.List;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @SuppressWarnings({"unchecked", "rawtypes"})
@@ -61,6 +67,9 @@ class GitHubClientTest {
 
     @BeforeEach
     void setUp() {
+        // @InjectMocks doesn't apply @Value defaults - pageSize stays 0 and the
+        // client pages forever on an empty first page.
+        ReflectionTestUtils.setField(gitHubClient, "pageSize", 100);
         when(webClient.get()).thenReturn(requestHeadersUriSpec);
         when(requestHeadersUriSpec.uri(any(Function.class))).thenReturn(requestHeadersSpec);
         when(requestHeadersSpec.retrieve()).thenReturn(responseSpec);
@@ -146,6 +155,109 @@ class GitHubClientTest {
 
         assertThat(tasks).hasSize(2);
         assertThat(tasks).extracting(Task::title).containsExactly("Valid", "Also valid");
+    }
+
+    @Test
+    void fetchIssues_shouldReturnEmptyWhenNoIssues() {
+        when(responseSpec.bodyToFlux(GitHubIssue.class)).thenReturn(Flux.empty());
+
+        List<Task> tasks = gitHubClient.fetchIssues("owner", "repo").collectList().block();
+
+        assertThat(tasks).isEmpty();
+    }
+
+    @Test
+    void fetchIssues_shouldMapClosedIssueToDone() {
+        GitHubIssue closed = createGitHubIssue(1L, "Closed", "b", "closed", "https://github.com/o/r/issues/1", "u", false);
+        when(responseSpec.bodyToFlux(GitHubIssue.class)).thenReturn(Flux.just(closed));
+
+        List<Task> tasks = gitHubClient.fetchIssues("owner", "repo").collectList().block();
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).status()).isEqualTo(TaskStatus.DONE);
+    }
+
+    @Test
+    void fetchIssues_shouldMapUnknownStateToInProgress() {
+        GitHubIssue weird = createGitHubIssue(1L, "Weird", "b", "locked", "https://github.com/o/r/issues/1", "u", false);
+        when(responseSpec.bodyToFlux(GitHubIssue.class)).thenReturn(Flux.just(weird));
+
+        List<Task> tasks = gitHubClient.fetchIssues("owner", "repo").collectList().block();
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).status()).isEqualTo(TaskStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void fetchIssues_shouldMapNullStateToNew() {
+        GitHubIssue noState = createGitHubIssue(1L, "No state", "b", null, "https://github.com/o/r/issues/1", "u", false);
+        when(responseSpec.bodyToFlux(GitHubIssue.class)).thenReturn(Flux.just(noState));
+
+        List<Task> tasks = gitHubClient.fetchIssues("owner", "repo").collectList().block();
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).status()).isEqualTo(TaskStatus.NEW);
+    }
+
+    @Test
+    void fetchIssues_shouldHaveDeveloperRoleContext() {
+        GitHubIssue issue = createGitHubIssue(1L, "Dev task", "b", "open", "https://github.com/o/r/issues/1", "u", false);
+        when(responseSpec.bodyToFlux(GitHubIssue.class)).thenReturn(Flux.just(issue));
+
+        List<Task> tasks = gitHubClient.fetchIssues("owner", "repo").collectList().block();
+
+        assertThat(tasks.get(0).roleContext()).isEqualTo(RoleContext.DEVELOPER);
+    }
+
+    @Test
+    void fetchPullRequests_shouldHaveManagerRoleContext() {
+        GitHubIssue pr = createGitHubIssue(1L, "PR", "b", "open", "https://github.com/o/r/pull/1", "u", true);
+        when(responseSpec.bodyToFlux(GitHubIssue.class)).thenReturn(Flux.just(pr));
+
+        List<Task> tasks = gitHubClient.fetchPullRequests("owner", "repo").collectList().block();
+
+        assertThat(tasks.get(0).roleContext()).isEqualTo(RoleContext.MANAGER);
+    }
+
+    @Test
+    void fetchIssues_shouldRetryOnServerError() {
+        GitHubIssue issue = createGitHubIssue(1L, "Recovered", "b", "open", "https://github.com/o/r/issues/1", "u", false);
+        when(responseSpec.bodyToFlux(GitHubIssue.class))
+                .thenReturn(
+                        Flux.error(WebClientResponseException.create(500, "Internal Error", HttpHeaders.EMPTY, new byte[0], null)),
+                        Flux.just(issue));
+
+        List<Task> tasks = gitHubClient.fetchIssues("owner", "repo").collectList().block();
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).title()).isEqualTo("Recovered");
+        verify(webClient, times(2)).get();
+    }
+
+    @Test
+    void fetchIssues_shouldNotRetryOnClientError() {
+        when(responseSpec.bodyToFlux(GitHubIssue.class))
+                .thenReturn(Flux.error(WebClientResponseException.create(404, "Not Found", HttpHeaders.EMPTY, new byte[0], null)));
+
+        assertThatThrownBy(() -> gitHubClient.fetchIssues("owner", "repo").collectList().block())
+                .isInstanceOf(WebClientResponseException.class);
+        verify(webClient, times(1)).get();
+    }
+
+    @Test
+    void fetchAllTasks_shouldMergeIssuesAndPullRequests() {
+        GitHubIssue issue = createGitHubIssue(1L, "Issue", "b", "open", "https://github.com/o/r/issues/1", "u", false);
+        GitHubIssue pr = createGitHubIssue(2L, "PR", "b", "open", "https://github.com/o/r/pull/2", "u", true);
+        // Both endpoints return the same mixed flux; fetchIssues filters out PRs,
+        // fetchPullRequests maps everything as a PR.
+        when(responseSpec.bodyToFlux(GitHubIssue.class))
+                .thenReturn(Flux.just(issue, pr), Flux.just(issue, pr));
+
+        List<Task> tasks = gitHubClient.fetchAllTasks("owner", "repo").collectList().block();
+
+        assertThat(tasks).hasSize(3);
+        assertThat(tasks).filteredOn(t -> t.sourceType() == SourceType.GITHUB_ISSUE).hasSize(1);
+        assertThat(tasks).filteredOn(t -> t.sourceType() == SourceType.GITHUB_PR).hasSize(2);
     }
 
     private GitHubIssue createGitHubIssue(Long number, String title, String body, String state,

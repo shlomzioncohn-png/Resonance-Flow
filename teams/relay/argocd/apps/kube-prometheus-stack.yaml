@@ -1,0 +1,100 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    # See README.md "Monitoring".
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  project: default
+  sources:
+    # The upstream chart.
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 92.4.0
+      helm:
+        releaseName: monitoring
+        # Shared-cluster-only settings (Grafana's Ingress), kept with the
+        # resonance-flow chart's in one file. valuesObject below wins over it.
+        valueFiles:
+          - $values/teams/relay/helm/resonance-flow/environments/shared.yaml
+        valuesObject:
+          prometheus:
+            prometheusSpec:
+              serviceMonitorSelectorNilUsesHelmValues: false
+              podMonitorSelectorNilUsesHelmValues: false
+              ruleSelectorNilUsesHelmValues: false
+              probeSelectorNilUsesHelmValues: false
+              scrapeConfigSelectorNilUsesHelmValues: false
+              retention: 15d
+              retentionSize: 9GB
+              storageSpec:
+                volumeClaimTemplate:
+                  spec:
+                    accessModes: ["ReadWriteOnce"]
+                    resources:
+                      requests:
+                        storage: 10Gi
+              resources:
+                requests:
+                  cpu: 200m
+                  memory: 1Gi
+                limits:
+                  memory: 2Gi
+          alertmanager:
+            alertmanagerSpec:
+              retention: 120h
+          grafana:
+            enabled: true
+            admin:
+              existingSecret: grafana-admin
+              userKey: admin-user
+              passwordKey: admin-password
+            # See the resonance-flow chart's README "Dashboards".
+            sidecar:
+              dashboards:
+                folderAnnotation: grafana_folder
+                provider:
+                  foldersFromFilesStructure: true
+                # This chart's own dashboards.
+                annotations:
+                  grafana_folder: kubernetes
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                memory: 512Mi
+          kubeEtcd:
+            enabled: false
+          kubeControllerManager:
+            enabled: false
+          kubeScheduler:
+            enabled: false
+          kubeProxy:
+            enabled: false
+    # Our own manifests: the grafana-admin Secret PreSync hook.
+    - repoURL: https://github.com/KamaTechOrg/Resonance-Flow.git
+      targetRevision: main
+      path: teams/relay/monitoring
+    # $values for the chart's valueFiles. A ref-only source deploys nothing.
+    - repoURL: https://github.com/KamaTechOrg/Resonance-Flow.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

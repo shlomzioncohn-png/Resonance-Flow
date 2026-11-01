@@ -49,6 +49,11 @@ bff:
     employee-task: ${BFF_ENDPOINT_EMPLOYEE_TASK:/workspace/employee-task}
     manager-users: ${BFF_ENDPOINT_MANAGER_USERS:/manager/users}
     task-selection: ${BFF_ENDPOINT_TASK_SELECTION:/workspace/tasks/selection}
+    work-insights: ${BFF_ENDPOINT_WORK_INSIGHTS:/work-insights}
+  # Special timeout for work-insights: first call may take up to 90 seconds (AI processing),
+  # so this timeout must be longer than the standard read-timeout-ms.
+  # Subsequent calls within the same day are fast (cached in Inbox DB).
+  read-timeout-work-insights-ms: ${BFF_READ_TIMEOUT_WORK_INSIGHTS_MS:120000}
 
 # JWT configuration for RS256 token signing/validation
 lens:
@@ -58,6 +63,15 @@ lens:
 
 server:
   port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
 
 logging:
   level:

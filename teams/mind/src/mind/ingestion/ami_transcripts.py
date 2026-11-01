@@ -304,6 +304,51 @@ def _transcript_for_record(
     return AMITranscript(meeting_id=meeting_id, text=text)
 
 
+def load_gold_actions(
+    meeting_id: str,
+    manifest_path: Path = MANIFEST_PATH,
+    sha256_path: Path = SHA256_PATH,
+    root: Path = _PROJECT_ROOT,
+) -> list[str]:
+    """The meeting's gold action items: the `<sentence>`s of its abssumm `<actions>`.
+
+    The extraction eval's answer key (#178). Only the eval reads it; the
+    extractor sees the transcript alone. Sentences come back verbatim, in file
+    order; a meeting with no `<actions>` has none.
+
+    Raises:
+        KeyError: meeting_id is not a record in the manifest.
+        RuntimeError: the manifest or ami.sha256 is missing, the record lists
+            no abssumm file, or that file is not downloaded or doesn't match
+            its checksum.
+    """
+    manifest = _read_manifest(manifest_path)
+    record = next((r for r in manifest.records if r.id == meeting_id), None)
+    if record is None:
+        raise KeyError(f"meeting {meeting_id!r} is not in {manifest_path.name}")
+    rel_path = next((p for p in record.files if p.endswith(f"/{meeting_id}{_ABSSUMM_SUFFIX}")), None)
+    if rel_path is None:
+        raise RuntimeError(
+            f"record {meeting_id!r} in {manifest_path.name} lists no {meeting_id}{_ABSSUMM_SUFFIX}"
+        )
+    path = root / rel_path
+    if not path.exists():
+        raise RuntimeError(
+            f"{rel_path} not found. The AMI annotations are gitignored, not committed -- "
+            f"download {manifest.package.file} (see {manifest_path.name}, source "
+            f"page: {manifest.source_page}) and unzip it under local-data/ami/."
+        )
+    checksums = _load_checksums(sha256_path)
+    if rel_path not in checksums:
+        raise RuntimeError(f"{rel_path} has no entry in {sha256_path.name}")
+    _verify_checksum(path, checksums[rel_path])
+    return [
+        " ".join((sentence.text or "").split())
+        for actions in ET.parse(path).getroot().iter("actions")
+        for sentence in actions.iter("sentence")
+    ]
+
+
 # Same format and behaviour as load_checksums()/verify_checksum() in
 # benchmarks/common.py, which src/ cannot import.
 def _load_checksums(sha256_path: Path) -> dict[str, str]:

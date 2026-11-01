@@ -10,10 +10,11 @@ bootstrap, mirroring `run.py --model dummy`. Real pipeline output plugs in here
 once Yonit's extraction and Michal's ASR are producing it.
 
 `--threshold` and the similarity backend are the swappable matching rule (see
-`extraction_eval.evaluate_extraction`). The similarity is the pure-Python
-`placeholder_similarity` and the default threshold is the fixture's 0.5 —
-**not** the locked lexical τ = 0.60 from `extraction_eval_design.md` §6, which is
-calibrated for the `rapidfuzz` backend that is not built yet.
+`extraction_eval.evaluate_extraction`). The similarity is the lexical backend,
+`similarity.lexical_similarity`, and the default threshold is its locked
+τ = `LEXICAL_THRESHOLD` (0.60, `extraction_eval_design.md` §6), so a run uses
+the rule fixed before any real output was seen. The bundled fixture scores the
+same with it as with the Jaccard placeholder it was worked out by hand for.
 
 Reporting mirrors `run.py`: a short summary, then the full report as JSON (also
 written to `extraction_report.json`), so the matched/missed/false-positive detail
@@ -28,12 +29,12 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, StrictStr
 
 from mind.evaluation.extraction_eval import (
-    PLACEHOLDER_THRESHOLD,
     ExtractionEvalReport,
+    ExtractionSliceReport,
     evaluate_extraction,
-    placeholder_similarity,
 )
 from mind.evaluation.extraction_fixture import FIXTURE_ANNOTATED, FIXTURE_EXTRACTED
+from mind.evaluation.similarity import LEXICAL_THRESHOLD, lexical_similarity
 
 
 def _summary_lines(report: ExtractionEvalReport) -> str:
@@ -46,6 +47,38 @@ def _summary_lines(report: ExtractionEvalReport) -> str:
         f"({report.true_positives}/{report.n_annotated} "
         f"annotations were found)\n"
         f"  F1:        {report.f1:.1%}"
+    )
+
+
+def _pct(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.1%}"
+
+
+def slice_summary_lines(report: ExtractionSliceReport) -> str:
+    """The summary of a per-meeting run: micro (headline), macro, then failures.
+
+    Failures get their own line, with the count per `reason`, so a provider
+    outage reads as an outage and not as a drop in extraction quality.
+    """
+    n_failed_meetings = sum(1 for meeting in report.meetings if meeting.failed)
+    if report.failures:
+        reasons = ", ".join(
+            f"{reason} {count}" for reason, count in sorted(report.failure_reasons.items())
+        )
+        failures_line = (
+            f"  Failures:  {len(report.failures)} outcome(s) in "
+            f"{n_failed_meetings}/{len(report.meetings)} meeting(s) ({reasons}); "
+            "counted as zero extracted items, not skipped"
+        )
+    else:
+        failures_line = "  Failures:  none"
+    return (
+        f"[extraction-quality, {len(report.meetings)} meeting(s)]\n"
+        f"  Micro:     P {_pct(report.micro_precision)}  R {_pct(report.micro_recall)}  "
+        f"F1 {_pct(report.micro_f1)}\n"
+        f"  Macro:     P {_pct(report.macro_precision)}  R {_pct(report.macro_recall)}  "
+        f"F1 {_pct(report.macro_f1)}\n"
+        f"{failures_line}"
     )
 
 
@@ -91,9 +124,9 @@ def main() -> None:
     parser.add_argument(
         "--threshold",
         type=float,
-        default=PLACEHOLDER_THRESHOLD,
-        help=f"Similarity at/above which a pair counts as the same item (default {PLACEHOLDER_THRESHOLD}). "
-        "Not the locked lexical tau=0.60 — that is for the rapidfuzz backend, not the placeholder.",
+        default=LEXICAL_THRESHOLD,
+        help=f"Similarity at/above which a pair counts as the same item (default {LEXICAL_THRESHOLD}, "
+        "the locked lexical tau). Changing it is a rule change: say so in the report you share.",
     )
     args = parser.parse_args()
 
@@ -113,7 +146,7 @@ def main() -> None:
         report = evaluate_extraction(
             extracted,
             annotated,
-            similarity=placeholder_similarity,
+            similarity=lexical_similarity,
             threshold=args.threshold,
         )
     except ValueError as e:
@@ -122,7 +155,7 @@ def main() -> None:
 
     print("\n=== Extraction-Quality Eval ===")
     print(f"Input:              {source}")
-    print("Similarity backend: placeholder_similarity (placeholder — Jaccard token overlap)")
+    print("Similarity backend: lexical_similarity (rapidfuzz token_set_ratio)")
     print(f"Threshold:          {args.threshold}")
     print(f"Items:              {len(extracted)} extracted, {len(annotated)} annotated\n")
     print(_summary_lines(report))
@@ -131,7 +164,7 @@ def main() -> None:
     print("===============================\n")
 
     output = {
-        "similarity_backend": "placeholder_similarity",
+        "similarity_backend": "lexical_similarity",
         "threshold": args.threshold,
         "input": source,
         "report": report.model_dump(),

@@ -1,5 +1,10 @@
 {{- range $componentName, $component := .Values.components }}
-{{- if $component.enabled }}
+{{- $resourceName := $component.shareFrom | default $componentName }}
+{{- $source := index $.Values.components $resourceName }}
+{{- if and $component.enabled $source.enabled }}
+{{- if $component.shareFrom }}
+{{- $component = merge (deepCopy $component) (deepCopy (pick $source "image" "config" "secret" "volumes" "volumeMounts" "dependencySecretVolumes")) }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -93,10 +98,17 @@ spec:
           image: "{{ $component.image.repository }}:{{ $component.image.tag }}"
           imagePullPolicy: {{ $component.image.pullPolicy }}
 
+          {{- with $component.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          {{- with $component.containerPort }}
           ports:
             - name: http
-              containerPort: {{ $component.containerPort }}
+              containerPort: {{ . }}
               protocol: TCP
+          {{- end }}
 
           {{- if or $component.config $component.secret $component.env (eq $componentName "notification-delivery") }}
           env:
@@ -151,12 +163,12 @@ spec:
         {{- if $component.config }}
         - name: resonance-flow-config
           configMap:
-            name: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}-config
+            name: {{ include "resonance-flow.fullname" $ }}-{{ $resourceName }}-config
         {{- end }}
         {{- if $component.secret }}
         - name: resonance-flow-secret
           secret:
-            secretName: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}-secret
+            secretName: {{ include "resonance-flow.fullname" $ }}-{{ $resourceName }}-secret
             optional: true
         {{- end }}
         {{- range $secretVolume := $dependencySecretVolumes }}

@@ -120,7 +120,7 @@ class ChatEditWireContractTest {
         // Same logical group, not a new one.
         assertThat(groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1")).contains(groupId);
         // Full transcript rebuilt from scratch, not a diff - the edited text replaces the old
-        // snapshot for "m1" (see ChatGroupStateReconciler.mergeSnapshots), it isn't appended
+        // snapshot for "m1" (see GroupStateMutator.mergeSnapshots), it isn't appended
         // alongside it.
         assertThat(edited.body()).contains("updated message");
         assertThat(edited.body()).doesNotContain("original message");

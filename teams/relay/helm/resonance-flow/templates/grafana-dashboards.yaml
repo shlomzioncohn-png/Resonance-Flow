@@ -1,0 +1,48 @@
+{{/* Grafana dashboards (dashboards/<folder>/*.json) - see README.md "Dashboards".
+kube-prometheus-stack's Grafana sidecar loads any ConfigMap labelled grafana_dashboard: "1"
+into the folder its grafana_folder annotation names. One ConfigMap per folder. Same CRD
+check as prometheusrules.yaml, so not in teams' kind CI. */}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule" }}
+{{- range $path, $_ := .Files.Glob "dashboards/*.json" }}
+{{- fail (printf "%s: put dashboards in dashboards/<folder>/, e.g. dashboards/platform/" $path) }}
+{{- end }}
+{{- $folders := dict }}
+{{- $uids := dict }}
+{{- range $path, $_ := .Files.Glob "dashboards/*/*.json" }}
+{{- $folder := base (dir $path) }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $folder) }}
+{{- fail (printf "%s: folder %q must be lowercase letters, digits and '-' (it's part of a ConfigMap name)" $path $folder) }}
+{{- end }}
+{{- /* The sidecar keys dashboards by uid: a missing or repeated one makes them overwrite each other. */}}
+{{- $uid := (fromJson ($.Files.Get $path)).uid | default "" }}
+{{- if not $uid }}
+{{- fail (printf "%s: not valid JSON, or no top-level \"uid\"" $path) }}
+{{- end }}
+{{- if hasKey $uids $uid }}
+{{- fail (printf "%s: uid %q is already used by %s" $path $uid (get $uids $uid)) }}
+{{- end }}
+{{- $_ := set $uids $uid $path }}
+{{- $_ := set $folders $folder (append (default (list) (get $folders $folder)) $path) }}
+{{- end }}
+{{- range $folder := keys $folders | sortAlpha }}
+---
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: {{ include "resonance-flow.fullname" $ }}-grafana-dashboards-{{ $folder }}
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: {{ $folder }}
+    # Client-side apply copies the whole ConfigMap into an annotation capped at 256KiB.
+    argocd.argoproj.io/sync-options: ServerSideApply=true
+
+data:
+  {{- range $path := get $folders $folder | sortAlpha }}
+  {{ base $path }}: |-
+    {{- $.Files.Get $path | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}

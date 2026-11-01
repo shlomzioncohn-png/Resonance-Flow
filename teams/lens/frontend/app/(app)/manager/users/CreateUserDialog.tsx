@@ -16,6 +16,7 @@ import {
   type UserCreateFields,
   type UserDetails,
 } from '@/services/managerUsersApi';
+import { PASSWORD_MIN_LENGTH, passwordProblem } from '@/services/passwordRules';
 
 // Same loose check the Gateway/Inbox apply (@Email) — just enough to catch typos before Save.
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -27,6 +28,7 @@ const EMPTY_FORM: UserCreateFields = {
   email: '',
   phone: '',
   role: 'EMPLOYEE',
+  password: '',
 };
 
 function createErrorMessageFor(error: unknown): string {
@@ -51,7 +53,14 @@ function normalizeEmail(email: string): string {
  */
 function toRequest(form: UserCreateFields): UserCreateFields {
   const email = normalizeEmail(form.email);
-  const request: UserCreateFields = { displayName: form.displayName.trim(), email, username: email, role: form.role };
+  // The password is sent exactly as typed - spaces are allowed in a password.
+  const request: UserCreateFields = {
+    displayName: form.displayName.trim(),
+    email,
+    username: email,
+    role: form.role,
+    password: form.password,
+  };
   for (const key of ['firstName', 'lastName', 'phone'] as const) {
     const value = form[key]?.trim();
     if (value) request[key] = value;
@@ -78,8 +87,13 @@ export default function CreateUserDialog({ open, onClose, onCreated }: CreateUse
   const emailInvalid = !!form.email && !EMAIL_PATTERN.test(form.email.trim());
   // Stays flagged until the manager changes the email the server rejected.
   const emailTaken = duplicateEmail !== null && duplicateEmail === normalizeEmail(form.email);
+  const passwordError = passwordProblem(form.password);
   const canSave =
-    form.displayName.trim().length > 0 && EMAIL_PATTERN.test(form.email.trim()) && !emailTaken && !saving;
+    form.displayName.trim().length > 0 &&
+    EMAIL_PATTERN.test(form.email.trim()) &&
+    !emailTaken &&
+    passwordError === null &&
+    !saving;
 
   const close = () => {
     if (saving) return;
@@ -145,6 +159,20 @@ export default function CreateUserDialog({ open, onClose, onCreated }: CreateUse
             <MenuItem value="EMPLOYEE">Employee</MenuItem>
             <MenuItem value="MANAGER">Manager</MenuItem>
           </TextField>
+          <TextField
+            label="Initial password"
+            type="password"
+            required
+            autoComplete="new-password"
+            {...field('password')}
+            // Only flagged once the manager started typing, not on an empty new form.
+            error={!!form.password && passwordError !== null}
+            helperText={
+              form.password && passwordError
+                ? passwordError
+                : `At least ${PASSWORD_MIN_LENGTH} characters. The user sets a new password on first sign-in.`
+            }
+          />
           {error && (
             <Typography color="error" variant="body2" role="alert">
               {error}

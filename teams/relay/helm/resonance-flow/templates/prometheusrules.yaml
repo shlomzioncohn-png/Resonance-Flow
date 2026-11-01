@@ -1,0 +1,117 @@
+{{/* Platform alert rules - see README.md "Alerting". Same CRD check as servicemonitor.yaml. */}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule" }}
+{{- $ns := .Release.Namespace }}
+{{- /* team -> the containers it owns. A component's container is named after it
+(deployment.yaml), so `container` alone gives the team - no join on kube_pod_labels. */}}
+{{- $teams := dict }}
+{{- $owned := list }}
+{{- range $name, $component := .Values.components }}
+{{- $team := include "resonance-flow.componentTeam" (dict "name" $name "component" $component) }}
+{{- if and $component.enabled (ne $team "relay") }}
+{{- $_ := set $teams $team (append (default (list) (get $teams $team)) $name) }}
+{{- $owned = append $owned $name }}
+{{- end }}
+{{- end }}
+{{- $podSelectors := list }}
+{{- range $team, $containers := $teams }}
+{{- $podSelectors = append $podSelectors (dict "team" $team "matcher" (printf ", container=~%q" (join "|" (sortAlpha $containers)))) }}
+{{- end }}
+{{- /* relay owns everything else in the namespace: its own components, the infra
+subcharts, sidecars, hook Jobs. */}}
+{{- $podSelectors = append $podSelectors (dict "team" "relay" "matcher" (ternary (printf ", container!~%q" (join "|" (sortAlpha $owned))) "" (gt (len $owned) 0))) }}
+{{- $kafkaJmx := and .Values.kafka.enabled .Values.kafka.metrics.jmx.enabled }}
+{{- $kafkaExporter := (index .Values "kafka-exporter").enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+
+metadata:
+  name: {{ include "resonance-flow.fullname" . }}-alerts
+  labels:
+    {{- include "resonance-flow.labels" . | nindent 4 }}
+
+spec:
+  groups:
+    - name: resonance-flow.pods
+      rules:
+        {{- range $s := $podSelectors }}
+        - alert: PodCrashLooping
+          expr: max_over_time(kube_pod_container_status_waiting_reason{namespace="{{ $ns }}", reason="CrashLoopBackOff"{{ $s.matcher }}}[5m]) >= 1
+          for: 5m
+          labels:
+            severity: critical
+            team: {{ $s.team }}
+          annotations:
+            summary: '{{`Container {{ $labels.container }} in pod {{ $labels.pod }} is in CrashLoopBackOff.`}}'
+        - alert: PodOOMKilled
+          expr: |-
+            kube_pod_container_status_last_terminated_reason{namespace="{{ $ns }}", reason="OOMKilled"{{ $s.matcher }}} == 1
+            and on (namespace, pod, container)
+            increase(kube_pod_container_status_restarts_total{namespace="{{ $ns }}"}[10m]) > 0
+          labels:
+            severity: warning
+            team: {{ $s.team }}
+          annotations:
+            summary: '{{`Container {{ $labels.container }} in pod {{ $labels.pod }} was OOMKilled in the last 10m.`}}'
+        {{- end }}
+
+    {{- if or $kafkaExporter $kafkaJmx }}
+    - name: resonance-flow.kafka
+      rules:
+        {{- if $kafkaExporter }}
+        - alert: BridgeTasksConsumerLagHigh
+          expr: sum by (consumergroup, topic) (kafka_consumergroup_lag{namespace="{{ $ns }}", topic="bridge.structured.tasks"}) > {{ .Values.alerts.bridgeTasksLag.threshold }}
+          for: 5m
+          labels:
+            severity: warning
+            team: {{ .Values.alerts.bridgeTasksLag.team }}
+          annotations:
+            summary: '{{`Consumer group {{ $labels.consumergroup }} is {{ $value }} messages behind on {{ $labels.topic }}.`}}'
+        {{- end }}
+        {{- if $kafkaJmx }}
+        # The JMX exporter is a sidecar of the broker pod, so its target vanishes with
+        # the broker - absent(), not == 0.
+        - alert: KafkaBrokerDown
+          expr: absent(up{namespace="{{ $ns }}", component="kafka"} == 1)
+          for: 2m
+          labels:
+            severity: critical
+            team: relay
+          annotations:
+            summary: No Kafka broker is up.
+        - alert: KafkaOfflinePartitions
+          expr: max(kafka_controller_kafkacontroller_offlinepartitionscount_value{namespace="{{ $ns }}"}) > 0
+          for: 1m
+          labels:
+            severity: critical
+            team: relay
+          annotations:
+            summary: '{{`{{ $value }} Kafka partitions have no leader.`}}'
+        # Can't fire on today's single broker (replication factor 1) - see README.md "Alerting".
+        - alert: KafkaUnderReplicatedPartitions
+          expr: sum(kafka_server_replicamanager_total_underreplicatedpartitions_value{namespace="{{ $ns }}"}) > 0
+          for: 5m
+          labels:
+            severity: warning
+            team: relay
+          annotations:
+            summary: '{{`{{ $value }} Kafka partitions are under-replicated.`}}'
+        {{- end }}
+    {{- end }}
+
+    - name: resonance-flow.storage
+      rules:
+        # Inactive until postgresql.primary.persistence / minio.persistence are turned
+        # on - no PVC, no series. See README.md "Alerting".
+        - alert: PersistentVolumeFillingUp
+          expr: |-
+            kubelet_volume_stats_used_bytes{namespace="{{ $ns }}", persistentvolumeclaim=~".*(postgresql|minio).*"}
+              / kubelet_volume_stats_capacity_bytes{namespace="{{ $ns }}", persistentvolumeclaim=~".*(postgresql|minio).*"}
+              > 0.85
+          for: 5m
+          labels:
+            severity: warning
+            team: relay
+          annotations:
+            summary: '{{`PVC {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} full.`}}'
+{{- end }}

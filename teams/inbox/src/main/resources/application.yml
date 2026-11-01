@@ -30,6 +30,13 @@ spring:
       value-serializer: io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer
 
 management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
   endpoint:
     health:
       probes:

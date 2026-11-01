@@ -301,3 +301,12 @@ for anything that wants the raw path.
 - name: SPRING_CONFIG_ADDITIONAL_LOCATION
   value: "file:/etc/resonance-flow/config/config.yaml"
 {{- end }}
+
+{{/*
+The team that owns a component - the `team` label on its metrics and alerts:
+components.<name>.team, else metrics.team, else the component name.
+Takes {name, component}.
+*/}}
+{{- define "resonance-flow.componentTeam" -}}
+{{- .component.team | default (dig "metrics" "team" "" .component) | default .name }}
+{{- end }}

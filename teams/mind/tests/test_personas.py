@@ -281,6 +281,21 @@ def test_real_persona_set_loads_and_has_the_expected_size():
     assert len({s.scenario_id for s in scenarios}) == len(scenarios)
 
 
+def test_real_persona_set_fills_description_tier_and_effort():
+    # The schema lets them be null since #175, for tasks built from real output
+    # (eval/real_shaped/). The hand-written set still states all three: a
+    # scenario that left one out by mistake would be scored on data its author
+    # never chose, e.g. an assumed tier.
+    empty = [
+        f"{s.scenario_id}/{t.task_id}: {field}"
+        for s in load_personas(REAL_PERSONAS_DIR)
+        for t in s.tasks
+        for field in ("description", "tier", "effort_estimate")
+        if getattr(t, field) is None
+    ]
+    assert empty == []
+
+
 def test_real_persona_set_validates_with_no_errors():
     report = validate_personas(load_personas(REAL_PERSONAS_DIR))
     assert report.errors == []

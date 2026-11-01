@@ -26,6 +26,7 @@ app/
 │   │   ├── wip/page.tsx       "/manager/wip"
 │   │   ├── blocked/page.tsx   "/manager/blocked"
 │   │   ├── bottlenecks/page.tsx "/manager/bottlenecks" dependency graph; ?projectId= filter, ?taskId= open task
+│   │   ├── flow-health/page.tsx "/manager/flow-health" read-only patterns over time; ?pattern= ?severity= ?projectId= filters, ?flagId= open flag
 │   │   └── users/page.tsx     "/manager/users"
 │   ├── employee/
 │   │   ├── page.tsx                     "/employee"                  My Workspace — time-boxed task recommendation

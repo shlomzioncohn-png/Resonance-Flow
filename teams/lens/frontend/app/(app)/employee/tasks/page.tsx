@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import Chip from '@mui/material/Chip';
 import InputAdornment from '@mui/material/InputAdornment';
 import MuiLink from '@mui/material/Link';
@@ -10,6 +11,7 @@ import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import SearchIcon from '@mui/icons-material/Search';
+import LoadingState from '@/components/feedback/LoadingState';
 import PageContainer from '@/components/layout/PageContainer';
 import DataTable, { type Column } from '@/components/ui/DataTable';
 import WorkInsights from '@/components/ui/WorkInsights';
@@ -110,6 +112,17 @@ const STATUS_FILTERS: { value: TaskListFilter; label: string }[] = [
 const SEARCH_DELAY_MS = 300;
 
 export default function EmployeeTasksPage() {
+  return (
+    // The page reads ?search= from the URL, which needs a Suspense boundary to build.
+    <Suspense fallback={<LoadingState message="Loading tasks…" />}>
+      <EmployeeTasksView />
+    </Suspense>
+  );
+}
+
+function EmployeeTasksView() {
+  // Set by the search box in the Header
+  const urlSearch = useSearchParams().get('search') ?? '';
   const [state, setState] = useState<LoadState>('loading');
   const [tasks, setTasks] = useState<ApiTask[]>([]);
   const [total, setTotal] = useState(0);
@@ -117,11 +130,21 @@ export default function EmployeeTasksPage() {
   const [pageSize, setPageSize] = useState(20);
   const [statusFilter, setStatusFilter] = useState<TaskListFilter>('all');
   // searchInput follows every keystroke; search is what's actually sent
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState(urlSearch);
+  const [search, setSearch] = useState(urlSearch);
   // Bumped by Retry, to run the request again with the same parameters
   const [reloadKey, setReloadKey] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
+
+  // A new search from the Header while this page is already open: take it
+  // over right away (React's "adjust state when a prop changes" pattern).
+  const [appliedUrlSearch, setAppliedUrlSearch] = useState(urlSearch);
+  if (urlSearch !== appliedUrlSearch) {
+    setAppliedUrlSearch(urlSearch);
+    setSearchInput(urlSearch);
+    setSearch(urlSearch);
+    setPage(0);
+  }
 
   // Wait for typing to pause, so every keystroke isn't its own request
   useEffect(() => {

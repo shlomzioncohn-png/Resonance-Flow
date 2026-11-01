@@ -132,7 +132,8 @@ src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_
                                   # V11 task readiness view + indexes,
                                   # V12 constraint_history - issue #815,
                                   # V13 drops unresolved_dependencies - replaced by placeholder tasks,
-                                  # V14 task.tier - issue #864)
+                                  # V14 task.tier - issue #864,
+                                  # V18 flow_health_flag (per tenant) - written only by the flow-health analytics job)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskDependencyServicePostgresIntegrationTest,
@@ -167,6 +168,7 @@ Ancestors has no `/transitive` variant - the ancestor chain already is the trans
 | GET | `/tasks/state-history` | Tenant-wide state history, `from`/`to` required (max 90 days), cursor-paged oldest first |
 | GET | `/tasks/blocked-since` | Currently blocked tasks of the tenant with `blockedSince`, optional `taskIds` |
 | GET | `/tasks/{taskId}/constraints/history` | Constraint history, filterable by time range |
+| GET | `/flow-health/flags` | The caller's tenant's flow-health flags (read-only; `X-Tenant-Id` required, 400 without): filter by `pattern` (CHRONIC_BLOCKER, RECURRING_CYCLE, SLOW_CHAIN) and `severity` (low, medium, high); paged with `page`/`size` (max 100), ordered by rank |
 | GET | `/tasks/{taskId}/dependents` | Direct dependents |
 | GET | `/tasks/{taskId}/dependents/transitive` | All (transitive) dependents |
 | GET | `/tasks/{taskId}/ancestors` | Full ancestor chain (hierarchy) |
@@ -855,6 +857,15 @@ Callers that need those business rules enforced (duplicate edges, self-dependenc
 should go through `TaskDependencyService` rather than calling the repository directly.
 
 `TaskRepository` is also used here, since `TaskDependencyService` needs task existence checks.
+
+## Tenant dependency graph: DONE tasks are excluded
+
+`GET /tenants/{tenantId}/dependency-graph` returns only open work. Tasks with `status = DONE` are
+filtered out in the query (`TaskRepository.findByTenantIdAndStatusNot`) and again in
+`TenantDependencyGraphService`, so a DONE task never appears as a node or as either end of an
+edge. `transitiveDependentsCount` is computed on the filtered graph (for `A <- B(DONE) <- C`, `A`
+has 0 dependents), and `limit`/`hasMore` apply after filtering. A tenant whose tasks are all DONE
+gets an empty graph. Consumers (Lens) must not expect `DONE` in the node `status`.
 
 ## Dependency change history (Issue #153)
 

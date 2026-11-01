@@ -28,6 +28,7 @@ def _mounted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     monkeypatch.setenv("CONFIG_FILE_PATH", str(tmp_path / "config.yaml"))
     monkeypatch.setenv("SECRETS_FILE_PATH", str(tmp_path / "secrets.yaml"))
+    monkeypatch.setenv("LLM_SECRETS_DIR", str(tmp_path / "llm"))
     return tmp_path
 
 
@@ -68,6 +69,28 @@ def test_the_secret_file_supplies_the_key(_mounted: Path) -> None:
 
     assert settings.api_key == "sk-from-the-secret"
     assert settings.configured is True
+
+
+def test_the_llm_secret_key_file_wins_over_secrets_yaml(_mounted: Path) -> None:
+    (_mounted / "secrets.yaml").write_text(
+        "llm:\n  deepseek:\n    api_key: sk-stale\n  gemini:\n    api_key: g-stale\n",
+        encoding="utf-8",
+    )
+    (_mounted / "llm").mkdir()
+    (_mounted / "llm" / "deepseek-api-key").write_text("sk-from-file\n", encoding="utf-8")
+
+    assert load_deepseek_settings().api_key == "sk-from-file"
+    assert load_gemini_settings().api_key == "g-stale"
+
+    (_mounted / "llm" / "gemini-api-key").write_text("g-from-file", encoding="utf-8")
+    assert load_gemini_settings().api_key == "g-from-file"
+
+
+def test_an_empty_llm_secret_key_file_counts_as_missing(_mounted: Path) -> None:
+    (_mounted / "llm").mkdir()
+    (_mounted / "llm" / "gemini-api-key").write_text("  \n", encoding="utf-8")
+
+    assert load_gemini_settings().configured is False
 
 
 def test_the_two_files_merge_rather_than_replace(_mounted: Path) -> None:

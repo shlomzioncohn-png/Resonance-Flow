@@ -464,9 +464,12 @@ public class InboxClient {
 
     /**
      * @param snoozedUntil when a SNOOZED task wakes up; null for any other status
+     * @param feedbackText why a REJECTED task was rejected; null for any other status
+     *                     (Inbox answers 400 if it comes with another status)
      * @return the updated task, or null if Inbox doesn't have it
      */
-    public TaskDTO updateStatus(String userId, String taskId, String newStatus, Instant snoozedUntil) {
+    public TaskDTO updateStatus(String userId, String taskId, String newStatus, Instant snoozedUntil,
+                                String feedbackText) {
         if (mockEnabled) {
             InboxTaskRecord record = tasksById.get(taskId);
             if (record == null) {
@@ -487,7 +490,7 @@ public class InboxClient {
         try {
             InboxTaskResponse task = restTemplate.exchange(
                     URI.create(taskUri(taskId) + "/status"), HttpMethod.PATCH,
-                    new HttpEntity<>(statusBody(newStatus, snoozedUntil), headers),
+                    new HttpEntity<>(statusBody(newStatus, snoozedUntil, feedbackText), headers),
                     InboxTaskResponse.class)
                     .getBody();
             return task == null ? null : toTaskDTO(task);
@@ -582,12 +585,15 @@ public class InboxClient {
         return devActorId.isBlank() ? userId : devActorId;
     }
 
-    /** Inbox's PATCH .../status body - snoozed_until only when there is one. */
-    private static Map<String, Object> statusBody(String newStatus, Instant snoozedUntil) {
+    /** Inbox's PATCH .../status body - snoozed_until and feedback_text only when there is one. */
+    private static Map<String, Object> statusBody(String newStatus, Instant snoozedUntil, String feedbackText) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("status", newStatus.toUpperCase());
         if (snoozedUntil != null) {
             body.put("snoozed_until", snoozedUntil.toString());
+        }
+        if (feedbackText != null && !feedbackText.isBlank()) {
+            body.put("feedback_text", feedbackText);
         }
         return body;
     }

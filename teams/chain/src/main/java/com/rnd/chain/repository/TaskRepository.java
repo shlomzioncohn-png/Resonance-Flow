@@ -1,6 +1,7 @@
 package com.rnd.chain.repository;
 
 import com.rnd.chain.dto.Task;
+import com.rnd.chain.dto.TaskStatus;
 
 import java.util.List;
 import java.util.Optional;
@@ -36,6 +37,13 @@ public interface TaskRepository {
     List<Task> findByParentTaskId(UUID parentTaskId);
 
     List<Task> findByTenantId(UUID tenantId);
+
+    /**
+     * @return the tenant's non-deleted tasks whose status is not {@code excludedStatus}, filtered
+     * in the query so excluded rows are never loaded.
+     */
+    List<Task> findByTenantIdAndStatusNot(UUID tenantId, TaskStatus excludedStatus);
+
     /**
      * Persists the given task - inserts it if its id doesn't already
      * exist, or replaces the existing one if it does (upsert). Contract:

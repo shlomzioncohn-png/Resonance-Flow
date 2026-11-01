@@ -10,6 +10,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import DashboardHeader from '@/components/layout/DashboardHeader';
 import DependencyGraph from '@/components/ui/DependencyGraph';
+import WorkInsights from '@/components/ui/WorkInsights';
 import { useDashboardFilters } from '@/hooks/useDashboardFilters';
 import { useDependencyGraph } from '@/hooks/useDependencyGraph';
 import { useManagerKpis } from '@/hooks/useManagerKpis';
@@ -62,6 +63,7 @@ export default function ManagerDashboardView() {
 
   return (
     <Stack spacing={3}>
+      <WorkInsights />
       <DashboardHeader
         orgName={ORG_NAME}
         filters={filters}

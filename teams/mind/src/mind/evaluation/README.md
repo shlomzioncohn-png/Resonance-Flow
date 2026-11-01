@@ -31,6 +31,9 @@ class RankingModel(Protocol):
   `effort_estimate` (minutes; the eval set's form of the canonical
   `Task.effort_estimate`), `tier`, `blocked`, `parent_task_id` (nullable; points
   at a node in `eval/hierarchy/nodes.json` — see **Hierarchy** below).
+  `description`, `effort_estimate` and `tier` may be null, and `task_id` may be a
+  lowercase UUID, as on real tasks (#175 — see **Real pipeline output through
+  the harness** below).
 - `ScoreContext`: just `current_datetime` — the model may judge how near a
   `deadline` is, and nothing else about the persona's situation (per the mentor's
   review). The harness fixes it to the scenario's `current_datetime`; it is never
@@ -775,6 +778,139 @@ establish: the real-data slice does not yet measure ranking quality for any
 model that has actually been run against it — it proves only that the harness
 pipes real AMI data through any `RankingModel` implementation end to end.
 
+## Real pipeline output through the harness (#174)
+
+The real-data slice above is still hand-written scenarios. #174 asks what happens
+when the harness meets tasks the pipeline actually produced. **Diagnostic only:
+nothing is fixed here; the fixes are #175.**
+
+**What was run.** The three tasks (T1–T3) of one `demo_flow` run (slack-first,
+2026-10-26), exported by Michal Brecher from the run's stack as `task.created`
+and `task.score.proposed`, the event in each message's `value` with proto field
+names. They are kept in `eval/real_output/2026-10-26_demo-slack-first/`.
+`scripts/diagnose_real_tasks.py` replays them, no stack and no model call:
+
+```bash
+python scripts/diagnose_real_tasks.py
+```
+
+**Result: the harness rejected all three tasks when it loaded them**, before any
+model ran. This records the harness as it was before #175 (run on 17cd38ee);
+the same script on the current code shows the fixes below instead. Each
+`value` into `Task.model_validate`, unchanged:
+
+| field | the harness expects | real output | tasks |
+|---|---|---|---|
+| `task_id` | `task_id`, matching `^[a-z0-9_]+$` | `id`, a UUID with hyphens | 3/3 |
+| `tier` | `operational` / `tactical` / `strategic` | `TASK_TIER_TACTICAL` (the proto enum name) | 3/3 |
+| `effort_estimate` | required, by that name | `effort_estimate_minutes`; absent on T1 | 3/3; 1/3 |
+| `description` | required | absent on T1 | 1/3 |
+| `blocked` | required | absent; Chain's `is_available` arrives instead | 3/3 |
+| everything else | `extra="forbid"` | 10–12 more fields (`tenant_id`, `urgency`, `status`, `confidence`…) | 3/3 |
+
+With only the obvious renames done (`id` → `task_id`, the effort name, the tier
+lowercased, `blocked=False`), one gap is still left on every task: **the UUID
+fails `task_id`'s pattern**. That one does not show from reading the models side
+by side; it took real ids.
+
+`LongestDescriptionModel`, the length-bias probe, crashes on T1
+(`len(None)`): the first thing an optional `description` would break.
+
+**All of these are harness assumptions, none a bug in the pipeline's output.**
+Empty `description`, `tier` and effort are valid states the extraction contract
+allows (#351, #352).
+
+**The live path holds.** The same events through `InboxTask` (#357) and
+`SegmentedRankingModel`, scored at each event's `scored_at`, give exactly the
+`mind_score` the run published (0.470893, 0.213120, 0.261094), including T1
+with its empty fields. So real tasks already reach the model correctly; only the
+scenario path of the harness cannot take them.
+
+**Limitations.** Three tasks from one run of a synthetic scenario. Fields the
+harness does not read are out of scope here (`role_context` empty on T2 and T3,
+no suggested owner) — both already show as FAIL in the demo's own check.
+
+### The fixes, and the check that keeps them (#175)
+
+**The harness now takes real-shaped tasks.** In `Task` (`interfaces.py`):
+
+- `task_id` and `expected_top_task_id` share one pattern, `TASK_ID_PATTERN`:
+  snake_case as before, **or** a lowercase UUID. Not any string: an uppercase or
+  braced UUID is still rejected.
+- `description`, `effort_estimate` and `tier` are optional. Empty is `null` (or
+  the key absent), never `""` or `0`; a non-null value is checked as before.
+- `scenario.schema.json` is regenerated. `personas.sha256` does not change: the
+  checksum covers the scenario files, not the schema.
+- `LongestDescriptionModel` reads a missing description as length 0 instead of
+  crashing. It was the only code under `evaluation/` that assumed the fields
+  were filled; `scoring/` already handled empty ones (#357).
+- The hand-written set in `eval/personas/` still fills all three on every task:
+  `tests/test_personas.py` fails if one is left out, so the optional schema does
+  not loosen the curated set.
+
+With these, `scripts/diagnose_real_tasks.py`'s second pass accepts all three
+demo tasks.
+
+**What the model does with an empty field** — already decided in the model,
+not in the harness, which passes `null` through: no tier → scored by
+`ASSUMED_TIER` (`tactical`, the middle of both axes) and logged
+`tier_assumed`; no effort estimate → no quick-win bonus (the absence of a bonus,
+not a penalty); no description → nothing added to the text the lexicons read.
+A missing tier or estimate also lowers the score's confidence.
+
+**A scenario with empty fields, outside the frozen set.**
+`eval/real_shaped/salesperson_demo_quote_blocked_vs_supplier_form.json`: Dana
+(Salesperson) with two real tasks from the demo run, kept as they came (UUID
+ids; the price quote has no description and no effort estimate), and one
+hand-written task with no tier and no deadline, since no real task came
+without a tier. `blocked` is set from the demo's expected answer (the quote
+waits for Omer's cost sheet). Correct answer: the supplier registration form.
+It is in its own folder so `eval/personas/`, its checksum and the frozen
+baseline stay as they are; it goes through the same schema and loader.
+
+**CI.** `make eval-real-shaped` runs the harness on `eval/real_shaped/` with the
+segmented model, and `mind-ci.yaml` runs it after the smoke check. It fails if
+the harness cannot load or score those tasks; it has no accuracy gate (one
+scenario is not a number). Locally: exit 0 as is; with `description` made
+required again on purpose, exit 1 naming `tasks/0/description`; exit 0 once
+restored. The Mind CI job is skipped on draft PRs, so the same red-then-green
+proof on GitHub is recorded on the PR that lands this.
+
+That scenario is written down once, so it cannot notice a later change to what
+real tasks look like. `tests/test_real_output_through_harness.py` can: it takes
+the recorded `task.created` events and builds each task the way the live path
+does today — the current generated proto (parsed strictly, so a field the
+proto no longer knows is an error), then `to_scoring_task` — and loads it into
+`Task`, checks that T1's empty fields stay empty, and that the harness's copy
+scores exactly like the live `InboxTask`. A change to the proto, to
+`to_scoring_task` or to `Task` that breaks this fails in the PR that makes it
+(checked: `description` made required again fails 3 tests; an event field the
+proto does not know fails on parsing). What it cannot catch is a change in what
+the pipeline produces (say, tier no longer filled): that takes a new demo run.
+
+**The persona set is unchanged.** All 42 scenarios scored before (49c5ab1c,
+this branch's base) and after, with `segmented`, `dummy`, `nearest-deadline`,
+`skip-blocked-nearest-deadline` and `longest-description`: every task's score
+identical, the same top task in all 42. The frozen baseline
+(`baseline_score_2026-10-25.json`) still loads, 33/42.
+
+**What the scenario shows about the segmented model** — findings, not fixed
+here, and the scenario was not changed for them:
+
+1. It picks the hand-written task, which has no tier, over the supplier form
+   (base 0.496 against 0.261; final 0.647 against 0.483), for two reasons.
+   **The operational rule itself:** its scale is 8 hours, so the form's
+   deadline four days out gives time pressure 0.075 — below the 0.15 an
+   operational task gets with no deadline at all. The same form with no
+   deadline would score 0.310, not 0.261: the distant date lowers it.
+   **The weights:** the untiered task is scored by the tactical rule
+   (`ASSUMED_TIER`), where no deadline is 0.30 (not neutral; 0.5 is
+   strategic's) and impact weighs 0.55 against operational's 0.25, so impact
+   gives it 0.330 (0.55 × 0.600) against the form's 0.125 (0.25 × 0.500).
+2. The keyword lexicon misses negation: "nothing depends on it" counts in the
+   task's favour as "depends on it", which is why its impact is 0.600 and not
+   the 0.500 the form gets.
+
 ## Extraction-quality eval
 
 A **second, separate** harness — not a variant of the ranking metric above, which
@@ -907,7 +1043,7 @@ differences on a fixed reference, not to certify absolute extraction quality.
 ```bash
 python -m mind.evaluation.run_extraction_eval                   # the bundled hand-built fixture
 python -m mind.evaluation.run_extraction_eval --input pair.json
-python -m mind.evaluation.run_extraction_eval --threshold 0.6   # default: PLACEHOLDER_THRESHOLD (0.5)
+python -m mind.evaluation.run_extraction_eval --threshold 0.7   # default: LEXICAL_THRESHOLD (0.60)
 ```
 
 `pair.json` is `{"extracted": [...], "annotated": [...]}` — exactly those two keys,
@@ -918,20 +1054,234 @@ stderr and exits with code 1. The full report is also written to
 `extraction_report.json` in the working directory (gitignored). With no `--input`, the
 fixture in `extraction_fixture.py` runs — three true positives, one false
 positive, one false negative, precision = recall = 0.75, worked out by hand in
-that file's docstring. The similarity the CLI uses is a pure-Python Jaccard placeholder
-(`placeholder_similarity`, paired with `PLACEHOLDER_THRESHOLD = 0.5`); the real backend (embeddings, or a `rapidfuzz` baseline)
-is not built yet — blocked on Ayala's answer (`extraction_eval_design.md` §4).
+that file's docstring. The similarity the CLI uses is the lexical backend
+(`similarity.lexical_similarity`, `rapidfuzz`'s `token_set_ratio`, with the locked
+`LEXICAL_THRESHOLD = 0.60`, `extraction_eval_design.md` §4.2/§6); the fixture scores
+the same with it. The Jaccard `placeholder_similarity` stays for the unit tests,
+whose expected counts are worked out for it. The embedding backend
+(`similarity.embedding_similarity`, `EMBEDDING_THRESHOLD = 0.70`) is chosen with
+`scripts/run_ami_extraction_eval.py --backend embedding`, and `--backend both`
+scores with both, as every report shows them; see "Embedding backend" below.
 `metrics.extraction_precision_recall` is a stricter placeholder still (exact
 string match); it is not this eval.
 
 ### Current status
 
-**Fixture-validated, not yet run against real pipeline output** — see
-[Cross-team: should the Task model / API error format be shared contracts? #21](https://github.com/KamaTechOrg/Resonance-Flow/issues/21)
-(tracking issues for this eval: #176 design, #177 implementation).
-The extracted side needs Yonit's extraction pipeline and Michal's ASR to be
-producing output; the annotated side (AMI action items) wires in via a manifest
-edit, not a code change (`extraction_eval_design.md` §"Scope").
+**Run once on real AMI meetings through main's real extraction (#178, 2026-10-25);
+re-scored with the embedding backend, and run on ASR transcripts of two of the
+meetings (2026-10-28).**
+Tracking issues: #176 design, #177 implementation, #178 real-data validation.
+Not yet in CI (#175).
+
+### Real-data validation (#178)
+
+**What was run.** The v1 slice — IB4003, IS1008b, IS1008d, 16 gold action items
+(8 + 4 + 4, `load_gold_actions`) — on AMI's **human** transcripts
+(`ingestion/ami_transcripts.py`, #784), each meeting sent whole as one MEETING
+item to `BasicExtractor` (main at the #968 merge) on `gemini-3.6-flash`, scored
+with `evaluate_meetings` at the locked lexical τ = 0.60. Human transcripts, not
+ASR, so this measures extraction alone (mentor's call); ASR is in "ASR transcripts" below.
+
+```bash
+# needs a key; spends quota (see the script's docstring)
+CONFIG_FILE_PATH=config.local.yaml SECRETS_FILE_PATH=secrets.local.yaml \
+    python scripts/run_ami_extraction_eval.py
+# re-score the recorded run: no key, no model call
+python scripts/run_ami_extraction_eval.py \
+    --from-outcomes eval/extraction_runs/2026-10-25_gemini-3.6-flash/outcomes.json
+```
+
+The model's answers (`outcomes.json`) and the scored report (`scores.json`) of
+this run are in `eval/extraction_runs/2026-10-25_gemini-3.6-flash/`. `scores.json`
+quotes AMI's action items verbatim (CC BY 4.0, AMI Meeting Corpus, University of
+Edinburgh; see `eval/datasets/ami.manifest.json`).
+
+**The number, as the eval computes it** — the reported result, not adjusted:
+
+| | TP | FP | FN | precision | recall | F1 |
+|---|---|---|---|---|---|---|
+| IB4003 | 2 | 3 | 6 | 40.0% | 25.0% | 30.8% |
+| IS1008b | 3 | 4 | 1 | 42.9% | 75.0% | 54.5% |
+| IS1008d | 1 | 6 | 3 | 14.3% | 25.0% | 18.2% |
+| **micro** | 6 | 13 | 10 | **31.6%** | **37.5%** | **34.3%** |
+| macro | | | | 32.4% | 41.7% | 34.5% |
+
+No extraction failed.
+
+**Hand review (#178 step 4).** Every gold item and every extracted item was
+checked against the transcript (line numbers below are in the text
+`load_transcript` returns). This is a judgement, recorded to explain the number,
+not to replace it:
+
+| | gold found by the model | eval's TP | matcher missed a right pair | matcher took a wrong pair |
+|---|---|---|---|---|
+| IB4003 | 4 / 8 | 2 | g1 split offices (0.55, l. 76); g2 Gisella (0.59) | — |
+| IS1008b | 3 / 4 | 3 | g4 Intel/IBM, speech vs voice recognition (0.60, rounds below) | g3 "present the marketing concept" ← "keep watching market trends" (0.66) |
+| IS1008d | 2 / 4 | 1 | g2 promotion plan to management ← "convince management to align the launch with a sports event" (l. 235) | — |
+| **total** | **9 / 16 (56%)** | 6 | 4 | 1 |
+
+IB4003's g5 ("build a proposal") and g6 ("merge it with the other team's") are one
+sentence of the meeting (l. 243) and one extracted item; one-to-one matching
+gives one TP and one FN there, as design §3.4 intends.
+
+**Findings.**
+
+1. **The lexical backend is not enough on real output.** It rejected four right
+   pairs and accepted one wrong one, so the official recall is 19 points under
+   what the model found. Two causes: synonyms (speech/voice, split/separate,
+   convince/present) and long descriptions — the model writes a sentence of
+   detail per task, and `token_set_ratio` scores the longer text lower
+   (Gisella: 0.73 on the title, 0.59 on title + description). τ and the
+   comparison text were fixed before the run and are **not** changed after it.
+   This is the evidence for an embedding backend (Ayala); the recorded
+   `outcomes.json` lets it be scored on the very same answers.
+2. **AMI's `<actions>` is a partial answer key.** Of the 19 extracted items, 10
+   match no gold item yet were said in the meeting (send the minutes, the
+   sharing folder, four people in a three-person room, market tests, launch…).
+   Some sit in the same file's `<decisions>`; one contradicts the transcript
+   (IS1008d `<decisions>`: evaluate real units "rather than evaluating the
+   prototype"; l. 172–185: the team agrees on a prototype evaluation). So low
+   precision here does not mean invented tasks.
+3. **The model invents little.** No extracted task is absent from its meeting;
+   one adds a detail that was not said (IS1008d, "…or movie tie-in": the sports
+   event is l. 212–235, "movie" only appears at l. 151, about a 3D view).
+4. **What the model misses** (reported to Yonit, not fixed here): the next
+   meeting (IB4003 g8, "next Tuesday… about two o'clock", l. 276–293), loose
+   group tasks (IB4003 g3, g4), and tasks set for another speaker (IS1008b g3,
+   IS1008d g3).
+5. **One run is not a stable number.** IS1008b was run twice: the same seven
+   tasks, other descriptions, and TP went from 2 to 3 — through the wrong
+   pair above. Repeated runs would give a range.
+
+**Limitations.** Three meetings, 16 gold items, one run of one model; human
+transcripts, not ASR; the hand review is one reviewer's reading.
+
+### Embedding backend (2026-10-28)
+
+Finding 1 above is why it exists. Ayala's `mind.embeddings.similarity` (cosine
+over bge-small-en-v1.5, [0, 1]) is wired in as `similarity.embedding_similarity`;
+the lexical backend stays, for CI without the model and as the comparison
+point (`extraction_eval_design.md` §4.3).
+
+**τ = 0.70, chosen on the §5 pairs only**, before the real run was scored with
+it (`scripts/derive_embedding_threshold.py`, the pairs in `threshold_pairs.py`;
+§6 has the detail). Same-task pairs score 0.751–0.958, different-task pairs
+0.507–0.793, so no τ separates them pair by pair; every τ from 0.643 to 0.750
+makes the one-to-one matching return exactly the hand-labelled pairs, also with
+each true item left out, and 0.70 is the middle. The script's first rule
+(pair by pair) gave 0.83 and failed 8 of those 9 checks; the rule was changed to
+the matching criterion the lexical τ was held to, recorded in §6. Until a τ is
+frozen, the backend refuses to run.
+
+**The same recorded answers, re-scored** (no model call; `--from-outcomes ...
+--backend both`; `scores.json` and `scores_embedding.json`).
+
+**How every report shows the result** (mentor's decision, 2026-10-28): both
+backends side by side, each with its right and wrong matches split by the hand
+review, next to the hand review itself as the ground truth. The default backend
+stays lexical (design §4.3).
+
+| gold items found (of 16) | lexical, τ 0.60 | embedding, τ 0.70 | hand review (ground truth) |
+|---|---|---|---|
+| **right matches** | **5 (31%)** | **7 (44%)** | **9 (56%)** |
+| wrong matches | 1 | 4 | — |
+| the backend's own recall (micro) | 37.5% | 68.8% | — |
+| the backend's own precision / F1 (micro) | 31.6% / 34.3% | 57.9% / 62.9% | — |
+
+31–44% is the range the two backends give; both sit **below** the hand review,
+because both miss right pairs the model did find (IS1008d's "convince
+management…" for the promotion plan, which neither backend matches). A
+backend's own recall counts its wrong matches as found, so it is not the
+extraction's quality: embedding's 68.8% includes four wrong ones.
+
+**Hand review of the 11 embedding matches**, against the review above:
+
+- **Recovered:** the three right pairs the lexical backend lost to synonyms —
+  IB4003 split offices (0.80) and Gisella (0.74), IS1008b Intel/IBM with
+  "speech" for "voice recognition" (0.74).
+- **Wrong, and new:** within one meeting, different tasks on the same topic now
+  clear τ. IB4003 "Prepare a concrete proposal…" → "the group members will come
+  up with their own preferences…" (0.76; the item is g5/g6's); IS1008d "Start
+  real production" → "the group will evaluate the product after real units have
+  been produced" (0.76); IS1008d "Launch product in the market" → "the Marketing
+  Expert will begin his marketing plan after production has begun" (0.71).
+- **Wrong, as with lexical:** IS1008b "Keep watching market trends" → "the
+  Marketing Expert will present the marketing concept" (0.76).
+- **Still missed:** IS1008d g2 (the promotion plan to management, which the
+  model extracted as "convince management to align the launch…"), and IB4003
+  g5/g6, whose item went to g3.
+
+All four wrong matches score 0.70–0.85, inside the band the run script flags
+for review by hand.
+
+**What it shows.** The embedding backend fixes the lexical one's misses on
+synonyms, but it over-matches on topic. Neither backend alone is the extraction
+quality, which is why both are reported with the hand review: lexical 31%,
+embedding 44%, the hand review 56%. On 16 items neither backend can be called
+better. τ is not moved for this (§6): it was set on the §5 pairs before this
+run, and the review band is where these errors are caught.
+
+### ASR transcripts (2026-10-28)
+
+**The question.** The real pipeline transcribes a meeting recording; it never
+sees AMI's human transcript. How much does extraction lose when it reads ASR
+output instead? Expected: a clear drop, from word errors and from the missing
+speakers (the human transcript opens every line with a role, and the gold is
+phrased by role, "The Project Manager will…").
+
+**What was run.** IS1008b and IB4003 (IS1008d has no audio here), Mix-Headset,
+transcribed by Michal Brecher through the pipeline's `asr.transcribe()`
+(Whisper base.en, chunks of up to 60 s cut in silence, `vad_filter=True`); the
+only change was lifting the 600 s decode cap and 240 s timeout so a whole
+meeting is transcribed (`truncated=False`). No speaker labels; IS1008b's text is
+23% shorter than the human transcript (20,111 against 26,071 characters). The
+transcripts (CC BY 4.0, AMI Meeting Corpus) are in
+`eval/extraction_runs/asr_transcripts_2026-10-28/`; the run, the same model
+and gold, in `eval/extraction_runs/2026-10-28_asr_gemini-3.6-flash/`:
+
+```bash
+python scripts/run_ami_extraction_eval.py \
+    --transcripts-dir eval/extraction_runs/asr_transcripts_2026-10-28 --backend both
+```
+
+**Result, on the same two meetings (12 gold items)**, in the reporting format
+above, against the human-transcript run of 2026-10-25:
+
+| gold items found (of 12) | lexical | embedding | hand review |
+|---|---|---|---|
+| human transcript | 4 right, 1 wrong | 6 right, 2 wrong | **7 (58%)** |
+| ASR transcript | 4 right, 0 wrong | 5 right, 0 wrong | **5 (42%)** |
+
+The backends' own recall on ASR: lexical 33.3%, embedding 41.7%.
+
+**What the hand review found.**
+
+- **A small drop, and only part of it is ASR.** Two gold items were found from
+  the human transcript and not from ASR. IB4003's Gisella task is one, but the
+  ASR text has it ("putting Gisela with the other admin of the school is not
+  an option"): the model did not extract it this run, the run-to-run variation
+  seen before, not ASR. IS1008b's "research companies … voice recognition" is
+  the other: ASR wrote "companies like **Inter** or IBM", and the model extracted
+  speech-recognition tasks but none about finding companies (borderline;
+  counted as missed).
+- **Garbled names do not always cost an item.** "Pierrette" came out "Perret",
+  and "Ask Perret and Maggie about their preferences" was still extracted and
+  matched.
+- **The missing speakers did not hurt what this eval measures.** It compares a
+  task's content, not who owns it. Tasks from ASR come without an owner ("Ask
+  Perret and Maggie…" rather than "The Project Manager will ask…"): that affects
+  owner assignment, which this eval does not score.
+- **No wrong matches this time**, with either backend; "keep watching market
+  trends" was not matched to the marketing concept, its description now worded
+  differently.
+- **Extra items are still real tasks** absent from the gold (the minutes, the
+  shared folder, four places in the three-person room), as on the human
+  transcript.
+
+**Limitations.** Two meetings, 12 gold items, one run per transcript; a
+difference of two items cannot be put on ASR with confidence. The decode cap
+was lifted for these transcripts; in production a whole meeting would be cut
+at 600 s.
 
 ### Several tasks per text (#690, was a known limitation)
 
@@ -943,9 +1293,9 @@ empty list is a valid answer. `item_key` stays on the outcome, so the eval still
 groups results by meeting through it (see "The extracted-item contract"); each
 `tasks[i].fields` is what it reads.
 
-Still a gap: content longer than `extraction.prompts.MAX_CONTENT_CHARS` (8000) is
-truncated, and a meeting's action items cluster in its closing recap, so a long
-transcript can still lose items. Truncation is now logged.
+Since #968, `extraction.prompts.MAX_CONTENT_CHARS` is 100,000 for every source,
+a safety net against a runaway item; the v1 slice's transcripts (26–35k
+characters) go through whole.
 
 ## Guardrail eval
 

@@ -69,6 +69,7 @@ class JiraClientTest {
     void fetchIssues_shouldMapJiraIssueToTask() {
         JiraSearchResult result = new JiraSearchResult();
         result.setIssues(Collections.singletonList(createJiraIssue()));
+        result.setLast(true);
 
         when(responseSpec.bodyToMono(JiraSearchResult.class)).thenReturn(Mono.just(result));
 
@@ -89,6 +90,7 @@ class JiraClientTest {
     void fetchIssues_shouldReturnEmptyWhenNoIssues() {
         JiraSearchResult result = new JiraSearchResult();
         result.setIssues(null);
+        result.setLast(true);
 
         when(responseSpec.bodyToMono(JiraSearchResult.class)).thenReturn(Mono.just(result));
 
@@ -98,19 +100,20 @@ class JiraClientTest {
     }
 
     @Test
-    void searchIssues_shouldFetchAllPagesUntilTotalReached() {
+    void searchIssues_shouldFetchAllPagesUntilIsLast() {
         ReflectionTestUtils.setField(jiraClient, "pageSize", 2);
 
         JiraSearchResult page1 = new JiraSearchResult();
         page1.setIssues(List.of(createJiraIssue("PROJ-1", "Issue 1"), createJiraIssue("PROJ-2", "Issue 2")));
-        page1.setTotal(3);
+        page1.setLast(false);
+        page1.setNextPageToken("tok-1");
 
         JiraSearchResult page2 = new JiraSearchResult();
         page2.setIssues(List.of(createJiraIssue("PROJ-3", "Issue 3")));
-        page2.setTotal(3);
+        page2.setLast(true);
 
-        // Page 1 leaves consumed (0 + 2) < total (3), so page 2 is fetched;
-        // after it consumed (2 + 1) == 3 so paging stops.
+        // Page 1 is not last and carries a token, so page 2 is fetched;
+        // page 2 reports isLast so paging stops.
         when(responseSpec.bodyToMono(JiraSearchResult.class))
                 .thenReturn(Mono.just(page1), Mono.just(page2));
 
@@ -121,13 +124,27 @@ class JiraClientTest {
     }
 
     @Test
+    void searchIssues_shouldStopWhenIsLastEvenWithTokenPresent() {
+        JiraSearchResult result = new JiraSearchResult();
+        result.setIssues(List.of(createJiraIssue("PROJ-1", "Only")));
+        result.setLast(true);
+        result.setNextPageToken("ignored");
+
+        when(responseSpec.bodyToMono(JiraSearchResult.class)).thenReturn(Mono.just(result));
+
+        List<Task> tasks = jiraClient.searchIssues("project = PROJ").collectList().block();
+
+        assertThat(tasks).hasSize(1);
+    }
+
+    @Test
     void searchIssues_shouldSkipInvalidRecordWithoutDroppingValidOnes() {
         JiraSearchResult result = new JiraSearchResult();
         result.setIssues(List.of(
                 createJiraIssue("PROJ-1", "Valid"),
                 createJiraIssue("PROJ-2", null),
                 createJiraIssue("PROJ-3", "Also valid")));
-        result.setTotal(3);
+        result.setLast(true);
 
         when(responseSpec.bodyToMono(JiraSearchResult.class)).thenReturn(Mono.just(result));
 

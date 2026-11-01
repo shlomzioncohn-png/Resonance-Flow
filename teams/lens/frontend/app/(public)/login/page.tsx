@@ -13,6 +13,7 @@ import { useRole } from '@/components/layout/RoleProvider';
 import { homeFor } from '@/components/layout/Sidebar/navConfig';
 import { getErrorMessage } from '@/services/api';
 import { login } from '@/services/authApi';
+import { loginTokens } from '@/theme/tokens';
 
 export default function LoginPage() {
   const { signIn } = useRole();
@@ -44,11 +45,14 @@ export default function LoginPage() {
         minHeight: '100vh',
         display: 'grid',
         placeItems: 'center',
-        bgcolor: 'background.default',
+        background: loginTokens.background,
         p: 2,
       }}
     >
-      <Paper sx={{ p: 4, maxWidth: 400, width: '100%' }} elevation={0} variant="outlined">
+      <Paper
+        sx={{ p: 4, maxWidth: 400, width: '100%', borderRadius: 4, boxShadow: loginTokens.cardShadow }}
+        elevation={0}
+      >
         <Stack component="form" onSubmit={handleSubmit} spacing={2.5}>
           <Box sx={{ alignSelf: 'center' }}>
             <Logo variant="light" />

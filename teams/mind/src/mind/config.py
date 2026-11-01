@@ -14,11 +14,13 @@ import os
 from datetime import time
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Self
 from urllib.parse import quote
+from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
+    AnyHttpUrl,
     BaseModel,
     ConfigDict,
     Field,
@@ -26,6 +28,7 @@ from pydantic import (
     Secret,
     SecretStr,
     field_validator,
+    model_validator,
 )
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
@@ -257,6 +260,111 @@ class MonitoringSettings(BaseSettings):
     # Names this process in that file's name and on each line; the script's
     # own name when not set.
     process_name: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.-]{1,64}$")
+
+
+class _InboxConfigFileKeys(PydanticBaseSettingsSource):
+    """The two connection settings of the Inbox directory, from the chart's files.
+
+        config.yaml    inbox.url        -> base_url
+        secrets.yaml   inbox.actor_id   -> actor_id
+
+    The actor id is a secret, not a setting: Inbox trusts `X-Actor-Id` without
+    checking it, so whoever knows this id acts as a SYSTEM_ADMIN.
+
+    Read leniently, unlike the vector store: Inbox lookups are optional. A missing
+    file or key means "not configured" and the client returns no candidates, where
+    a missing vector store has to stop the service.
+    """
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        raise NotImplementedError  # unused: __call__ is overridden directly
+
+    def __call__(self) -> dict[str, Any]:
+        inbox = config_file.section(config_file.load_merged_lenient(), "inbox")
+        keys = {"url": "base_url", "actor_id": "actor_id"}
+        return {name: inbox[key] for key, name in keys.items() if inbox.get(key) is not None}
+
+
+class InboxDirectorySettings(BaseSettings):
+    """Standalone, like EmbeddingModelSettings -- looking up a name needs no DSN.
+
+    How the Inbox directory client (integrations/inbox_directory.py) reaches
+    Inbox's Users/Teams endpoints. `base_url` and `actor_id` are connection
+    settings, so in the cluster they come from the files Relay's chart mounts
+    (see _InboxConfigFileKeys), and the env var is only a fallback for a local
+    run. They have no default on purpose: the actor is a service user Inbox
+    creates for Mind (#131), and a guessed id would make every call look like a
+    permissions problem. Left unset, the client logs it and returns no
+    candidates. The rest are tuning knobs and come from env, as elsewhere.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="MIND_INBOX_DIRECTORY__", env_file=_ENV_FILE, extra="ignore"
+    )
+
+    # An http(s) URL, checked when the settings load: an address with a typo
+    # (no "http://", a port that is not a number) stops Mind at start-up with
+    # the setting named, instead of looking like Inbox being down on every call.
+    # Empty means unset, see _blank_means_unset.
+    base_url: AnyHttpUrl | None = None
+    # Sent as X-Actor-Id. Its role decides what Inbox returns: TENANT_ADMIN or
+    # SYSTEM_ADMIN see everyone, a TEAM_LEAD or EMPLOYEE gets a partial list.
+    actor_id: UUID | None = None
+    # Per HTTP call.
+    timeout_seconds: float = Field(default=5.0, gt=0)
+    # For reading both lists of a tenant together, however many pages it takes.
+    max_fetch_seconds: float = Field(default=15.0, gt=0)
+    # 0 turns the cache off.
+    cache_ttl_seconds: float = Field(default=300.0, ge=0)
+    # Candidates scoring below this are dropped. A name that fails the word
+    # rule in integrations/name_matching.py scores 0 and a name that passes it
+    # scores at least WORD_MATCH_MIN * PARTIAL_SCORE (about 0.5), so this is a
+    # floor under the rule, not the rule: 0.4 drops nothing the rule lets through.
+    # Raise it only to drop weak matches such as a nickname or a typo in a lone
+    # first name; it must stay below PARTIAL_SCORE (0.7).
+    min_score: float = Field(default=0.4, ge=0.0, le=1.0)
+
+    @field_validator("base_url", "actor_id", mode="before")
+    @classmethod
+    def _blank_means_unset(cls, value: object) -> object:
+        # A variable that is exported but empty (`MIND_...__ACTOR_ID=`) arrives
+        # as "" and would otherwise be a bad UUID, or an address that counts as
+        # configured. Both mean "not set".
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
+
+    @model_validator(mode="after")
+    def _min_score_stays_below_a_partial_match(self) -> Self:
+        # Imported here so that config does not import the matching at load time.
+        from mind.integrations.name_matching import PARTIAL_SCORE
+
+        if self.min_score >= PARTIAL_SCORE:
+            raise ValueError(
+                f"min_score must be below {PARTIAL_SCORE}, what a lone first name scores: "
+                f"at {self.min_score} every partial match would be dropped, and #132 "
+                "would never see two people with the same first name"
+            )
+        return self
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Earlier sources win: the chart's files before the env, which only
+        # fills in when the files do not set the key.
+        return (
+            init_settings,
+            _InboxConfigFileKeys(settings_cls),
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+        )
 
 
 class DeadlineSettings(BaseSettings):

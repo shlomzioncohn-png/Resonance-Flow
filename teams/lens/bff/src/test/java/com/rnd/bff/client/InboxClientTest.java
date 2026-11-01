@@ -98,7 +98,7 @@ class InboxClientTest {
     void updateStatus_roundTripsAllEightStatuses() {
         for (String status : List.of(
                 "NEW", "IN_REVIEW", "APPROVED", "IN_PROGRESS", "SNOOZED", "DONE", "REJECTED", "CANCELLED")) {
-            TaskDTO updated = inboxClient.updateStatus("any-user", "task_001", status, null);
+            TaskDTO updated = inboxClient.updateStatus("any-user", "task_001", status, null, null);
             assertThat(updated.getStatus()).isEqualTo(status);
             // getTaskById after updateStatus reflects the same value - proves
             // the underlying InboxTaskRecord was actually mutated, not just
@@ -109,7 +109,7 @@ class InboxClientTest {
 
     @Test
     void updateStatus_unknownId_returnsNull() {
-        assertThat(inboxClient.updateStatus("any-user", "does-not-exist", "IN_PROGRESS", null)).isNull();
+        assertThat(inboxClient.updateStatus("any-user", "does-not-exist", "IN_PROGRESS", null, null)).isNull();
     }
 
     // -------------------------------------------------------------------------
@@ -263,7 +263,7 @@ class InboxClientTest {
 
     @Test
     void updateStatus_real_sendsPatchWithUppercaseStatus() {
-        TaskDTO updated = realClient(ACTOR).updateStatus("emp_001", "539e1548-18e9-3021-92c7-25567dfe1cc8", "in_progress", null);
+        TaskDTO updated = realClient(ACTOR).updateStatus("emp_001", "539e1548-18e9-3021-92c7-25567dfe1cc8", "in_progress", null, null);
 
         assertThat(lastMethod.get()).isEqualTo("PATCH");
         assertThat(lastBody.get()).isEqualTo("{\"status\":\"IN_PROGRESS\"}");
@@ -281,9 +281,25 @@ class InboxClientTest {
     @Test
     void updateStatus_real_snoozeSendsSnoozedUntil() {
         realClient(ACTOR).updateStatus("emp_001", "539e1548-18e9-3021-92c7-25567dfe1cc8", "SNOOZED",
-                Instant.parse("2026-10-12T09:00:00Z"));
+                Instant.parse("2026-10-12T09:00:00Z"), null);
 
         assertThat(lastBody.get()).isEqualTo("{\"status\":\"SNOOZED\",\"snoozed_until\":\"2026-10-12T09:00:00Z\"}");
+    }
+
+    @Test
+    void updateStatus_real_rejectSendsFeedbackTextInSnakeCase() {
+        realClient(ACTOR).updateStatus("emp_001", "539e1548-18e9-3021-92c7-25567dfe1cc8", "REJECTED",
+                null, "Not my area: belongs to the data team");
+
+        assertThat(lastBody.get()).isEqualTo(
+                "{\"status\":\"REJECTED\",\"feedback_text\":\"Not my area: belongs to the data team\"}");
+    }
+
+    @Test
+    void updateStatus_real_blankFeedbackTextIsLeftOut() {
+        realClient(ACTOR).updateStatus("emp_001", "539e1548-18e9-3021-92c7-25567dfe1cc8", "REJECTED", null, "  ");
+
+        assertThat(lastBody.get()).isEqualTo("{\"status\":\"REJECTED\"}");
     }
 
     @Test

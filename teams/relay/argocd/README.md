@@ -30,11 +30,11 @@ dedicated project is needed for this repo's scope.
 | File                     | Purpose                                                                 |
 |--------------------------|--------------------------------------------------------------------------|
 | `root-app.yaml`          | App-of-apps bootstrap `Application` - manages everything under `apps/` |
-| `argocd-cm-patch.yaml`   | Restores the `argoproj.io/Application` health check ArgoCD dropped in 1.8 (with a fix for a "Missing" status edge case). Without it the sync-waves below (`0` → `1` → `2`) don't wait for the previous wave to be Healthy |
+| `argocd-cm-patch.yaml`   | Restores the `argoproj.io/Application` health check ArgoCD dropped in 1.8 (with a fix for a "Missing" status edge case). Without it the sync-waves below don't wait for the previous wave to be Healthy |
 | `apps/resonance-flow.yaml` | Wave `0`. `Application` syncing the [`resonance-flow`](../helm/resonance-flow) chart (all teams' services, including the Kafka/Postgres/MinIO subcharts and Schema Registry), with [`environments/shared.yaml`](../helm/resonance-flow/environments/shared.yaml) layered on top for shared-cluster-only settings |
 | `apps/schema-sync-hook.yaml` | Wave `1`. `Application` running the [`schema-sync-hook`](../schema-sync-hook) Job that checks and registers `shared/proto` schemas; it needs the Schema Registry from wave `0` to be up |
-| `apps/traefik.yaml`      | Wave `2`. `Application` installing the Traefik ingress controller (namespace `traefik`, ingress class `traefik`) that serves the chart's Ingress |
-
+| `apps/kube-prometheus-stack.yaml` | Wave `3`. `Application` installing cluster monitoring (Prometheus Operator, Prometheus, Alertmanager, node-exporter, kube-state-metrics) into namespace `monitoring` - see [Monitoring](#monitoring) |
+| `apps/traefik.yaml`      | Wave `4`. `Application` installing the Traefik ingress controller (namespace `traefik`, ingress class `traefik`) that serves the chart's Ingress |
 ## Onboarding your team's service
 
 There is nothing to add here. Once your team's CI writes a
@@ -71,13 +71,83 @@ kubectl apply -f teams/relay/argocd/argocd-cm-patch.yaml
 kubectl apply -f teams/relay/argocd/root-app.yaml
 ```
 
-Then `argocd app list` should show `root` and `resonance-flow`;
+Then `argocd app list` should show `root`, `resonance-flow`,
+`schema-sync-hook` and `traefik`;
 `argocd app get resonance-flow` to check the umbrella chart's status.
 
 If `teams-mind-api`/`teams-relay-*`-style Applications from the old
 directory-generator setup were ever applied to a live cluster, delete
 them explicitly (`argocd app delete <name>`) - they're orphaned now that
 `teams/relay/k8s/argocd/` is gone from `main`.
+
+## Monitoring
+
+`apps/kube-prometheus-stack.yaml` installs the
+[kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack)
+chart as its own `Application` in its own `monitoring` namespace - not as a
+subchart of `resonance-flow`, so a broken monitoring stack never blocks any
+team's sync.
+
+- **Ordering.** It's on sync-wave `3`, after `resonance-flow`. The chart's
+  `templates/servicemonitor.yaml` only renders once the
+  `monitoring.coreos.com/v1` CRDs exist, so on a fresh cluster
+  `resonance-flow`'s first sync skips ServiceMonitors, and ArgoCD's next
+  refresh adds them once this app has installed the CRDs. `traefik` is on
+  wave `4`, after it: its chart renders a ServiceMonitor without that check.
+- **Scraping a service.** A team opts its component in with
+  `components.<team>.metrics` - see the chart's
+  [README](../helm/resonance-flow/README.md#metrics-scraping-metrics).
+- **Infra targets.** Kafka, PostgreSQL and MinIO - see the chart's README.
+  Traefik exposes its own metrics, per router. Kafka consumer-group lag comes
+  from the chart's `kafka-exporter` subchart - see the chart's README.
+- **Alert rules.** The platform's PrometheusRules live in the `resonance-flow`
+  chart - see its [README](../helm/resonance-flow/README.md#alerting).
+
+- **Grafana.** On, with the Prometheus and Alertmanager datasources the chart
+  provisions. Its dashboard sidecar loads any ConfigMap labelled
+  `grafana_dashboard: "1"` from any namespace into the folder its
+  `grafana_folder` annotation names (the chart's own dashboards go to
+  `kubernetes`), and refuses edits saved in the UI - that's how the
+  `resonance-flow` chart ships its dashboards (its README, "Dashboards").
+- **Grafana's Ingress.** Through Traefik, on its own host (no sub-path, so
+  probes, metrics and port-forward keep working at `/`). Like the
+  `resonance-flow` Ingress, its host and TLS live in
+  [`environments/shared.yaml`](../helm/resonance-flow/environments/shared.yaml),
+  under `grafana:`: the chart source loads that file through a third,
+  ref-only source (`ref: values`), with `valuesObject` winning over it. Off
+  until `grafana.ingress.host` is set - enabling it without one fails the
+  render. Turning it on also sets Grafana's `root_url` to `https://<host>/`.
+- **Grafana's admin login.** From the `grafana-admin` Secret (`admin-user`,
+  `admin-password`), which the app's second source,
+  `teams/relay/monitoring/grafana-admin-secret-hook.yaml`, creates in a
+  PreSync hook with a random 32-char password - so `sources`, not `source`
+  (ArgoCD ≥ 2.6). Same pattern as the chart's `_db-credentials-hook.tpl`: the
+  Job creates the Secret through the API, so ArgoCD neither tracks nor prunes
+  it, and a later sync keeps an existing non-empty password (an empty one is
+  replaced). It's not a rendered Secret because ArgoCD renders offline: the
+  Grafana chart's own random password would change on every refresh. To
+  rotate it, delete the Secret and sync.
+
+To try Grafana and the dashboards without a shared cluster,
+`../monitoring-env/up.sh` installs kube-prometheus-stack (same values) and the
+`resonance-flow` chart on a local kind cluster, without Traefik - Grafana at
+`http://localhost:3000` through a port-forward. See its
+[README](../monitoring-env/README.md).
+
+Prometheus and Alertmanager have no Ingress, and Grafana's is off until its
+host is set. Reach them with:
+
+```bash
+kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-prometheus 9090:9090
+kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-alertmanager 9093:9093
+kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80
+```
+
+Grafana's admin password:
+
+```bash
+kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d
+```
 
 ## Scope
 

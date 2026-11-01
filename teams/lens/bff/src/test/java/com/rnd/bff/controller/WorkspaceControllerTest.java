@@ -151,7 +151,7 @@ class WorkspaceControllerTest {
 
     @Test
     void updateTaskStatus_emptyBody_returns400InsteadOfSilentlyDroppingStatus() throws Exception {
-        when(workspaceService.updateTaskStatus(anyString(), anyString(), anyString(), any()))
+        when(workspaceService.updateTaskStatus(anyString(), anyString(), anyString(), any(), any()))
                 .thenThrow(new IllegalArgumentException("newStatus cannot be null"));
 
         mockMvc
@@ -166,9 +166,9 @@ class WorkspaceControllerTest {
 
     @Test
     void updateTaskStatus_undocumentedEnumValue_returns400() throws Exception {
-        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("DELETED_BY_ME", null);
+        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("DELETED_BY_ME", null, null);
         
-        when(workspaceService.updateTaskStatus(anyString(), anyString(), anyString(), any()))
+        when(workspaceService.updateTaskStatus(anyString(), anyString(), anyString(), any(), any()))
                 .thenThrow(new IllegalArgumentException("Invalid status: DELETED_BY_ME"));
 
         mockMvc
@@ -184,7 +184,7 @@ class WorkspaceControllerTest {
     @Test
     @DirtiesContext
     void updateTaskStatus_documentedEnumValue_returns200AndEchoesStatus() throws Exception {
-        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("IN_PROGRESS", null);
+        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("IN_PROGRESS", null, null);
         
         TaskDTO updatedTask = TaskDTO.builder()
                 .id("task_001")
@@ -194,7 +194,7 @@ class WorkspaceControllerTest {
                 .effortEstimate(30)
                 .build();
         
-        when(workspaceService.updateTaskStatus(anyString(), anyString(), anyString(), any()))
+        when(workspaceService.updateTaskStatus(anyString(), anyString(), anyString(), any(), any()))
                 .thenReturn(updatedTask);
 
         mockMvc
@@ -209,9 +209,9 @@ class WorkspaceControllerTest {
 
     @Test
     void updateTaskStatus_unknownTaskId_returns404() throws Exception {
-        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("IN_PROGRESS", null);
+        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("IN_PROGRESS", null, null);
         
-        when(workspaceService.updateTaskStatus(anyString(), anyString(), anyString(), any()))
+        when(workspaceService.updateTaskStatus(anyString(), anyString(), anyString(), any(), any()))
                 .thenThrow(new com.rnd.bff.exception.TaskNotFoundException("task_does_not_exist"));
 
         mockMvc

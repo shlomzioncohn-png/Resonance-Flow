@@ -88,6 +88,8 @@ export interface UserCreateFields {
   phone?: string;
   username?: string;
   role: 'MANAGER' | 'EMPLOYEE';
+  /** The initial password the manager sets; the user replaces it on first sign-in. */
+  password: string;
 }
 
 export function createUser(fields: UserCreateFields): Promise<UserDetails> {

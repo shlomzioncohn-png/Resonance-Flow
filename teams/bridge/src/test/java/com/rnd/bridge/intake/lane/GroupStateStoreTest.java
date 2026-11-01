@@ -73,7 +73,7 @@ class GroupStateStoreTest {
      * For a threaded group, groupId always equals threadId, which always equals the thread
      * root's own messageId (see GroupState's javadoc). A thread group must never claim index
      * ownership of that messageId - it stays whatever it already was (unset here, but see
-     * ChatGroupStateReconciler.newThreadGroupState for the live root -> first-reply case where
+     * ChatGroupFactory.newThreadGroupState for the live root -> first-reply case where
      * it's the root's ORIGINAL non-thread group that must keep owning it).
      */
     @Test

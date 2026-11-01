@@ -19,6 +19,8 @@ import type { WorkInsight } from '@/services/workInsightsApi';
 
 export type InsightLoadState = 'loading' | 'loaded' | 'error';
 
+export type FeedbackState = 'idle' | 'sending' | 'sent' | 'failed';
+
 export interface WorkInsightsDrawerProps {
   open: boolean;
   onClose: () => void;
@@ -26,11 +28,13 @@ export interface WorkInsightsDrawerProps {
   insight: WorkInsight | null;
   errorMessage: string;
   onRetry: () => void;
-  feedbackSent: boolean;
+  feedback: FeedbackState;
   onFeedback: (helpful: boolean) => void;
+  onRetryFeedback: () => void;
 }
 
 const TYPING_DELAY_MS = 28;
+const LONG_WAIT_MS = 5000;
 const REVEAL_STEP_MS = 280;
 const TITLE_ID = 'work-insights-title';
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
@@ -47,8 +51,9 @@ export default function WorkInsightsDrawer({
   insight,
   errorMessage,
   onRetry,
-  feedbackSent,
+  feedback,
   onFeedback,
+  onRetryFeedback,
 }: WorkInsightsDrawerProps) {
   return (
     <Drawer
@@ -99,12 +104,14 @@ export default function WorkInsightsDrawer({
           />
         )}
         {state === 'loaded' && insight?.status === 'NOT_ENOUGH_DATA' && <NotEnoughDataView />}
+        {state === 'loaded' && insight?.status === 'NO_INSIGHT' && <NoInsightView />}
         {state === 'loaded' && insight?.status === 'READY' && (
           <InsightView
             key={insight.insightId}
             insight={insight}
-            feedbackSent={feedbackSent}
+            feedback={feedback}
             onFeedback={onFeedback}
+            onRetryFeedback={onRetryFeedback}
           />
         )}
       </Box>
@@ -113,6 +120,13 @@ export default function WorkInsightsDrawer({
 }
 
 function LoadingView() {
+  const [longWait, setLongWait] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setLongWait(true), LONG_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
     <Box role="status">
       <Stack direction="row" spacing={1} sx={{ alignItems: 'center', color: 'primary.main' }}>
@@ -134,6 +148,11 @@ function LoadingView() {
           Analyzing your tasks…
         </Typography>
       </Stack>
+      {longWait && (
+        <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
+          The first insight of the day can take up to a minute.
+        </Typography>
+      )}
       <Stack spacing={1} sx={{ mt: 2 }}>
         <Skeleton variant="rounded" height={12} />
         <Skeleton variant="rounded" height={12} width="80%" />
@@ -156,13 +175,27 @@ function NotEnoughDataView() {
   );
 }
 
-interface InsightViewProps {
-  insight: WorkInsight;
-  feedbackSent: boolean;
-  onFeedback: (helpful: boolean) => void;
+function NoInsightView() {
+  return (
+    <Box sx={{ textAlign: 'center', py: 6 }}>
+      <Typography variant="h6" component="h3">
+        No new insight today
+      </Typography>
+      <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
+        Nothing in your recent tasks stood out. Check back tomorrow.
+      </Typography>
+    </Box>
+  );
 }
 
-function InsightView({ insight, feedbackSent, onFeedback }: InsightViewProps) {
+interface InsightViewProps {
+  insight: WorkInsight;
+  feedback: FeedbackState;
+  onFeedback: (helpful: boolean) => void;
+  onRetryFeedback: () => void;
+}
+
+function InsightView({ insight, feedback, onFeedback, onRetryFeedback }: InsightViewProps) {
   const text = insight.insight ?? '';
   const reduceMotion = useMediaQuery(REDUCED_MOTION);
   const [typedLength, setTypedLength] = useState(0);
@@ -182,6 +215,9 @@ function InsightView({ insight, feedbackSent, onFeedback }: InsightViewProps) {
   });
 
   const evidence = insight.evidence;
+  const achieved = evidence?.achieved;
+  const total = evidence?.total;
+  const hasCount = achieved != null && total != null && total > 0;
 
   return (
     <>
@@ -209,36 +245,59 @@ function InsightView({ insight, feedbackSent, onFeedback }: InsightViewProps) {
             <Typography variant="body2" color="text.secondary">
               {evidence.text}
             </Typography>
-            <LinearProgress
-              variant="determinate"
-              value={evidence.total > 0 ? (evidence.achieved / evidence.total) * 100 : 0}
-              aria-label={`${evidence.achieved} of ${evidence.total}`}
-              sx={{
-                mt: 1,
-                height: 8,
-                borderRadius: 1,
-                '& .MuiLinearProgress-bar': { bgcolor: (theme) => theme.custom.ai.accent },
-              }}
-            />
+            {hasCount && (
+              <LinearProgress
+                variant="determinate"
+                value={(achieved / total) * 100}
+                aria-label={`${achieved} of ${total}`}
+                sx={{
+                  mt: 1,
+                  height: 8,
+                  borderRadius: 1,
+                  '& .MuiLinearProgress-bar': { bgcolor: (theme) => theme.custom.ai.accent },
+                }}
+              />
+            )}
           </Box>
         </Fade>
       )}
 
       <Fade {...reveal(2)}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 'auto' }}>
-          {feedbackSent ? (
+          {feedback === 'sent' && (
             <Typography variant="body2" color="success.main" sx={{ fontWeight: 600 }}>
               Thanks, we&apos;ll learn from this
             </Typography>
-          ) : (
+          )}
+          {feedback === 'failed' && (
+            <>
+              <Typography variant="body2" role="alert" sx={{ color: 'error.main' }}>
+                Couldn&apos;t send your feedback.
+              </Typography>
+              <Button size="small" variant="text" onClick={onRetryFeedback}>
+                Try again
+              </Button>
+            </>
+          )}
+          {(feedback === 'idle' || feedback === 'sending') && (
             <>
               <Typography variant="body2" color="text.secondary">
                 Was this helpful?
               </Typography>
-              <Button size="small" variant="contained" onClick={() => onFeedback(true)}>
+              <Button
+                size="small"
+                variant="contained"
+                disabled={feedback === 'sending'}
+                onClick={() => onFeedback(true)}
+              >
                 Helpful
               </Button>
-              <Button size="small" variant="outlined" onClick={() => onFeedback(false)}>
+              <Button
+                size="small"
+                variant="outlined"
+                disabled={feedback === 'sending'}
+                onClick={() => onFeedback(false)}
+              >
                 Not relevant
               </Button>
             </>
