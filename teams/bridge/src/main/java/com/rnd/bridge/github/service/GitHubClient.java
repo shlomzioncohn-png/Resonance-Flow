@@ -84,7 +84,7 @@ public class GitHubClient {
      */
     private Flux<GitHubIssue> fetchAllPages(String path) {
         return fetchPage(path, 1)
-                .expand(page -> page.items().size() == pageSize
+                .expand(page -> !page.items().isEmpty() && page.items().size() == pageSize
                         ? fetchPage(path, page.number() + 1)
                         : Mono.empty())
                 .concatMapIterable(GitHubPage::items);
