@@ -44,10 +44,18 @@ register them once after it starts (again after a registry restart):
 docker compose --profile seed run --rm schema-seed
 ```
 
-For a small dependency graph in Chain (the Manager's Bottlenecks screen), load Inbox's seed
-(`teams/inbox/seeds/load-seeds.sql`) and then `teams/chain/seeds/load-chain-demo-seed.sql`, which
-reuses its task ids and tenant.
-
 To publish a test event, open Kafka UI, pick the topic, choose `SchemaRegistry` as the value serde
 and send JSON. Each team's own `docker-compose.yml` runs a broker of its own on the same ports, so
 stop it before starting this one.
+
+## Seed data for the Manager's Bottlenecks screen
+
+Load Inbox's seed first, then Chain's small dependency graph, which reuses Inbox's task ids and
+tenant. Run from the repo root, with the stack up (the CSVs are generated and git-ignored):
+
+```bash
+(cd teams/inbox && java -cp target/classes com.rnd.inbox.seedgen.SeedGenerator)   # needs a compiled inbox
+(cd teams/inbox/seeds && psql -h localhost -p 5432 -U postgres -d inbox -f load-seeds.sql)
+psql -h localhost -p 5432 -U postgres -d inbox -f teams/inbox/seeds/assign-tasks-to-projects.sql   # gives tasks a project
+psql -h localhost -p 5432 -U postgres -d chain -f teams/chain/seeds/load-chain-demo-seed.sql
+```
