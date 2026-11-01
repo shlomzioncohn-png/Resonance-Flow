@@ -457,6 +457,10 @@ class DependencyEdgeServiceTest {
         UUID dependsOnTaskId =
                 UUID.randomUUID();
 
+        // The task already has one real blocker; the view counts rows, not a seeded counter.
+        UUID existingBlockerId =
+                UUID.randomUUID();
+
         Fixture fixture =
                 newFixture(
                         List.of(
@@ -469,8 +473,16 @@ class DependencyEdgeServiceTest {
                                         dependsOnTaskId,
                                         0,
                                         0,
+                                        true),
+                                buildTask(
+                                        existingBlockerId,
+                                        0,
+                                        0,
                                         true)),
-                        List.of());
+                        List.of(
+                                new TaskDependency(
+                                        taskId,
+                                        existingBlockerId)));
 
         fixture.service()
                 .addDependency(
@@ -1022,6 +1034,9 @@ class DependencyEdgeServiceTest {
         UUID dependsOnTaskId =
                 UUID.randomUUID();
 
+        UUID otherBlockerId =
+                UUID.randomUUID();
+
         Fixture fixture =
                 newFixture(
                         List.of(
@@ -1034,21 +1049,32 @@ class DependencyEdgeServiceTest {
                                         dependsOnTaskId,
                                         0,
                                         0,
+                                        true),
+                                buildTask(
+                                        otherBlockerId,
+                                        0,
+                                        0,
                                         true)),
                         List.of(
                                 new TaskDependency(
                                         taskId,
-                                        dependsOnTaskId)));
+                                        dependsOnTaskId),
+                                new TaskDependency(
+                                        taskId,
+                                        otherBlockerId)));
 
         fixture.service()
                 .removeDependency(
                         taskId,
                         dependsOnTaskId);
 
-        assertTrue(
+        assertEquals(
+                List.of(otherBlockerId),
                 fixture.dependencyRepo()
                         .findByTaskId(taskId)
-                        .isEmpty());
+                        .stream()
+                        .map(TaskDependency::dependsOnTaskId)
+                        .toList());
 
         Task task =
                 fixture.taskRepo()

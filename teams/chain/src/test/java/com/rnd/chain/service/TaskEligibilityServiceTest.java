@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.rnd.chain.repository.TaskReadinessRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import com.rnd.chain.dto.Constraint;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskEligibilityResponse;
@@ -272,17 +273,15 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
-    void recalculateTaskEligibility_shouldFixIncorrectReadyState() {
+    void recalculateTaskEligibility_blockedTask_staysNotReadyAndPublishesNothing() {
 
         UUID taskId = UUID.randomUUID();
 
-        taskRepository.save(
-                createTask(
-                        taskId,
-                        TaskStatus.ACTIVE,
-                        true,
-                        1,
-                        0));
+        UUID blockerId = UUID.randomUUID();
+
+        taskRepository.save(createTask(taskId, TaskStatus.ACTIVE, true, 0, 0));
+        taskRepository.save(createTask(blockerId, TaskStatus.ACTIVE, true, 0, 0));
+        dependencyRepository.save(new TaskDependency(taskId, blockerId));
 
         TestTransactions.runCommitted(() -> service.recalculateTaskEligibility(
                 taskId));
@@ -298,9 +297,8 @@ class TaskEligibilityServiceTest {
                 1,
                 blockingCount(updated));
 
-        assertEquals(
-                1,
-                publisher.getEvents().size());
+        // Readiness is derived from the edges, so a recalculation changes nothing to announce.
+        assertTrue(publisher.getEvents().isEmpty());
     }
 
     @Test
@@ -316,22 +314,27 @@ class TaskEligibilityServiceTest {
     @Test
     void hasBlocker_becomesNotReady() {
         UUID taskId = UUID.randomUUID();
-        // isReady starts stale (true) so the blocker actually flips it, exercising the recompute.
-        Fixture fixture = newFixture(List.of(buildTask(taskId, 1, 0, true)), List.of());
+        UUID blockerId = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true), buildTask(blockerId, 0, 0, true)),
+                List.of(new TaskDependency(taskId, blockerId)));
 
         fixture.service().recalculateTaskEligibility(taskId);
 
         assertFalse(isReady(fixture.taskRepo().findById(taskId).orElseThrow()));
+        assertEquals(1, blockingCount(fixture.taskRepo().findById(taskId).orElseThrow()));
     }
 
     @Test
     void hasOpenConstraint_becomesNotReady() {
         UUID taskId = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 1, true)), List.of());
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+        fixture.constraintRepo().save(openConstraint(taskId, "c-open"));
 
         fixture.service().recalculateTaskEligibility(taskId);
 
         assertFalse(isReady(fixture.taskRepo().findById(taskId).orElseThrow()));
+        assertEquals(1, openConstraintCount(fixture.taskRepo().findById(taskId).orElseThrow()));
     }
 
     @Test
@@ -460,18 +463,18 @@ class TaskEligibilityServiceTest {
 
     @Test
     void statusChangeToNonDone_fromNonDone_doesNotTriggerDependentsRecalculation() {
-        // taskA's blockingCount (5, an arbitrary non-zero value) must come back completely
-        // untouched - proof that adjustDependentsBlockingCount never ran for this transition.
+        // taskA's one real blocker (taskB) must still count after taskB moves between two
+        // non-DONE statuses - proof that the dependents were not recalculated away.
         UUID taskB = UUID.randomUUID();
         UUID taskA = UUID.randomUUID();
         Fixture fixture = newFixture(
-                List.of(buildTask(taskB, 0, 0, true), buildTask(taskA, 5, 0, false)),
+                List.of(buildTask(taskB, 0, 0, true), buildTask(taskA, 0, 0, false)),
                 List.of(new TaskDependency(taskA, taskB)));
 
         fixture.service().onTaskStatusChanged(taskB, TaskStatus.PENDING);
 
         assertEquals(TaskStatus.PENDING, fixture.taskRepo().findById(taskB).orElseThrow().getStatus());
-        assertEquals(5, blockingCount(fixture.taskRepo().findById(taskA).orElseThrow()));
+        assertEquals(1, blockingCount(fixture.taskRepo().findById(taskA).orElseThrow()));
     }
 
     @Test
@@ -649,6 +652,12 @@ class TaskEligibilityServiceTest {
             edgeService,
             priorityScoreService);
 }
+
+    private static Constraint openConstraint(UUID taskId, String constraintId) {
+        LocalDateTime now = LocalDateTime.now();
+        return new Constraint(constraintId, taskId, Constraint.ConstraintType.APPROVAL_NEEDED,
+                Constraint.ConstraintStatus.PENDING, null, "source-ref", now, now);
+    }
 
     private static Task buildTask(UUID id, int blockingCount, int openConstraintCount, boolean isReady) {
         return buildTask(id, blockingCount, openConstraintCount, isReady, TaskStatus.ACTIVE);

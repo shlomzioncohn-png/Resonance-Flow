@@ -55,6 +55,11 @@ public class TaskEligibilityService {
                 taskId,
                 "taskId must not be null");
 
+        // Unknown task is a 404-style error; a missing readiness row for a known task is not.
+        taskRepository.findById(taskId)
+                .orElseThrow(
+                        () -> new TaskNotFoundException(taskId));
+
         TaskReadinessSnapshot readiness =
                 requireReadinessSnapshot(
                         taskReadinessRepository.findByIds(

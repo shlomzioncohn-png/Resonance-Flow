@@ -267,6 +267,11 @@ public class PriorityScoreService {
                 confidence,
                 "confidence");
 
+        // Unknown task is a TaskNotFoundException; a missing readiness row for a known task is not.
+        taskRepository.findById(taskId)
+                .orElseThrow(
+                        () -> new TaskNotFoundException(taskId));
+
         /*
          * Score/confidence changes do not themselves modify readiness,
          * therefore one View snapshot represents both before and after.
