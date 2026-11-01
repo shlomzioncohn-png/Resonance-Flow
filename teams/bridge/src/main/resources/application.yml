@@ -70,7 +70,7 @@ jira:
     token: ${JIRA_TOKEN:}
   target:
     project: ${JIRA_TARGET_PROJECT:}
-  # Page size for /rest/api/2/search (startAt/maxResults pagination)
+  # Page size for /rest/api/3/search/jql (nextPageToken/maxResults pagination)
   page-size: ${JIRA_PAGE_SIZE:100}
   sync:
     # Set to true to enable the automatic nightly Jira to Kafka sync
