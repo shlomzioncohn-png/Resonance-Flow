@@ -91,13 +91,15 @@ public class GitHubClient {
     }
 
     private Mono<GitHubPage> fetchPage(String path, int page) {
-        return webClient.get()
+        // defer: the request must be built per subscription so each retry
+        // actually re-issues it instead of replaying the first response flux.
+        return Flux.defer(() -> webClient.get()
                 .uri(uriBuilder -> uriBuilder.path(path)
                        .queryParam("per_page", pageSize)
                         .queryParam("page", page)
                         .build())
                 .retrieve()
-                .bodyToFlux(GitHubIssue.class)
+                .bodyToFlux(GitHubIssue.class))
                 .collectList()
                 .map(items -> new GitHubPage(page, items))
                 .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
