@@ -41,7 +41,7 @@ from mind.config import DeadlineSettings
 from mind.contracts import RawObjectEvent
 from mind.contracts.raw_object_event_enums import Sensitivity
 from mind.contracts.task_creation_requested import TaskCreationRequested
-from mind.embeddings.base import SearchResult
+from mind.embeddings.confidence import ScoredResult
 from mind.extraction.assembly import to_task_creation_requested
 from mind.extraction.extractor import ExtractionFailure, ExtractionItem, ExtractionOutcome
 from mind.extraction.models import ExtractedFields
@@ -78,7 +78,7 @@ class ExtractionUnavailable(Exception):
 #: (tenant_id, title, description) -> the closest open task of that tenant, if
 #: it clears the threshold: `find_duplicate` on `index.for_tenant(tenant_id)`
 #: (#841: one tenant's task is never another's duplicate).
-FindDuplicate = Callable[[UUID, str, str], Awaitable[SearchResult | None]]
+FindDuplicate = Callable[[UUID, str, str], Awaitable[ScoredResult | None]]
 
 
 def _loggable_title(event: RawObjectEvent, title: str) -> str:
@@ -209,16 +209,16 @@ class CreationPipeline:
                     tenant_id, request.title, request.description or ""
                 )
                 if match is not None:
-                    # Mind has no update path and Inbox no "possible duplicate"
-                    # field: sending would only make a second task.
+                    # Mind has no update path and Inbox no "possible duplicate" field.
                     logger.info(
                         "creation: %s task %d not sent, %s is a duplicate of task %s "
-                        "(similarity %.3f)",
+                        "(similarity %.3f, confidence %.3f)",
                         event.correlation_id,
                         task_index,
                         _loggable_title(event, request.title),
                         match.task_id,
                         match.similarity,
+                        match.confidence,
                     )
                     continue
 

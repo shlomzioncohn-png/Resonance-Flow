@@ -8,7 +8,8 @@ strings in, one ranked result list out per string, same order.
 import asyncio
 
 from mind.config import get_settings
-from mind.embeddings.base import SearchResult, VectorStore
+from mind.embeddings.base import VectorStore
+from mind.embeddings.confidence import ScoredResult, score_above_threshold
 from mind.embeddings.search import nearest_tasks
 
 DEFAULT_K = 5
@@ -22,7 +23,7 @@ async def resolve_dependency_targets(
     threshold: float | None = None,
     is_query: bool = True,
     exclude_task_id: str | None = None,
-) -> list[list[SearchResult]]:
+) -> list[list[ScoredResult]]:
     """Up to k candidates per reference, same order as the input. "No
     match" is the default: threshold=None reads Settings.dependency_match_threshold,
     not "no filtering" -- pass threshold=0.0 explicitly for the raw,
@@ -51,4 +52,4 @@ async def resolve_dependency_targets(
             for text in references
         )
     )
-    return [[c for c in candidates if c.similarity >= threshold] for candidates in results]
+    return [score_above_threshold(candidates, threshold) for candidates in results]

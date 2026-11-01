@@ -112,7 +112,7 @@ class DependencyPublisher:
             store, mentions, k=1, exclude_task_id=task_id_normalized
         )
         # Two mentions can resolve to the same target: dedup by target first,
-        # keeping the higher confidence, so they don't race two sends for one
+        # keeping the higher similarity, so they don't race two sends for one
         # event_id -- Chain keeps whichever arrives first, confidence included.
         # `mentions_for` tracks every mention behind each target, so #918's
         # pending store is only cleared for a mention once *its* edge has
@@ -125,9 +125,16 @@ class DependencyPublisher:
                 if self._pending is not None:
                     await self._pending.add(task_id, tenant_id, mention)
                 continue
-            confidence = results[0].similarity
-            if target_uuid not in candidates or confidence > candidates[target_uuid]:
-                candidates[target_uuid] = confidence
+            # #476 review: Chain's README takes this field at face value as
+            # a 0..1 confidence (defaulting to 1.0 for edges not sourced from
+            # Mind) and sums it directly into blockingConfidenceSum/
+            # dependentConfidenceSum -- it isn't calibrated against raw
+            # similarity on their side. Switching what we send here would
+            # silently change their priority_score with no coordination, so
+            # this still sends raw similarity, not #476's new confidence.
+            similarity = results[0].similarity
+            if target_uuid not in candidates or similarity > candidates[target_uuid]:
+                candidates[target_uuid] = similarity
             mentions_for.setdefault(target_uuid, []).append(mention)
 
         for target_uuid, confidence in candidates.items():

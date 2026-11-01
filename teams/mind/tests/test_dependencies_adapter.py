@@ -12,7 +12,7 @@ import pytest
 from mind.contracts.task_dependencies_proposed import DependencyProposed
 from mind.dependencies.adapter import DependencyAdapter
 from mind.dependencies.publisher import DependencyPublisher
-from mind.embeddings.base import SearchResult
+from mind.embeddings.confidence import ScoredResult
 from mind.task_creation.pending import PendingRequest
 from mind.task_creation.reply import MatchedReply
 
@@ -53,7 +53,7 @@ def adapter(publisher: DependencyPublisher) -> DependencyAdapter:
     return DependencyAdapter(publisher)
 
 
-def _resolved(*per_mention: list[SearchResult]):
+def _resolved(*per_mention: list[ScoredResult]):
     """Same convention as test_dependencies_publish.py's helper of the same name."""
     return patch(
         "mind.dependencies.publisher.resolve_dependency_targets",
@@ -77,7 +77,7 @@ def _matched(task_id: str, *, mentions: tuple[str, ...] = ()) -> MatchedReply:
 
 
 async def test_on_task_created_publishes_a_resolved_mention(adapter, sink):
-    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+    with _resolved([ScoredResult(task_id=TASK_B, similarity=0.9, confidence=0.2)]):
         await adapter.on_task_created(_matched(TASK_A, mentions=("the DB upgrade",)))
 
     [event] = sink.sent
@@ -112,7 +112,7 @@ async def test_on_task_created_with_an_unparseable_task_id_logs_and_returns(
 
 
 async def test_on_task_created_passes_the_matched_tenant_id_through(adapter, sink):
-    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+    with _resolved([ScoredResult(task_id=TASK_B, similarity=0.9, confidence=0.2)]):
         await adapter.on_task_created(_matched(TASK_A, mentions=("the DB upgrade",)))
 
     [event] = sink.sent

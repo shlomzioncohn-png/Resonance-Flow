@@ -10,7 +10,9 @@ from fastapi.testclient import TestClient
 
 from mind.api.main import app
 from mind.api.v1.router import get_vector_index
+from mind.config import get_settings
 from mind.embeddings.base import SearchResult
+from mind.embeddings.confidence import confidence_from_similarity
 
 client = TestClient(app)
 
@@ -41,7 +43,12 @@ def test_returns_200_with_the_expected_shape(mock_store):
     response = client.get("/v1/tasks/task-1/related")
 
     assert response.status_code == 200
-    assert response.json() == {"related": [{"task_id": "task-2", "similarity": 0.9}]}
+    expected_confidence = confidence_from_similarity(0.9, get_settings().related_task_threshold)
+    assert response.json() == {
+        "related": [
+            {"task_id": "task-2", "similarity": 0.9, "confidence": expected_confidence}
+        ]
+    }
 
 
 def test_returns_200_with_an_empty_list_for_an_unindexed_task(mock_store):

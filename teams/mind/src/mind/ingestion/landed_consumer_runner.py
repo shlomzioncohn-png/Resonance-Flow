@@ -38,7 +38,7 @@ from mind.dependencies.adapter import DependencyAdapter
 from mind.dependencies.kafka_sink import KafkaDependencySink
 from mind.dependencies.postgres_pending import pending_dependency_store
 from mind.dependencies.publisher import DependencyPublisher
-from mind.embeddings.base import SearchResult
+from mind.embeddings.confidence import ScoredResult
 from mind.embeddings.duplicate_detection import find_duplicate
 from mind.embeddings.embeddings import warm_up as warm_up_embeddings
 from mind.embeddings.pgvector_store import PgVectorStore
@@ -222,7 +222,7 @@ def main() -> None:
     loop.run_until_complete(search_index.open())
     extractor = BasicExtractor(provider, ExtractionConfig(classify=True))
 
-    async def _find_duplicate(tenant_id: UUID, title: str, description: str) -> SearchResult | None:
+    async def _find_duplicate(tenant_id: UUID, title: str, description: str) -> ScoredResult | None:
         # Only the item's own tenant (#841).
         with call_context(stage="duplicate_check"):
             return await find_duplicate(search_index.for_tenant(tenant_id), title, description)

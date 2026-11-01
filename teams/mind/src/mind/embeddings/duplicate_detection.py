@@ -2,14 +2,15 @@
 (#353). R2's pipeline (#350) owns what happens with the signal."""
 
 from mind.config import get_settings
-from mind.embeddings.base import SearchResult, VectorStore
+from mind.embeddings.base import VectorStore
+from mind.embeddings.confidence import ScoredResult
 from mind.embeddings.dependency_resolution import resolve_dependency_targets
 from mind.embeddings.embeddings import task_text
 
 
 async def find_duplicate(
     store: VectorStore, title: str, description: str, *, threshold: float | None = None
-) -> SearchResult | None:
+) -> ScoredResult | None:
     """Best match for this candidate task, if it clears threshold. "No
     match" is the default: threshold=None reads Settings.duplicate_similarity_threshold.
     Full task vs full task (is_query=False) -- not #245's mention-vs-passage case."""

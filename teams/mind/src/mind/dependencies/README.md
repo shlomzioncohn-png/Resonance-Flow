@@ -97,6 +97,20 @@ deduped by `event_id`). Two caveats, not glossed over:
   instance, is not actually deduped. This design accepts that; it isn't
   idempotent against every failure mode, only against the common one.
 
+## Confidence on a proposed edge (#476)
+
+`DependencyEdge.confidence` already existed (#244) before this issue --
+reviewed against #476's reasoning, not rebuilt. #476 replaced raw
+similarity with `confidence_from_similarity()` (similarity's distance
+above a threshold, see `embeddings/README.md`, "Confidence") for the
+other two inferences (duplicate, related-task), but **not here**: this
+edge's `confidence` is still raw similarity, unchanged. Chain's own
+README takes this field at face value as a 0..1 confidence and sums it
+into `blockingConfidenceSum`/`dependentConfidenceSum` -- switching what
+gets sent would silently change their `priority_score` with no
+coordination, so it stays as similarity until that's coordinated with
+Chain.
+
 ## Open decisions (review, not settled in this PR)
 
 Three items from review intentionally left open rather than decided

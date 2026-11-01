@@ -1,16 +1,19 @@
 """#472: related-task search, see embeddings/README.md."""
 
 from mind.config import get_settings
-from mind.embeddings.base import SearchResult, VectorStore
+from mind.embeddings.base import VectorStore
+from mind.embeddings.confidence import ScoredResult, score_above_threshold
 
 DEFAULT_K = 5
 
 
 async def find_related(
     store: VectorStore, task_id: str, *, k: int = DEFAULT_K, threshold: float | None = None
-) -> list[SearchResult]:
+) -> list[ScoredResult]:
     """Up to k related tasks, task_id itself excluded. [] on no embedding,
-    empty index, or nothing above threshold -- never an error."""
+    empty index, or nothing above threshold -- never an error. No
+    confidence for that empty case (#476): it's a structural fact, not a
+    graded inference -- see embeddings/README.md, "Confidence"."""
     if k <= 0:
         raise ValueError(f"k must be positive, got {k}")
     if threshold is None:
@@ -19,4 +22,4 @@ async def find_related(
     if vector is None:
         return []
     candidates = await store.search(vector, k=k, exclude_task_id=task_id)
-    return [c for c in candidates if c.similarity >= threshold]
+    return score_above_threshold(candidates, threshold)

@@ -8,6 +8,7 @@ through `for_tenant()`.
 """
 
 from mind.embeddings.base import DEMO_TENANT_ID, SearchResult, VectorIndex, VectorStore
+from mind.embeddings.confidence import ScoredResult, confidence_from_similarity
 from mind.embeddings.dependency_resolution import resolve_dependency_targets
 from mind.embeddings.duplicate_detection import find_duplicate
 from mind.embeddings.embeddings import embed, embed_async, embed_batch, embed_batch_async, task_text
@@ -16,9 +17,11 @@ from mind.embeddings.search import nearest_tasks
 
 __all__ = [
     "DEMO_TENANT_ID",
+    "ScoredResult",
     "SearchResult",
     "VectorIndex",
     "VectorStore",
+    "confidence_from_similarity",
     "embed",
     "embed_async",
     "embed_batch",

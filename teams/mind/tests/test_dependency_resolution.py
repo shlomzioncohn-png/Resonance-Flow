@@ -11,6 +11,7 @@ from benchmarks.vector_store_test_table import create_vector_store_test_table
 from mind.config import VectorStoreSettings, get_settings
 from mind.embeddings import embed, task_text
 from mind.embeddings.base import SearchResult
+from mind.embeddings.confidence import confidence_from_similarity
 from mind.embeddings.dependency_resolution import resolve_dependency_targets
 from mind.embeddings.embeddings import EMBEDDING_DIM
 from mind.embeddings.pgvector_store import PgVectorStore
@@ -231,6 +232,23 @@ async def test_threshold_comparison_is_inclusive_at_the_boundary():
     [candidates] = await resolve_dependency_targets(store, ["the DB upgrade"], threshold=0.8)
 
     assert {c.task_id for c in candidates} == {"task-above", "task-at"}
+
+
+async def test_each_surviving_candidate_carries_a_confidence_not_its_raw_similarity():
+    store = AsyncMock()
+    store.search.return_value = [
+        SearchResult(task_id="task-at", similarity=0.8),
+        SearchResult(task_id="task-above", similarity=0.9),
+    ]
+
+    [candidates] = await resolve_dependency_targets(store, ["the DB upgrade"], threshold=0.8)
+
+    by_id = {c.task_id: c for c in candidates}
+    assert by_id["task-at"].confidence == pytest.approx(0.0)
+    assert by_id["task-above"].confidence == pytest.approx(
+        confidence_from_similarity(0.9, 0.8)
+    )
+    assert by_id["task-above"].confidence != pytest.approx(by_id["task-above"].similarity)
 
 
 async def test_empty_references_list_returns_empty_list_without_calling_the_store():
