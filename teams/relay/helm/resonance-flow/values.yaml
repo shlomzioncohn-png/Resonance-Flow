@@ -474,6 +474,13 @@ components:
     service: *defaultService
     resources: *defaultResources
     <<: *defaultHealthProbes
+    startupProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      # 300s budget - ~230s observed at 500m with other JVMs starting alongside.
+      failureThreshold: 60
     # Password comes from the chain-db-credentials Secret, mounted as a file below -
     # not a literal here, not an env var; created once by the chain db-credentials
     # hook Job, not rendered as a chart resource. secretName must match the
