@@ -71,7 +71,8 @@ kubectl apply -f teams/relay/argocd/argocd-cm-patch.yaml
 kubectl apply -f teams/relay/argocd/root-app.yaml
 ```
 
-Then `argocd app list` should show `root` and `resonance-flow`;
+Then `argocd app list` should show `root`, `resonance-flow`,
+`schema-sync-hook` and `traefik`;
 `argocd app get resonance-flow` to check the umbrella chart's status.
 
 If `teams-mind-api`/`teams-relay-*`-style Applications from the old
