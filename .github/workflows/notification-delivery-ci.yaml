@@ -26,13 +26,13 @@ jobs:
       service_name: notification-delivery
       service_dir: teams/relay/notification_delivery
 
-  cd:
+  release:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
       packages: write
       pull-requests: write
-    uses: ./.github/workflows/service-cd.yaml
+    uses: ./.github/workflows/service-release.yaml
     secrets: inherit
     with:
       service_name: notification-delivery

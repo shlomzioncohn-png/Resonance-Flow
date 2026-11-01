@@ -75,11 +75,11 @@ jobs:
 
   # #469: produces real numbers for vector-store-comparison.md's "Foundation
   # Gate benchmark" section against a real pgvector instance (same kind
-  # cluster + Helm infra the `ci`/`cd` jobs use), instead of a human having
+  # cluster + Helm infra the `ci`/`release` jobs use), instead of a human having
   # to trust a result no CI run ever actually reproduced. Report-only, not a
   # merge gate -- continue-on-error so a flaky run doesn't block the PR.
   # Runs only after merge to main, not on every PR push. Not on
-  # workflow_dispatch either: a manual run also runs `cd`, which publishes an image.
+  # workflow_dispatch either: a manual run also runs `release`, which publishes an image.
   foundation-gate-benchmark:
     needs: lint
     if: github.event_name == 'push'
@@ -133,14 +133,14 @@ jobs:
           name: foundation-gate-benchmark-results
           path: teams/mind/benchmarks/foundation_gate_benchmark_results.json
 
-  cd:
+  release:
     needs: lint
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
       packages: write
       pull-requests: write
-    uses: ./.github/workflows/service-cd.yaml
+    uses: ./.github/workflows/service-release.yaml
     secrets: inherit
     with:
       service_name: mind

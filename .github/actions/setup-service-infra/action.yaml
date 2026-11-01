@@ -3,7 +3,7 @@ description: >
   Spins up a kind cluster, installs the shared Helm chart with the component itself
   disabled (only its infra deps come up), and port-forwards Postgres if the service
   declares it, exporting PG*/TEST_DATABASE_URL. Shared by every service-ci-<language>.yaml
-  and service-cd.yaml so there is exactly one kind cluster per job, whichever phase that
+  and service-release.yaml so there is exactly one kind cluster per job, whichever phase that
   job runs. Safe to run in parallel on one host: each job gets its own cluster name,
   image tag and kubeconfig, and Postgres is forwarded to a free local port.
 

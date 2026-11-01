@@ -10,7 +10,7 @@ on:
       - "resonance-flow/**"
       - ".github/workflows/lens-frontend-ci.yaml"
       - ".github/workflows/service-ci-node.yaml"
-      - ".github/workflows/service-cd.yaml"
+      - ".github/workflows/service-release.yaml"
   pull_request:
     branches: [ "main", "lens-team" ]
     paths:
@@ -18,7 +18,7 @@ on:
       - "!teams/lens/bff/**"
       - ".github/workflows/lens-frontend-ci.yaml"
       - ".github/workflows/service-ci-node.yaml"
-      - ".github/workflows/service-cd.yaml"
+      - ".github/workflows/service-release.yaml"
   workflow_dispatch: {}
 
 concurrency:
@@ -38,13 +38,13 @@ jobs:
       service_name: lens-frontend
       service_dir: teams/lens/frontend
 
-  cd:
+  release:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
       packages: write
       pull-requests: write
-    uses: ./.github/workflows/service-cd.yaml
+    uses: ./.github/workflows/service-release.yaml
     secrets: inherit
     with:
       service_name: lens-frontend
