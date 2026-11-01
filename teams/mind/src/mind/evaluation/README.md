@@ -31,6 +31,9 @@ class RankingModel(Protocol):
   `effort_estimate` (minutes; the eval set's form of the canonical
   `Task.effort_estimate`), `tier`, `blocked`, `parent_task_id` (nullable; points
   at a node in `eval/hierarchy/nodes.json` — see **Hierarchy** below).
+  `description`, `effort_estimate` and `tier` may be null, and `task_id` may be a
+  lowercase UUID, as on real tasks (#175 — see **Real pipeline output through
+  the harness** below).
 - `ScoreContext`: just `current_datetime` — the model may judge how near a
   `deadline` is, and nothing else about the persona's situation (per the mentor's
   review). The harness fixes it to the scenario's `current_datetime`; it is never
@@ -774,6 +777,139 @@ that drove `dummy`'s 66.7%. This is the answer the rebase was meant to
 establish: the real-data slice does not yet measure ranking quality for any
 model that has actually been run against it — it proves only that the harness
 pipes real AMI data through any `RankingModel` implementation end to end.
+
+## Real pipeline output through the harness (#174)
+
+The real-data slice above is still hand-written scenarios. #174 asks what happens
+when the harness meets tasks the pipeline actually produced. **Diagnostic only:
+nothing is fixed here; the fixes are #175.**
+
+**What was run.** The three tasks (T1–T3) of one `demo_flow` run (slack-first,
+2026-10-26), exported by Michal Brecher from the run's stack as `task.created`
+and `task.score.proposed`, the event in each message's `value` with proto field
+names. They are kept in `eval/real_output/2026-10-26_demo-slack-first/`.
+`scripts/diagnose_real_tasks.py` replays them, no stack and no model call:
+
+```bash
+python scripts/diagnose_real_tasks.py
+```
+
+**Result: the harness rejected all three tasks when it loaded them**, before any
+model ran. This records the harness as it was before #175 (run on 17cd38ee);
+the same script on the current code shows the fixes below instead. Each
+`value` into `Task.model_validate`, unchanged:
+
+| field | the harness expects | real output | tasks |
+|---|---|---|---|
+| `task_id` | `task_id`, matching `^[a-z0-9_]+$` | `id`, a UUID with hyphens | 3/3 |
+| `tier` | `operational` / `tactical` / `strategic` | `TASK_TIER_TACTICAL` (the proto enum name) | 3/3 |
+| `effort_estimate` | required, by that name | `effort_estimate_minutes`; absent on T1 | 3/3; 1/3 |
+| `description` | required | absent on T1 | 1/3 |
+| `blocked` | required | absent; Chain's `is_available` arrives instead | 3/3 |
+| everything else | `extra="forbid"` | 10–12 more fields (`tenant_id`, `urgency`, `status`, `confidence`…) | 3/3 |
+
+With only the obvious renames done (`id` → `task_id`, the effort name, the tier
+lowercased, `blocked=False`), one gap is still left on every task: **the UUID
+fails `task_id`'s pattern**. That one does not show from reading the models side
+by side; it took real ids.
+
+`LongestDescriptionModel`, the length-bias probe, crashes on T1
+(`len(None)`): the first thing an optional `description` would break.
+
+**All of these are harness assumptions, none a bug in the pipeline's output.**
+Empty `description`, `tier` and effort are valid states the extraction contract
+allows (#351, #352).
+
+**The live path holds.** The same events through `InboxTask` (#357) and
+`SegmentedRankingModel`, scored at each event's `scored_at`, give exactly the
+`mind_score` the run published (0.470893, 0.213120, 0.261094), including T1
+with its empty fields. So real tasks already reach the model correctly; only the
+scenario path of the harness cannot take them.
+
+**Limitations.** Three tasks from one run of a synthetic scenario. Fields the
+harness does not read are out of scope here (`role_context` empty on T2 and T3,
+no suggested owner) — both already show as FAIL in the demo's own check.
+
+### The fixes, and the check that keeps them (#175)
+
+**The harness now takes real-shaped tasks.** In `Task` (`interfaces.py`):
+
+- `task_id` and `expected_top_task_id` share one pattern, `TASK_ID_PATTERN`:
+  snake_case as before, **or** a lowercase UUID. Not any string: an uppercase or
+  braced UUID is still rejected.
+- `description`, `effort_estimate` and `tier` are optional. Empty is `null` (or
+  the key absent), never `""` or `0`; a non-null value is checked as before.
+- `scenario.schema.json` is regenerated. `personas.sha256` does not change: the
+  checksum covers the scenario files, not the schema.
+- `LongestDescriptionModel` reads a missing description as length 0 instead of
+  crashing. It was the only code under `evaluation/` that assumed the fields
+  were filled; `scoring/` already handled empty ones (#357).
+- The hand-written set in `eval/personas/` still fills all three on every task:
+  `tests/test_personas.py` fails if one is left out, so the optional schema does
+  not loosen the curated set.
+
+With these, `scripts/diagnose_real_tasks.py`'s second pass accepts all three
+demo tasks.
+
+**What the model does with an empty field** — already decided in the model,
+not in the harness, which passes `null` through: no tier → scored by
+`ASSUMED_TIER` (`tactical`, the middle of both axes) and logged
+`tier_assumed`; no effort estimate → no quick-win bonus (the absence of a bonus,
+not a penalty); no description → nothing added to the text the lexicons read.
+A missing tier or estimate also lowers the score's confidence.
+
+**A scenario with empty fields, outside the frozen set.**
+`eval/real_shaped/salesperson_demo_quote_blocked_vs_supplier_form.json`: Dana
+(Salesperson) with two real tasks from the demo run, kept as they came (UUID
+ids; the price quote has no description and no effort estimate), and one
+hand-written task with no tier and no deadline, since no real task came
+without a tier. `blocked` is set from the demo's expected answer (the quote
+waits for Omer's cost sheet). Correct answer: the supplier registration form.
+It is in its own folder so `eval/personas/`, its checksum and the frozen
+baseline stay as they are; it goes through the same schema and loader.
+
+**CI.** `make eval-real-shaped` runs the harness on `eval/real_shaped/` with the
+segmented model, and `mind-ci.yaml` runs it after the smoke check. It fails if
+the harness cannot load or score those tasks; it has no accuracy gate (one
+scenario is not a number). Locally: exit 0 as is; with `description` made
+required again on purpose, exit 1 naming `tasks/0/description`; exit 0 once
+restored. The Mind CI job is skipped on draft PRs, so the same red-then-green
+proof on GitHub is recorded on the PR that lands this.
+
+That scenario is written down once, so it cannot notice a later change to what
+real tasks look like. `tests/test_real_output_through_harness.py` can: it takes
+the recorded `task.created` events and builds each task the way the live path
+does today — the current generated proto (parsed strictly, so a field the
+proto no longer knows is an error), then `to_scoring_task` — and loads it into
+`Task`, checks that T1's empty fields stay empty, and that the harness's copy
+scores exactly like the live `InboxTask`. A change to the proto, to
+`to_scoring_task` or to `Task` that breaks this fails in the PR that makes it
+(checked: `description` made required again fails 3 tests; an event field the
+proto does not know fails on parsing). What it cannot catch is a change in what
+the pipeline produces (say, tier no longer filled): that takes a new demo run.
+
+**The persona set is unchanged.** All 42 scenarios scored before (49c5ab1c,
+this branch's base) and after, with `segmented`, `dummy`, `nearest-deadline`,
+`skip-blocked-nearest-deadline` and `longest-description`: every task's score
+identical, the same top task in all 42. The frozen baseline
+(`baseline_score_2026-10-25.json`) still loads, 33/42.
+
+**What the scenario shows about the segmented model** — findings, not fixed
+here, and the scenario was not changed for them:
+
+1. It picks the hand-written task, which has no tier, over the supplier form
+   (base 0.496 against 0.261; final 0.647 against 0.483), for two reasons.
+   **The operational rule itself:** its scale is 8 hours, so the form's
+   deadline four days out gives time pressure 0.075 — below the 0.15 an
+   operational task gets with no deadline at all. The same form with no
+   deadline would score 0.310, not 0.261: the distant date lowers it.
+   **The weights:** the untiered task is scored by the tactical rule
+   (`ASSUMED_TIER`), where no deadline is 0.30 (not neutral; 0.5 is
+   strategic's) and impact weighs 0.55 against operational's 0.25, so impact
+   gives it 0.330 (0.55 × 0.600) against the form's 0.125 (0.25 × 0.500).
+2. The keyword lexicon misses negation: "nothing depends on it" counts in the
+   task's favour as "depends on it", which is why its impact is 0.600 and not
+   the 0.500 the form gets.
 
 ## Extraction-quality eval
 

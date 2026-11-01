@@ -44,5 +44,7 @@ class LongestDescriptionModel:
     persona set, the set rewards length instead of understanding."""
 
     def score(self, task: Task, context: ScoreContext) -> ScoreResult:
-        length = len(task.description)
+        # No description is length 0: the probe leans toward long text, and
+        # absent text is the shortest there is.
+        length = len(task.description or "")
         return ScoreResult(score=length / (length + 1000))
