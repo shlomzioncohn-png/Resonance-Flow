@@ -50,6 +50,7 @@ services:
       - INBOX_MOCK_ENABLED=${INBOX_MOCK_ENABLED:-false}
       - INBOX_SERVICE_URL=http://inbox-service:8080
       - INBOX_DEV_ACTOR_ID=${INBOX_DEV_ACTOR_ID:-ef071a8a-1040-3a27-904a-f6352bad4fea}
+      - CHAIN_SERVICE_URL=http://chain-service:8081
     depends_on:
       - inbox
     healthcheck:
