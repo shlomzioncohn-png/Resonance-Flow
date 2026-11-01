@@ -7,7 +7,7 @@ for the **Employee → My Workspace** screen (see attached screenshot / Figma:
 "Resonance Flow — Good morning, Alex").
 
 It exists to answer one question precisely, per
-[`lens-architecture-design.md`](./lens-architecture-design.md) §11
+[`lens-architecture-design.md`](../lens-architecture-design.md) §11
 ("Define clear contracts between Gateway, BFF, and downstream services"):
 
 > Which HTTP endpoints does the Gateway need to expose (route) so the
@@ -21,7 +21,7 @@ It exists to answer one question precisely, per
 | lens-bff | (this doc's author) | Implement the **controllers**, aggregate Inbox/Chain/Mind, own the DTOs below |
 | Inbox / Chain / Mind | respective teams | Domain data — currently skeleton-only, see §7 |
 
-This is a companion to `docs/employee-ui-design.md` (UX reference) and is meant to
+This is a companion to [`employee-ui-design.md`](./employee-ui-design.md) (UX reference) and is meant to
 be reviewed with Dvori and the manager before implementation starts.
 
 ---
@@ -354,7 +354,7 @@ mocks.
 
 - **Notifications** (bell icon, badge count) — frontend's own header already
   marks this "not implemented yet"; owned by Relay per
-  `docs/employee-ui-design.md` §9. No endpoint proposed here.
+  [`employee-ui-design.md`](./employee-ui-design.md) §9. No endpoint proposed here.
 - **`GET /v1/tasks` (My Tasks list)** — included above for completeness
   since the nav item exists, but not required to ship the screenshot's
   Workspace screen; can follow in a second pass.

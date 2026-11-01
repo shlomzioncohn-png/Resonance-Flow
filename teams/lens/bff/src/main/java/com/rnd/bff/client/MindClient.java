@@ -9,7 +9,7 @@ import java.util.stream.Collectors;
 
 /**
  * Client for Mind — scores/ranks candidate tasks for a user and available
- * time window (see docs/lens-architecture-design.md). Mind's API isn't live
+ * time window (see teams/lens/docs/lens-architecture-design.md). Mind's API isn't live
  * yet, so this returns a fixed confidence score for every task id.
  */
 @Service
