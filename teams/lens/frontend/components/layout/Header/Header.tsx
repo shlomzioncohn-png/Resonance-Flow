@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, type FormEvent } from 'react';
 import AppBar from '@mui/material/AppBar';
 import Avatar from '@mui/material/Avatar';
 import Box from '@mui/material/Box';
@@ -12,7 +13,6 @@ import Typography from '@mui/material/Typography';
 import { useRouter } from 'next/navigation';
 import LogoutIcon from '@mui/icons-material/Logout';
 import MenuIcon from '@mui/icons-material/Menu';
-import NotificationsNoneOutlinedIcon from '@mui/icons-material/NotificationsNoneOutlined';
 import SearchIcon from '@mui/icons-material/Search';
 import { logout } from '@/services/authApi';
 import { useRole } from '../RoleProvider';
@@ -41,6 +41,16 @@ export default function Header({ onMenuClick }: HeaderProps) {
   const { user, signOut } = useRole();
   const router = useRouter();
 
+  const [searchText, setSearchText] = useState('');
+
+  // Enter opens My Tasks with the search already applied (?search=)
+  const handleSearch = (event: FormEvent<HTMLFormElement>) => {
+    // Stop the browser's own form submit, which would reload the page
+    event.preventDefault();
+    const text = searchText.trim();
+    router.push(text ? `/employee/tasks?search=${encodeURIComponent(text)}` : '/employee/tasks');
+  };
+
   const handleSignOut = async () => {
     try {
       await logout();
@@ -64,35 +74,38 @@ export default function Header({ onMenuClick }: HeaderProps) {
           <MenuIcon />
         </IconButton>
 
-        <Box
-          sx={{
-            display: { xs: 'none', sm: 'flex' },
-            alignItems: 'center',
-            gap: 1,
-            bgcolor: '#f1f3f6',
-            borderRadius: 2,
-            px: 1.5,
-            py: 0.75,
-            flexGrow: 1,
-            maxWidth: 360,
-          }}
-        >
-          <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
-          <InputBase
-            placeholder="Search tasks, projects…"
-            disabled
-            fullWidth
-            sx={{ fontSize: 14 }}
-          />
-        </Box>
+        {/* Only employees have a screen that searches tasks (My Tasks) - there's
+            no manager-wide search on the server yet, so managers don't see the box. */}
+        {user?.role === 'EMPLOYEE' && (
+          <Box
+            component="form"
+            role="search"
+            onSubmit={handleSearch}
+            sx={{
+              display: { xs: 'none', sm: 'flex' },
+              alignItems: 'center',
+              gap: 1,
+              bgcolor: '#f1f3f6',
+              borderRadius: 2,
+              px: 1.5,
+              py: 0.75,
+              flexGrow: 1,
+              maxWidth: 360,
+            }}
+          >
+            <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+            <InputBase
+              placeholder="Search my tasks…"
+              value={searchText}
+              onChange={(event) => setSearchText(event.target.value)}
+              fullWidth
+              sx={{ fontSize: 14 }}
+              inputProps={{ 'aria-label': 'Search my tasks' }}
+            />
+          </Box>
+        )}
 
         <Box sx={{ flexGrow: 1 }} />
-
-        <Tooltip title="Notifications — not implemented yet">
-          <IconButton>
-            <NotificationsNoneOutlinedIcon />
-          </IconButton>
-        </Tooltip>
 
         {user && (
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center', pl: 0.5 }}>
