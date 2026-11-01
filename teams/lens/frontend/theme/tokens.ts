@@ -130,3 +130,16 @@ export const breakpointTokens = {
   lg: 1200,
   xl: 1536,
 } as const;
+
+/** The sign-in screen's background: brand glows on dark slate, drawn in CSS (no image file). */
+export const loginTokens = {
+  background: [
+    'radial-gradient(circle at 18% 22%, rgba(79,70,229,0.55) 0, transparent 38%)',
+    'radial-gradient(circle at 86% 78%, rgba(139,92,246,0.45) 0, transparent 40%)',
+    'radial-gradient(circle at 72% 12%, rgba(236,72,153,0.18) 0, transparent 28%)',
+    'radial-gradient(circle at 30% 92%, rgba(8,145,178,0.20) 0, transparent 30%)',
+    'radial-gradient(rgba(195,200,255,0.10) 1.5px, transparent 1.5px) 0 0 / 28px 28px',
+    `linear-gradient(135deg, ${colorTokens.slate[950]} 0%, #1b1f4b 55%, ${colorTokens.brand[900]} 100%)`,
+  ].join(', '),
+  cardShadow: '0 30px 80px -20px rgba(11, 17, 32, 0.75)',
+} as const;

@@ -144,6 +144,13 @@ export const CreateUser: Story = {
     await expect(dialog.getByRole('button', { name: 'Create' })).toBeDisabled();
     await userEvent.type(dialog.getByLabelText(/^email/i), '.com');
 
+    // The initial password is required, and too short a one keeps Create off.
+    await expect(dialog.getByRole('button', { name: 'Create' })).toBeDisabled();
+    await userEvent.type(dialog.getByLabelText(/initial password/i), 'short');
+    await expect(dialog.getByText('At least 8 characters')).toBeInTheDocument();
+    await expect(dialog.getByRole('button', { name: 'Create' })).toBeDisabled();
+    await userEvent.type(dialog.getByLabelText(/initial password/i), '-Pass1');
+
     await userEvent.click(dialog.getByRole('combobox', { name: /role/i }));
     await userEvent.click(within(document.body).getByRole('option', { name: 'Manager' }));
     await userEvent.click(dialog.getByRole('button', { name: 'Create' }));
@@ -158,6 +165,7 @@ export const CreateUser: Story = {
         email: 'avital@example.com',
         username: 'avital@example.com',
         role: 'MANAGER',
+        password: 'short-Pass1',
       }),
     );
 
@@ -178,6 +186,7 @@ export const CreateUserDuplicateEmail: Story = {
     const dialog = within(await within(document.body).findByRole('dialog', { name: 'New user' }));
     await userEvent.type(dialog.getByLabelText(/display name/i), 'Dana Levi');
     await userEvent.type(dialog.getByLabelText(/^email/i), 'dana.cohen@example.com');
+    await userEvent.type(dialog.getByLabelText(/initial password/i), 'Welcome-2026');
     await userEvent.click(dialog.getByRole('button', { name: 'Create' }));
 
     // Shown on the Email field itself, and Create stays off until the email is changed.

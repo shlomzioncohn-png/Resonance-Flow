@@ -64,8 +64,11 @@ public class TaskDTO {
     /** Task IDs this task depends on. Empty list = no dependencies. */
     private List<String> dependencies;
 
-    /** Blockers, e.g. "approval_needed". Empty list = no constraints. */
-    private List<String> constraints;
+    /** Chain's constraints on this task (all statuses). Empty list = no constraints; null = unknown. */
+    private List<ConstraintDTO> constraints;
+
+    /** How many of `constraints` are still open (status PENDING). null = unknown. */
+    private Integer openConstraintCount;
 
     // -------------------------------------------------------------------------
     // Below: real `tasks` table columns, added alongside the fields above

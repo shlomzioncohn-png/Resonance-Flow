@@ -628,7 +628,7 @@ class ChatGroupStateReconcilerTest {
      * in the SAME thread with 2 more attachments. Both contribute to the group's total, so the
      * rebuilt transcript and every newly emitted attachment record from run 2 must report 3
      * (1 carried forward from run 1 + 2 new from run 2) - not just the 2 visible in run 2's own
-     * batch. Exercises the real reconciler path (mergeSnapshots + toSourceRecords together),
+     * batch. Exercises the real reconciler path (GroupStateMutator.mergeSnapshots + toSourceRecords together),
      * not a hand-built GroupState.
      */
     @Test
@@ -665,7 +665,7 @@ class ChatGroupStateReconcilerTest {
     }
 
     /**
-     * Editing/replacing an existing message must not double-count its attachments: mergeSnapshots
+     * Editing/replacing an existing message must not double-count its attachments: GroupStateMutator.mergeSnapshots
      * replaces the prior MessageSnapshot for the same messageId (Map.put keyed by messageId)
      * rather than appending a second one, so the group's total reflects only the edited
      * message's current attachment count.
@@ -951,7 +951,7 @@ class ChatGroupStateReconcilerTest {
     @Test
     void duplicateDeliveryOfTheSameEditDoesNotAdvanceTheRevisionTwice() {
         // Simulates Slack retrying the same message_changed webhook delivery - the parser would
-        // produce an identical ChatMessage both times, so this exercises mergeIntoGroupState's
+        // produce an identical ChatMessage both times, so this exercises GroupStateMutator.mergeInto's
         // contentUnchanged branch directly, without re-testing parsing itself.
         reconciler.reconcileNonThreadedMessage(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi", "m1"));
         reconciler.reconcileNonThreadedMessage(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi (edited)", "m1"));
@@ -1283,7 +1283,7 @@ class ChatGroupStateReconcilerTest {
         // must still advance to a new revision number rather than collapsing onto it - otherwise
         // a later stale ack for the claimed revision could incorrectly confirm this edited
         // content. It also still invalidates the outstanding claim, the same pre-existing
-        // mergeIntoGroupState behavior, untouched by this step (see
+        // GroupStateMutator.rebuild behavior, untouched by this step (see
         // ChatGroupStateReconciler.mergeIntoCurrentChatGroup's javadoc: flagged, not redesigned).
         assertThat(edit.groupState().revision()).isEqualTo(1);
         assertThat(edit.groupState().claimedRevision()).isNull();
@@ -1522,7 +1522,7 @@ class ChatGroupStateReconcilerTest {
         // docs/plans/slack-message-deleted.md §3): a persisted GroupState with revision >= 0 is
         // never empty unless a deletion (removeMessage) produced it. Ordinary merges - new
         // messages, edits, even a confirmed-published retry - can never shrink messages() to
-        // empty on their own (mergeSnapshots only ever appends/replaces-by-id, see its javadoc).
+        // empty on their own (GroupStateMutator.mergeSnapshots only ever appends/replaces-by-id, see its javadoc).
         reconciler.reconcileNonThreadedMessage(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "A", "m1"));
         ChatGroupStateReconciler.RealtimeReconcileResult edit =
                 reconciler.reconcileNonThreadedMessage(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "A (edited)", "m1"));

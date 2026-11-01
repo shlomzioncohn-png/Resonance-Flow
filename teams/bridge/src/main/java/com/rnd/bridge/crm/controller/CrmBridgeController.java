@@ -2,6 +2,7 @@ package com.rnd.bridge.crm.controller;
 
 import com.rnd.bridge.crm.CrmSourceResult;
 import com.rnd.bridge.crm.CrmSyncService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -14,6 +15,7 @@ import java.util.List;
  * Thin HTTP trigger for the CRM lane: {@code POST /bridge/crm/sync} runs every active source via
  * {@link CrmSyncService}. 200 if at least one source succeeded; 503 only if all failed.
  */
+@ConditionalOnProperty(name = "bridge.manual-triggers.enabled", havingValue = "true")
 @RestController
 @RequestMapping("/bridge/crm")
 public class CrmBridgeController {

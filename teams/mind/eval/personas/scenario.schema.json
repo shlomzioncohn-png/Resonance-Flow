@@ -147,8 +147,8 @@
       "description": "A single candidate task within a persona evaluation scenario.\n\nThe harness calls `RankingModel.score()` once per Task and builds the ranking\nfrom the returned scores — a model never sees the whole scenario.",
       "properties": {
         "task_id": {
-          "description": "Unique within this scenario. Referenced by expected_top_task_id. Same character rule as scenario_id (lowercase, digits, underscore).",
-          "pattern": "^[a-z0-9_]+$",
+          "description": "Unique within this scenario. Referenced by expected_top_task_id. Either scenario_id's character rule (lowercase, digits, underscore) or a lowercase UUID, as Inbox assigns to a real task.",
+          "pattern": "^(?:[a-z0-9_]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
           "title": "Task Id",
           "type": "string"
         },
@@ -158,10 +158,18 @@
           "type": "string"
         },
         "description": {
-          "description": "Enough detail that a model (and a human reader) can judge duration, urgency and relevance without outside knowledge.",
-          "minLength": 1,
-          "title": "Description",
-          "type": "string"
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Enough detail that a model (and a human reader) can judge duration, urgency and relevance without outside knowledge. null or absent when there is none, as on many real tasks (#174); never an empty string.",
+          "title": "Description"
         },
         "deadline": {
           "anyOf": [
@@ -178,20 +186,36 @@
           "title": "Deadline"
         },
         "effort_estimate": {
-          "description": "Effort estimate for the task, in minutes — the eval set's concrete form of the canonical Task.effort_estimate (owned by Inbox). Recorded for Chain's downstream constraint-satisfaction step; the ranking model sees it, but a scenario's correct answer must not hinge on comparing it to context.free_time_minutes (see eval/personas/README.md).",
-          "minimum": 1,
-          "title": "Effort Estimate",
-          "type": "integer"
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Effort estimate for the task, in minutes — the eval set's concrete form of the canonical Task.effort_estimate (owned by Inbox). Recorded for Chain's downstream constraint-satisfaction step; the ranking model sees it, but a scenario's correct answer must not hinge on comparing it to context.free_time_minutes (see eval/personas/README.md). null or absent when the content gave no basis for one (#352).",
+          "title": "Effort Estimate"
         },
         "tier": {
-          "description": "What KIND of task this is — independent of persona. A Developer can receive an operational or a tactical task; tier is not implied by role. Lowercase values, matching the canonical Task schema (Inbox) and src/mind/scoring/. See 'Persona ≠ Tier' in eval/personas/README.md.",
-          "enum": [
-            "operational",
-            "tactical",
-            "strategic"
+          "anyOf": [
+            {
+              "enum": [
+                "operational",
+                "tactical",
+                "strategic"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "title": "Tier",
-          "type": "string"
+          "default": null,
+          "description": "What KIND of task this is — independent of persona. A Developer can receive an operational or a tactical task; tier is not implied by role. Lowercase values, matching the canonical Task schema (Inbox) and src/mind/scoring/. See 'Persona ≠ Tier' in eval/personas/README.md. null or absent when extraction left it unset (#351); the model then scores by an assumed tier.",
+          "title": "Tier"
         },
         "blocked": {
           "description": "True if this task cannot currently be worked on right now (e.g. waiting on something outside this scenario). A blocked task should generally not be the expected_top_task_id.",
@@ -215,9 +239,6 @@
       "required": [
         "task_id",
         "title",
-        "description",
-        "effort_estimate",
-        "tier",
         "blocked"
       ],
       "title": "Task",
@@ -250,6 +271,7 @@
     },
     "expected_top_task_id": {
       "description": "The task_id (from `tasks`) a correct model must pick as the single best use of the persona's free time. Must equal the task_id of exactly one entry in `tasks` (enforced below).",
+      "pattern": "^(?:[a-z0-9_]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
       "title": "Expected Top Task Id",
       "type": "string"
     },

@@ -13,6 +13,7 @@ from mind.ingestion.ami_transcripts import (
     AMITranscript,
     format_transcript,
     load_all_transcripts,
+    load_gold_actions,
     load_transcript,
     speaker_labels,
 )
@@ -259,6 +260,62 @@ def test_file_missing_from_sha256_is_an_error(corpus: Path):
         _load_all(corpus)
 
 
+# Abstract and decisions sentences sit next to <actions>; only the actions are gold.
+ABSSUMM_WITH_ACTIONS = """<?xml version="1.0" encoding="ISO-8859-1"?>
+<nite:root xmlns:nite="http://nite.sourceforge.net/">
+<abstract nite:id="TS3000a.x.abstract.1">
+<sentence nite:id="TS3000a.x.s.1">The team met to start the project.</sentence>
+</abstract>
+<actions nite:id="TS3000a.x.actions.1">
+<sentence nite:id="TS3000a.x.s.2">The Project Manager will book a room.</sentence>
+<sentence nite:id="TS3000a.x.s.3">The   team will meet
+   next Tuesday</sentence>
+</actions>
+<decisions nite:id="TS3000a.x.decisions.1">
+<sentence nite:id="TS3000a.x.s.4">The remote will be yellow.</sentence>
+</decisions>
+</nite:root>
+"""
+
+
+def _load_gold(root: Path, meeting_id: str = MEETING) -> list[str]:
+    return load_gold_actions(meeting_id, root / "ami.manifest.json", root / "ami.sha256", root)
+
+
+def test_gold_actions_are_the_actions_sentences_only_whitespace_collapsed(corpus: Path):
+    (corpus / ABSSUMM).write_text(ABSSUMM_WITH_ACTIONS, encoding="utf-8")
+    _write_sha256(corpus, [ABSSUMM, MEETINGS, *WORDS, *SEGMENTS])
+    assert _load_gold(corpus) == [
+        "The Project Manager will book a room.",
+        "The team will meet next Tuesday",
+    ]
+
+
+def test_gold_actions_of_a_meeting_without_actions_is_empty(corpus: Path):
+    (corpus / ABSSUMM).write_text(
+        '<nite:root xmlns:nite="http://nite.sourceforge.net/"/>', encoding="utf-8"
+    )
+    _write_sha256(corpus, [ABSSUMM, MEETINGS, *WORDS, *SEGMENTS])
+    assert _load_gold(corpus) == []
+
+
+def test_gold_actions_of_a_meeting_not_in_the_manifest(corpus: Path):
+    with pytest.raises(KeyError, match="TS9999a"):
+        _load_gold(corpus, "TS9999a")
+
+
+def test_gold_actions_need_the_abssumm_file_in_the_record(corpus: Path):
+    _edit_manifest(corpus, lambda m: m["records"][0]["files"].remove(ABSSUMM))
+    with pytest.raises(RuntimeError, match="lists no TS3000a.abssumm.xml"):
+        _load_gold(corpus)
+
+
+def test_gold_actions_checksum_mismatch_is_an_error(corpus: Path):
+    (corpus / ABSSUMM).write_text(ABSSUMM_WITH_ACTIONS, encoding="utf-8")
+    with pytest.raises(RuntimeError, match="checksum mismatch"):
+        _load_gold(corpus)
+
+
 _AMI_DIR = MANIFEST_PATH.parents[2] / "local-data" / "ami" / "ami_public_manual_1.6.2"
 
 
@@ -289,3 +346,13 @@ def test_real_slice_loads_all_three_meetings():
     assert ib_speakers == {"A", "B", "C", "D"}
     # IS1008d opens with a sentence the word-by-word merge cut in four
     assert transcripts["IS1008d"].text.startswith("Industrial Designer: I'm sorry to be late.\n")
+
+
+@pytest.mark.skipif(
+    not (_AMI_DIR / "abstractive").exists(),
+    reason="AMI annotations not present locally (see eval/datasets/ami.manifest.json)",
+)
+def test_real_slice_gold_is_sixteen_action_items():
+    gold = {m: load_gold_actions(m) for m in ["IB4003", "IS1008b", "IS1008d"]}
+    assert {m: len(items) for m, items in gold.items()} == {"IB4003": 8, "IS1008b": 4, "IS1008d": 4}
+    assert gold["IS1008b"][2] == "The Marketing Expert will present the marketing concept."

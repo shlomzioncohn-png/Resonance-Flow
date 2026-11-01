@@ -52,4 +52,12 @@ public class TaskStatusUpdateDTO {
      * Inbox enforces the "required" rule and answers 400 without it.
      */
     private Instant snoozedUntil;
+
+    /**
+     * Why the task was rejected - only with status REJECTED, optional there.
+     * Sent to Inbox as feedback_text; Inbox answers 400 if it comes with any
+     * other status. Inbox has no category field, so the Frontend puts the
+     * category at the start of the text.
+     */
+    private String feedbackText;
 }

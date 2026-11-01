@@ -21,10 +21,11 @@ const meta = {
     onClose: fn(),
     onRetry: fn(),
     onFeedback: fn(),
+    onRetryFeedback: fn(),
     state: 'loaded',
     insight: READY_INSIGHT,
     errorMessage: '',
-    feedbackSent: false,
+    feedback: 'idle',
   },
 } satisfies Meta<typeof WorkInsightsDrawer>;
 
@@ -41,13 +42,36 @@ export const WithoutRecommendation: Story = {
   args: { insight: { ...READY_INSIGHT, recommendation: undefined } },
 };
 
+export const FeedbackSending: Story = {
+  args: { feedback: 'sending' },
+};
+
 export const FeedbackSent: Story = {
-  args: { feedbackSent: true },
+  args: { feedback: 'sent' },
+};
+
+export const FeedbackFailed: Story = {
+  args: { feedback: 'failed' },
+};
+
+export const EvidenceWithoutNumbers: Story = {
+  args: {
+    insight: {
+      ...READY_INSIGHT,
+      evidence: { text: 'Late tasks were 14 hours late at the median in the past month' },
+    },
+  },
 };
 
 export const NotEnoughData: Story = {
   args: {
-    insight: { insightId: 'c4d2a1b3-8e5f-4a2c-b1d3-2b3c4d5e6f70', status: 'NOT_ENOUGH_DATA', periodDays: 30 },
+    insight: { status: 'NOT_ENOUGH_DATA', periodDays: 30 },
+  },
+};
+
+export const NoInsight: Story = {
+  args: {
+    insight: { status: 'NO_INSIGHT', periodDays: 30 },
   },
 };
 

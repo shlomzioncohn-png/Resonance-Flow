@@ -141,7 +141,7 @@ public class SlackEventsController {
      * retry); a supported event whose landing/publish failed gets a non-2xx so Slack retries
      * it. This is safe to retry synchronously: reconciler.reconcileNonThreadedMessage/
      * reconciler.group() already durably persisted the merged GroupState (see
-     * ChatGroupStateReconciler.mergeIntoGroupState) before this method is even reached, and a
+     * GroupStateMutator.mergeInto) before this method is even reached, and a
      * redelivery re-resolves the same messageId to the same group rather than creating a
      * duplicate one.
      */
@@ -204,7 +204,7 @@ public class SlackEventsController {
         // Scheduling is keyed on "does this GroupState still need publishing", not on whether
         // this event was a genuinely-new message - an edit can just as well produce a fresh
         // unpublished revision (superseding an OPEN, CLAIMED, or even already-PUBLISHED group -
-        // see ChatGroupStateReconciler.mergeIntoGroupState), and that revision must still get a
+        // see GroupStateMutator.rebuild), and that revision must still get a
         // live timer or it would never reach Kafka. scheduleOrReschedule always derives its
         // deadline from GroupState's own message timestamps (see its javadoc), never from when
         // this event arrived, so an edit never artificially extends the session gap - if the
@@ -267,7 +267,7 @@ public class SlackEventsController {
      * registration could be said to have "succeeded". Only the thread group's publish result
      * (the only step with an external Kafka-facing ack) participates in the returned boolean.
      * A retry (Slack redelivering on a non-2xx) is safe on both sides: the channel-group
-     * merge/removal reuses the exact same mergeIntoGroupState/removeMessage primitives the
+     * merge/removal reuses the exact same GroupStateMutator.mergeInto/removeFrom primitives the
      * ordinary single-group path already proves idempotent against a redelivered event (see
      * duplicateDeliveryOfTheSameEditDoesNotAdvanceTheRevisionTwice/
      * removeMessageTwiceIsANoOpTheSecondTime), and scheduleOrReschedule always cancels-and-

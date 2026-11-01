@@ -33,6 +33,77 @@ def test_dummy_model_score_returns_score_result_in_range():
     assert 0.0 <= result.score <= 1.0
 
 
+UUID = "ae1bba81-af79-452c-8ba3-6937ab09f474"
+
+
+@pytest.mark.parametrize("task_id", ["task_a", "t1", UUID])
+def test_task_id_takes_snake_case_or_a_lowercase_uuid(task_id):
+    assert Task(task_id=task_id, title="A task", blocked=False).task_id == task_id
+
+
+@pytest.mark.parametrize(
+    "task_id", [UUID.upper(), "{" + UUID + "}", "task one", "Task_A", "task-a", ""]
+)
+def test_task_id_rejects_anything_else(task_id):
+    with pytest.raises(ValidationError):
+        Task(task_id=task_id, title="A task", blocked=False)
+
+
+def test_description_tier_and_effort_may_be_absent_or_null():
+    absent = Task(task_id=UUID, title="A task", blocked=False)
+    null = Task(
+        task_id=UUID,
+        title="A task",
+        description=None,
+        tier=None,
+        effort_estimate=None,
+        blocked=False,
+    )
+    for task in (absent, null):
+        assert (task.description, task.tier, task.effort_estimate) == (None, None, None)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [{"description": ""}, {"effort_estimate": 0}, {"tier": "TASK_TIER_TACTICAL"}],
+)
+def test_an_empty_or_wrong_value_is_still_rejected(field):
+    # Empty is null, never "" or 0; a present value is checked as before.
+    with pytest.raises(ValidationError):
+        Task(task_id="task_a", title="A task", blocked=False, **field)
+
+
+def _scenario(expected_top_task_id: str, task_ids: tuple[str, str]) -> dict:
+    task = {"title": "A task", "blocked": False}
+    return {
+        "scenario_id": "developer_ids",
+        "persona": {"role": "Developer"},
+        "context": {
+            "free_time_minutes": 30,
+            "current_datetime": "2026-10-01T09:00:00",
+            "time_horizon": "today",
+            "constraints": [],
+        },
+        "tasks": [{"task_id": i, **task} for i in task_ids],
+        "expected_top_task_id": expected_top_task_id,
+        "expected_reason": "The first task is the one to do now.",
+        "source": {"type": "synthetic", "source_detail": None},
+        "team_lead_approved": False,
+    }
+
+
+def test_expected_top_task_id_takes_a_uuid():
+    other = "36dd9c2c-6e15-4de2-9fa6-7afebd09d50c"
+    scenario = PersonaEvaluationScenario.model_validate(_scenario(UUID, (UUID, other)))
+    assert scenario.expected_top_task_id == UUID
+
+
+def test_expected_top_task_id_has_the_same_pattern_as_task_id():
+    with pytest.raises(ValidationError) as caught:
+        PersonaEvaluationScenario.model_validate(_scenario(UUID.upper(), (UUID, "task_b")))
+    assert any(error["loc"] == ("expected_top_task_id",) for error in caught.value.errors())
+
+
 def test_score_result_factors_default_to_none():
     assert ScoreResult(score=0.5).factors is None
 

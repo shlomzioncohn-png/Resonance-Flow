@@ -78,8 +78,7 @@ class CrmTaskValidatorTest {
 
     @Test
     void theSharedTaskValidatorOnItsOwnStillAcceptsANullTenantSoGitHubAndJiraAreUnaffected() {
-        // GitHubClient, JiraClient and
-        // TaskEnrichmentConsumer all share TaskValidator directly and never set
+        // GitHubClient and JiraClient share TaskValidator directly and never set
         // Task.organizationId. This is what proves adding the tenant/sourceRef checks to
         // CrmTaskValidator, not to TaskValidator itself, doesn't break them.
         Task task = withTenantId(baseTask(), null);

@@ -29,7 +29,7 @@ import java.util.List;
  * that is neither confirmed published nor claimed collapse onto that same revision number
  * instead of each minting a new one, and an unchanged retry (identical content re-read) never
  * advances it either. A newly created group starts at -1 (see
- * ChatGroupStateReconciler.newGroupState) so its first real merge - always against an
+ * ChatGroupFactory.newGroupState) so its first real merge - always against an
  * unpublished, unclaimed (nonexistent) version - lands at revision 0, the same as any later
  * content change that lands while unpublished and unclaimed.
  * Internal bookkeeping only - never exposed on RawObjectEvent/the wire.

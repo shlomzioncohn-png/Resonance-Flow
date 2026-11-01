@@ -16,5 +16,5 @@ import java.util.List;
 @AllArgsConstructor
 public class TaskDependenciesDTO {
     private List<String> dependencies;
-    private List<String> constraints;
+    private List<ConstraintDTO> constraints;
 }

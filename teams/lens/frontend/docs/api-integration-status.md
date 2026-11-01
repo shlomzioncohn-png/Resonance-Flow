@@ -54,6 +54,11 @@ still mocked inside the BFF.
   - `POST /api/auth/login` — the Login screen (`services/authApi.ts`). Mock users match
     the Keycloak realm: `manager1`/`manager1` (manager) and `employee1`/`employee1`
     (employee). A wrong password gets the Gateway's 401 error body.
+  - `GET /api/manager/flow-health` — the Flow Health screen (`services/flowHealthApi.ts`),
+    read-only. The Gateway and BFF serve it for real (Chain's flags enriched with task names);
+    the MSW handler is only for working without them. Sample data lives in
+    `mocks/flowHealthData.ts`. `flowHealthEmptyHandler` / `flowHealthUnavailableHandler` give
+    no flags and a 503.
 
   MSW runs only when `NEXT_PUBLIC_API_MOCKING=enabled`; every other call still goes to
   the Gateway. Without it, sign-in fails until the Gateway serves `/api/auth/login`.

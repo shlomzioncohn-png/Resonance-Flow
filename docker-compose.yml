@@ -185,6 +185,8 @@ services:
       - BRIDGE_DB_PASSWORD=${DB_PASSWORD:-postgres}
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - SCHEMA_REGISTRY_URL=http://schema-registry:8080/apis/ccompat/v6
+      # Opens the unauthenticated manual sync/run endpoints - on for local runs, off in the cluster.
+      - BRIDGE_MANUAL_TRIGGERS_ENABLED=${BRIDGE_MANUAL_TRIGGERS_ENABLED:-true}
     depends_on:
       postgres:
         condition: service_healthy

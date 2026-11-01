@@ -219,7 +219,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/bridge"
       pullPolicy: IfNotPresent
-      tag: "f82f899"
+      tag: "4655ffa"
     containerPort: 8080
     service: *defaultService
     resources: *defaultResources
@@ -252,6 +252,17 @@ components:
       # CD smoke test and blocked every Bridge deploy since #996.
       CRM_ORGANIZATION_ID: "00000000-0000-0000-0000-000000000001"
       BRIDGE_TENANT_ID: "00000000-0000-0000-0000-000000000001"
+      # Media lane (Zoom/BBB/scanned docs -> bridge.raw.landed -> Mind) reads local folders.
+      # Each is its own emptyDir below, so the folder exists from pod start. Drop a file in
+      # with `kubectl cp <file> <bridge-pod>:/data/media/zoom/`; MediaSyncJob picks it up
+      # within 5 minutes. emptyDir is lost on restart - fine for demos, not for real intake
+      # (which will come from the Zoom/BBB APIs, not folders).
+      BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR: "/data/media/zoom"
+      BRIDGE_MEDIA_BBB_RECORDINGS_DIR: "/data/media/bbb"
+      BRIDGE_MEDIA_SCANNED_DOCS_DIR: "/data/media/docs"
+      BRIDGE_MEDIA_SYNC_CRON_ENABLED: "true"
+      # Rules-only until the bridge-llm Secret below exists; with it, Gemini classifies too.
+      BRIDGE_MEDIA_CLASSIFICATION_ENABLED: "true"
     objectStorage:
       bucket: "bridge-raw"
     config:
@@ -261,6 +272,8 @@ components:
             - "configtree:/etc/resonance-flow/secrets/object-storage/"
             - "configtree:/etc/resonance-flow/secrets/kafka/"
             - "configtree:/etc/resonance-flow/secrets/bridge-db/"
+            # optional: the bridge-llm Secret may not exist; Bridge then runs without an AI key.
+            - "optional:configtree:/etc/resonance-flow/secrets/bridge-llm/"
         kafka:
           properties:
             security.protocol: "SASL_PLAINTEXT"
@@ -334,6 +347,15 @@ components:
       - name: bridge-db-credentials
         mountPath: /etc/resonance-flow/secrets/bridge-db
         readOnly: true
+      - name: media-zoom
+        mountPath: /data/media/zoom
+      - name: media-bbb
+        mountPath: /data/media/bbb
+      - name: media-docs
+        mountPath: /data/media/docs
+      - name: bridge-llm-credentials
+        mountPath: /etc/resonance-flow/secrets/bridge-llm
+        readOnly: true
     dependencySecretVolumes:
       - name: object-storage-credentials
         dependencyName: object-storage
@@ -343,6 +365,18 @@ components:
           - key: root-password
             path: minio.secret-key
     volumes:
+      - name: media-zoom
+        emptyDir: {}
+      - name: media-bbb
+        emptyDir: {}
+      - name: media-docs
+        emptyDir: {}
+      # Gemini key for bridge.ai (every Bridge AI usage), created by hand in the cluster, never
+      # committed - key bridge.ai.providers.gemini.api-key. Optional, like mind-llm.
+      - name: bridge-llm-credentials
+        secret:
+          secretName: resonance-flow-bridge-llm
+          optional: true
       - name: bridge-db-credentials
         secret:
           secretName: resonance-flow-bridge-db-credentials
@@ -440,6 +474,13 @@ components:
     service: *defaultService
     resources: *defaultResources
     <<: *defaultHealthProbes
+    startupProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      # 300s budget - ~230s observed at 500m with other JVMs starting alongside.
+      failureThreshold: 60
     # Password comes from the chain-db-credentials Secret, mounted as a file below -
     # not a literal here, not an env var; created once by the chain db-credentials
     # hook Job, not rendered as a chart resource. secretName must match the

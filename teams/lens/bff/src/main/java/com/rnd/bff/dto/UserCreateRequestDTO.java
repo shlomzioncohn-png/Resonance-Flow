@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 /**
  * Body of POST /manager/users, forwarded by Gateway's ManagerUsersController.
@@ -24,4 +25,7 @@ public class UserCreateRequestDTO {
     private String username;
     /** LENS role: MANAGER | EMPLOYEE. */
     private String role;
+    /** The initial password, forwarded to Inbox as is. Kept out of toString so it never reaches a log line. */
+    @ToString.Exclude
+    private String password;
 }

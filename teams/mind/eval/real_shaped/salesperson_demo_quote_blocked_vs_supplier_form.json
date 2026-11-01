@@ -1,0 +1,45 @@
+{
+  "scenario_id": "salesperson_demo_quote_blocked_vs_supplier_form",
+  "persona": {
+    "role": "Salesperson",
+    "department": "Sales"
+  },
+  "context": {
+    "free_time_minutes": 30,
+    "current_datetime": "2026-10-26T12:00:00Z",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "ae1bba81-af79-452c-8ba3-6937ab09f474",
+      "title": "Get pricing proposal over to Northwind",
+      "deadline": "2026-10-29T15:00:00Z",
+      "tier": "tactical",
+      "blocked": true
+    },
+    {
+      "task_id": "a31e7d3a-db76-4ce0-ae46-3820eb5921c3",
+      "title": "Complete, sign and return the supplier registration form",
+      "description": "Form NW-SR-14 needed to set Brightline Sensors up in Northwind Traders' vendor system. Email completed form to procurement@northwind.example.",
+      "deadline": "2026-10-30T15:00:00Z",
+      "effort_estimate": 15,
+      "tier": "operational",
+      "blocked": false
+    },
+    {
+      "task_id": "task_tidy_shared_folder",
+      "title": "Tidy up the old files in the team's shared sales folder",
+      "description": "The shared sales folder has a few years of old drafts in it. Nobody has asked for a cleanup and nothing depends on it; it would just make the folder easier to browse.",
+      "effort_estimate": 10,
+      "blocked": false
+    }
+  ],
+  "expected_top_task_id": "a31e7d3a-db76-4ce0-ae46-3820eb5921c3",
+  "expected_reason": "The price quote cannot go out until Omer finishes the updated cost sheet, so it is blocked. The supplier form is Northwind's own request, due Friday, and without it Brightline cannot be set up as their vendor. Tidying the shared folder is optional housekeeping that nobody asked for and nothing depends on.",
+  "source": {
+    "type": "real",
+    "source_detail": "demo_flow run of 2026-10-26 (slack-first). The two UUID tasks are task.created output as Inbox sent it (eval/real_output/2026-10-26_demo-slack-first/), fields kept as they came: the quote has no description and no effort estimate. Only `blocked` is set by hand, from the demo's expected answer (the quote depends on Omer's cost sheet). task_tidy_shared_folder is hand-written, with no tier and no deadline, because no real task came without a tier."
+  },
+  "team_lead_approved": true
+}

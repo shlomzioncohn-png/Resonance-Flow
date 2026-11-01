@@ -129,6 +129,8 @@ public class ManagerUsersService {
         putIfPresent(body, "phone", request.getPhone());
         putIfPresent(body, "username", request.getUsername());
         body.put("role", inboxRole);
+        // Inbox saves it as the user's sign-in password (hashed), under the username.
+        putIfPresent(body, "password", request.getPassword());
 
         logger.info("Creating user via Inbox - actorId: {}, tenantId: {}, role: {}",
                 actorId, actor.getTenant().getId(), inboxRole);

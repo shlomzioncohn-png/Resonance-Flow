@@ -90,7 +90,7 @@ import java.util.List;
  * precomputedRef is non-null only for a carried-forward attachment record whose bytes were
  * already landed to MinIO under a DIFFERENT group before this record was built (today: a thread-
  * root migration's own already-landed attachments - see ChatSourceRecordMapper.toSourceRecords
- * (GroupState, List) and ChatGroupStateReconciler.newThreadGroupState). For such a record,
+ * (GroupState, List) and ChatGroupFactory.newThreadGroupState). For such a record,
  * rawContent is unused filler (there is nothing left to land - the object already exists under
  * precomputedRef.objectKey()): SourceRecordRefMapper.toRef returns precomputedRef verbatim instead
  * of recomputing a ref from rawContent, and UnstructuredIntakeLane.afterMap skips landing it

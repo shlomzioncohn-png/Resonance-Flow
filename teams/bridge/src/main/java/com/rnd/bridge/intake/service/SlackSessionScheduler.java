@@ -33,7 +33,7 @@ import org.springframework.stereotype.Component;
  * {@link #scheduleOrReschedule} from the non-thread reconcile path, for both genuinely-new
  * messages and edits, whenever the resulting GroupState is still unpublished (an edit can
  * supersede an OPEN, CLAIMED, or already-PUBLISHED group with a fresh unpublished revision that
- * still needs a live timer - see ChatGroupStateReconciler.mergeIntoGroupState); nothing here
+ * still needs a live timer - see GroupStateMutator.rebuild); nothing here
  * special-cases threadId, because nothing here is ever handed a threaded GroupState in the first
  * place.
  */
@@ -64,8 +64,8 @@ public class SlackSessionScheduler {
      * derived entirely from state + the configured session gap - callers never compute a deadline
      * themselves. The deadline is {@code latestMessageTimestamp + ChatSessionProperties.
      * sessionGapMinutes()}, where latestMessageTimestamp is state.messages()'s last element -
-     * always the maximum timestamp, since mergeSnapshots keeps GroupState.messages() sorted
-     * ascending on every merge (see ChatGroupStateReconciler.mergeSnapshots).
+     * always the maximum timestamp, since GroupStateMutator.mergeSnapshots keeps
+     * GroupState.messages() sorted ascending on every merge.
      * Any previously-registered timer for the same group is replaced: the new ScheduledFuture is
      * installed in the registry first, and only then is the old one best-effort cancelled -
      * cancel(false) is not relied on for correctness (a cancelled callback may still run; see

@@ -8,7 +8,7 @@ from mind.evaluation.interfaces import ScoreContext, Task
 CONTEXT = ScoreContext(current_datetime=datetime.fromisoformat("2026-10-01T09:00:00"))
 
 
-def _task(description: str, **overrides) -> Task:
+def _task(description: str | None, **overrides) -> Task:
     fields = {
         "task_id": "task_a",
         "title": "A task",
@@ -19,6 +19,17 @@ def _task(description: str, **overrides) -> Task:
         **overrides,
     }
     return Task(**fields)
+
+
+def test_no_description_scores_as_the_shortest_instead_of_crashing():
+    # A real task often has none (#174: T1 of the demo run crashed this probe).
+    model = LongestDescriptionModel()
+
+    none = model.score(_task(None), CONTEXT).score
+    some = model.score(_task("x"), CONTEXT).score
+
+    assert none == 0.0
+    assert some > none
 
 
 def test_a_longer_description_scores_higher():

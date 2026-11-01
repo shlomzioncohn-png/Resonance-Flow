@@ -39,6 +39,7 @@ export default function DataTable<T>({
   sort,
   onSortChange,
   pagination,
+  onRowClick,
 }: DataTableProps<T>) {
   if (loading) return <LoadingState />;
   if (error) return <ErrorState description={error} onRetry={onRetry} />;
@@ -95,7 +96,12 @@ export default function DataTable<T>({
           </TableHead>
           <TableBody>
             {rows.map((row) => (
-              <TableRow key={getRowId(row)} hover>
+              <TableRow
+                key={getRowId(row)}
+                hover
+                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                sx={onRowClick ? { cursor: 'pointer' } : undefined}
+              >
                 {columns.map((column) => (
                   <TableCell key={column.id} align={column.align}>
                     {column.render(row)}

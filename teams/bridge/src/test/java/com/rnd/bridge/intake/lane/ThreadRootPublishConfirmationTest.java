@@ -41,7 +41,7 @@ import org.junit.jupiter.api.Test;
  * message posted with no thread_ts yet (so it is reconciled as an ordinary non-thread message,
  * landing in its own time-gap GroupState) followed by a reply that names it via thread_ts,
  * migrating a copy of the root into a brand-new thread GroupState (see
- * ChatGroupStateReconciler.newThreadGroupState). This used to leave the thread GroupState's
+ * ChatGroupFactory.newThreadGroupState). This used to leave the thread GroupState's
  * published flag permanently stuck at false, because UnstructuredIntakeLane.afterPublish
  * resolved which group to confirm by reverse-looking up the transcript's first sourceMessageId
  * (always the root, timestamp-sorted) through GroupStateStore's messageId index - an index entry
@@ -102,7 +102,7 @@ class ThreadRootPublishConfirmationTest {
         ChatGroupStateReconciler.RealtimeReconcileResult rootResult = reconciler.reconcileNonThreadedMessage(root);
         String originalRootGroupId = rootResult.groupState().groupId();
 
-        // Reply 1 names the root via thread_ts - ChatGroupStateReconciler.newThreadGroupState
+        // Reply 1 names the root via thread_ts - ChatGroupFactory.newThreadGroupState
         // migrates a copy of the root's snapshot into a brand-new thread GroupState keyed by
         // threadId ("root-ts").
         ChatMessage reply1 = message("2026-08-18T09:01:00Z", "reply one", "reply1-ts", "root-ts");

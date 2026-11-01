@@ -20,7 +20,7 @@ import java.util.List;
  * GroupStateStore.recordLandedAttachment, called directly from SlackEventsController once a
  * specific attachment's MinIO put actually succeeds (not a Kafka publish - publication for a
  * non-thread session happens exactly once, for the whole group, at session close; see
- * SlackSessionPublisher). ChatGroupStateReconciler.mergeSnapshots carries this forward (filtered
+ * SlackSessionPublisher). GroupStateMutator.mergeSnapshots carries this forward (filtered
  * to whatever attachments the message still has) on every re-merge of the same messageId, so a
  * Slack retry or an unrelated text edit of an already-landed attachment never re-lands it - only
  * an attachment whose file id isn't in this set yet is still eligible. Deliberately keyed on

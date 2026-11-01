@@ -68,7 +68,7 @@ public abstract class AbstractIntakeLane<S, O extends BridgePayload> {
      * Same read/map/validate/publish loop as {@link #run(ReadCursor, Instant)}, but against an
      * already-obtained Stream instead of one this method fetches itself via sourceReader().read.
      * Exists for callers that must read from the source themselves outside the generic
-     * SourceReader/ReadCursor contract - e.g. UnstructuredIntakeController's Calendar path,
+     * SourceReader/ReadCursor contract - e.g. UnstructuredIntakeService's Calendar path,
      * which needs the incremental-sync token tied to its own single read() call (see
      * CalendarReadResult) rather than the token being silently dropped inside a reader this
      * method would otherwise call on the caller's behalf.
