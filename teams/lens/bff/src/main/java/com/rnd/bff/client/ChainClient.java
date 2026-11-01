@@ -1,7 +1,10 @@
 package com.rnd.bff.client;
 
-import com.rnd.bff.dto.ConstraintDTO;
+import com.rnd.bff.dto.ChainFlowHealthFlagDTO;
+import com.rnd.bff.dto.ChainFlowHealthPageDTO;
 import com.rnd.bff.dto.TaskDependenciesDTO;
+import com.rnd.bff.exception.ServiceUnavailableException;
+import com.rnd.bff.dto.ConstraintDTO;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,10 +15,12 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +41,8 @@ import java.util.concurrent.Executors;
  *   and 404 for a task that isn't in that tenant (or doesn't exist).
  * - Dependency graph (the manager's Bottlenecks screen): real call to
  *   GET /tenants/{tenantId}/dependency-graph.
+ * - Flow-health flags (the manager's Flow health screen): real, read-only call to
+ *   GET /flow-health/flags.
  */
 @Service
 public class ChainClient {
@@ -48,6 +55,10 @@ public class ChainClient {
     static final int HISTORY_PAGE_SIZE = 50;
     /** Chain's own default for the dependency graph. */
     static final int GRAPH_LIMIT = 500;
+    private static final String FLOW_HEALTH_FLAGS_PATH = "/flow-health/flags";
+    private static final int FLAGS_PAGE_SIZE = 100;
+    /** A safety stop for getFlowHealthFlags: 20 pages of 100 = 2,000 flags. */
+    private static final int FLAGS_MAX_PAGES = 20;
 
     /** How many constraint calls to Chain may be in flight at once for one BFF instance. */
     static final int CONSTRAINT_CALLS_IN_PARALLEL = 8;
@@ -156,6 +167,42 @@ public class ChainClient {
         ChainDependencyGraph graph = restTemplate.exchange(
                 uri, HttpMethod.GET, new HttpEntity<>(headers), ChainDependencyGraph.class).getBody();
         return graph == null ? new ChainDependencyGraph(List.of(), List.of(), false) : graph;
+    }
+
+    /**
+     * Every flow-health flag Chain holds for {@code tenantId} (all pages), ordered by rank. Read-only.
+     * Chain scopes the flags by the {@code X-Tenant-Id} header and answers 400 without a valid one.
+     *
+     * @throws ServiceUnavailableException if Chain is unreachable or answers with an error or an empty body;
+     *                                     the cause is logged, never sent to the caller
+     */
+    public List<ChainFlowHealthFlagDTO> getFlowHealthFlags(String tenantId) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(TENANT_HEADER, tenantId);
+        List<ChainFlowHealthFlagDTO> flags = new ArrayList<>();
+        try {
+            int page = 0;
+            ChainFlowHealthPageDTO current;
+            do {
+                URI uri = UriComponentsBuilder.fromHttpUrl(chainServiceUrl)
+                        .path(FLOW_HEALTH_FLAGS_PATH)
+                        .queryParam("page", page)
+                        .queryParam("size", FLAGS_PAGE_SIZE)
+                        .build()
+                        .toUri();
+                current = restTemplate.exchange(uri, HttpMethod.GET, new HttpEntity<>(headers),
+                        ChainFlowHealthPageDTO.class).getBody();
+                if (current == null || current.getContent() == null) {
+                    throw new ServiceUnavailableException("chain", "Chain returned an empty response");
+                }
+                flags.addAll(current.getContent());
+                page++;
+            } while (page < current.getTotalPages() && page < FLAGS_MAX_PAGES);
+        } catch (RestClientException e) {
+            logger.error("Chain flow-health request failed", e);
+            throw new ServiceUnavailableException("chain", "Chain is currently unavailable", e);
+        }
+        return flags;
     }
 
     private <T> List<T> getHistory(String taskId, String tenantId, String path,

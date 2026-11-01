@@ -32,6 +32,7 @@ export const navSections: NavSection[] = [
       { label: 'Work in progress', href: '/manager/wip' },
       { label: 'Blocked & delayed', href: '/manager/blocked' },
       { label: 'Bottlenecks', href: '/manager/bottlenecks' },
+      { label: 'Flow health', href: '/manager/flow-health' },
       { label: 'Users', href: '/manager/users' },
     ],
   },

@@ -39,13 +39,16 @@ import type {
   UserListResponse,
   UserStatus,
 } from '@/services/managerUsersApi';
+import type { FlowHealth } from '@/services/flowHealthApi';
 import type { WorkInsight, InsightFeedbackRequest } from '@/services/workInsightsApi';
 import { sampleProjectTaskCounts } from './dashboardChartsData';
 import { emptyGraph, sampleGraph, sampleGraphForProject } from './dependencyGraphData';
+import { emptyFlowHealth, sampleFlowHealth } from './flowHealthData';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080';
 export const USERS_URL = `${API_BASE_URL}/api/manager/users`;
 export const BOTTLENECKS_GRAPH_URL = `${API_BASE_URL}/api/manager/bottlenecks/graph`;
+export const FLOW_HEALTH_URL = `${API_BASE_URL}/api/manager/flow-health`;
 export const WORK_INSIGHTS_URL = `${API_BASE_URL}/api/work-insights`;
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -191,6 +194,22 @@ export const bottlenecksGraphErrorHandler = http.get(BOTTLENECKS_GRAPH_URL, asyn
   );
 });
 
+/** Flow Health with no flags yet, and a Chain outage (the BFF answers 503). */
+export const flowHealthEmptyHandler = http.get(FLOW_HEALTH_URL, async () => {
+  await delay(300);
+  return HttpResponse.json<FlowHealth>(emptyFlowHealth);
+});
+
+export const flowHealthUnavailableHandler = http.get(FLOW_HEALTH_URL, async ({ request }) => {
+  await delay(300);
+  return errorResponse(
+    503,
+    'SERVICE_UNAVAILABLE',
+    'Downstream service is unavailable. Please try again later.',
+    new URL(request.url).pathname,
+  );
+});
+
 function touch(user: UserDetails, changes: Partial<UserDetails>): UserDetails {
   Object.assign(user, changes, { updatedAt: new Date().toISOString() });
   return user;
@@ -280,7 +299,10 @@ export const handlers = [
 
       const { login, password } = await request.json();
       const account = MOCK_ACCOUNTS.find(
-        (candidate) => candidate.login === login && candidate.password === password,
+        // Like Keycloak, accept the username or the realm email (the login field is type="email").
+        (candidate) =>
+          (candidate.login === login || `${candidate.login}@lens.local` === login) &&
+          candidate.password === password,
       );
 
       if (!account) {
@@ -355,4 +377,10 @@ export const handlers = [
 
   // POST /auth/logout - the real Gateway clears the token cookie; the mock has none to clear.
   http.post(`${API_BASE_URL}/auth/logout`, () => new HttpResponse(null, { status: 204 })),
+
+  // GET /api/manager/flow-health - read-only; there is no write handler on purpose.
+  http.get(FLOW_HEALTH_URL, async () => {
+    await delay(400);
+    return HttpResponse.json<FlowHealth>(sampleFlowHealth);
+  }),
 ];
