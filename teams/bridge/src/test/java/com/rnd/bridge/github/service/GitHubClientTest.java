@@ -67,6 +67,9 @@ class GitHubClientTest {
 
     @BeforeEach
     void setUp() {
+        // @InjectMocks doesn't apply @Value defaults - pageSize stays 0 and the
+        // client pages forever on an empty first page.
+        ReflectionTestUtils.setField(gitHubClient, "pageSize", 100);
         when(webClient.get()).thenReturn(requestHeadersUriSpec);
         when(requestHeadersUriSpec.uri(any(Function.class))).thenReturn(requestHeadersSpec);
         when(requestHeadersSpec.retrieve()).thenReturn(responseSpec);

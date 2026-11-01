@@ -85,9 +85,13 @@ public class JiraClient {
     private Mono<JiraPage> fetchPage(String jql, String nextPageToken) {
         return webClient.get()
                 .uri(uriBuilder -> {
-                    var builder = uriBuilder.path("/rest/api/3/search/jql")
+                    var builder = uriBuilder.path("/rest/api/2/search/jql")
                             .queryParam("jql", jql)
-                            .queryParam("maxResults", pageSize);
+                            .queryParam("maxResults", pageSize)
+                            // v3 returns description as an ADF object the String-typed
+                            // DTO can't bind - the v2 endpoint keeps it plain text. List
+                            // every field the mapper reads, or Jira returns all of them.
+                            .queryParam("fields", "summary,description,status,issuetype,created,updated");
                     if (StringUtils.hasText(nextPageToken)) {
                         builder.queryParam("nextPageToken", nextPageToken);
                     }
