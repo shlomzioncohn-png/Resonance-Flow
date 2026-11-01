@@ -858,6 +858,15 @@ should go through `TaskDependencyService` rather than calling the repository dir
 
 `TaskRepository` is also used here, since `TaskDependencyService` needs task existence checks.
 
+## Tenant dependency graph: DONE tasks are excluded
+
+`GET /tenants/{tenantId}/dependency-graph` returns only open work. Tasks with `status = DONE` are
+filtered out in the query (`TaskRepository.findByTenantIdAndStatusNot`) and again in
+`TenantDependencyGraphService`, so a DONE task never appears as a node or as either end of an
+edge. `transitiveDependentsCount` is computed on the filtered graph (for `A <- B(DONE) <- C`, `A`
+has 0 dependents), and `limit`/`hasMore` apply after filtering. A tenant whose tasks are all DONE
+gets an empty graph. Consumers (Lens) must not expect `DONE` in the node `status`.
+
 ## Dependency change history (Issue #153)
 
 Every dependency-graph change that actually creates or removes an edge is recorded as a

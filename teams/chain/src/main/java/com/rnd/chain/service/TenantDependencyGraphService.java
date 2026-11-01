@@ -3,6 +3,7 @@ package com.rnd.chain.service;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskReadinessSnapshot;
+import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TenantDependencyGraphEdge;
 import com.rnd.chain.dto.TenantDependencyGraphNode;
 import com.rnd.chain.dto.TenantDependencyGraphResponse;
@@ -61,11 +62,20 @@ public class TenantDependencyGraphService {
         }
 
         /*
-         * The repository returns only non-deleted tasks
-         * belonging to this tenant.
+         * DONE tasks are excluded in the query (so they are never loaded)
+         * and filtered again here as a safeguard. Edges, counts, limit
+         * and hasMore are all derived from this filtered set, so a DONE
+         * task never appears as a node, an edge endpoint or a dependent.
          */
         List<Task> tasks =
-                taskRepository.findByTenantId(tenantId);
+                taskRepository
+                        .findByTenantIdAndStatusNot(
+                                tenantId,
+                                TaskStatus.DONE)
+                        .stream()
+                        .filter(task ->
+                                task.getStatus() != TaskStatus.DONE)
+                        .toList();
 
         if (tasks.isEmpty()) {
             return new TenantDependencyGraphResponse(
