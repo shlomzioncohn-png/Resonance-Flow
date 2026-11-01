@@ -29,6 +29,9 @@ import java.util.Set;
  *   out when filtering by project.
  * - blocksCount is Chain's count over the whole tenant, so with a project
  *   filter it can count tasks of other projects too - they're still waiting.
+ * - isBlocked is Chain's "not ready": an unfinished dependency or an open
+ *   (PENDING) constraint. Marking the last constraint satisfied or waived
+ *   clears it, once nothing else blocks the task.
  * - Chain doesn't send an edge's confidence yet: an edge without one is 1.0,
  *   the same default Chain itself uses for edges that didn't come from Mind.
  */
@@ -102,8 +105,9 @@ public class BottlenecksService {
                 continue;
             }
             String title = task != null && task.getTitle() != null ? task.getTitle() : UNKNOWN_TASK_TITLE;
+            // Chain's isReady counts both unfinished dependencies and open (PENDING) constraints.
             nodes.add(new DependencyGraphDTO.Node(node.taskId(), title, node.status(),
-                    node.blockingCount() > 0, node.transitiveDependentsCount()));
+                    !node.isReady(), node.transitiveDependentsCount()));
             kept.add(node.taskId());
         }
 

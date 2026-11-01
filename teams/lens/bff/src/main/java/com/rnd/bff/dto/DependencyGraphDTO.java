@@ -13,7 +13,7 @@ public record DependencyGraphDTO(List<Node> nodes, List<Edge> edges) {
 
     /**
      * @param status      Chain's: PENDING, ACTIVE, DONE
-     * @param isBlocked   at least one task this one depends on isn't done yet
+     * @param isBlocked   not ready in Chain: a task it depends on isn't done yet, or it has an open constraint
      * @param blocksCount how many tasks depend on this one, directly or indirectly
      */
     public record Node(String id, String title, String status,

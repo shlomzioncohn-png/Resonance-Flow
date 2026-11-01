@@ -85,6 +85,19 @@ class BottlenecksServiceTest {
     }
 
     @Test
+    void isBlockedFollowsChainsReadiness_soAnOpenConstraintBlocksAndClosingItUnblocks() {
+        // No unfinished dependency, but not ready: an open (PENDING) constraint.
+        ChainDependencyGraph withOpenConstraint = new ChainDependencyGraph(
+                List.of(new ChainDependencyGraph.Node("ci", "ACTIVE", false, 0, 0, null)), List.of(), false);
+        // The constraint was satisfied or waived: ready again.
+        ChainDependencyGraph constraintClosed = new ChainDependencyGraph(
+                List.of(new ChainDependencyGraph.Node("ci", "ACTIVE", true, 0, 0, null)), List.of(), false);
+
+        assertThat(BottlenecksService.toGraph(withOpenConstraint, TASKS, null).nodes().get(0).isBlocked()).isTrue();
+        assertThat(BottlenecksService.toGraph(constraintClosed, TASKS, null).nodes().get(0).isBlocked()).isFalse();
+    }
+
+    @Test
     void blankProjectMeansTheWholeTenant() {
         assertThat(BottlenecksService.toGraph(GRAPH, TASKS, " ").nodes()).hasSize(4);
     }
