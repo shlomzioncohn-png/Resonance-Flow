@@ -39,16 +39,21 @@ jobs:
           mkdir -p teams/relay/schema-sync-hook/files/schemas teams/relay/schema-sync-hook/files/ci
           # rm first so a schema deleted from shared/proto disappears from the copy too
           rm -f teams/relay/schema-sync-hook/files/schemas/*.proto
-          for f in shared/proto/*.proto; do
-            docker run --rm -v "$PWD:/workspace" -w /workspace maven:3.9.9-eclipse-temurin-21 \
-              java -jar teams/relay/schema-canonicalize/target/canonicalize.jar shared/proto "$(basename "$f")" \
-              > "teams/relay/schema-sync-hook/files/schemas/$(basename "$f")"
-            [ -s "teams/relay/schema-sync-hook/files/schemas/$(basename "$f")" ] || { echo "::error::canonicalize produced no output for $f"; exit 1; }
-          done
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/workspace" -w /workspace \
+            --entrypoint bash maven:3.9.9-eclipse-temurin-21 -c '
+              set -euo pipefail
+              for f in shared/proto/*.proto; do
+                out="teams/relay/schema-sync-hook/files/schemas/$(basename "$f")"
+                java -jar teams/relay/schema-canonicalize/target/canonicalize.jar shared/proto "$(basename "$f")" > "$out"
+                [ -s "$out" ] || { echo "::error::canonicalize produced no output for $f"; exit 1; }
+              done'
           # only the scripts the chart actually mounts — not seed-registry.sh /
           # check-all-schemas.sh, which are CI-only
           cp teams/relay/ci/check-schema-compatibility.sh teams/relay/ci/register-schema.sh teams/relay/ci/_schema-references.sh teams/relay/schema-sync-hook/files/ci/
           cp teams/relay/ci/schema-subjects.tsv teams/relay/schema-sync-hook/files/
+
+      - name: Fetch main so the push only sends new commits
+        run: git fetch --no-tags origin main
 
       # PAT, not GITHUB_TOKEN - see service-update-manifest.yaml. No-op when nothing changed.
       - name: Open a PR with the synced copies

@@ -13,16 +13,19 @@ REGISTRY_URL="${SCHEMA_REGISTRY_URL:-http://localhost:8081/apis/ccompat/v6}"
 # Sets REFERENCES and BODY.
 source "$(dirname "${BASH_SOURCE[0]}")/_schema-references.sh"
 
-HTTP_STATUS=$(curl -s -o /tmp/register-response.json -w "%{http_code}" \
+RESPONSE="$(mktemp)"
+trap 'rm -f "$RESPONSE"' EXIT
+
+HTTP_STATUS=$(curl -s -o "$RESPONSE" -w "%{http_code}" \
   -X POST "${REGISTRY_URL}/subjects/${SUBJECT}/versions" \
   -H "Content-Type: application/vnd.schemaregistry.v1+json" \
   -d "$BODY")
 
 if [ "$HTTP_STATUS" -ge 400 ]; then
   echo "Failed to register schema for '${SUBJECT}' (HTTP $HTTP_STATUS):"
-  cat /tmp/register-response.json
+  cat "$RESPONSE"
   exit 1
 fi
 
-GLOBAL_ID=$(jq -r '.id' /tmp/register-response.json)
+GLOBAL_ID=$(jq -r '.id' "$RESPONSE")
 echo "Registered '${SUBJECT}' — global schema id ${GLOBAL_ID}"

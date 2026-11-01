@@ -22,9 +22,6 @@ schemaRegistryUrl: "http://resonance-flow-schema-registry.resonance-flow.svc.clu
 # from teams/relay/ci/schema-subjects.tsv (copied in as files/schema-subjects.tsv
 # by relay-schema-sync.yaml), the single source of truth also used by the
 # PR-time CI check. Add a schema there, not here.
-#
-# Note: task-created-event.proto / raw-object-event.proto in
-# that list are still UNCONFIRMED DRAFTS (Inbox/Bridge haven't signed off).
 
 resources:
   requests:

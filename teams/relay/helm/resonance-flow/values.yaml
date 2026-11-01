@@ -56,6 +56,16 @@ ingress:
       component: lens-gateway
     - path: /auth
       component: lens-gateway
+# Components opt in with components.<name>.metrics - see README.md "Metrics scraping".
+monitoring:
+  namespace: monitoring
+# PrometheusRules - see README.md "Alerting".
+alerts:
+  # Lag on bridge.structured.tasks, summed per consumer group. inbox is its only
+  # consumer today. The threshold is a first guess - tune it with inbox.
+  bridgeTasksLag:
+    threshold: 1000
+    team: inbox
 pipeConsumerGroupSweep:
   enabled: true
   schedule: "0 * * * *"
@@ -112,6 +122,9 @@ components:
       tag: "29aaca0"
     containerPort: 8000
     service: *defaultService
+    metrics:
+      enabled: true
+      path: /metrics
     resources: *defaultResources
     <<: *defaultHealthProbes
     env: {}
@@ -163,8 +176,7 @@ components:
         user: mind
         db: mind
       llm:
-        model: ""
-        cache_dir: ./models
+        provider: ""
       ocr:
         provider: local
       asr:
@@ -173,6 +185,8 @@ components:
         whisper_model: base.en
       object_storage:
         bucket: bridge-raw
+      inbox:
+        url: http://resonance-flow-inbox:80
       kafka:
         producer:
           task_creation_requested_topic: task.creation.requested
@@ -181,6 +195,47 @@ components:
     secret:
       create: false
     kafkaSasl: true
+    inboxActorId: "00000000-0000-0000-0000-000000000003"
+  mind-landed-consumer:
+    enabled: true
+    shareFrom: mind
+    team: mind
+    replicaCount: 1
+    command: ["python", "-m", "mind.ingestion.landed_consumer_runner"]
+    updateStrategy:
+      type: Recreate
+    dependencies:
+      - name: object-storage
+        port: 9000
+      - name: postgresql
+        port: 5432
+      - name: schema-registry
+        port: 8080
+    resources:
+      requests:
+        cpu: "1"
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 1536Mi
+  mind-index-consumer:
+    enabled: true
+    shareFrom: mind
+    team: mind
+    replicaCount: 1
+    command: ["python", "-m", "mind.embeddings.index_consumer_runner"]
+    dependencies:
+      - name: postgresql
+        port: 5432
+      - name: schema-registry
+        port: 8080
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
   lens-bff:
     enabled: true
     replicaCount: 1
@@ -190,12 +245,23 @@ components:
       tag: "9474270"
     containerPort: 8082
     service: *defaultService
+    metrics:
+      enabled: true
+      team: lens
     resources: *defaultResources
     <<: *defaultHealthProbes
     env: {}
     dependencies:
       - name: notification-delivery
         port: 80
+    volumeMounts:
+      - name: lens-admin-credentials
+        mountPath: /etc/resonance-flow/secrets/lens-admin
+        readOnly: true
+    volumes:
+      - name: lens-admin-credentials
+        secret:
+          secretName: resonance-flow-lens-admin
     config:
       server:
         port: 8082
@@ -222,6 +288,10 @@ components:
       tag: "4655ffa"
     containerPort: 8080
     service: *defaultService
+    # base-path: / in bridge's application.yml, so no /actuator prefix.
+    metrics:
+      enabled: true
+      path: /prometheus
     resources: *defaultResources
     <<: *defaultHealthProbes
     # Bridge only calls out (source APIs, Kafka, Postgres, MinIO); no component calls its
@@ -395,6 +465,8 @@ components:
         port: 5432
   lens-frontend:
     enabled: true
+    # Not scraped (no metrics block), but its pod alerts still route to lens.
+    team: lens
     replicaCount: 1
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-frontend"
@@ -472,6 +544,10 @@ components:
       tag: "012846e"
     containerPort: 8081
     service: *defaultService
+    # base-path: / in chain's application.yml, so no /actuator prefix.
+    metrics:
+      enabled: true
+      path: /prometheus
     resources: *defaultResources
     <<: *defaultHealthProbes
     startupProbe:
@@ -534,6 +610,8 @@ components:
       tag: "4142843"
     containerPort: 8080
     service: *defaultService
+    metrics:
+      enabled: true
     resources: *defaultResources
     startupProbe:
       httpGet:
@@ -560,6 +638,9 @@ components:
       - name: inbox-db-credentials
         mountPath: /etc/resonance-flow/secrets/inbox-db
         readOnly: true
+      - name: lens-admin-credentials
+        mountPath: /etc/resonance-flow/secrets/lens-admin
+        readOnly: true
       - name: kafka-sasl-credentials
         mountPath: /etc/resonance-flow/secrets/kafka-sasl
         readOnly: true
@@ -567,6 +648,9 @@ components:
       - name: inbox-db-credentials
         secret:
           secretName: resonance-flow-inbox-db-credentials
+      - name: lens-admin-credentials
+        secret:
+          secretName: resonance-flow-lens-admin
       - name: kafka-sasl-credentials
         secret:
           secretName: resonance-flow-kafka-sasl-credentials
@@ -590,6 +674,8 @@ components:
             mindTaskCreationRequested: task.creation.requested
   schema-registry:
     enabled: true
+    # Serves the Relay-owned shared/proto schemas.
+    team: relay
     replicaCount: 1
     image:
       # In-memory Apicurio registry - not durable, fine for dev/CI only. Any restart (e.g. a
@@ -641,9 +727,28 @@ components:
       tag: "5b08464"
     containerPort: 8080
     service: *defaultService
+    metrics:
+      enabled: true
+      team: lens
     resources: *defaultResources
     <<: *defaultHealthProbes
-    env: {}
+    volumeMounts:
+      - name: lens-gateway-jwt
+        mountPath: /etc/resonance-flow/secrets/lens-gateway-jwt
+        readOnly: true
+    volumes:
+      - name: lens-gateway-jwt
+        secret:
+          secretName: resonance-flow-lens-gateway-jwt
+    config:
+      jwt:
+        key_id: "gateway-key-1"
+        private_key_location: /etc/resonance-flow/secrets/lens-gateway-jwt/private.pem
+        public_key_location: /etc/resonance-flow/secrets/lens-gateway-jwt/public.pem
+      bff:
+        service:
+          url: http://resonance-flow-lens-bff:80
+
   notification-delivery:
     enabled: true
     replicaCount: 1
@@ -655,6 +760,9 @@ components:
     service:
       type: ClusterIP
       port: 80
+    metrics:
+      enabled: true
+      team: relay
     resources:
       requests:
         cpu: 100m
@@ -757,6 +865,49 @@ kafka:
         memory: 768Mi
   broker:
     replicaCount: 0
+# prometheus-kafka-exporter, for consumer-group lag
+kafka-exporter:
+  enabled: false
+  kafkaServer:
+    - resonance-flow-kafka:9092
+  kafkaBrokerVersion: "3.6.0"
+  sasl:
+    enabled: true
+    # Off: it reads username and password from one Secret, but the password is
+    # Kafka's own (client-passwords, created by the kafka-sasl hook). env and
+    # extraArgs below pass the same flags instead.
+    scram:
+      enabled: false
+  env:
+    - name: KAFKA_SASL_USERNAME
+      valueFrom:
+        secretKeyRef:
+          # templates/kafka-exporter-sasl-secret.yaml, from kafka.sasl.client.users.
+          name: resonance-flow-kafka-exporter-sasl
+          key: username
+    - name: KAFKA_SASL_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: resonance-flow-kafka-sasl-credentials
+          key: client-passwords
+  extraArgs:
+    - --sasl.mechanism=plain
+    - --sasl.username=$(KAFKA_SASL_USERNAME)
+    - --sasl.password=$(KAFKA_SASL_PASSWORD)
+  # see README.md "Metrics scraping".
+  prometheus:
+    serviceMonitor:
+      enabled: false
+  liveness:
+    enabled: true
+  readiness:
+    enabled: true
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
 minio:
   enabled: true
   mode: standalone

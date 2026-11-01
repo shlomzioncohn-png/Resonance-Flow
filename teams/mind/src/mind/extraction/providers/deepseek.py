@@ -89,8 +89,9 @@ class DeepSeekProvider:
 
         if not self._settings.configured:
             raise ValueError(
-                "DeepSeek api_key is not configured: expected llm.deepseek.api_key in the "
-                "mounted secrets.yaml (see mind.extraction.providers.settings)"
+                "DeepSeek api_key is not configured: expected deepseek-api-key in the "
+                "resonance-flow-mind-llm Secret, or llm.deepseek.api_key in the mounted "
+                "secrets.yaml (see mind.extraction.providers.settings)"
             )
 
         # Only a client we created is a client we may close.

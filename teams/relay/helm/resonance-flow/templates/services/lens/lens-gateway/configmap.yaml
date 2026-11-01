@@ -1,0 +1,19 @@
+{{- $component := index .Values.components "lens-gateway" }}
+{{- if $component.enabled }}
+{{- with $component.config }}
+{{- $cfg := . }}
+---
+{{ include "resonance-flow.configMapHeader" (dict "root" $ "component" "lens-gateway") }}
+
+data:
+  config.yaml: |
+    lens:
+      jwt:
+        key-id: {{ $cfg.jwt.key_id | quote }}
+        private-key-location: {{ $cfg.jwt.private_key_location | quote }}
+        public-key-location: {{ $cfg.jwt.public_key_location | quote }}
+    bff:
+      service:
+        url: {{ $cfg.bff.service.url | quote }}
+{{- end }}
+{{- end }}

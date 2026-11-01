@@ -2,26 +2,27 @@
 
 Foundation module for Team Relay (event bus and service communication).
 
-This is a minimal Spring Boot skeleton. No Kafka integration or business logic is implemented yet.
+Its service is `notification_delivery`, which pushes task notifications to users over WebSocket.
+See [notification_delivery/README.md](notification_delivery/README.md).
 
 ## Stack
 
-- Java 11
-- Spring Boot 2.7.18 (Maven)
+- Java 21
+- Spring Boot 3.3.13 (Maven)
 - Docker / Docker Compose
 
 ## Project structure
 
 ```
-notification_delivery/main/java/
-└── RelayApplication.java   # Spring Boot entry point
+notification_delivery/main/java/pipe/
+└── NotificationDeliveryApplication.java   # Spring Boot entry point
 notification_delivery/main/resources/application.yml
 notification_delivery/test/java/
 ```
 
 ## Running locally with Maven
 
-Requires Maven and JDK 11.
+Requires Maven and JDK 21.
 
 ```bash
 mvn spring-boot:run

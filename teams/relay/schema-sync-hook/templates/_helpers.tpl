@@ -50,7 +50,7 @@ check reads from teams/relay/ci/schema-subjects.tsv.
 {{- $level := "FULL" -}}
 {{- range .Files.Lines "files/schema-subjects.tsv" -}}
 {{- $t := trim . -}}
-{{- if and (hasPrefix "#" $t) (contains "compatibility:" $t) -}}
+{{- if regexMatch "^#[[:space:]]*compatibility:" $t -}}
 {{- $level = (splitList "compatibility:" $t | last) | trim -}}
 {{- end -}}
 {{- end -}}

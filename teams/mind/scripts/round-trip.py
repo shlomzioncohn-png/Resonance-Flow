@@ -31,6 +31,25 @@ from mind.messaging.task_dependencies_proposed_event_pb2 import (
 from mind.messaging.task_score_proposed_event_pb2 import TaskScoreProposedEvent
 
 
+def consume_own_event(group_id, topic, message_type, event_id, handle) -> bool:
+    found = []
+
+    def handle_own(event, msg):
+        if event.event_id == event_id:
+            handle(event, msg)
+            found.append(event)
+        else:
+            print(f"skipped: {topic}[{msg.partition()}]@{msg.offset()} event_id={event.event_id!r}")
+
+    while not found:
+        n = ProtobufConsumer(group_id=group_id, topics=[topic]).run(
+            message_type, handle_own, max_messages=1, idle_timeout=30
+        )
+        if n == 0:
+            return False
+    return True
+
+
 def task_created_round_trip() -> bool:
     print("\n--- Flow 1: task.created (Inbox -> MIND) ---")
     task = TaskCreatedEvent(
@@ -85,10 +104,17 @@ def task_dependencies_round_trip() -> bool:
         print(f"consumed: task.dependencies.proposed[{msg.partition()}]@{msg.offset()} "
               f"task_id={event.task_id!r} dependencies={received['edges']}")
 
-    n = ProtobufConsumer(
-        group_id="round-trip-task-dependencies", topics=["task.dependencies.proposed"]
-    ).run(DependencyProposedEvent, handle, max_messages=1, idle_timeout=30)
-    ok = n == 1 and received.get("task_id") == dep.task_id and received.get("edges") == edges
+    ok = (
+        consume_own_event(
+            "round-trip-task-dependencies",
+            "task.dependencies.proposed",
+            DependencyProposedEvent,
+            dep.event_id,
+            handle,
+        )
+        and received.get("task_id") == dep.task_id
+        and received.get("edges") == edges
+    )
     print("PASS" if ok else "FAIL - did not receive the same event back")
     return ok
 
@@ -120,11 +146,14 @@ def task_score_round_trip() -> bool:
         print(f"consumed: task.score.proposed[{msg.partition()}]@{msg.offset()} "
               f"task_id={event.task_id!r} mind_score={event.mind_score}")
 
-    n = ProtobufConsumer(
-        group_id="round-trip-task-score", topics=["task.score.proposed"]
-    ).run(TaskScoreProposedEvent, handle, max_messages=1, idle_timeout=30)
     ok = (
-        n == 1
+        consume_own_event(
+            "round-trip-task-score",
+            "task.score.proposed",
+            TaskScoreProposedEvent,
+            score.event_id,
+            handle,
+        )
         and received.get("task_id") == score.task_id
         and received.get("mind_score") == score.mind_score
         and received.get("tenant_id") == score.tenant_id

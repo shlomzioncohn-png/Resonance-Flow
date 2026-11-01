@@ -12,8 +12,7 @@ data:
       user: {{ $cfg.vector_store.user | quote }}
       db: {{ $cfg.vector_store.db | quote }}
     llm:
-      model: {{ $cfg.llm.model | quote }}
-      cache_dir: {{ $cfg.llm.cache_dir | quote }}
+      {{- toYaml $cfg.llm | nindent 6 }}
     ocr:
       provider: {{ $cfg.ocr.provider | quote }}
     asr:
@@ -29,5 +28,9 @@ data:
         task_creation_requested_topic: {{ $cfg.kafka.producer.task_creation_requested_topic | quote }}
     service:
       log_level: {{ $cfg.service.log_level | quote }}
+    {{- with $cfg.inbox }}
+    inbox:
+      url: {{ .url | quote }}
+    {{- end }}
 {{- end }}
 {{- end }}

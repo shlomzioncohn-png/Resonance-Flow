@@ -34,3 +34,5 @@ structured-task-event.proto	bridge.structured.tasks-value
 task-dependencies-proposed-event.proto	task.dependencies.proposed-value
 task-score-proposed-event.proto	task.score.proposed-value
 scheduling-updated-event.proto	task.scheduling.updated-value
+task-notification.proto	resonance.task-events-notifications-value
+task-notification.proto	resonance.task-notifications-value

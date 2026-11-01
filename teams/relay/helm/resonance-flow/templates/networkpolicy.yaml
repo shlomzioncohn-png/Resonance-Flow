@@ -41,5 +41,17 @@ spec:
         - port: http
           protocol: TCP
     {{- end }}
+    {{- if and $component.metrics $component.metrics.enabled }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Values.monitoring.namespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: http
+          protocol: TCP
+    {{- end }}
 {{- end }}
 {{- end }}

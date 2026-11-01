@@ -10,3 +10,52 @@ ingress:
   # plus cert-manager annotations if it issues it.
   tlsSecretName: ""
   annotations: {}
+components:
+  mind:
+    config:
+      llm:
+        provider: gemini
+kafka:
+  metrics:
+    jmx:
+      enabled: true
+      image:
+        registry: docker.io
+        repository: bitnamilegacy/jmx-exporter
+postgresql:
+  metrics:
+    enabled: true
+minio:
+  metrics:
+    enabled: true
+kafka-exporter:
+  enabled: true
+# Not read by this chart: the kube-prometheus-stack Application
+# (teams/relay/argocd/apps/kube-prometheus-stack.yaml) loads this file too, and
+# this block is its Grafana subchart's. Grafana gets its own host (no sub-path,
+# so probes, metrics and port-forward keep working at /) on the same Traefik.
+grafana:
+  ingress:
+    # Stays off until the host is known: an enabled Ingress without
+    # grafana.ingress.host fails the render.
+    enabled: false
+    ingressClassName: traefik
+    # TODO: the Grafana host, e.g. grafana.<domain>.
+    host: ""
+    # The chart templates each entry, so the host is set once, above.
+    hosts:
+      - '{{ required "grafana.ingress.host is required when grafana.ingress.enabled is true" .Values.ingress.host }}'
+    # TLS (same owner as ingress.tlsSecretName): a Secret in the monitoring
+    # namespace, plus cert-manager annotations if it issues it. Empty = Traefik's
+    # self-signed default certificate.
+    tls: []
+    #  - secretName: grafana-tls
+    #    hosts:
+    #      - '{{ .Values.ingress.host }}'
+    annotations: {}
+  grafana.ini:
+    server:
+      # The chart derives server.domain from the host; the default root_url would
+      # add :3000 and http. Used for redirects and links Grafana builds (and SSO
+      # callbacks, later).
+      root_url: '{{ if .Values.ingress.enabled }}https://%(domain)s/{{ else }}%(protocol)s://%(domain)s:%(http_port)s/{{ end }}'
