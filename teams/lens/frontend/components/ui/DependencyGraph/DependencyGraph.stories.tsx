@@ -58,6 +58,24 @@ export const Default: Story = {
   },
 };
 
+/** A task with open constraints shows the lock chip with their count, in the graph and in the table. */
+export const OpenConstraints: Story = {
+  play: async ({ canvas }) => {
+    const node = await canvas.findByRole('group', { name: /^Migrate login screen\./ });
+    await expect(node).toHaveAccessibleName(
+      'Migrate login screen. Status: Pending. Blocked. 2 open constraints. Blocks 4 tasks.',
+    );
+    await expect(within(node).getByTestId('open-constraints-chip')).toHaveTextContent('2');
+
+    const table = canvas.getByRole('table', { name: 'Tasks by number of tasks blocked' });
+    const row = within(table).getByRole('row', { name: /Migrate login screen/ });
+    await expect(within(row).getByLabelText('2 open constraints')).toHaveTextContent('2');
+    // A task without any shows no chip.
+    const blockerRow = within(table).getByRole('row', { name: /Finalize auth token service/ });
+    await expect(within(blockerRow).queryByTestId('open-constraints-chip')).not.toBeInTheDocument();
+  },
+};
+
 export const EmptyGraph: Story = {
   args: { graph: emptyGraph },
   play: async ({ canvas }) => {

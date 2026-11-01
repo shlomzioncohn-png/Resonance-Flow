@@ -109,10 +109,15 @@ export const MarkSatisfied: Story = {
   play: async ({ userEvent }) => {
     const invalidate = spyOn(queryClient, 'invalidateQueries');
     const row = within((await constraintRows())[0]);
+    const body = within(document.body);
+    // The lock chip in the header counts the one open constraint...
+    await expect(body.getByTestId('open-constraints-chip')).toHaveTextContent('1');
 
     await userEvent.click(row.getByRole('button', { name: 'Mark satisfied' }));
 
     await expect(await row.findByText('Satisfied')).toBeInTheDocument();
+    // ...and goes away once none is open.
+    await expect(body.queryByTestId('open-constraints-chip')).not.toBeInTheDocument();
     await expect(row.queryByText('Pending')).not.toBeInTheDocument();
     await expect(row.getByRole('button', { name: 'Reopen' })).toBeEnabled();
     await expect(row.queryByRole('button', { name: 'Mark satisfied' })).not.toBeInTheDocument();

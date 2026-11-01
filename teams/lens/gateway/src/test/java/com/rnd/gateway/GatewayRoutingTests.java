@@ -235,7 +235,7 @@ class GatewayRoutingTests {
                 .setResponseCode(200)
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"nodes\":[{\"id\":\"t1\",\"title\":\"Set up CI\",\"status\":\"ACTIVE\","
-                        + "\"isBlocked\":true,\"blocksCount\":3}],"
+                        + "\"isBlocked\":true,\"blocksCount\":3,\"openConstraintCount\":2}],"
                         + "\"edges\":[{\"source\":\"t0\",\"target\":\"t1\",\"confidence\":0.8}]}"));
 
         mockMvc.perform(get("/api/manager/bottlenecks/graph").param("projectId", "p 1").with(jwt()))
@@ -243,6 +243,7 @@ class GatewayRoutingTests {
             .andExpect(jsonPath("$.nodes[0].title").value("Set up CI"))
             .andExpect(jsonPath("$.nodes[0].isBlocked").value(true))
             .andExpect(jsonPath("$.nodes[0].blocksCount").value(3))
+            .andExpect(jsonPath("$.nodes[0].openConstraintCount").value(2))
             .andExpect(jsonPath("$.edges[0].source").value("t0"))
             .andExpect(jsonPath("$.edges[0].confidence").value(0.8));
 

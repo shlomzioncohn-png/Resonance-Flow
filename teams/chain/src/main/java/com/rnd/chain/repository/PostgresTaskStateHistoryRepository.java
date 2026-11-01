@@ -72,7 +72,10 @@ public class PostgresTaskStateHistoryRepository implements TaskStateHistoryRepos
         return jpaRepository.findLatestBlockedSinceByTaskIds(taskIds).stream()
                 .collect(Collectors.toMap(
                         row -> (UUID) row[0],
-                        row -> ((java.sql.Timestamp) row[1]).toInstant()
+                        // LOCAL FIX ONLY (LENS testing) - not committed; Hibernate 6 returns Instant here.
+                        row -> row[1] instanceof Instant instant
+                                ? instant
+                                : ((java.sql.Timestamp) row[1]).toInstant()
                 ));
     }
 

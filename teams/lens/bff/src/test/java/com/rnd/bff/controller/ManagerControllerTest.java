@@ -62,8 +62,8 @@ class ManagerControllerTest {
     @Test
     void getDependencyGraph_returnsTheGraphInTheFrontendsShape() throws Exception {
         when(bottlenecksService.getGraph("mgr_001", "p-1")).thenReturn(new DependencyGraphDTO(
-                List.of(new DependencyGraphDTO.Node("t-1", "Set up CI", "ACTIVE", false, 2),
-                        new DependencyGraphDTO.Node("t-2", "Deploy", "PENDING", true, 0)),
+                List.of(new DependencyGraphDTO.Node("t-1", "Set up CI", "ACTIVE", false, 2, 0),
+                        new DependencyGraphDTO.Node("t-2", "Deploy", "PENDING", true, 0, 1)),
                 List.of(new DependencyGraphDTO.Edge("t-1", "t-2", 1.0))));
 
         mockMvc

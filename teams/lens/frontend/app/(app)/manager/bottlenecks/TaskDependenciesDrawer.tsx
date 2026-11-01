@@ -23,7 +23,7 @@ import type { DependencyGraph, GraphNode } from '@/services/bottlenecksApi';
 import { getTaskConstraints, updateConstraintStatus } from '@/services/managerApi';
 import { bottleneckKeys } from '@/services/queryKeys';
 import type { Constraint, ConstraintStatus } from '@/services/workspaceApi';
-import { softToneSx } from '../../employee/shared';
+import { OpenConstraintsChip, softToneSx } from '../../employee/shared';
 import {
   constraintStatusLabel,
   constraintTypeLabel,
@@ -207,6 +207,19 @@ function ConstraintsSection({ taskId }: { taskId: string }) {
 }
 
 /**
+ * The lock chip with the number of open (PENDING) constraints, same as on the
+ * employee's screens. Reads the Constraints block's cache entry, so it updates
+ * as soon as a row's status changes. Nothing while loading, or with none open.
+ */
+function OpenConstraintsBadge({ taskId }: { taskId: string }) {
+  const { data } = useQuery({
+    queryKey: bottleneckKeys.constraints(taskId),
+    queryFn: () => getTaskConstraints(taskId),
+  });
+  return <OpenConstraintsChip count={data?.filter(isOpenConstraint).length} />;
+}
+
+/**
  * Details for one task in the dependency graph: the tasks it directly
  * blocks, the tasks it is directly waiting on, and its constraints, which
  * the manager can mark satisfied, waive or reopen.
@@ -234,9 +247,10 @@ export default function TaskDependenciesDrawer({ task, graph, onSelectTask, onCl
               <CloseIcon />
             </IconButton>
           </Stack>
-          <Stack direction="row" spacing={1}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <StatusBadge status={TASK_STATUS_BADGE[task.status].tone} label={TASK_STATUS_BADGE[task.status].label} />
             {task.isBlocked && <StatusBadge status="warning" label="Blocked" />}
+            <OpenConstraintsBadge taskId={task.id} />
           </Stack>
           <Typography variant="body2" color="text.secondary">
             {task.blocksCount === 0

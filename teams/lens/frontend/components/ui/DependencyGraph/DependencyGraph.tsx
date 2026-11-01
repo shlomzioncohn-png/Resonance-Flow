@@ -24,6 +24,7 @@ import DataTable, { type Column } from '@/components/ui/DataTable';
 import StatusBadge from '@/components/ui/StatusBadge';
 import type { DependencyGraph as Graph, GraphNode } from '@/services/bottlenecksApi';
 import GraphTaskNode, { type GraphTaskFlowNode } from './GraphTaskNode';
+import OpenConstraintsChip from './OpenConstraintsChip';
 import { byBlocksCount, layoutGraph, NODE_HEIGHT, NODE_WIDTH, nearestInDirection, topBlockers } from './layout';
 import { blockerLevel, nodeAriaLabel, TASK_STATUS_BADGE } from './taskStatus';
 
@@ -292,9 +293,10 @@ function BlockersTable({
       id: 'status',
       header: 'Status',
       render: (task) => (
-        <Stack direction="row" spacing={0.5}>
+        <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
           <StatusBadge status={TASK_STATUS_BADGE[task.status].tone} label={TASK_STATUS_BADGE[task.status].label} />
           {task.isBlocked && <StatusBadge status="warning" label="Blocked" />}
+          <OpenConstraintsChip count={task.openConstraintCount} />
         </Stack>
       ),
     },

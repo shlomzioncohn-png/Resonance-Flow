@@ -18,6 +18,8 @@ export type GraphNode = {
   isBlocked: boolean;
   /** How many tasks depend on this one, directly or indirectly. */
   blocksCount: number;
+  /** How many of its constraints are still open (PENDING). Missing from an older BFF. */
+  openConstraintCount?: number;
 };
 
 /** `source` blocks `target`: the edge points from the blocker to the task it blocks. */

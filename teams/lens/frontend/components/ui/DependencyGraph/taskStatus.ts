@@ -24,6 +24,8 @@ export function blocksLabel(count: number): string {
 export function nodeAriaLabel(node: GraphNode, criticalThreshold: number): string {
   const parts = [node.title, `Status: ${TASK_STATUS_BADGE[node.status].label}`];
   if (node.isBlocked) parts.push('Blocked');
+  const open = node.openConstraintCount ?? 0;
+  if (open > 0) parts.push(`${open} open constraint${open === 1 ? '' : 's'}`);
   parts.push(blocksLabel(node.blocksCount));
   if (blockerLevel(node, criticalThreshold) === 'critical') parts.push('Critical blocker');
   return `${parts.join('. ')}.`;
