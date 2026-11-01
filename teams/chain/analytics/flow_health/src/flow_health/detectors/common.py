@@ -52,3 +52,12 @@ def write_flags(flags: list[Flag], path: Path | str, meta: dict | None = None) -
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False) + "\n",
                    encoding="utf-8", newline="\n")
+
+
+_SEVERITY_ORDER = {s: i for i, s in enumerate(reversed(SEVERITIES))}   # high first
+
+
+def rank_order(flags: list[Flag]) -> list[Flag]:
+    """The overall order of all flags: severity (high, medium, low), then score descending; ties by flag_id
+    so runs agree. The one place this order is defined: the ranked list and the published `rank` both use it."""
+    return sorted(flags, key=lambda f: (_SEVERITY_ORDER[f.severity], -f.score, f.flag_id))

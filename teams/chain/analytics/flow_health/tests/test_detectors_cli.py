@@ -38,3 +38,19 @@ def test_one_run_writes_a_flags_file_with_the_agreed_fields(small, tmp_path):
 
 def test_two_runs_write_byte_identical_files(small, tmp_path):
     assert _run(small, tmp_path / "a.json") == _run(small, tmp_path / "b.json")
+
+
+def test_the_tenant_option_is_recorded_for_publishing(small, tmp_path):
+    data_dir, features = small
+    tenant = "aaaaaaaa-0000-0000-0000-000000000001"
+    out = tmp_path / "flags.json"
+
+    assert detectors_cli(["--data", str(data_dir), "--features", str(features), "--out", str(out),
+                          "--seed", "42", "--tenant", tenant]) == 0
+
+    assert json.loads(out.read_text(encoding="utf-8"))["meta"]["tenant_id"] == tenant
+    # Without the option the file has no tenant, so publishing it is refused rather than guessed.
+    other = tmp_path / "no_tenant.json"
+    assert detectors_cli(["--data", str(data_dir), "--features", str(features), "--out", str(other),
+                          "--seed", "42"]) == 0
+    assert "tenant_id" not in json.loads(other.read_text(encoding="utf-8"))["meta"]

@@ -35,6 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", type=Path, default=None, help="output directory (default: out/<name of --data>)")
     p.add_argument("--config", type=Path, default=DEFAULT_PATH, help="detector thresholds (default: detectors/config.yaml)")
     p.add_argument("--freeze", action="store_true", help="lock the hash of the config; later runs refuse any other config")
+    p.add_argument("--tenant", default=None,
+                   help="uuid of the tenant the data belongs to; recorded in flags.json so `flow_health.publish` can load it")
     args = p.parse_args(argv)
 
     digest = config_hash(args.config)
@@ -50,8 +52,11 @@ def main(argv: list[str] | None = None) -> int:
     out = args.out or Path("out") / args.data.name
     seed = json.loads((args.data / "manifest.json").read_text(encoding="utf-8")).get("seed")
     features_cli.main(["--data", str(args.data), "--out", str(out)])
-    detectors_cli.main(["--data", str(args.data), "--features", str(out), "--config", str(args.config),
-                        "--seed", str(seed)])
+    detectors_args = ["--data", str(args.data), "--features", str(out), "--config", str(args.config),
+                      "--seed", str(seed)]
+    if args.tenant:
+        detectors_args += ["--tenant", args.tenant]
+    detectors_cli.main(detectors_args)
 
     payload = json.loads((out / "flags.json").read_text(encoding="utf-8"))
     flags = [Flag(**f) for f in payload["flags"]]

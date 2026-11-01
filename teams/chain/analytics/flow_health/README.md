@@ -24,6 +24,25 @@ The generator itself uses only the standard library; the analysis code (loader, 
 `pip install -e ".[dev,analysis]"` (pandas, scikit-learn). Options: `--out`, `--seed` (dev), `--eval-seed`,
 `--tasks`, `--days`, `--projects`, `--instances`, `--missing-tier-rate` (see `--help`).
 
+## Publishing the flags to Chain (`flow_health.publish`)
+
+The detectors write `flags.json`; `flow_health.publish` is the only thing that loads it into Chain's
+`flow_health_flag` table (migration `V18`), which the Manager's Flow health screen reads. Flags are per tenant:
+each run analyses one tenant's data, so give the tenant to the run and it travels in the file as `meta.tenant_id`.
+
+```bash
+pip install -e ".[publish]"
+python -m flow_health.run_all --data data/heldout --tenant <tenant uuid>      # or: python -m flow_health.detectors ... --tenant <uuid>
+export FLOW_HEALTH_DATABASE_URL=postgresql://<user>:<password>@<host>:5432/chain
+python -m flow_health.publish --flags out/heldout/flags.json --dry-run          # checks the file, writes nothing
+python -m flow_health.publish --flags out/heldout/flags.json
+```
+
+Publishing replaces that tenant's flags from the previous run, in one transaction (all or nothing), and never
+touches another tenant's rows. An empty run clears the tenant's old flags. A file with no tenant, a tenant that
+disagrees with `--tenant`, no `meta.as_of`, or a repeated `flag_id` is refused before the database is touched.
+`rank` is the overall order of `ranked_flags.csv` (severity, then score) and `run_at` is `meta.as_of`.
+
 ## Two timelines: dev and eval
 
 | | `data/dev` | `data/eval` |
