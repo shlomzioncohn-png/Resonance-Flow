@@ -36,6 +36,8 @@ import java.util.Set;
  * - openConstraintCount: Chain's graph doesn't send it, so each task that isn't
  *   ready gets one constraints call (in parallel, see ChainClient.getFeasibility).
  *   Ask Chain to add it to the graph node, then drop those calls.
+ * - DONE tasks are left out, with their edges: Chain's graph still returns them,
+ *   but a finished task isn't a bottleneck.
  * - Chain doesn't send an edge's confidence yet: an edge without one is 1.0,
  *   the same default Chain itself uses for edges that didn't come from Mind.
  */
@@ -46,6 +48,7 @@ public class BottlenecksService {
 
     static final String UNKNOWN_TASK_TITLE = "Unknown task";
     static final double DEFAULT_CONFIDENCE = 1.0;
+    static final String DONE_STATUS = "DONE";
 
     private final ChainClient chainClient;
     private final InboxClient inboxClient;
@@ -129,6 +132,10 @@ public class BottlenecksService {
         List<DependencyGraphDTO.Node> nodes = new ArrayList<>();
         Set<String> kept = new HashSet<>();
         for (ChainDependencyGraph.Node node : graph.nodes() == null ? List.<ChainDependencyGraph.Node>of() : graph.nodes()) {
+            // A finished task blocks nothing - leave it (and its edges) out of the graph.
+            if (DONE_STATUS.equals(node.status())) {
+                continue;
+            }
             TaskDTO task = tasksById.get(node.taskId());
             if (projectId != null && (task == null || !projectId.equals(task.getProjectId()))) {
                 continue;
