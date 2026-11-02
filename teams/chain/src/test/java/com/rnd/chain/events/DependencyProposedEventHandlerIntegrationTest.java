@@ -68,7 +68,8 @@ import static org.mockito.Mockito.mock;
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
 @TestPropertySource(properties = {
-        "chain.kafka.schema-registry-url=mock://dependency-proposed-handler-test"
+        "chain.kafka.schema-registry-url=mock://dependency-proposed-handler-test",
+        "spring.kafka.admin.auto-create=true"
 })
 class DependencyProposedEventHandlerIntegrationTest {
 

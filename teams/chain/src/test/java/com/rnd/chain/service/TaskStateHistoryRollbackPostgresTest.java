@@ -15,7 +15,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import com.rnd.chain.events.SchedulingUpdatePublisher;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
@@ -43,6 +45,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Tag("postgres")
 @SpringBootTest
 class TaskStateHistoryRollbackPostgresTest {
+
+    // Not about Kafka: a mock keeps the afterCommit scheduling publish from blocking on a broker.
+    @MockBean
+    private SchedulingUpdatePublisher schedulingUpdatePublisher;
 
     @org.springframework.beans.factory.annotation.Autowired
     private com.rnd.chain.repository.TaskReadinessRepository taskReadinessRepository;

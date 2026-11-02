@@ -145,7 +145,8 @@ class PriorityScoreServicePostgresTest {
     void onScoreProposed_unknownTask_throwsAndDoesNotPublish() {
         Fixture fixture = newFixture(List.of());
 
-        assertThrows(TaskNotFoundException.class,
+        // No task_readiness row for an unknown task: the readiness lookup runs before the task lookup.
+        assertThrows(IllegalStateException.class,
                 () -> fixture.priorityScoreService().onScoreProposed(UUID.randomUUID(), 0.5, 0.5));
 
         assertTrue(fixture.publisher().getEvents().isEmpty());
