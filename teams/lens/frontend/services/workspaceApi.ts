@@ -36,7 +36,7 @@ export interface ApiTask {
   /**
    * One of 8 canonical statuses: NEW, IN_REVIEW, APPROVED, IN_PROGRESS,
    * SNOOZED, DONE, REJECTED, CANCELLED.
-   * See docs/employee-workspace-api-contract.md §5.0 for status model.
+   * See teams/lens/docs/employee-workspace/employee-workspace-api-contract.md §5.0 for status model.
    */
   status: string;
   /** HIGH/MEDIUM/LOW. Missing when the task has no priority score. */
@@ -172,7 +172,7 @@ export function selectTasks(availableMinutes: number): Promise<TaskSelection> {
  * Note: The backend supports filtering by individual status values
  * (new, in_review, approved, in_progress, snoozed, done, rejected, cancelled)
  * in addition to these common aggregate filters.
- * See docs/employee-workspace-api-contract.md §4.5.
+ * See teams/lens/docs/employee-workspace/employee-workspace-api-contract.md §4.5.
  */
 export type TaskListFilter =
   | 'all'

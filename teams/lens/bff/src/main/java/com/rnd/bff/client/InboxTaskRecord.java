@@ -21,7 +21,7 @@ import java.util.Map;
  * tier, roleContext, extractionProvenance). Status values are one of the 8
  * canonical enums: new, in_review, approved, in_progress, snoozed, done,
  * rejected, cancelled. These are passed through to TaskDTO without
- * simplification or mapping (see docs/employee-workspace-api-contract.md
+ * simplification or mapping (see teams/lens/docs/employee-workspace/employee-workspace-api-contract.md
  * §5.0 for the status model change).
  *
  * owner/project stay plain display strings (not resolved from

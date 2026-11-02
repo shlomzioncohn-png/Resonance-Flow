@@ -32,7 +32,7 @@ import java.util.UUID;
 
 /**
  * Client for Inbox — owns canonical task data (see
- * docs/lens-architecture-design.md).
+ * teams/lens/docs/lens-architecture-design.md).
  *
  * Two modes, switched by inbox.mock-enabled (INBOX_MOCK_ENABLED):
  * - true: an in-memory mock task set, no network calls — so the
@@ -52,7 +52,7 @@ import java.util.UUID;
  * method boundary. TaskDTO carries both the real schema fields and is
  * designed to surface the full 8-value status enum directly, with no
  * simplification or mapping. This ensures the API is a transparent window
- * into the canonical data model (see docs/employee-workspace-api-contract.md
+ * into the canonical data model (see teams/lens/docs/employee-workspace/employee-workspace-api-contract.md
  * §5.0 for the status model change).
  *
  * The mock ignores userId (single mock tenant) — every method still takes it
@@ -681,7 +681,7 @@ public class InboxClient {
                 .title(record.getTitle())
                 .description(record.getDescription())
                 // Status is no longer simplified: pass through all 8 real values directly.
-                // See docs/employee-workspace-api-contract.md §5.0 for the status model change.
+                // See teams/lens/docs/employee-workspace/employee-workspace-api-contract.md §5.0 for the status model change.
                 .status(toUpperCase(record.getStatus()))
                 .priority(toFrontendPriority(record.getPriorityScore()))
                 .effortEstimate(record.getEffortEstimateMinutes())

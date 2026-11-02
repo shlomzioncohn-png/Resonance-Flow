@@ -228,7 +228,7 @@ public class WorkspaceService {
 
     /**
      * Statuses a task can still be worked on in (see
-     * docs/employee-workspace-api-contract.md §5.0). DONE, REJECTED and
+     * teams/lens/docs/employee-workspace/employee-workspace-api-contract.md §5.0). DONE, REJECTED and
      * CANCELLED are closed; SNOOZED is paused on purpose.
      */
     private static final List<String> WORKABLE_STATUSES = List.of("NEW", "IN_REVIEW", "APPROVED", "IN_PROGRESS");

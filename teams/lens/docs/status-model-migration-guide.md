@@ -256,7 +256,7 @@ All statuses can be transitioned:
 
 ## Questions & Support
 
-- **API contract details:** See `docs/employee-workspace-api-contract.md` §5.0 ("Status Model Change")
+- **API contract details:** See [`employee-workspace-api-contract.md`](./employee-workspace/employee-workspace-api-contract.md) §5.0 ("Status Model Change")
 - **Data schema:** See `docs/Inbox_Data_Schema_Specification.md` (Inbox owns the 8-status enum)
 - **Code examples:** See `teams/lens/bff/src/main/java/com/rnd/bff/dto/TaskDTO.java` (javadoc with migration guidance)
 

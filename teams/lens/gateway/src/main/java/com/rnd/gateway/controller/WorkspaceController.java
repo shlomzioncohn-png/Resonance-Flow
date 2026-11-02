@@ -538,7 +538,7 @@ public class WorkspaceController {
      * Response: updated TaskDTO
      */
     @Operation(summary = "Update task status",
-            description = "Allowed values: NEW, IN_REVIEW, APPROVED, IN_PROGRESS, SNOOZED, DONE, REJECTED, CANCELLED. See docs/employee-workspace-api-contract.md §5.0 for status model.")
+            description = "Allowed values: NEW, IN_REVIEW, APPROVED, IN_PROGRESS, SNOOZED, DONE, REJECTED, CANCELLED. See teams/lens/docs/employee-workspace/employee-workspace-api-contract.md §5.0 for status model.")
     @PatchMapping("/tasks/{taskId}/status")
     public ResponseEntity<TaskDTO> updateTaskStatus(
             @PathVariable String taskId,

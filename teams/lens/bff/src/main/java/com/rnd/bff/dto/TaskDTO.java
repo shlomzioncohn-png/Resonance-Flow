@@ -16,7 +16,7 @@ import java.util.Map;
  * of the DTO rather than sharing a library module. See
  * docs/workspace-screen-integration-plan.md.
  *
- * STATUS MODEL CHANGE (see docs/employee-workspace-api-contract.md §5.0):
+ * STATUS MODEL CHANGE (see teams/lens/docs/employee-workspace/employee-workspace-api-contract.md §5.0):
  * This DTO now surfaces the full 8-value status enum directly (NEW, IN_REVIEW,
  * APPROVED, IN_PROGRESS, SNOOZED, DONE, REJECTED, CANCELLED) with no
  * simplification or mapping. The `status` field is the canonical representation;

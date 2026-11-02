@@ -68,7 +68,7 @@ details → block-reason flow (confirmed by repo search).
 2. Follow the existing `LensDataInterface`/adapter pattern
    (`.github/agents/react-lens.agent.md`) rather than calling the BFF shape
    directly from components, and the `loading`/`empty`/`error`/content
-   pattern already used elsewhere (`docs/app-shell-and-routing.md`).
+   pattern already used elsewhere ([`app-shell-and-routing.md`](../../frontend/docs/app-shell-and-routing.md)).
 3. Map `TaskDTO.status` onto the existing `StatusBadge`
    (`healthy | warning | critical | neutral`) tone convention — needs an
    explicit status→tone mapping (e.g. `READY`→neutral, `IN_PROGRESS`→healthy,

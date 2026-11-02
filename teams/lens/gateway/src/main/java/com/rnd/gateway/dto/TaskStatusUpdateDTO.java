@@ -36,7 +36,7 @@ public class TaskStatusUpdateDTO {
     /**
      * New status for the task. Must be one of the 8 canonical values:
      * NEW, IN_REVIEW, APPROVED, IN_PROGRESS, SNOOZED, DONE, REJECTED, CANCELLED.
-     * See docs/employee-workspace-api-contract.md §5.0 for the status model change.
+     * See teams/lens/docs/employee-workspace/employee-workspace-api-contract.md §5.0 for the status model change.
      */
     @NotBlank(message = "status is required")
     @Pattern(

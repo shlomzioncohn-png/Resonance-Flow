@@ -10,7 +10,7 @@
 - **ה-admin היחיד** נכנס עם שם משתמש וסיסמה, ואין לו email. הוא `SYSTEM_ADMIN` ב-Inbox ו-`MANAGER` ב-LENS, ונוצר רק ב-seed של Inbox.
 - **הסיסמאות נשמרות רק ב-Inbox**, כ-bcrypt בטבלה `user_auth_identities` הקיימת. ה-gateway וה-BFF לא שומרים סיסמאות ולא hash.
 - **ה-gateway מנפיק JWT** וחותם עליו ב-RS256. בכל בקשה הוא מאמת את הטוקן בלי לקרוא לאף שירות, ומעביר ל-BFF את `X-User-Id` ואת `X-User-Role`.
-- **ה-gateway מדבר רק עם ה-BFF.** ה-BFF הוא היחיד שפונה ל-Inbox, כמו שמוגדר ב-`docs/lens-architecture-design.md`.
+- **ה-gateway מדבר רק עם ה-BFF.** ה-BFF הוא היחיד שפונה ל-Inbox, כמו שמוגדר ב-[`lens-architecture-design.md`](../lens-architecture-design.md).
 
 
 ## 00. הארכיטקטורה
@@ -105,7 +105,7 @@ FE ──Bearer JWT──▶ Gateway (signature check only, no downstream call) 
 - ה-hash לא יוצא מ-Inbox בשום תגובה. סיסמאות לא נכתבות ללוג באף שירות.
 - הנתיבים הציבוריים לא חושפים מבנה פנימי: המילה inbox לא מופיעה בנתיבים או ב-query params, והערכים של `role` הם רק `MANAGER` ו-`EMPLOYEE`.
 - שגיאות מוחזרות במבנה ה-`ErrorResponse` הקיים של כל שירות.
-- יש לתאם את החפיפה בין `GET /auth/me` לבין `GET /v1/me` מ-`docs/employee-workspace-api-contract.md`.
+- יש לתאם את החפיפה בין `GET /auth/me` לבין `GET /v1/me` מ-[`employee-workspace-api-contract.md`](../employee-workspace/employee-workspace-api-contract.md).
 
 ## 04. Inbox: רישום ובדיקת סיסמה
 

@@ -22,7 +22,7 @@ import PlayArrowOutlinedIcon from '@mui/icons-material/PlayArrowOutlined';
 
 /**
  * Why a task can't be worked on right now - the "Can't do this now" list
- * (docs/employee-ui-design.md §6, docs/employee-workspace-api-contract.md §4.4).
+ * (teams/lens/docs/employee-workspace/employee-ui-design.md §6, teams/lens/docs/employee-workspace/employee-workspace-api-contract.md §4.4).
  */
 export type BlockReason =
   | 'WAITING_FOR_MANAGER_APPROVAL'

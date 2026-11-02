@@ -30,7 +30,7 @@ import java.util.concurrent.Executors;
 
 /**
  * Client for Chain — owns dependency/blocker data and feasibility (see
- * docs/lens-architecture-design.md).
+ * teams/lens/docs/lens-architecture-design.md).
  *
  * - Feasibility: getFeasibility fetches each task's constraints from
  *   GET /tasks/{taskId}/constraints. Dependencies are still always empty -
