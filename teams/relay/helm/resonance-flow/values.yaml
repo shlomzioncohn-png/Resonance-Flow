@@ -471,7 +471,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-frontend"
       pullPolicy: IfNotPresent
-      tag: "9474270"
+      tag: "1cb5a90"
     containerPort: 3000
     service: *defaultService
     resources:
@@ -748,7 +748,6 @@ components:
       bff:
         service:
           url: http://resonance-flow-lens-bff:80
-
   notification-delivery:
     enabled: true
     replicaCount: 1
