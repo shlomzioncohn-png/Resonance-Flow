@@ -119,11 +119,11 @@ inside a team's own folder.
 Some cross-team infra that individual teams' docs/configs already reference does not exist in this
 repo yet. Don't assume it's there — check first:
 
-- The root `docker-compose.yml` runs the shared Postgres (+ pgAdmin), the lens services, and
-  chain, bridge and inbox — but no Kafka. Each team also has its own `docker-compose.yml`.
-- Kafka for local dev currently only exists inside `teams/inbox/docker-compose.yml`
-  (single-node, KRaft mode). Other teams that need a broker (bridge, relay) don't have one wired
-  into their own compose files yet.
+- The root `docker-compose.yml` runs the shared Postgres (+ pgAdmin), the lens services, chain,
+  bridge and inbox, and one shared Kafka broker, schema registry and Kafka UI (issue #1088). Each
+  team also has its own `docker-compose.yml`, with a broker of its own.
+- The registry starts empty and the producers don't auto-register schemas: after it starts, run
+  `docker compose --profile seed run --rm schema-seed` once (again after a registry restart).
 
 ## Team-specific standards
 

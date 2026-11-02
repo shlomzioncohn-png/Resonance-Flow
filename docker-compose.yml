@@ -50,6 +50,7 @@ services:
       - INBOX_MOCK_ENABLED=${INBOX_MOCK_ENABLED:-false}
       - INBOX_SERVICE_URL=http://inbox-service:8080
       - INBOX_DEV_ACTOR_ID=${INBOX_DEV_ACTOR_ID:-ef071a8a-1040-3a27-904a-f6352bad4fea}
+      - CHAIN_SERVICE_URL=http://chain-service:8081
     depends_on:
       - inbox
     healthcheck:
@@ -155,8 +156,12 @@ services:
       - DB_NAME=chain
       - DB_USER=chain
       - DB_PASSWORD=${CHAIN_DB_PASSWORD:-chain}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - SCHEMA_REGISTRY_URL=http://schema-registry:8080/apis/ccompat/v6
     depends_on:
       postgres:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
 
   bridge:
@@ -179,10 +184,14 @@ services:
       - BRIDGE_DB_URL=jdbc:postgresql://postgres:5432/${DB_NAME:-resonance_flow}
       - BRIDGE_DB_USER=${DB_USER:-postgres}
       - BRIDGE_DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - SCHEMA_REGISTRY_URL=http://schema-registry:8080/apis/ccompat/v6
       # Opens the unauthenticated manual sync/run endpoints - on for local runs, off in the cluster.
       - BRIDGE_MANUAL_TRIGGERS_ENABLED=${BRIDGE_MANUAL_TRIGGERS_ENABLED:-true}
     depends_on:
       postgres:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
 
   inbox:
@@ -202,8 +211,80 @@ services:
       - DB_NAME=inbox
       - DB_USER=inbox
       - DB_PASSWORD=${INBOX_DB_PASSWORD:-inbox}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - SCHEMA_REGISTRY_URL=http://schema-registry:8080/apis/ccompat/v6
     depends_on:
       postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  # ========================================
+  # SHARED KAFKA - one broker and one schema registry for chain, bridge and inbox (issue #1088).
+  # Containers use kafka:29092; an IDE on the host uses localhost:${KAFKA_PORT}.
+  # ========================================
+  kafka:
+    image: apache/kafka:4.2.1
+    container_name: resonance-kafka
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    environment:
+      - KAFKA_NODE_ID=1
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:9092
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:${KAFKA_PORT:-9092}
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_LOG_DIRS=/var/lib/kafka/data
+      - CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - resonance-kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  # Canonical hash on, like the cluster's registry. Host port 8083: 8081/8082 are Chain's and Inbox's.
+  schema-registry:
+    image: apicurio/apicurio-registry-mem:2.5.11.Final
+    container_name: resonance-schema-registry
+    environment:
+      - REGISTRY_CCOMPAT_USE_CANONICAL_HASH=true
+    ports:
+      - "${SCHEMA_REGISTRY_PORT:-8083}:8080"
+
+  # Run once after the registry starts (it is in-memory, so again after a restart):
+  #   docker compose --profile seed run --rm schema-seed
+  # The producers don't auto-register schemas, so publishing fails with 40401 on an empty registry.
+  schema-seed:
+    image: maven:3.9.9-eclipse-temurin-21
+    profiles: ["seed"]
+    command: ["bash", "/repo/teams/relay/scripts/seed-local-schemas.sh"]
+    volumes:
+      - .:/repo:ro
+      - schema-seed-m2:/root/.m2
+    depends_on:
+      schema-registry:
+        condition: service_started
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: resonance-kafka-ui
+    ports:
+      - "${KAFKA_UI_PORT:-8090}:8080"
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=resonance-local
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:29092
+      - KAFKA_CLUSTERS_0_SCHEMAREGISTRY=http://schema-registry:8080/apis/ccompat/v6
+    depends_on:
+      kafka:
         condition: service_healthy
 
   # ========================================
@@ -222,3 +303,5 @@ services:
 volumes:
   resonance-postgres-data:
   resonance-pgadmin-data:
+  resonance-kafka-data:
+  schema-seed-m2:
