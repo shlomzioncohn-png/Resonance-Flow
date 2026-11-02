@@ -9,6 +9,7 @@ import {
   bottlenecksGraphErrorHandler,
   bottlenecksGraphHandler,
 } from '@/mocks/handlers';
+import type { Constraint } from '@/services/workspaceApi';
 import ManagerBottlenecksPage from './page';
 
 // GET /api/manager/bottlenecks/graph is real in the app (Chain's graph through
@@ -16,6 +17,18 @@ import ManagerBottlenecksPage from './page';
 // Empty and ServerError swap in the alternative handlers from mocks/handlers.ts.
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080';
+
+const sampleConstraints: Constraint[] = [
+  {
+    constraintId: 'c1',
+    type: 'APPROVAL_NEEDED',
+    status: 'PENDING',
+    reason: { approver: 'Security team', note: 'Token lifetime change' },
+    sourceRef: 'mind:run-42',
+    createdAt: '2026-10-20T09:15:30',
+  },
+  { constraintId: 'c2', type: 'DATE_WINDOW', status: 'SATISFIED', reason: {}, createdAt: '2026-10-21T10:00:00' },
+];
 
 const meta = {
   title: 'Pages/Manager/Bottlenecks',
@@ -44,6 +57,18 @@ const meta = {
         ]),
       ),
       bottlenecksGraphHandler,
+      // The drawer's Constraints block (Chain's constraints through the BFF): the same two for
+      // every task, and a status change answers with the constraint in its new status.
+      http.get(`${API_BASE_URL}/api/manager/tasks/:taskId/constraints`, () =>
+        HttpResponse.json<Constraint[]>(sampleConstraints),
+      ),
+      http.patch(`${API_BASE_URL}/api/manager/tasks/:taskId/constraints/:constraintId`, async ({ params, request }) => {
+        const { status } = (await request.json()) as { status: Constraint['status'] };
+        const constraint = sampleConstraints.find((c) => c.constraintId === params.constraintId);
+        return constraint
+          ? HttpResponse.json<Constraint>({ ...constraint, status })
+          : HttpResponse.json({ message: 'Constraint not found' }, { status: 404 });
+      }),
     );
   },
 } satisfies Meta<typeof ManagerBottlenecksPage>;

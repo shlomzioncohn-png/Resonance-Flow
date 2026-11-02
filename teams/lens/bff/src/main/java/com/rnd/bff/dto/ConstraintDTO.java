@@ -11,11 +11,11 @@ import java.util.Map;
 
 /**
  * One constraint on a task, as Chain returns it from
- * GET /tasks/{taskId}/constraints (com.rnd.chain.dto.Constraint). Read-only
- * in LENS - the BFF never changes a constraint's status.
+ * GET /tasks/{taskId}/constraints and PATCH /tasks/{taskId}/constraints/{constraintId}
+ * (com.rnd.chain.dto.Constraint). Only a manager changes a constraint's status,
+ * from the Bottlenecks screen (TaskConstraintsService).
  *
- * Fields Chain sends that LENS doesn't show (taskId, sourceRef, updatedAt)
- * are ignored.
+ * Fields Chain sends that LENS doesn't show (taskId, updatedAt) are ignored.
  */
 @Data
 @NoArgsConstructor
@@ -36,6 +36,9 @@ public class ConstraintDTO {
 
     /** Free-form details from Chain (flat scalar values). Chain sends {} when there are none. */
     private Map<String, Object> reason;
+
+    /** Where the constraint came from, as Chain sends it. May be null. */
+    private String sourceRef;
 
     /** As Chain sends it (ISO local date-time, e.g. "2026-10-20T09:15:30"). */
     private String createdAt;

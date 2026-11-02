@@ -1,19 +1,26 @@
 package com.rnd.gateway.controller;
 
+import com.rnd.gateway.dto.ConstraintDTO;
+import com.rnd.gateway.dto.ConstraintStatusUpdateDTO;
 import com.rnd.gateway.dto.DependencyGraphDTO;
 import com.rnd.gateway.dto.ManagerProjectDTO;
 import com.rnd.gateway.exception.GatewayTimeoutException;
 import com.rnd.gateway.exception.ServiceUnavailableException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -29,7 +36,7 @@ import java.util.List;
 
 /**
  * Manager Dashboard Gateway Controller
- * Routes all-projects and Bottlenecks dependency-graph requests to BFF.
+ * Routes all-projects, Bottlenecks dependency-graph and task-constraint requests to BFF.
  */
 @RestController
 @RequestMapping("/api/manager")
@@ -82,17 +89,70 @@ public class ManagerController {
         return ResponseEntity.ok(graph);
     }
 
-    /** GET from BFF as the acting manager, with the same error mapping for every manager screen. */
+    @Operation(summary = "Task constraints",
+            description = "The Bottlenecks screen's task drawer: Chain's constraints of one task in the manager's tenant. "
+                    + "404 when the task isn't in the tenant.")
+    @GetMapping("/tasks/{taskId}/constraints")
+    public ResponseEntity<List<ConstraintDTO>> getTaskConstraints(@PathVariable String taskId) {
+        logger.info("Task constraints request - taskId: {}", taskId);
+
+        URI bffUrl = UriComponentsBuilder.fromHttpUrl(bffServiceUrl)
+                .path("/manager/tasks/{taskId}/constraints")
+                .buildAndExpand(taskId)
+                .encode()
+                .toUri();
+        ConstraintDTO[] constraints = forward(bffUrl, ConstraintDTO[].class, "task constraints");
+
+        logger.info("Received task constraints from BFF - taskId: {}, count: {}", taskId, constraints.length);
+        return ResponseEntity.ok(List.of(constraints));
+    }
+
+    @Operation(summary = "Update constraint status",
+            description = "Sets a constraint to PENDING, SATISFIED or WAIVED. 400 for any other status. "
+                    + "404 when the task isn't in the tenant or the constraint doesn't exist on it.")
+    @PatchMapping("/tasks/{taskId}/constraints/{constraintId}")
+    public ResponseEntity<ConstraintDTO> updateConstraintStatus(
+            @PathVariable String taskId,
+            @PathVariable String constraintId,
+            @Valid @RequestBody ConstraintStatusUpdateDTO body) {
+        logger.info("Constraint status update request - taskId: {}, constraintId: {}, newStatus: {}",
+                taskId, constraintId, body.getStatus());
+
+        URI bffUrl = UriComponentsBuilder.fromHttpUrl(bffServiceUrl)
+                .path("/manager/tasks/{taskId}/constraints/{constraintId}")
+                .buildAndExpand(taskId, constraintId)
+                .encode()
+                .toUri();
+        ConstraintDTO updated = forward(HttpMethod.PATCH, bffUrl, body, ConstraintDTO.class, "constraint status update");
+
+        logger.info("Constraint status updated - taskId: {}, constraintId: {}, status: {}",
+                taskId, constraintId, updated.getStatus());
+        return ResponseEntity.ok(updated);
+    }
+
+    /** GET from BFF as the acting manager. */
     private <T> T forward(URI bffUrl, Class<T> type, String what) {
+        return forward(HttpMethod.GET, bffUrl, null, type, what);
+    }
+
+    /**
+     * Calls BFF as the acting manager, with the same error mapping for every manager screen.
+     *
+     * @param requestBody sent as JSON; null for a request without a body (GET)
+     */
+    private <T> T forward(HttpMethod method, URI bffUrl, Object requestBody, Class<T> type, String what) {
         try {
-            logger.debug("Forwarding to BFF: {}", bffUrl);
+            logger.debug("Forwarding to BFF: {} {}", method, bffUrl);
 
             // BFF reads the user's tenant and tasks from Inbox. Mock identity, same as
             // ManagerDashboardController (TODO Auth stage 2).
             HttpHeaders headers = new HttpHeaders();
             headers.set("X-User-Id", "mgr_001");
             headers.set("X-User-Role", "MANAGER");
-            T body = restTemplate.exchange(bffUrl, HttpMethod.GET, new HttpEntity<>(headers), type).getBody();
+            if (requestBody != null) {
+                headers.setContentType(MediaType.APPLICATION_JSON);
+            }
+            T body = restTemplate.exchange(bffUrl, method, new HttpEntity<>(requestBody, headers), type).getBody();
             if (body == null) {
                 throw new ServiceUnavailableException("bff", "BFF returned empty response");
             }

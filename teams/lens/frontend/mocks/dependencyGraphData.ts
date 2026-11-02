@@ -19,6 +19,8 @@ type SeedTask = {
   status: GraphTaskStatus;
   /** The BFF's mock project id (p1-p8), so the project filter has something to filter. */
   projectId: string;
+  /** Open (PENDING) constraints; they block the task too. Default 0. */
+  openConstraints?: number;
 };
 
 type SeedEdge = [source: string, target: string, confidence: number];
@@ -47,8 +49,12 @@ function buildGraph(tasks: SeedTask[], seedEdges: SeedEdge[]): DependencyGraph {
     id: task.id,
     title: task.title,
     status: task.status,
-    isBlocked: edges.some((edge) => edge.target === task.id && statusOf.get(edge.source) !== 'DONE'),
+    // Same rule as Chain's isReady: an unfinished dependency or an open constraint.
+    isBlocked:
+      (task.openConstraints ?? 0) > 0 ||
+      edges.some((edge) => edge.target === task.id && statusOf.get(edge.source) !== 'DONE'),
     blocksCount: dependentsOf(task.id, blocks).size,
+    openConstraintCount: task.openConstraints ?? 0,
   }));
   return { nodes, edges };
 }
@@ -57,7 +63,7 @@ const id = (n: number) => `5f3c2a10-8d4e-4b7a-9c61-0000000000${String(n).padStar
 
 const SAMPLE_TASKS: SeedTask[] = [
   { id: id(1), title: 'Finalize auth token service', status: 'ACTIVE', projectId: 'p3' },
-  { id: id(2), title: 'Migrate login screen', status: 'PENDING', projectId: 'p3' },
+  { id: id(2), title: 'Migrate login screen', status: 'PENDING', projectId: 'p3', openConstraints: 2 },
   { id: id(3), title: 'Session refresh API', status: 'PENDING', projectId: 'p3' },
   { id: id(4), title: 'SSO for partners', status: 'PENDING', projectId: 'p7' },
   { id: id(5), title: 'Onboarding flow v2', status: 'PENDING', projectId: 'p3' },

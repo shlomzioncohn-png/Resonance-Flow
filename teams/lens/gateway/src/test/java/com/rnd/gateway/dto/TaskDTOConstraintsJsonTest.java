@@ -19,9 +19,10 @@ class TaskDTOConstraintsJsonTest {
             {"id":"task_002","title":"Update customer proposal","openConstraintCount":1,
              "constraints":[
                {"constraintId":"c1","type":"APPROVAL_NEEDED","status":"PENDING",
-                "reason":{"note":"Legal sign-off","attempt":2},"createdAt":"2026-10-20T09:15:30"},
+                "reason":{"note":"Legal sign-off","attempt":2},"sourceRef":"mind:run-42",
+                "createdAt":"2026-10-20T09:15:30"},
                {"constraintId":"c2","type":"DATE_WINDOW","status":"WAIVED","reason":{},
-                "createdAt":"2026-10-21T10:00:00"}
+                "sourceRef":null,"createdAt":"2026-10-21T10:00:00"}
              ]}
             """;
 
@@ -36,6 +37,7 @@ class TaskDTOConstraintsJsonTest {
         assertThat(first.getType()).isEqualTo("APPROVAL_NEEDED");
         assertThat(first.getStatus()).isEqualTo("PENDING");
         assertThat(first.getReason()).containsEntry("note", "Legal sign-off").containsEntry("attempt", 2);
+        assertThat(first.getSourceRef()).isEqualTo("mind:run-42");
         assertThat(first.getCreatedAt()).isEqualTo("2026-10-20T09:15:30");
 
         JsonNode expected = mapper.readTree(BFF_JSON);

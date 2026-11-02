@@ -2,6 +2,7 @@ package com.rnd.bff.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -16,6 +17,7 @@ import com.rnd.bff.dto.TaskDependenciesDTO;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
@@ -229,6 +231,87 @@ class ChainClientTest {
             // Chain doesn't send it yet
             assertThat(edge.confidence()).isNull();
         });
+    }
+
+    @Test
+    void getConstraintsReturnsChainsConstraintsWithTheTenantHeader() {
+        chain.expect(requestTo(CHAIN + "/tasks/" + TASK + "/constraints"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("X-Tenant-Id", TENANT))
+                .andRespond(withSuccess("""
+                        [{"constraintId":"c1","taskId":"%s","type":"APPROVAL_NEEDED","status":"PENDING",
+                          "reason":{"approver":"Security team"},"sourceRef":"mind:run-42",
+                          "createdAt":"2026-10-20T09:15:30","updatedAt":"2026-10-20T09:15:30"}]
+                        """.formatted(TASK), MediaType.APPLICATION_JSON));
+
+        Optional<List<ConstraintDTO>> result = client.getConstraints(TASK, TENANT);
+
+        chain.verify();
+        assertThat(result).hasValueSatisfying(constraints -> assertThat(constraints).singleElement()
+                .satisfies(c -> {
+                    assertThat(c.getConstraintId()).isEqualTo("c1");
+                    assertThat(c.getType()).isEqualTo("APPROVAL_NEEDED");
+                    assertThat(c.getStatus()).isEqualTo("PENDING");
+                    assertThat(c.getReason()).containsEntry("approver", "Security team");
+                    assertThat(c.getSourceRef()).isEqualTo("mind:run-42");
+                    assertThat(c.getCreatedAt()).isEqualTo("2026-10-20T09:15:30");
+                }));
+    }
+
+    @Test
+    void getConstraintsNotFoundIsEmpty() {
+        // Chain answers 404 both for "not in this tenant" and "doesn't exist".
+        chain.expect(requestTo(CHAIN + "/tasks/" + TASK + "/constraints")).andRespond(withResourceNotFound());
+
+        assertThat(client.getConstraints(TASK, TENANT)).isEmpty();
+    }
+
+    @Test
+    void getConstraintsServerErrorIsAnError() {
+        chain.expect(requestTo(CHAIN + "/tasks/" + TASK + "/constraints")).andRespond(withServerError());
+
+        assertThatThrownBy(() -> client.getConstraints(TASK, TENANT))
+                .isInstanceOf(HttpServerErrorException.class);
+    }
+
+    @Test
+    void updateConstraintStatusPatchesTheStatusWithTheTenantHeader() {
+        chain.expect(requestTo(CHAIN + "/tasks/" + TASK + "/constraints/c1"))
+                .andExpect(method(HttpMethod.PATCH))
+                .andExpect(header("X-Tenant-Id", TENANT))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(content().json("{\"status\":\"SATISFIED\"}", true))
+                .andRespond(withSuccess("""
+                        {"constraintId":"c1","taskId":"%s","type":"APPROVAL_NEEDED","status":"SATISFIED",
+                         "reason":{},"sourceRef":null,"createdAt":"2026-10-20T09:15:30","updatedAt":"2026-10-29T12:00:00"}
+                        """.formatted(TASK), MediaType.APPLICATION_JSON));
+
+        Optional<ConstraintDTO> result = client.updateConstraintStatus(TASK, "c1", "SATISFIED", TENANT);
+
+        chain.verify();
+        assertThat(result).hasValueSatisfying(c -> {
+            assertThat(c.getConstraintId()).isEqualTo("c1");
+            assertThat(c.getStatus()).isEqualTo("SATISFIED");
+        });
+    }
+
+    @Test
+    void updateConstraintStatusNotFoundIsEmpty() {
+        // A task outside the tenant and a constraint that isn't on the task both answer 404.
+        chain.expect(requestTo(CHAIN + "/tasks/" + TASK + "/constraints/missing"))
+                .andExpect(method(HttpMethod.PATCH))
+                .andRespond(withResourceNotFound());
+
+        assertThat(client.updateConstraintStatus(TASK, "missing", "WAIVED", TENANT)).isEmpty();
+    }
+
+    @Test
+    void updateConstraintStatusBadRequestIsAnError() {
+        // e.g. a task id that isn't a UUID - a real failure, not "not found".
+        chain.expect(requestTo(CHAIN + "/tasks/" + TASK + "/constraints/c1")).andRespond(withBadRequest());
+
+        assertThatThrownBy(() -> client.updateConstraintStatus(TASK, "c1", "PENDING", TENANT))
+                .isInstanceOf(HttpClientErrorException.BadRequest.class);
     }
 
     @Test

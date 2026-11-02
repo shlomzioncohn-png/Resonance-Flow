@@ -1,5 +1,7 @@
 package com.rnd.bff.client;
 
+import com.rnd.bff.dto.ConstraintDTO;
+import com.rnd.bff.dto.ConstraintStatusUpdateDTO;
 import com.rnd.bff.dto.ChainFlowHealthFlagDTO;
 import com.rnd.bff.dto.ChainFlowHealthPageDTO;
 import com.rnd.bff.dto.TaskDependenciesDTO;
@@ -13,6 +15,7 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
@@ -24,6 +27,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -41,6 +45,8 @@ import java.util.concurrent.Executors;
  *   and 404 for a task that isn't in that tenant (or doesn't exist).
  * - Dependency graph (the manager's Bottlenecks screen): real call to
  *   GET /tenants/{tenantId}/dependency-graph.
+ * - One task's constraints (the Bottlenecks screen's task drawer): real calls to
+ *   GET /tasks/{taskId}/constraints and PATCH /tasks/{taskId}/constraints/{constraintId}.
  * - Flow-health flags (the manager's Flow health screen): real, read-only call to
  *   GET /flow-health/flags.
  */
@@ -114,21 +120,76 @@ public class ChainClient {
     }
 
     private List<ConstraintDTO> getConstraintsOrEmpty(String tenantId, String taskId) {
-        URI uri = UriComponentsBuilder.fromHttpUrl(chainServiceUrl)
-                .path("/tasks/{taskId}/constraints")
-                .buildAndExpand(taskId)
-                .encode()
-                .toUri();
         try {
-            List<ConstraintDTO> constraints = restTemplate.exchange(
-                    uri, HttpMethod.GET, new HttpEntity<>(tenantHeaders(tenantId)),
-                    new ParameterizedTypeReference<List<ConstraintDTO>>() { })
-                    .getBody();
-            return constraints == null ? List.of() : constraints;
+            return getConstraints(taskId, tenantId).orElseGet(() -> {
+                logger.warn("Chain has no task {} in this tenant - showing no constraints", taskId);
+                return List.of();
+            });
         } catch (RuntimeException ex) {
             logger.warn("Chain constraints unavailable for task {} - showing none: {}", taskId, ex.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * One task's constraints, from GET /tasks/{taskId}/constraints.
+     *
+     * @return empty when Chain answers 404 (the task isn't in this tenant, or doesn't
+     *         exist). Any other failure (4xx, 5xx, Chain unreachable) is thrown as is.
+     */
+    public Optional<List<ConstraintDTO>> getConstraints(String taskId, String tenantId) {
+        try {
+            List<ConstraintDTO> constraints = restTemplate.exchange(
+                    constraintsUri(taskId), HttpMethod.GET, new HttpEntity<>(tenantHeaders(tenantId)),
+                    new ParameterizedTypeReference<List<ConstraintDTO>>() { })
+                    .getBody();
+            return Optional.of(constraints == null ? List.of() : constraints);
+        } catch (HttpClientErrorException.NotFound ex) {
+            // Chain doesn't tell "not in your tenant" from "doesn't exist" - either way, not found.
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Sets one constraint's status via PATCH /tasks/{taskId}/constraints/{constraintId}
+     * with body {"status": ...}.
+     *
+     * @param status PENDING, SATISFIED or WAIVED
+     * @return the constraint as Chain saved it; empty when Chain answers 404 (the task
+     *         isn't in this tenant, or the constraint doesn't exist on that task). Any
+     *         other failure is thrown as is.
+     */
+    public Optional<ConstraintDTO> updateConstraintStatus(String taskId, String constraintId,
+                                                          String status, String tenantId) {
+        URI uri = UriComponentsBuilder.fromHttpUrl(chainServiceUrl)
+                .path("/tasks/{taskId}/constraints/{constraintId}")
+                .buildAndExpand(taskId, constraintId)
+                .encode()
+                .toUri();
+        HttpHeaders headers = tenantHeaders(tenantId);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        try {
+            ConstraintDTO updated = restTemplate.exchange(
+                    uri, HttpMethod.PATCH,
+                    new HttpEntity<>(new ConstraintStatusUpdateDTO(status), headers),
+                    ConstraintDTO.class).getBody();
+            if (updated == null) {
+                // Chain always answers the PATCH with the constraint - no body is a broken response.
+                throw new IllegalStateException("Chain returned no constraint for " + constraintId);
+            }
+            return Optional.of(updated);
+        } catch (HttpClientErrorException.NotFound ex) {
+            // Same as getConstraints: a task outside the tenant and a missing constraint both answer 404.
+            return Optional.empty();
+        }
+    }
+
+    private URI constraintsUri(String taskId) {
+        return UriComponentsBuilder.fromHttpUrl(chainServiceUrl)
+                .path("/tasks/{taskId}/constraints")
+                .buildAndExpand(taskId)
+                .encode()
+                .toUri();
     }
 
     /** X-Tenant-Id only - Chain requires it and reads no other identity header. */

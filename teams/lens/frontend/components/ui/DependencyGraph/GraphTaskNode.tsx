@@ -9,6 +9,7 @@ import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
 import StatusBadge from '@/components/ui/StatusBadge';
 import type { GraphNode } from '@/services/bottlenecksApi';
+import OpenConstraintsChip from './OpenConstraintsChip';
 import { NODE_HEIGHT, NODE_WIDTH } from './layout';
 import { TASK_STATUS_BADGE, type BlockerLevel } from './taskStatus';
 
@@ -24,7 +25,7 @@ export type GraphTaskFlowNode = Node<GraphTaskNodeData, 'task'>;
 const hiddenHandle = { opacity: 0, pointerEvents: 'none' } as const;
 
 /**
- * One task in the graph: title, status, and how many tasks it blocks. The
+ * One task in the graph: title, status, open constraints, and how many tasks it blocks. The
  * wrapping React Flow node carries the aria-label (see DependencyGraph), so
  * the visible content is hidden from screen readers to avoid reading it twice.
  */
@@ -76,9 +77,10 @@ function GraphTaskNode({ data }: NodeProps<GraphTaskFlowNode>) {
           </Typography>
         </Stack>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
-          <Stack direction="row" spacing={0.5}>
+          <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.5 }}>
             <StatusBadge status={status.tone} label={status.label} />
             {task.isBlocked && <StatusBadge status="warning" label="Blocked" />}
+            <OpenConstraintsChip count={task.openConstraintCount} />
           </Stack>
           <Typography
             variant="caption"

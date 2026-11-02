@@ -42,5 +42,16 @@ describe('query keys', () => {
     it('builds a graph key with project', () => {
       expect(bottleneckKeys.graph('P-123')).toEqual(['manager', 'bottlenecks', 'graph', 'P-123']);
     });
+
+    // A constraint change invalidates graphs() - it must reach every project's graph.
+    it.each([undefined, 'P-123'])('graph(%s) starts with graphs()', (projectId) => {
+      const graphs = bottleneckKeys.graphs();
+      expect(bottleneckKeys.graph(projectId).slice(0, graphs.length)).toEqual(graphs);
+    });
+
+    it("doesn't put a task's constraints under graphs()", () => {
+      const graphs = bottleneckKeys.graphs();
+      expect(bottleneckKeys.constraints('t-1').slice(0, graphs.length)).not.toEqual(graphs);
+    });
   });
 });

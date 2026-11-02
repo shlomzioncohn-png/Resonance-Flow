@@ -14,10 +14,12 @@ export type GraphNode = {
   id: string;
   title: string;
   status: GraphTaskStatus;
-  /** True when at least one task this one depends on isn't done yet. */
+  /** True when Chain says the task isn't ready: a task it depends on isn't done yet, or it has an open constraint. */
   isBlocked: boolean;
   /** How many tasks depend on this one, directly or indirectly. */
   blocksCount: number;
+  /** How many of its constraints are still open (PENDING). Missing from an older BFF. */
+  openConstraintCount?: number;
 };
 
 /** `source` blocks `target`: the edge points from the blocker to the task it blocks. */

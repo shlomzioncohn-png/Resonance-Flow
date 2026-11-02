@@ -9,7 +9,8 @@ import java.util.Map;
 
 /**
  * One constraint on a task (from Chain, via the BFF). Mirrors
- * com.rnd.bff.dto.ConstraintDTO field-for-field. Read-only in LENS.
+ * com.rnd.bff.dto.ConstraintDTO field-for-field. Only a manager changes a
+ * constraint's status, via PATCH /api/manager/tasks/{taskId}/constraints/{constraintId}.
  */
 @Data
 @NoArgsConstructor
@@ -27,6 +28,9 @@ public class ConstraintDTO {
 
     /** Free-form details from Chain (flat scalar values). */
     private Map<String, Object> reason;
+
+    /** Where the constraint came from, as Chain sends it. May be null. */
+    private String sourceRef;
 
     /** ISO local date-time, e.g. "2026-10-20T09:15:30". */
     private String createdAt;

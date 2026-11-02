@@ -1,8 +1,8 @@
 import { Graph, layout } from '@dagrejs/dagre';
 import type { DependencyGraph, GraphNode } from '@/services/bottlenecksApi';
 
-export const NODE_WIDTH = 260;
-export const NODE_HEIGHT = 96;
+export const NODE_WIDTH = 290;
+export const NODE_HEIGHT = 110;
 
 /**
  * The `limit` nodes that block the most tasks (ties keep the server's order),

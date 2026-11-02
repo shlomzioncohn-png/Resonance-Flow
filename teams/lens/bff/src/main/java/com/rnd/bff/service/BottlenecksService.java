@@ -3,6 +3,7 @@ package com.rnd.bff.service;
 import com.rnd.bff.client.ChainClient;
 import com.rnd.bff.client.ChainDependencyGraph;
 import com.rnd.bff.client.InboxClient;
+import com.rnd.bff.dto.ConstraintDTO;
 import com.rnd.bff.dto.DependencyGraphDTO;
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.exception.InboxRejectedException;
@@ -29,6 +30,14 @@ import java.util.Set;
  *   out when filtering by project.
  * - blocksCount is Chain's count over the whole tenant, so with a project
  *   filter it can count tasks of other projects too - they're still waiting.
+ * - isBlocked is Chain's "not ready": an unfinished dependency or an open
+ *   (PENDING) constraint. Marking the last constraint satisfied or waived
+ *   clears it, once nothing else blocks the task.
+ * - openConstraintCount: Chain's graph doesn't send it, so each task that isn't
+ *   ready gets one constraints call (in parallel, see ChainClient.getFeasibility).
+ *   Ask Chain to add it to the graph node, then drop those calls.
+ * - DONE tasks are left out, with their edges: Chain's graph still returns them,
+ *   but a finished task isn't a bottleneck.
  * - Chain doesn't send an edge's confidence yet: an edge without one is 1.0,
  *   the same default Chain itself uses for edges that didn't come from Mind.
  */
@@ -39,6 +48,7 @@ public class BottlenecksService {
 
     static final String UNKNOWN_TASK_TITLE = "Unknown task";
     static final double DEFAULT_CONFIDENCE = 1.0;
+    static final String DONE_STATUS = "DONE";
 
     private final ChainClient chainClient;
     private final InboxClient inboxClient;
@@ -72,7 +82,7 @@ public class BottlenecksService {
             throw new ServiceUnavailableException("inbox", "Inbox is unavailable", ex);
         }
 
-        DependencyGraphDTO result = toGraph(graph, tasks, projectId);
+        DependencyGraphDTO result = toGraph(graph, tasks, projectId, openConstraintCounts(tenantId, graph));
         if (graph.hasMore()) {
             logger.warn("Tenant {} has more than {} tasks in Chain - the graph shows the top ones only",
                     tenantId, result.nodes().size());
@@ -82,8 +92,33 @@ public class BottlenecksService {
         return result;
     }
 
-    /** The mapping itself, separate from fetching so it can be tested on its own. */
+    /**
+     * Open (PENDING) constraints per task. Chain's graph doesn't carry the count, so it's
+     * fetched per task - only for tasks that aren't ready, since a ready task has none open.
+     * A task whose call fails counts 0 (ChainClient logs it); the graph still shows.
+     */
+    private Map<String, Integer> openConstraintCounts(String tenantId, ChainDependencyGraph graph) {
+        List<String> notReady = graph.nodes() == null ? List.of() : graph.nodes().stream()
+                .filter(node -> !node.isReady())
+                .map(ChainDependencyGraph.Node::taskId)
+                .toList();
+        if (notReady.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Integer> counts = new HashMap<>();
+        chainClient.getFeasibility(tenantId, notReady).forEach((taskId, feasibility) ->
+                counts.put(taskId, ConstraintDTO.countOpen(feasibility.getConstraints())));
+        return counts;
+    }
+
+    /** toGraph without constraint counts (every task 0). */
     static DependencyGraphDTO toGraph(ChainDependencyGraph graph, List<TaskDTO> tasks, String projectId) {
+        return toGraph(graph, tasks, projectId, Map.of());
+    }
+
+    /** The mapping itself, separate from fetching so it can be tested on its own. */
+    static DependencyGraphDTO toGraph(ChainDependencyGraph graph, List<TaskDTO> tasks, String projectId,
+                                      Map<String, Integer> openConstraintCounts) {
         if (projectId != null && projectId.isBlank()) {
             projectId = null;
         }
@@ -97,13 +132,19 @@ public class BottlenecksService {
         List<DependencyGraphDTO.Node> nodes = new ArrayList<>();
         Set<String> kept = new HashSet<>();
         for (ChainDependencyGraph.Node node : graph.nodes() == null ? List.<ChainDependencyGraph.Node>of() : graph.nodes()) {
+            // A finished task blocks nothing - leave it (and its edges) out of the graph.
+            if (DONE_STATUS.equals(node.status())) {
+                continue;
+            }
             TaskDTO task = tasksById.get(node.taskId());
             if (projectId != null && (task == null || !projectId.equals(task.getProjectId()))) {
                 continue;
             }
             String title = task != null && task.getTitle() != null ? task.getTitle() : UNKNOWN_TASK_TITLE;
+            // Chain's isReady counts both unfinished dependencies and open (PENDING) constraints.
             nodes.add(new DependencyGraphDTO.Node(node.taskId(), title, node.status(),
-                    node.blockingCount() > 0, node.transitiveDependentsCount()));
+                    !node.isReady(), node.transitiveDependentsCount(),
+                    openConstraintCounts.getOrDefault(node.taskId(), 0)));
             kept.add(node.taskId());
         }
 

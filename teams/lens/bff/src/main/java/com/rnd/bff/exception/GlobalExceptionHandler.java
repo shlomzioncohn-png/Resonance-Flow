@@ -171,6 +171,19 @@ public class GlobalExceptionHandler {
                 HttpStatus.NOT_FOUND);
     }
 
+    /** Triggered when Chain has no such constraint on the task, or the task isn't in the user's tenant. */
+    @ExceptionHandler(ConstraintNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleConstraintNotFoundException(
+            ConstraintNotFoundException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Constraint not found - Path: {}, taskId: {}, constraintId: {}",
+                path, ex.getTaskId(), ex.getConstraintId());
+
+        return new ResponseEntity<>(
+                new ErrorResponse("NOT_FOUND", "Constraint not found", path, ex.getMessage()),
+                HttpStatus.NOT_FOUND);
+    }
+
     /**
      * A real 4xx response Inbox itself returned (404/409/400/403) for the
      * admin Users screen — see InboxResponseException's javadoc. Status and

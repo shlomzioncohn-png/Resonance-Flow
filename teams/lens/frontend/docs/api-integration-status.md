@@ -44,6 +44,13 @@ still mocked inside the BFF.
     send an edge's confidence yet, so every edge is 1.0 for now. The stories answer it with
     `bottlenecksGraphHandler` (sample data in `mocks/dependencyGraphData.ts`),
     `bottlenecksGraphEmptyHandler` and `bottlenecksGraphErrorHandler`.
+  - `GET /manager/tasks/{taskId}/constraints` and
+    `PATCH /manager/tasks/{taskId}/constraints/{constraintId}` (`{ "status": "PENDING" | "SATISFIED" | "WAIVED" }`)
+    — real: Chain's `GET /tasks/{taskId}/constraints` and
+    `PATCH /tasks/{taskId}/constraints/{constraintId}` for the user's tenant. The Bottlenecks
+    screen's task drawer shows them and lets the manager mark one satisfied, waive it or
+    reopen it. 404 when the task isn't in the tenant or the constraint doesn't exist; 503
+    when Chain fails. The Bottlenecks stories answer both inline.
 - **Frontend**: every screen calls the Gateway through `services/*Api.ts`. MSW was
   removed on 2026-10-06, when the mock data moved into the BFF, and brought back on
   2026-10-14 for:

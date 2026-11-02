@@ -165,8 +165,8 @@ class GatewayRoutingIntegrationTest {
         task.setTitle("Update customer proposal");
         task.setConstraints(List.of(
                 new ConstraintDTO("c1", "APPROVAL_NEEDED", "PENDING",
-                        Map.of("note", "Legal sign-off"), "2026-10-20T09:15:30"),
-                new ConstraintDTO("c2", "DATE_WINDOW", "SATISFIED", Map.of(), "2026-10-21T10:00:00")));
+                        Map.of("note", "Legal sign-off"), null, "2026-10-20T09:15:30"),
+                new ConstraintDTO("c2", "DATE_WINDOW", "SATISFIED", Map.of(), null, "2026-10-21T10:00:00")));
         task.setOpenConstraintCount(1);
         return task;
     }

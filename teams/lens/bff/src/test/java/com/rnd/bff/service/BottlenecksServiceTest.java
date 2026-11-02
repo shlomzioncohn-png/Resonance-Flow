@@ -2,17 +2,21 @@ package com.rnd.bff.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.rnd.bff.client.ChainClient;
 import com.rnd.bff.client.ChainDependencyGraph;
 import com.rnd.bff.client.InboxClient;
+import com.rnd.bff.dto.ConstraintDTO;
 import com.rnd.bff.dto.DependencyGraphDTO;
 import com.rnd.bff.dto.TaskDTO;
+import com.rnd.bff.dto.TaskDependenciesDTO;
 import com.rnd.bff.exception.InboxRejectedException;
 import com.rnd.bff.exception.ServiceUnavailableException;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -63,10 +67,10 @@ class BottlenecksServiceTest {
         DependencyGraphDTO graph = BottlenecksService.toGraph(GRAPH, TASKS, null);
 
         assertThat(graph.nodes()).containsExactly(
-                new DependencyGraphDTO.Node("ci", "Set up CI", "ACTIVE", false, 3),
-                new DependencyGraphDTO.Node("api", "Build the API", "PENDING", true, 1),
-                new DependencyGraphDTO.Node("ui", "Build the UI", "PENDING", true, 0),
-                new DependencyGraphDTO.Node("docs", "Write the docs", "PENDING", true, 0));
+                new DependencyGraphDTO.Node("ci", "Set up CI", "ACTIVE", false, 3, 0),
+                new DependencyGraphDTO.Node("api", "Build the API", "PENDING", true, 1, 0),
+                new DependencyGraphDTO.Node("ui", "Build the UI", "PENDING", true, 0, 0),
+                new DependencyGraphDTO.Node("docs", "Write the docs", "PENDING", true, 0, 0));
         // The edge points from the blocker to the task it blocks.
         assertThat(graph.edges()).containsExactly(
                 new DependencyGraphDTO.Edge("ci", "api", 1.0),
@@ -82,6 +86,19 @@ class BottlenecksServiceTest {
         // ci still blocks docs (p-2) too, so its count stays Chain's tenant-wide 3.
         assertThat(graph.nodes().get(0).blocksCount()).isEqualTo(3);
         assertThat(graph.edges()).extracting(DependencyGraphDTO.Edge::target).containsExactly("api", "ui");
+    }
+
+    @Test
+    void isBlockedFollowsChainsReadiness_soAnOpenConstraintBlocksAndClosingItUnblocks() {
+        // No unfinished dependency, but not ready: an open (PENDING) constraint.
+        ChainDependencyGraph withOpenConstraint = new ChainDependencyGraph(
+                List.of(new ChainDependencyGraph.Node("ci", "ACTIVE", false, 0, 0, null)), List.of(), false);
+        // The constraint was satisfied or waived: ready again.
+        ChainDependencyGraph constraintClosed = new ChainDependencyGraph(
+                List.of(new ChainDependencyGraph.Node("ci", "ACTIVE", true, 0, 0, null)), List.of(), false);
+
+        assertThat(BottlenecksService.toGraph(withOpenConstraint, TASKS, null).nodes().get(0).isBlocked()).isTrue();
+        assertThat(BottlenecksService.toGraph(constraintClosed, TASKS, null).nodes().get(0).isBlocked()).isFalse();
     }
 
     @Test
@@ -115,6 +132,25 @@ class BottlenecksServiceTest {
 
         assertThat(service.getGraph(USER, null).nodes()).hasSize(4);
         verify(chainClient).getDependencyGraph(TENANT);
+    }
+
+    @Test
+    void countsOpenConstraintsOnlyForTasksThatArentReady() {
+        when(tenantResolver.tenantOf(USER)).thenReturn(TENANT);
+        when(chainClient.getDependencyGraph(TENANT)).thenReturn(GRAPH);
+        when(inboxClient.getTenantTasks(USER)).thenReturn(TASKS);
+        // ci is ready, so it isn't asked about.
+        when(chainClient.getFeasibility(TENANT, List.of("api", "ui", "docs"))).thenReturn(Map.of(
+                "api", new TaskDependenciesDTO(List.of(), List.of(
+                        ConstraintDTO.builder().constraintId("c1").status("PENDING").build(),
+                        ConstraintDTO.builder().constraintId("c2").status("PENDING").build(),
+                        ConstraintDTO.builder().constraintId("c3").status("SATISFIED").build())),
+                "ui", new TaskDependenciesDTO(List.of(), List.of()),
+                "docs", new TaskDependenciesDTO(List.of(), List.of())));
+
+        assertThat(service.getGraph(USER, null).nodes())
+                .extracting(DependencyGraphDTO.Node::id, DependencyGraphDTO.Node::openConstraintCount)
+                .containsExactly(tuple("ci", 0), tuple("api", 2), tuple("ui", 0), tuple("docs", 0));
     }
 
     @Test

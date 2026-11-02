@@ -4,7 +4,7 @@
  * same as services/workspaceApi.ts.
  */
 import { api } from './api';
-import type { ApiTask } from './workspaceApi';
+import type { ApiTask, Constraint, ConstraintStatus } from './workspaceApi';
 
 /**
  * The Manager Dashboard's KPI tiles, for the manager's whole tenant. Real data:
@@ -67,4 +67,29 @@ export type ManagerTaskView = 'in-progress' | 'blocked-delayed';
 /** The tenant's tasks for one screen, soonest deadline first. */
 export function getManagerTasks(view: ManagerTaskView): Promise<ApiTask[]> {
   return api.get<ApiTask[]>(`/api/manager/dashboard/tasks/${view}`);
+}
+
+function constraintsPath(taskId: string): string {
+  return `/api/manager/tasks/${encodeURIComponent(taskId)}/constraints`;
+}
+
+/**
+ * One task's constraints from Chain, for the Bottlenecks screen's task drawer.
+ * 404 when the task isn't in the manager's tenant.
+ */
+export function getTaskConstraints(taskId: string): Promise<Constraint[]> {
+  return api.get<Constraint[]>(constraintsPath(taskId));
+}
+
+/**
+ * Sets a constraint to PENDING, SATISFIED or WAIVED; resolves to the constraint
+ * as Chain saved it. 404 when the task isn't in the tenant or the constraint
+ * doesn't exist on it.
+ */
+export function updateConstraintStatus(
+  taskId: string,
+  constraintId: string,
+  status: ConstraintStatus,
+): Promise<Constraint> {
+  return api.patch<Constraint>(`${constraintsPath(taskId)}/${encodeURIComponent(constraintId)}`, { status });
 }
