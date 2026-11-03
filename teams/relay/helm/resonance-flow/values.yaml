@@ -724,7 +724,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-gateway"
       pullPolicy: IfNotPresent
-      tag: "5b08464"
+      tag: "77c317f"
     containerPort: 8080
     service: *defaultService
     metrics:
